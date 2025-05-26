@@ -105,6 +105,13 @@ func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
 	}
 }
 
+func GuessStorageVersion(binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema) int64 {
+	if len(binlogs) == len(schema.Fields) {
+		return StorageV1
+	}
+	return StorageV2
+}
+
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
@@ -200,7 +207,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			for j, binlog := range binlogs {
 				logPath := binlog.GetLogPath()
 				if paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
-					path.Join(rwOptions.bucketName, logPath)
+					logPath = path.Join(rwOptions.bucketName, logPath)
 				}
 				paths[j] = append(paths[j], logPath)
 			}

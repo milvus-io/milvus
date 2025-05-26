@@ -71,7 +71,8 @@ DefaultValueChunkTranslator::get_cells(
         milvus::storage::CreateArrowBuilder(field_meta_.get_data_type());
     arrow::Status ast;
     if (field_meta_.default_value().has_value()) {
-        builder->Reserve(num_rows);
+        ast = builder->Reserve(num_rows);
+        AssertInfo(ast.ok(), "reserve arrow build failed: {}", ast.ToString());
         auto scalar = storage::CreateArrowScalarFromDefaultValue(field_meta_);
         ast = builder->AppendScalar(*scalar, num_rows);
     } else {

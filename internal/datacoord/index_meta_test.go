@@ -440,6 +440,7 @@ func newSegmentIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 }
 
 func TestMeta_CreateIndex(t *testing.T) {
+	indexName := "default_idx"
 	indexParams := []*commonpb.KeyValuePair{
 		{
 			Key:   common.IndexTypeKey,
@@ -707,6 +708,7 @@ func TestMeta_GetIndexedSegment(t *testing.T) {
 		fieldID    = UniqueID(100)
 		segID      = UniqueID(1000)
 		buildID    = UniqueID(10000)
+		nodeID     = UniqueID(1)
 		indexName  = "_default_idx"
 		typeParams = []*commonpb.KeyValuePair{
 			{
@@ -794,6 +796,12 @@ func TestMeta_GetIndexedSegment(t *testing.T) {
 }
 
 func TestMeta_MarkIndexAsDeleted(t *testing.T) {
+	var (
+		collID    = UniqueID(1)
+		fieldID   = UniqueID(2)
+		indexID   = UniqueID(100)
+		indexName = "default_idx"
+	)
 	sc := catalogmocks.NewDataCoordCatalog(t)
 	sc.On("AlterIndexes",
 		mock.Anything,

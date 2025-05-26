@@ -110,15 +110,10 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	}
 
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
+		// delegator node won't be used to load sealed segment if stream node is enabled
+		// and if growing segment doesn't exists, delegator won't produce any cost metrics
+		// so we deprecate the EnableWorkerSQCostMetrics param
+		return result.GetCostAggregation(), true
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
 	if searchResults.CostAggregation == nil {
@@ -169,15 +164,10 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	}
 	searchResults.ChannelsMvcc = channelsMvcc
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
+		// delegator node won't be used to load sealed segment if stream node is enabled
+		// and if growing segment doesn't exists, delegator won't produce any cost metrics
+		// so we deprecate the EnableWorkerSQCostMetrics param
+		return result.GetCostAggregation(), true
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
 	if searchResults.CostAggregation == nil {
@@ -356,15 +346,10 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	}
 
 	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
-		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
-			return result.GetCostAggregation(), true
-		}
-
-		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
-			return result.GetCostAggregation(), true
-		}
-
-		return nil, false
+		// delegator node won't be used to load sealed segment if stream node is enabled
+		// and if growing segment doesn't exists, delegator won't produce any cost metrics
+		// so we deprecate the EnableWorkerSQCostMetrics param
+		return result.GetCostAggregation(), true
 	})
 	ret.CostAggregation = mergeRequestCost(requestCosts)
 	if ret.CostAggregation == nil {

@@ -226,6 +226,18 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
+				FieldID:      int64(common.RowIDField),
+				Name:         common.RowIDFieldName,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      int64(common.TimeStampField),
+				Name:         common.TimeStampFieldName,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
 				FieldID:      100,
 				Name:         "pk",
 				IsPrimaryKey: true,
@@ -252,7 +264,6 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 		},
 	}
 	cm := mocks.NewChunkManager(suite.T())
-	schema = typeutil.AppendSystemFields(schema)
 
 	originalInsertData, err := testutil.CreateInsertData(schema, suite.numRows)
 	suite.NoError(err)
@@ -276,12 +287,15 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 			}
 			return nil
 		})
-	for fieldID, paths := range insertBinlogs {
-		field := typeutil.GetField(schema, fieldID)
-		suite.NotNil(field)
-		buf0 := createBinlogBuf(suite.T(), field, originalInsertData.Data[fieldID])
-		cm.EXPECT().Read(mock.Anything, paths[0]).Return(buf0, nil)
+	var (
+		paths = make([]string, 0)
+		bytes = make([][]byte, 0)
+	)
+	for _, field := range schema.Fields {
+		paths = append(paths, insertBinlogs[field.GetFieldID()][0])
+		bytes = append(bytes, createBinlogBuf(suite.T(), field, originalInsertData.Data[field.GetFieldID()]))
 	}
+	cm.EXPECT().MultiRead(mock.Anything, paths).Return(bytes, nil)
 
 	if len(suite.deletePKs) != 0 {
 		for _, path := range deltaLogs {

@@ -517,6 +517,7 @@ func (t *searchTask) advancedPostProcess(ctx context.Context, span trace.Span, t
 	}
 
 	multipleMilvusResults := make([]*milvuspb.SearchResults, len(t.SearchRequest.GetSubReqs()))
+	searchMetrics := []string{}
 	for index, internalResults := range multipleInternalResults {
 		subReq := t.SearchRequest.GetSubReqs()[index]
 		// Since the metrictype in the request may be empty, it can only be obtained from the result
@@ -530,6 +531,7 @@ func (t *searchTask) advancedPostProcess(ctx context.Context, span trace.Span, t
 			t.reScorers[index].setMetricType(subMetricType)
 			t.reScorers[index].reScore(result)
 		}
+		searchMetrics = append(searchMetrics, subMetricType)
 		multipleMilvusResults[index] = result
 	}
 
@@ -538,7 +540,7 @@ func (t *searchTask) advancedPostProcess(ctx context.Context, span trace.Span, t
 			return err
 		}
 	} else {
-		if err := t.hybridSearchRank(ctx, span, multipleMilvusResults); err != nil {
+		if err := t.hybridSearchRank(ctx, span, multipleMilvusResults, searchMetrics); err != nil {
 			return err
 		}
 	}
@@ -635,7 +637,7 @@ func mergeIDs(idsList []*schemapb.IDs) (*schemapb.IDs, int) {
 	return uniqueIDs, count
 }
 
-func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, multipleMilvusResults []*milvuspb.SearchResults) error {
+func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, multipleMilvusResults []*milvuspb.SearchResults, searchMetrics []string) error {
 	var err error
 	// The first step of hybrid search is without meta information. If rerank requires meta data, we need to do requery.
 	// At this time, outputFields and rerank input_fields will be recalled.
@@ -675,7 +677,7 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 		}
 		params := rerank.NewSearchParams(
 			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize,
+			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
 		)
 
 		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
@@ -689,7 +691,7 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 	} else {
 		params := rerank.NewSearchParams(
 			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize,
+			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
 		)
 		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
 			return err
@@ -815,7 +817,7 @@ func (t *searchTask) searchPostProcess(ctx context.Context, span trace.Span, toR
 
 	if t.functionScore != nil && len(result.Results.FieldsData) != 0 {
 		params := rerank.NewSearchParams(t.Nq, t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(),
-			t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize)
+			t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize, []string{metricType})
 		// rank only returns id and score
 		if t.result, err = t.functionScore.Process(ctx, params, []*milvuspb.SearchResults{result}); err != nil {
 			return err
@@ -865,9 +867,9 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	searchInfo := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
-	if searchInfo.parseError != nil {
-		return nil, nil, 0, false, searchInfo.parseError
+	searchInfo, err := parseSearchInfo(params, t.schema.CollectionSchema, t.rankParams)
+	if err != nil {
+		return nil, nil, 0, false, err
 	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
@@ -1254,8 +1256,9 @@ func (t *searchTask) reorganizeRequeryResults(ctx context.Context, fields []*sch
 		return nil, err
 	}
 	offsets := make(map[any]int)
+	pkItr := typeutil.GetDataIterator(pkFieldData)
 	for i := 0; i < typeutil.GetPKSize(pkFieldData); i++ {
-		pk := typeutil.GetData(pkFieldData, i)
+		pk := pkItr(i)
 		offsets[pk] = i
 	}
 

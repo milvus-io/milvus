@@ -108,6 +108,19 @@ func TestSegmentStats(t *testing.T) {
 	assert.Equal(t, uint64(13), stat.BinLogFileCounter)
 }
 
+func TestIsZero(t *testing.T) {
+	// Test zero insert metrics
+	zeroInsert := InsertMetrics{}
+	assert.True(t, zeroInsert.IsZero())
+
+	// Test non-zero insert metrics
+	nonZeroInsert := InsertMetrics{
+		Rows:       1,
+		BinarySize: 2,
+	}
+	assert.False(t, nonZeroInsert.IsZero())
+}
+
 func TestOversizeAlloc(t *testing.T) {
 	now := time.Now()
 	stat := &SegmentStats{

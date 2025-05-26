@@ -138,6 +138,7 @@ class TestcaseBase(Base):
     Additional methods;
     Public methods that can be used for test cases.
     """
+    client = None
 
     def _connect(self, enable_milvus_client_api=False):
         """ Add a connection and create the connect """
@@ -152,6 +153,7 @@ class TestcaseBase(Base):
             self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,uri=uri,token=cf.param_info.param_token)
             res, is_succ = self.connection_wrap.MilvusClient(uri=uri,
                                                              token=cf.param_info.param_token)
+            self.client = MilvusClient(uri=uri, token=cf.param_info.param_token)
         else:
             if cf.param_info.param_user and cf.param_info.param_password:
                 res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
@@ -165,6 +167,8 @@ class TestcaseBase(Base):
                                                             host=cf.param_info.param_host,
                                                             port=cf.param_info.param_port)
 
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+            self.client = MilvusClient(uri=uri, token=cf.param_info.param_token)
         server_version = utility.get_server_version()
         log.info(f"server version: {server_version}")
         return res
@@ -183,7 +187,7 @@ class TestcaseBase(Base):
         res = client.run_analyzer(text, analyzer_params, with_detail=True, with_hash=True)
         tokens = [r['token'] for r in res.tokens]
         return tokens
-        
+
 
     # def init_async_milvus_client(self):
     #     uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
@@ -364,6 +368,8 @@ class TestcaseBase(Base):
                     # Unlike dense vectors, sparse vectors cannot create flat index.
                     if DataType.SPARSE_FLOAT_VECTOR.name in vector_name:
                         collection_w.create_index(vector_name, ct.default_sparse_inverted_index)
+                    elif vector_data_type == DataType.INT8_VECTOR:
+                        collection_w.create_index(vector_name, ct.int8_vector_index)
                     else:
                         collection_w.create_index(vector_name, ct.default_flat_index)
 

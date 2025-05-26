@@ -25,6 +25,8 @@ struct Meta {
     // In actual resource reservation, we use the actual size of the cell to determine the type.
     StorageType storage_type;
     CacheWarmupPolicy cache_warmup_policy;
+    // Whether the translator supports strategy based eviction.
+    // Does not affect manual eviction.
     bool support_eviction;
     explicit Meta(StorageType storage_type,
                   CacheWarmupPolicy cache_warmup_policy,

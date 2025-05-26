@@ -231,7 +231,28 @@ var (
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALTxnStateLabelName)
 
+	// Rows level counter.
+	WALInsertRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "insert_rows_total",
+		Help: "Rows of growing insert on wal",
+	}, WALChannelLabelName)
+
+	WALInsertBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "insert_bytes",
+		Help: "Bytes of growing insert on wal",
+	}, WALChannelLabelName)
+
+	WALDeleteRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "delete_rows_total",
+		Help: "Rows of growing delete on wal",
+	}, WALChannelLabelName)
+
 	// Segment related metrics
+	WALGrowingSegmentRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "growing_segment_rows_total",
+		Help: "Rows of segment growing on wal",
+	}, WALChannelLabelName)
+
 	WALGrowingSegmentBytes = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_bytes",
 		Help: "Bytes of segment growing on wal",
@@ -490,7 +511,11 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALTimeTickSyncTimeTick)
 	registry.MustRegister(WALInflightTxn)
 	registry.MustRegister(WALTxnDurationSeconds)
+	registry.MustRegister(WALInsertRowsTotal)
+	registry.MustRegister(WALInsertBytes)
+	registry.MustRegister(WALDeleteRowsTotal)
 	registry.MustRegister(WALGrowingSegmentBytes)
+	registry.MustRegister(WALGrowingSegmentRowsTotal)
 	registry.MustRegister(WALGrowingSegmentHWMBytes)
 	registry.MustRegister(WALGrowingSegmentLWMBytes)
 	registry.MustRegister(WALSegmentAllocTotal)

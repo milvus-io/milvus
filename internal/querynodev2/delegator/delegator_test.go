@@ -522,7 +522,7 @@ func (s *DelegatorSuite) TestSearch() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -709,7 +709,7 @@ func (s *DelegatorSuite) TestQuery() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		_, err := s.delegator.Query(ctx, &querypb.QueryRequest{
 			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
@@ -987,7 +987,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		client := streamrpc.NewLocalQueryClient(ctx)
 		server := client.CreateServer()
@@ -1164,7 +1164,7 @@ func (s *DelegatorSuite) TestGetStats() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		_, err := s.delegator.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
@@ -1265,7 +1265,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 
 		sd, ok := s.delegator.(*shardDelegator)
 		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
+		sd.distribution.MarkOfflineSegments(1001)
 
 		err := s.delegator.UpdateSchema(ctx, &schemapb.CollectionSchema{}, 100)
 		s.Error(err)

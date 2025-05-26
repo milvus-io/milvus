@@ -227,6 +227,7 @@ func (m *meta) reloadFromKV(ctx context.Context, broker broker.Broker) error {
 	}
 
 	pool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
+	defer pool.Release()
 	futures := make([]*conc.Future[any], 0, len(collectionIDs))
 	collectionSegments := make([][]*datapb.SegmentInfo, len(collectionIDs))
 	for i, collectionID := range collectionIDs {
@@ -2216,4 +2217,46 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 	}
 
 	return segments
+}
+
+func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64) error {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	// Filter out the segments of the partition to be dropped.
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]int),
+	}
+	modSegments := make([]*SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
+	// set existed segments of channel to Dropped
+	for _, seg := range m.segments.segments {
+		if contains(partitionIDs, seg.PartitionID) {
+			clonedSeg := seg.Clone()
+			updateSegStateAndPrepareMetrics(clonedSeg, commonpb.SegmentState_Dropped, metricMutation)
+			modSegments = append(modSegments, clonedSeg)
+			segments = append(segments, clonedSeg.SegmentInfo)
+		}
+	}
+
+	// Save dropped segments in batch into meta.
+	err := m.catalog.SaveDroppedSegmentsInBatch(m.ctx, segments)
+	if err != nil {
+		return err
+	}
+	// update memory info
+	for _, segment := range modSegments {
+		m.segments.SetSegment(segment.GetID(), segment)
+	}
+	metricMutation.commit()
+	return nil
+}
+
+func contains(arr []int64, target int64) bool {
+	for _, val := range arr {
+		if val == target {
+			return true
+		}
+	}
+	return false
 }

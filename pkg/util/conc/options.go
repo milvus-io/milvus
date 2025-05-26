@@ -19,7 +19,7 @@ package conc
 import (
 	"time"
 
-	"github.com/panjf2000/ants/v2"
+	ants "github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"

@@ -26,6 +26,10 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
+    // Default implementation does nothing.
+    virtual void
+    ManualEvictCache() const {}
+
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
     DataOfChunk(int chunk_id) const = 0;

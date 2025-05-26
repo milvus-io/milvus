@@ -23,7 +23,7 @@ func TestTruncator(t *testing.T) {
 	truncator := newSamplingTruncator(&WALCheckpoint{
 		MessageID: rmq.NewRmqID(1),
 		TimeTick:  1,
-		Magic:     recoveryMagicStreamingInitialized,
+		Magic:     RecoveryMagicStreamingInitialized,
 	}, w, newRecoveryStorageMetrics(types.PChannelInfo{Name: "test", Term: 1}))
 
 	for i := 0; i < 20; i++ {
@@ -32,7 +32,7 @@ func TestTruncator(t *testing.T) {
 			truncator.SampleCheckpoint(&WALCheckpoint{
 				MessageID: rmq.NewRmqID(int64(i)),
 				TimeTick:  tsoutil.ComposeTSByTime(time.Now(), 0),
-				Magic:     recoveryMagicStreamingInitialized,
+				Magic:     RecoveryMagicStreamingInitialized,
 			})
 		}
 	}

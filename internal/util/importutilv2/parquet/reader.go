@@ -38,6 +38,7 @@ import (
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
+	cmr    storage.FileReader
 	schema *schemapb.CollectionSchema
 
 	path string
@@ -81,6 +82,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	return &reader{
 		ctx:        ctx,
 		cm:         cm,
+		cmr:        cmReader,
 		schema:     schema,
 		fileSize:   atomic.NewInt64(0),
 		path:       path,
@@ -140,11 +142,11 @@ func (r *reader) Size() (int64, error) {
 }
 
 func (r *reader) Close() {
-	for _, cr := range r.frs {
-		cr.Close()
-	}
 	err := r.r.Close()
 	if err != nil {
 		log.Warn("close parquet reader failed", zap.Error(err))
+	}
+	if r.cmr != nil {
+		r.cmr.Close()
 	}
 }

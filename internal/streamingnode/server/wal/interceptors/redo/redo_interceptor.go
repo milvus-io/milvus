@@ -48,6 +48,10 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 	if msg.MessageType() == message.MessageTypeInsert {
 		insertMessage := message.MustAsMutableInsertMessageV1(msg)
 		h := insertMessage.Header()
+		if len(h.Partitions) != 1 {
+			// TODO: We will support multi-partition insert in the future.
+			panic("insert message should only have one partition")
+		}
 		for _, partition := range h.Partitions {
 			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(h.CollectionId, partition.PartitionId)
 			if err != nil {

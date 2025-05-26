@@ -46,7 +46,7 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 				Id: rmq.NewRmqID(1).Marshal(),
 			},
 			TimeTick:      1,
-			RecoveryMagic: recoveryMagicStreamingInitialized,
+			RecoveryMagic: RecoveryMagicStreamingInitialized,
 		}, nil)
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
 	walName := "rocksmq"
@@ -58,7 +58,7 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 	err := rs.recoverRecoveryInfoFromMeta(context.Background(), walName, channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
 	assert.NoError(t, err)
 	assert.NotNil(t, rs.checkpoint)
-	assert.Equal(t, recoveryMagicStreamingInitialized, rs.checkpoint.Magic)
+	assert.Equal(t, RecoveryMagicStreamingInitialized, rs.checkpoint.Magic)
 	assert.True(t, rs.checkpoint.MessageID.EQ(rmq.NewRmqID(1)))
 }
 

@@ -38,6 +38,21 @@ func (t *describeDBTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *describeDBTask) Execute(ctx context.Context) (err error) {
+	visibleDatabases, err := t.core.getCurrentUserVisibleDatabases(ctx)
+	if err != nil {
+		t.Rsp = &rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Status(err),
+		}
+		return err
+	}
+	if !isVisibleDatabaseForCurUser(t.Req.GetDbName(), visibleDatabases) {
+		err = merr.WrapErrPrivilegeNotPermitted("not allowed to access database, db name: %s", t.Req.GetDbName())
+		t.Rsp = &rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Status(err),
+		}
+		return err
+	}
+
 	db, err := t.core.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
 		t.Rsp = &rootcoordpb.DescribeDatabaseResponse{

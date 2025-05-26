@@ -47,7 +47,7 @@ const (
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
 
-	DefaultSessionTTL        = 30 // s
+	DefaultSessionTTL        = 10 // s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -719,7 +719,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.SessionTTL = ParamItem{
 		Key:          "common.session.ttl",
 		Version:      "2.0.0",
-		DefaultValue: "60",
+		DefaultValue: "10",
 		Doc:          "ttl value when session granting a lease to register service",
 		Export:       true,
 	}
@@ -888,6 +888,13 @@ This helps Milvus-CDC synchronize incremental data`,
 		DefaultValue: "10000",
 		Doc:          "batch size when to apply pk to bloom filter",
 		Export:       true,
+		Formatter: func(value string) string {
+			batchSize := getAsInt(value)
+			if batchSize < 1 {
+				return "10000"
+			}
+			return strconv.Itoa(batchSize)
+		},
 	}
 	p.BloomFilterApplyBatchSize.Init(base.mgr)
 
@@ -2084,6 +2091,11 @@ type queryCoordConfig struct {
 	UpdateCollectionLoadStatusInterval ParamItem `refreshable:"false"`
 	ClusterLevelLoadReplicaNumber      ParamItem `refreshable:"true"`
 	ClusterLevelLoadResourceGroups     ParamItem `refreshable:"true"`
+
+	// balance batch size in one trigger
+	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
+	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
+	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2678,6 +2690,35 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.AutoBalanceInterval.Init(base.mgr)
+
+	p.BalanceSegmentBatchSize = ParamItem{
+		Key:          "queryCoord.balanceSegmentBatchSize",
+		FallbackKeys: []string{"queryCoord.collectionBalanceSegmentBatchSize"},
+		Version:      "2.5.14",
+		DefaultValue: "5",
+		Doc:          "the max balance task number for segment at each round, which is used for queryCoord to trigger balance on multiple collections",
+		Export:       false,
+	}
+	p.BalanceSegmentBatchSize.Init(base.mgr)
+
+	p.BalanceChannelBatchSize = ParamItem{
+		Key:          "queryCoord.balanceChannelBatchSize",
+		FallbackKeys: []string{"queryCoord.collectionBalanceChannelBatchSize"},
+		Version:      "2.5.14",
+		DefaultValue: "1",
+		Doc:          "the max balance task number for channel at each round, which is used for queryCoord to trigger balance on multiple collections",
+		Export:       false,
+	}
+	p.BalanceChannelBatchSize.Init(base.mgr)
+
+	p.EnableBalanceOnMultipleCollections = ParamItem{
+		Key:          "queryCoord.enableBalanceOnMultipleCollections",
+		Version:      "2.5.14",
+		DefaultValue: "true",
+		Doc:          "whether enable trigger balance on multiple collections at one time",
+		Export:       false,
+	}
+	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -3192,7 +3233,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 	p.MmapVectorField = ParamItem{
 		Key:          "queryNode.mmap.vectorField",
 		Version:      "2.4.7",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Formatter: func(originValue string) string {
 			if p.MmapEnabled.GetAsBool() {
 				return "true"
@@ -3771,6 +3812,7 @@ type dataCoordConfig struct {
 	MixCompactionTriggerInterval     ParamItem `refreshable:"false"`
 	L0CompactionTriggerInterval      ParamItem `refreshable:"false"`
 	GlobalCompactionInterval         ParamItem `refreshable:"false"`
+	CompactionExpiryTolerance        ParamItem `refreshable:"true"`
 
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -3815,12 +3857,12 @@ type dataCoordConfig struct {
 	GCScanIntervalInHour    ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
-	BindIndexNodeMode          ParamItem `refreshable:"false"`
-	IndexNodeAddress           ParamItem `refreshable:"false"`
-	WithCredential             ParamItem `refreshable:"false"`
-	IndexNodeID                ParamItem `refreshable:"false"`
-	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
-	TaskSlowThreshold          ParamItem `refreshable:"true"`
+	BindIndexNodeMode    ParamItem `refreshable:"false"`
+	IndexNodeAddress     ParamItem `refreshable:"false"`
+	WithCredential       ParamItem `refreshable:"false"`
+	IndexNodeID          ParamItem `refreshable:"false"`
+	TaskScheduleInterval ParamItem `refreshable:"false"`
+	TaskSlowThreshold    ParamItem `refreshable:"true"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
@@ -4241,6 +4283,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.GlobalCompactionInterval.Init(base.mgr)
 
+	p.CompactionExpiryTolerance = ParamItem{
+		Key:          "dataCoord.compaction.expiry.tolerance",
+		Version:      "2.5.0",
+		DefaultValue: "-1",
+		Doc:          "tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero",
+		Export:       true,
+	}
+	p.CompactionExpiryTolerance.Init(base.mgr)
+
 	p.MixCompactionTriggerInterval = ParamItem{
 		Key:          "dataCoord.compaction.mix.triggerInterval",
 		Version:      "2.4.15",
@@ -4557,12 +4608,12 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.IndexNodeID.Init(base.mgr)
-	p.IndexTaskSchedulerInterval = ParamItem{
+	p.TaskScheduleInterval = ParamItem{
 		Key:          "indexCoord.scheduler.interval",
 		Version:      "2.0.0",
 		DefaultValue: "100",
 	}
-	p.IndexTaskSchedulerInterval.Init(base.mgr)
+	p.TaskScheduleInterval.Init(base.mgr)
 
 	p.TaskSlowThreshold = ParamItem{
 		Key:          "datacoord.scheduler.taskSlowThreshold",
@@ -4745,27 +4796,41 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	p.ClusteringCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of clustering compaction job.",
-		DefaultValue: "16",
+		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
+		DefaultValue: "65536",
 		PanicIfEmpty: false,
 		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "65536"
+			}
+			return strconv.Itoa(slot)
+		},
 	}
 	p.ClusteringCompactionSlotUsage.Init(base.mgr)
 
 	p.MixCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.mixCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of mix compaction job.",
-		DefaultValue: "8",
+		Doc:          "slot usage of mix compaction task.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "4"
+			}
+			return strconv.Itoa(slot)
+		},
 	}
 	p.MixCompactionSlotUsage.Init(base.mgr)
 
 	p.L0DeleteCompactionSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.l0DeleteCompactionUsage",
 		Version:      "2.4.6",
-		Doc:          "slot usage of l0 compaction job.",
+		Doc:          "slot usage of l0 compaction task.",
 		DefaultValue: "8",
 		PanicIfEmpty: false,
 		Export:       true,
@@ -4796,9 +4861,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
 		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
-		DefaultValue: "65535",
+		DefaultValue: "65536",
 		PanicIfEmpty: false,
 		Export:       true,
+		Formatter: func(value string) string {
+			slot := getAsInt(value)
+			if slot < 1 {
+				return "65536"
+			}
+			return strconv.Itoa(slot)
+		},
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
 
@@ -4809,6 +4881,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
+		Forbidden:    true,
 	}
 	p.EnableStatsTask.Init(base.mgr)
 

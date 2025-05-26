@@ -57,7 +57,8 @@ InterimSealedIndexTranslator::get_cells(
     auto vec_index = std::make_unique<index::VectorMemIndex<float>>(
         index_type_,
         metric_type_,
-        knowhere::Version::GetCurrentVersion().VersionNumber());
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        false);
     auto num_chunk = vec_data_->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
         auto pw = vec_data_->GetChunk(i);

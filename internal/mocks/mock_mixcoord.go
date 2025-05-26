@@ -5903,6 +5903,54 @@ func (_c *MixCoord_MarkSegmentsDropped_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// NotifyDropPartition provides a mock function with given fields: ctx, channel, partitionIDs
+func (_m *MixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	ret := _m.Called(ctx, channel, partitionIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NotifyDropPartition")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) error); ok {
+		r0 = rf(ctx, channel, partitionIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_NotifyDropPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NotifyDropPartition'
+type MixCoord_NotifyDropPartition_Call struct {
+	*mock.Call
+}
+
+// NotifyDropPartition is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+//   - partitionIDs []int64
+func (_e *MixCoord_Expecter) NotifyDropPartition(ctx interface{}, channel interface{}, partitionIDs interface{}) *MixCoord_NotifyDropPartition_Call {
+	return &MixCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", ctx, channel, partitionIDs)}
+}
+
+func (_c *MixCoord_NotifyDropPartition_Call) Run(run func(ctx context.Context, channel string, partitionIDs []int64)) *MixCoord_NotifyDropPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]int64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_NotifyDropPartition_Call) Return(_a0 error) *MixCoord_NotifyDropPartition_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, []int64) error) *MixCoord_NotifyDropPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // OperatePrivilege provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) OperatePrivilege(_a0 context.Context, _a1 *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

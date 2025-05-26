@@ -243,6 +243,53 @@ func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) RunAndReturn(run fu
 	return _c
 }
 
+// GetQueryView provides a mock function with no fields
+func (_m *MockShardDelegator) GetQueryView() *channelQueryView {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQueryView")
+	}
+
+	var r0 *channelQueryView
+	if rf, ok := ret.Get(0).(func() *channelQueryView); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*channelQueryView)
+		}
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetQueryView_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryView'
+type MockShardDelegator_GetQueryView_Call struct {
+	*mock.Call
+}
+
+// GetQueryView is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetQueryView() *MockShardDelegator_GetQueryView_Call {
+	return &MockShardDelegator_GetQueryView_Call{Call: _e.mock.On("GetQueryView")}
+}
+
+func (_c *MockShardDelegator_GetQueryView_Call) Run(run func()) *MockShardDelegator_GetQueryView_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetQueryView_Call) Return(_a0 *channelQueryView) *MockShardDelegator_GetQueryView_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetQueryView_Call) RunAndReturn(run func() *channelQueryView) *MockShardDelegator_GetQueryView_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentInfo provides a mock function with given fields: readable
 func (_m *MockShardDelegator) GetSegmentInfo(readable bool) ([]SnapshotItem, []SegmentEntry) {
 	ret := _m.Called(readable)
@@ -403,51 +450,6 @@ func (_c *MockShardDelegator_GetTSafe_Call) Return(_a0 uint64) *MockShardDelegat
 }
 
 func (_c *MockShardDelegator_GetTSafe_Call) RunAndReturn(run func() uint64) *MockShardDelegator_GetTSafe_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetTargetVersion provides a mock function with no fields
-func (_m *MockShardDelegator) GetTargetVersion() int64 {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetTargetVersion")
-	}
-
-	var r0 int64
-	if rf, ok := ret.Get(0).(func() int64); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	return r0
-}
-
-// MockShardDelegator_GetTargetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTargetVersion'
-type MockShardDelegator_GetTargetVersion_Call struct {
-	*mock.Call
-}
-
-// GetTargetVersion is a helper method to define mock.On call
-func (_e *MockShardDelegator_Expecter) GetTargetVersion() *MockShardDelegator_GetTargetVersion_Call {
-	return &MockShardDelegator_GetTargetVersion_Call{Call: _e.mock.On("GetTargetVersion")}
-}
-
-func (_c *MockShardDelegator_GetTargetVersion_Call) Run(run func()) *MockShardDelegator_GetTargetVersion_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_GetTargetVersion_Call) Return(_a0 int64) *MockShardDelegator_GetTargetVersion_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardDelegator_GetTargetVersion_Call) RunAndReturn(run func() int64) *MockShardDelegator_GetTargetVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }

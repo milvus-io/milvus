@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -29,8 +30,7 @@ type DistributionSuite struct {
 }
 
 func (s *DistributionSuite) SetupTest() {
-	s.dist = NewDistribution()
-	s.Equal(initialTargetVersion, s.dist.getTargetVersion())
+	s.dist = NewDistribution("channel-1")
 }
 
 func (s *DistributionSuite) TearDownTest() {
@@ -177,6 +177,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 			s.SetupTest()
 			defer s.TearDownTest()
 			s.dist.AddGrowing(tc.growing...)
+			s.dist.SyncTargetVersion(1000, nil, nil, nil, nil)
 			_, _, version, err := s.dist.PinReadableSegments()
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
@@ -447,6 +448,15 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 			s.dist.AddGrowing(tc.presetGrowing...)
 			s.dist.AddDistributions(tc.presetSealed...)
 
+			// update target version, make delegator serviceable
+			growingIDs := lo.Map(tc.presetGrowing, func(item SegmentEntry, idx int) int64 {
+				return item.SegmentID
+			})
+			sealedIDs := lo.Map(tc.presetSealed, func(item SegmentEntry, idx int) int64 {
+				return item.SegmentID
+			})
+			s.dist.SyncTargetVersion(time.Now().Unix(), nil, growingIDs, sealedIDs, nil)
+
 			var version int64
 			if tc.withMockRead {
 				var err error
@@ -614,7 +624,7 @@ func (s *DistributionSuite) TestPeek() {
 	}
 }
 
-func (s *DistributionSuite) TestAddOfflines() {
+func (s *DistributionSuite) TestMarkOfflineSegments() {
 	type testCase struct {
 		tag         string
 		input       []SegmentEntry
@@ -665,12 +675,14 @@ func (s *DistributionSuite) TestAddOfflines() {
 			defer s.TearDownTest()
 
 			s.dist.AddDistributions(tc.input...)
-			s.dist.AddOfflines(tc.offlines...)
+			sealedSegmentID := lo.Map(tc.input, func(t SegmentEntry, _ int) int64 {
+				return t.SegmentID
+			})
+			s.dist.SyncTargetVersion(1000, nil, nil, sealedSegmentID, nil)
+			s.dist.MarkOfflineSegments(tc.offlines...)
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 
-			// current := s.dist.current.Load()
 			for _, offline := range tc.offlines {
-				// current.
 				s.dist.mut.RLock()
 				entry, ok := s.dist.sealedSegments[offline]
 				s.dist.mut.RUnlock()
@@ -739,7 +751,7 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 	s.Len(s1[0].Segments, 3)
 	s.Len(s2, 3)
 
-	s.dist.serviceable.Store(true)
+	s.dist.queryView.serviceable.Store(true)
 	s.dist.SyncTargetVersion(2, []int64{1}, []int64{222}, []int64{}, []int64{})
 	s.True(s.dist.Serviceable())
 

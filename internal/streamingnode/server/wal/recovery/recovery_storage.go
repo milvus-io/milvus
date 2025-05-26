@@ -61,6 +61,10 @@ type RecoveryStorage interface {
 	// ObserveMessage observes the message from the WAL.
 	ObserveMessage(msg message.ImmutableMessage)
 
+	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
+	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
+	UpdateFlusherCheckpoint(checkpoint *WALCheckpoint)
+
 	// Close closes the recovery storage.
 	Close()
 }

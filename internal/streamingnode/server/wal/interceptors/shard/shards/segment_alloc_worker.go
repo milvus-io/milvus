@@ -88,10 +88,10 @@ func (w *segmentAllocWorker) doOnce() error {
 	}
 	result, err := w.wal.Append(w.ctx, w.msg)
 	if err != nil {
-		w.Logger().Warn("failed to append create segment message", log.FieldMessage(w.msg), zap.Error(err))
+		w.Logger().Warn("failed to append create segment message", zap.Error(err))
 		return err
 	}
-	w.Logger().Info("append create segment message", log.FieldMessage(w.msg), zap.String("messageID", result.MessageID.String()), zap.Uint64("timetick", result.TimeTick))
+	w.Logger().Info("append create segment message", zap.String("messageID", result.MessageID.String()), zap.Uint64("timetick", result.TimeTick))
 	return nil
 }
 

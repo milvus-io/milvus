@@ -7,6 +7,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -149,16 +150,24 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 	broker := broker.NewCoordBroker(mixc, paramtable.GetNodeID())
 	chunkManager := resource.Resource().ChunkManager()
 
-	cpUpdater := util.NewChannelCheckpointUpdater(broker)
+	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
+		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID)
+		impl.rs.UpdateFlusherCheckpoint(&recovery.WALCheckpoint{
+			MessageID: messageID,
+			TimeTick:  mp.Timestamp,
+			Magic:     recovery.RecoveryMagicStreamingInitialized,
+		})
+	})
 	go cpUpdater.Start()
 
 	fc := &flusherComponents{
-		wal:          l,
-		broker:       broker,
-		cpUpdater:    cpUpdater,
-		chunkManager: chunkManager,
-		dataServices: make(map[string]*dataSyncServiceWrapper),
-		logger:       impl.logger,
+		wal:                        l,
+		broker:                     broker,
+		cpUpdater:                  cpUpdater,
+		chunkManager:               chunkManager,
+		dataServices:               make(map[string]*dataSyncServiceWrapper),
+		logger:                     impl.logger,
+		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
 	}
 	impl.logger.Info("flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {

@@ -542,7 +542,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
 			if err != nil || targetID != nodeID {
 				err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-				log.Warn("failed to get latest wall allocated", zap.Error(err))
+				log.Warn("failed to get latest wal allocated", zap.Error(err))
 				return merr.Status(err), nil
 			}
 		} else if !s.channelManager.Match(nodeID, channelName) {
@@ -713,7 +713,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		}
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
-	s.compactionHandler.removeTasksByChannel(channel)
+	s.compactionInspector.removeTasksByChannel(channel)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
 
@@ -1229,7 +1229,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	taskCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
+	taskCnt := s.compactionInspector.getCompactionTasksNumBySignalID(id)
 	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
@@ -1263,7 +1263,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	info := s.compactionHandler.getCompactionInfo(ctx, req.GetCompactionID())
+	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
 
 	resp.State = info.state
 	resp.ExecutingPlanNo = int64(info.executingCnt)
@@ -1297,7 +1297,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	info := s.compactionHandler.getCompactionInfo(ctx, req.GetCompactionID())
+	info := s.compactionInspector.getCompactionInfo(ctx, req.GetCompactionID())
 	resp.State = info.state
 	resp.MergeInfos = lo.MapToSlice[int64, *milvuspb.CompactionMergeInfo](info.mergeInfos, func(_ int64, merge *milvuspb.CompactionMergeInfo) *milvuspb.CompactionMergeInfo {
 		return merge
@@ -1770,6 +1770,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	if isBackup {
 		files = make([]*internalpb.ImportFile, 0)
 		pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
+		defer pool.Release()
 		futures := make([]*conc.Future[struct{}], 0, len(in.GetFiles()))
 		mu := &sync.Mutex{}
 		for _, importFile := range in.GetFiles() {
@@ -1907,7 +1908,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
 		return resp, nil
 	}
-	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta, s.jobManager)
+	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta, s.statsInspector)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -1916,7 +1917,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.ImportedRows = importedRows
 	resp.TotalRows = totalRows
-	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
+	resp.TaskProgresses = GetTaskProgresses(ctx, jobID, s.importMeta, s.meta)
 	log.Info("GetImportProgress done", zap.String("jobState", job.GetState().String()), zap.Any("resp", resp))
 	return resp, nil
 }
@@ -1944,7 +1945,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta, s.jobManager)
+		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta, s.statsInspector)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
@@ -1952,4 +1953,17 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
 	}
 	return resp, nil
+}
+
+// NotifyDropPartition notifies DataCoord to drop segments of specified partition
+func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info("receive NotifyDropPartition request",
+		zap.String("channelname", channel),
+		zap.Any("partitionID", partitionIDs))
+	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
+	// release all segments of the partition.
+	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
 }

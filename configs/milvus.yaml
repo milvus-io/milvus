@@ -187,24 +187,24 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2000000000 # Maximum entries count of a segment, default is 2GB
-      maxInterval: 600 # Maximum interval between two segments in seconds, default is 10 minutes.
+      maxSize: 2GB # Maximum entries count of a segment, default is 2GB
+      maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
-      maxInterval: 10 # Maximum interval between two auditing operations in seconds, default is 10 seconds.
+      maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
     logFileSyncPolicy:
-      maxInterval: 1000 # Maximum interval between two sync operations in milliseconds.
-      maxBytes: 64000000 # Maximum size of write buffer in bytes.
+      maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
+      maxBytes: 64M # Maximum size of write buffer in bytes.
       maxEntries: 100000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
-      retryInterval: 1000 # Maximum interval between two retries in milliseconds.
-      maxFlushSize: 8000000 # Maximum size of a fragment in bytes to flush, default is 8M.
+      retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
+      maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
       maxFlushThreads: 4 # Maximum number of threads to flush data
     fragmentManager:
-      maxBytes: 1000000000 # Maximum size of fragment cached data in bytes.
-      maxInterval: 1000 # Maximum interval between two fragment evicts in milliseconds.
+      maxBytes: 512M # Maximum size of fragment cached data in bytes.
+      maxInterval: 1s # Maximum interval between two fragment evicts. default is 1 second
   storage:
-    type: minio # The Type of the storage provider. Valid values: [default, minio, local, service], default is minio.
+    type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
@@ -315,10 +315,10 @@ proxy:
       base:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
       query:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [params: $query_params]"
         methods: "Query, Delete"
       search:
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [anns_field: $anns_field] [expr: $method_expr]"
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr] [nq: $nq] [params: $search_params]"
         methods: "HybridSearch, Search"
     cacheSize: 0 # Size of log of write cache, in byte. (Close write cache if size was 0)
     cacheFlushInterval: 3 # time interval of auto flush write cache, in seconds. (Close auto flush if interval was 0)
@@ -464,7 +464,7 @@ queryNode:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
-    vectorField: false # Enable mmap for loading vector data
+    vectorField: true # Enable mmap for loading vector data
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
@@ -620,6 +620,8 @@ dataCoord:
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
+    expiry:
+      tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
     single:
       ratio:
         threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
@@ -669,9 +671,9 @@ dataCoord:
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
-    clusteringCompactionUsage: 16 # slot usage of clustering compaction job.
-    mixCompactionUsage: 8 # slot usage of mix compaction job.
-    l0DeleteCompactionUsage: 8 # slot usage of l0 compaction job.
+    clusteringCompactionUsage: 65536 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
+    mixCompactionUsage: 4 # slot usage of mix compaction task.
+    l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb
     statsTaskSlotUsage: 8 # slot usage of stats task per 512mb
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
@@ -907,7 +909,7 @@ common:
     internaltlsEnabled: false
     tlsMode: 0
   session:
-    ttl: 30 # ttl value when session granting a lease to register service
+    ttl: 10 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
   locks:
     metrics:

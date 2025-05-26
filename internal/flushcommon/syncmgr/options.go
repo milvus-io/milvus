@@ -1,6 +1,7 @@
 package syncmgr
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,6 +50,11 @@ func (t *SyncTask) WithDrop() *SyncTask {
 
 func (t *SyncTask) WithMetaCache(metacache metacache.MetaCache) *SyncTask {
 	t.metacache = metacache
+	return t
+}
+
+func (t *SyncTask) WithSchema(schema *schemapb.CollectionSchema) *SyncTask {
+	t.schema = schema
 	return t
 }
 

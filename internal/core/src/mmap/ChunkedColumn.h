@@ -69,6 +69,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     virtual ~ChunkedColumnBase() = default;
 
+    void
+    ManualEvictCache() const override {
+        slot_->ManualEvictAll();
+    }
+
     PinWrapper<const char*>
     DataOfChunk(int chunk_id) const override {
         auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));

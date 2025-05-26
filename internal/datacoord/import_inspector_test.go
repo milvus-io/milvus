@@ -21,7 +21,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -30,25 +29,26 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 )
 
-type ImportSchedulerSuite struct {
+type ImportInspectorSuite struct {
 	suite.Suite
 
 	collectionID int64
 
-	catalog   *mocks.DataCoordCatalog
-	alloc     *allocator.MockAllocator
-	cluster   *MockCluster
-	meta      *meta
-	imeta     ImportMeta
-	scheduler *importScheduler
+	catalog    *mocks.DataCoordCatalog
+	alloc      *allocator.MockAllocator
+	cluster    *MockCluster
+	meta       *meta
+	importMeta ImportMeta
+	inspector  *importInspector
 }
 
-func (s *ImportSchedulerSuite) SetupTest() {
+func (s *ImportInspectorSuite) SetupTest() {
 	var err error
 
 	s.collectionID = 1
@@ -75,24 +75,29 @@ func (s *ImportSchedulerSuite) SetupTest() {
 		ID:     s.collectionID,
 		Schema: newTestSchema(),
 	})
-	s.imeta, err = NewImportMeta(context.TODO(), s.catalog)
+	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
-	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
+	scheduler := task2.NewMockGlobalScheduler(s.T())
+	s.inspector = NewImportInspector(context.TODO(), s.meta, s.importMeta, scheduler).(*importInspector)
 }
 
-func (s *ImportSchedulerSuite) TestProcessPreImport() {
+func (s *ImportInspectorSuite) TestProcessPreImport() {
 	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
-	var task ImportTask = &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:        0,
-			TaskID:       1,
-			CollectionID: s.collectionID,
-			State:        datapb.ImportTaskStateV2_Pending,
-		},
-		tr: timerecord.NewTimeRecorder("preimport task"),
+
+	taskProto := &datapb.PreImportTask{
+		JobID:        0,
+		TaskID:       1,
+		CollectionID: s.collectionID,
+		State:        datapb.ImportTaskStateV2_Pending,
 	}
-	err := s.imeta.AddTask(context.TODO(), task)
+
+	var task ImportTask = &preImportTask{
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("preimport task"),
+	}
+	task.(*preImportTask).task.Store(taskProto)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -103,68 +108,61 @@ func (s *ImportSchedulerSuite) TestProcessPreImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
-	const nodeID = 10
-	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
-		Slots: 1,
-	}, nil)
-	s.cluster.EXPECT().PreImport(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
-		sess := session.NewSession(&session.NodeInfo{
-			NodeID: nodeID,
-		}, nil)
-		return []*session.Session{sess}
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
+		task.CreateTaskOnWorker(1, cluster)
 	})
-	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	s.inspector.inspect()
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
-	s.Equal(int64(nodeID), task.GetNodeID())
 
 	// inProgress -> completed
-	s.cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(&datapb.QueryPreImportResponse{
+	cluster.EXPECT().QueryPreImport(mock.Anything, mock.Anything).Return(&datapb.QueryPreImportResponse{
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
-	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task.QueryTaskOnWorker(cluster)
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
-
-	// drop import task
-	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
-	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
-	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
-func (s *ImportSchedulerSuite) TestProcessImport() {
+func (s *ImportInspectorSuite) TestProcessImport() {
 	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	var task ImportTask = &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:        0,
-			TaskID:       1,
-			CollectionID: s.collectionID,
-			State:        datapb.ImportTaskStateV2_Pending,
-			FileStats: []*datapb.ImportFileStats{
-				{
-					HashedStats: map[string]*datapb.PartitionImportStats{
-						"channel1": {
-							PartitionRows: map[int64]int64{
-								int64(2): 100,
-							},
-							PartitionDataSize: map[int64]int64{
-								int64(2): 100,
-							},
+
+	taskProto := &datapb.ImportTaskV2{
+		JobID:        0,
+		TaskID:       1,
+		CollectionID: s.collectionID,
+		State:        datapb.ImportTaskStateV2_Pending,
+		FileStats: []*datapb.ImportFileStats{
+			{
+				HashedStats: map[string]*datapb.PartitionImportStats{
+					"channel1": {
+						PartitionRows: map[int64]int64{
+							int64(2): 100,
+						},
+						PartitionDataSize: map[int64]int64{
+							int64(2): 100,
 						},
 					},
 				},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("import task"),
 	}
-	err := s.imeta.AddTask(context.TODO(), task)
+
+	var task ImportTask = &importTask{
+		alloc:      s.alloc,
+		meta:       s.meta,
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("import task"),
+	}
+	task.(*importTask).task.Store(taskProto)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -177,62 +175,50 @@ func (s *ImportSchedulerSuite) TestProcessImport() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// pending -> inProgress
 	const nodeID = 10
 	s.alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	s.alloc.EXPECT().AllocTimestamp(mock.Anything).Return(300, nil)
-	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
-		Slots: 1,
-	}, nil)
-	s.cluster.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
-		sess := session.NewSession(&session.NodeInfo{
-			NodeID: nodeID,
-		}, nil)
-		return []*session.Session{sess}
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Run(func(task task2.Task) {
+		task.CreateTaskOnWorker(nodeID, cluster)
 	})
-	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	s.inspector.inspect()
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_InProgress, task.GetState())
-	s.Equal(int64(nodeID), task.GetNodeID())
 
 	// inProgress -> completed
-	s.cluster.ExpectedCalls = lo.Filter(s.cluster.ExpectedCalls, func(call *mock.Call, _ int) bool {
-		return call.Method != "QueryImport"
-	})
-	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
+	cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
 		State: datapb.ImportTaskStateV2_Completed,
 	}, nil)
-	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task.QueryTaskOnWorker(cluster)
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Completed, task.GetState())
-
-	// drop import task
-	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
-	s.scheduler.process()
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
-	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
-func (s *ImportSchedulerSuite) TestProcessFailed() {
+func (s *ImportInspectorSuite) TestProcessFailed() {
 	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+
+	taskProto := &datapb.ImportTaskV2{
+		JobID:           0,
+		TaskID:          1,
+		CollectionID:    s.collectionID,
+		NodeID:          6,
+		SegmentIDs:      []int64{2, 3},
+		StatsSegmentIDs: []int64{4, 5},
+		State:           datapb.ImportTaskStateV2_Failed,
+	}
+
 	var task ImportTask = &importTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:           0,
-			TaskID:          1,
-			CollectionID:    s.collectionID,
-			NodeID:          6,
-			SegmentIDs:      []int64{2, 3},
-			StatsSegmentIDs: []int64{4, 5},
-			State:           datapb.ImportTaskStateV2_Failed,
-		},
 		tr: timerecord.NewTimeRecorder("import task"),
 	}
-	err := s.imeta.AddTask(context.TODO(), task)
+	task.(*importTask).task.Store(taskProto)
+	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -245,19 +231,10 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
-	err = s.imeta.AddJob(context.TODO(), job)
+	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	s.cluster.EXPECT().QueryImport(mock.Anything, mock.Anything).Return(&datapb.QueryImportResponse{
-		Slots: 1,
-	}, nil)
-	s.cluster.EXPECT().GetSessions().RunAndReturn(func() []*session.Session {
-		sess := session.NewSession(&session.NodeInfo{
-			NodeID: 6,
-		}, nil)
-		return []*session.Session{sess}
-	})
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{ID: id, State: commonpb.SegmentState_Importing, IsImporting: true},
@@ -270,19 +247,17 @@ func (s *ImportSchedulerSuite) TestProcessFailed() {
 		s.NotNil(segment)
 	}
 
-	s.cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
-	s.scheduler.process()
+	s.inspector.inspect()
 	for _, id := range task.(*importTask).GetSegmentIDs() {
 		segment := s.meta.GetSegment(context.TODO(), id)
 		s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
 	}
-	task = s.imeta.GetTask(context.TODO(), task.GetTaskID())
+	task = s.importMeta.GetTask(context.TODO(), task.GetTaskID())
 	s.Equal(datapb.ImportTaskStateV2_Failed, task.GetState())
 	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
-	s.Equal(int64(NullNodeID), task.GetNodeID())
 }
 
-func TestImportScheduler(t *testing.T) {
-	suite.Run(t, new(ImportSchedulerSuite))
+func TestImportInspector(t *testing.T) {
+	suite.Run(t, new(ImportInspectorSuite))
 }

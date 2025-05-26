@@ -64,7 +64,6 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:7]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -282,7 +281,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "[expected=COSINE][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:7])
+    @pytest.mark.parametrize("index", ct.all_index_types[:8])
     def test_search_invalid_params_type(self, index):
         """
         target: test search with invalid search params
@@ -744,8 +743,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 101,
                                          "err_msg": err_msg})
         # 3. search collection without data after load
-        collection_w.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        if vector_data_type == DataType.INT8_VECTOR:
+            collection_w.create_index(ct.default_float_vec_field_name,
+                                      index_params={"index_type": "HNSW", "metric_type": "L2"})
+        else:
+            collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,

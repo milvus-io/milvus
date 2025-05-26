@@ -88,7 +88,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            int64_t num_rows,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
-                           const InsertRecordProto* insert_record_proto) {
+                           InsertRecordProto* insert_record_proto) {
     AssertInfo(insert_record_proto->num_rows() == num_rows,
                "Entities_raw count not equal to insert size");
     // step 1: check insert data if valid
@@ -116,6 +116,20 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         }
     }
 
+    // segment have latest schema while insert used old one
+    // need to fill insert data with field_meta
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
+        if (field_id.get() < START_USER_FIELDID) {
+            continue;
+        }
+        if (field_id_to_offset.count(field_id) > 0) {
+            continue;
+        }
+        auto data = bulk_subscript_not_exist_field(field_meta, num_rows);
+        insert_record_proto->add_fields_data()->CopyFrom(*data);
+        field_id_to_offset.emplace(field_id, field_offset++);
+    }
+
     // step 2: sort timestamp
     // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
@@ -125,7 +139,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 
     // update the mem size of timestamps and row IDs
     stats_.mem_size += num_rows * (sizeof(Timestamp) + sizeof(idx_t));
-    for (auto [field_id, field_meta] : schema_->get_fields()) {
+    for (auto& [field_id, field_meta] : schema_->get_fields()) {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }

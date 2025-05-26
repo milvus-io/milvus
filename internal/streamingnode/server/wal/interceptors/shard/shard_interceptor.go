@@ -37,6 +37,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeInsert:           impl.handleInsertMessage,
 		message.MessageTypeDelete:           impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:      impl.handleManualFlushMessage,
+		message.MessageTypeSchemaChange:     impl.handleSchemaChange,
 		message.MessageTypeCreateSegment:    impl.handleCreateSegment,
 		message.MessageTypeFlush:            impl.handleFlushSegment,
 	}
@@ -138,12 +139,17 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
 	for _, partition := range header.GetPartitions() {
+		if partition.BinarySize == 0 {
+			// binary size should be set at proxy with estimate, but we don't implement it right now.
+			// use payload size instead.
+			partition.BinarySize = uint64(len(msg.Payload()))
+		}
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),
 			PartitionID:  partition.GetPartitionId(),
 			InsertMetrics: stats.InsertMetrics{
 				Rows:       partition.GetRows(),
-				BinarySize: uint64(msg.EstimateSize()), // TODO: Use parition.BinarySize in future when merge partitions together in one message.
+				BinarySize: partition.GetBinarySize(),
 			},
 			TimeTick: msg.TimeTick(),
 		}
@@ -195,6 +201,7 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
+	impl.shardManager.ApplyDelete(deleteMessage)
 	return appendOp(ctx, msg)
 }
 
@@ -213,6 +220,22 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	})
 	header.SegmentIds = segmentIDs
 	maunalFlushMsg.OverwriteHeader(header)
+
+	return appendOp(ctx, msg)
+}
+
+// handleSchemaChange handles the schema change message.
+func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	schemaChangeMsg := message.MustAsMutableCollectionSchemaChangeV2(msg)
+	header := schemaChangeMsg.Header()
+	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
+	if err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
+
+	// Modify the header of schema change message, carry with the all flushed segment ids.
+	header.FlushedSegmentIds = segmentIDs
+	schemaChangeMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }

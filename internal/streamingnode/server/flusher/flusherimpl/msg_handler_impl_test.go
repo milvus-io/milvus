@@ -17,13 +17,16 @@
 package flusherimpl
 
 import (
+	"context"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -35,15 +38,16 @@ func TestFlushMsgHandler_HandleFlush(t *testing.T) {
 	wbMgr := writebuffer.NewMockBufferManager(t)
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-	msg, err := message.NewFlushMessageBuilderV2().
-		WithVChannel(vchannel).
+	msg := message.NewFlushMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
 		WithHeader(&message.FlushMessageHeader{
 			CollectionId: 0,
 			SegmentId:    1,
 		}).
 		WithBody(&message.FlushMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
@@ -69,15 +73,16 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 
-	msg, err := message.NewManualFlushMessageBuilderV2().
-		WithVChannel(vchannel).
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
 		WithHeader(&message.ManualFlushMessageHeader{
 			CollectionId: 0,
 			FlushTs:      1000,
 		}).
 		WithBody(&message.ManualFlushMessageBody{}).
-		BuildMutable()
-	assert.NoError(t, err)
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
 
 	handler := newMsgHandler(wbMgr)
 	msgID := mock_message.NewMockMessageID(t)
@@ -96,5 +101,43 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	wbMgr.EXPECT().FlushChannel(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	err = handler.HandleManualFlush(im)
+	assert.NoError(t, err)
+}
+
+func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
+	vchannel := "ch-0"
+
+	w := mock_streaming.NewMockWALAccesser(t)
+	b := mock_streaming.NewMockBroadcast(t)
+	w.EXPECT().Broadcast().Return(b)
+	b.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
+	streaming.SetWALForTest(w)
+
+	// test failed
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+
+	msg := message.NewSchemaChangeMessageBuilderV2().
+		WithBroadcast([]string{vchannel}).
+		WithHeader(&message.SchemaChangeMessageHeader{
+			CollectionId:      0,
+			FlushedSegmentIds: []int64{1},
+		}).
+		WithBody(&message.SchemaChangeMessageBody{}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0]
+
+	handler := newMsgHandler(wbMgr)
+	msgID := mock_message.NewMockMessageID(t)
+	im := message.MustAsImmutableCollectionSchemaChangeV2(msg.IntoImmutableMessage(msgID))
+	err := handler.HandleSchemaChange(context.Background(), im)
+	assert.Error(t, err)
+
+	// test normal
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Unset()
+	wbMgr.EXPECT().SealSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	err = handler.HandleSchemaChange(context.Background(), im)
 	assert.NoError(t, err)
 }

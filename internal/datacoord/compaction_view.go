@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
@@ -134,6 +135,10 @@ func (s *SegmentView) Clone() *SegmentView {
 
 func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) *SegmentView {
+		numOfRows := segment.GetNumOfRows()
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			numOfRows = segmentutil.CalcDelRowCountFromDeltaLog(segment.SegmentInfo)
+		}
 		return &SegmentView{
 			ID: segment.ID,
 			label: &CompactionGroupLabel{
@@ -157,7 +162,7 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
 			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
 
-			NumOfRows: segment.NumOfRows,
+			NumOfRows: numOfRows,
 			MaxRowNum: segment.MaxRowNum,
 			// TODO: set the following
 			// ExpireSize float64

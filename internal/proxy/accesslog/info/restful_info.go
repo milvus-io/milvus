@@ -226,3 +226,32 @@ func (i *RestfulInfo) AnnsField() string {
 	}
 	return Unknown
 }
+
+func (i *RestfulInfo) NQ() string {
+	if req, ok := i.req.(*milvuspb.SearchRequest); ok {
+		return fmt.Sprint(req.GetNq())
+	}
+
+	if req, ok := i.req.(*milvuspb.HybridSearchRequest); ok {
+		return listToString(lo.Map(req.GetRequests(), func(req *milvuspb.SearchRequest, _ int) string { return fmt.Sprint(req.GetNq()) }))
+	}
+	return Unknown
+}
+
+func (i *RestfulInfo) SearchParams() string {
+	if req, ok := i.req.(*milvuspb.SearchRequest); ok {
+		return kvsToString(req.GetSearchParams())
+	}
+
+	if req, ok := i.req.(*milvuspb.HybridSearchRequest); ok {
+		return listToString(lo.Map(req.GetRequests(), func(req *milvuspb.SearchRequest, _ int) string { return kvsToString(req.GetSearchParams()) }))
+	}
+	return Unknown
+}
+
+func (i *RestfulInfo) QueryParams() string {
+	if req, ok := i.req.(*milvuspb.QueryRequest); ok {
+		return kvsToString(req.GetQueryParams())
+	}
+	return Unknown
+}

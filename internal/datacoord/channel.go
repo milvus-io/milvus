@@ -22,10 +22,12 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 type ROChannel interface {
@@ -191,15 +193,30 @@ func NewStateChannelByWatchInfo(nodeID int64, info *datapb.ChannelWatchInfo) *St
 	return c
 }
 
-func (c *StateChannel) TransitionOnSuccess(opID int64) {
+func (c *StateChannel) TransitionState(err error, opID int64) {
 	if opID != c.Info.GetOpID() {
-		log.Warn("Try to transit on success but opID not match, stay original state ",
+		log.Warn("Try to transit state but opID not match, stay original state ",
 			zap.Any("currentState", c.currentState),
 			zap.String("channel", c.Name),
 			zap.Int64("target opID", opID),
 			zap.Int64("channel opID", c.Info.GetOpID()))
 		return
 	}
+
+	if err == nil {
+		c.transitionOnSuccess()
+		return
+	}
+
+	if errors.Is(err, merr.ErrChannelReduplicate) {
+		c.setState(ToRelease)
+		return
+	}
+
+	c.transitionOnFailure()
+}
+
+func (c *StateChannel) transitionOnSuccess() {
 	switch c.currentState {
 	case Standby:
 		c.setState(ToWatch)
@@ -216,21 +233,11 @@ func (c *StateChannel) TransitionOnSuccess(opID int64) {
 	}
 }
 
-func (c *StateChannel) TransitionOnFailure(opID int64) {
-	if opID != c.Info.GetOpID() {
-		log.Warn("Try to transit on failure but opID not match, stay original state",
-			zap.Any("currentState", c.currentState),
-			zap.String("channel", c.Name),
-			zap.Int64("target opID", opID),
-			zap.Int64("channel opID", c.Info.GetOpID()))
-		return
-	}
+func (c *StateChannel) transitionOnFailure() {
 	switch c.currentState {
-	case Watching:
+	case Watching, Releasing, ToWatch:
 		c.setState(Standby)
-	case Releasing:
-		c.setState(Standby)
-	case Standby, ToWatch, Watched, ToRelease:
+	case Standby, Watched, ToRelease:
 		// Stay original state
 	}
 }

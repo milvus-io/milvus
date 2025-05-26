@@ -1428,7 +1428,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
     @pytest.mark.parametrize("invalid_vector_type ", ct.all_dense_vector_types)
     def test_invalid_sparse_vector_data(self, index, invalid_vector_type):
         """
@@ -2154,7 +2154,7 @@ class TestUpsertValid(TestcaseBase):
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index ", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index ", ct.all_index_types[10:12])
     def test_upsert_sparse_data(self, index):
         """
         target: multiple upserts and counts(*)

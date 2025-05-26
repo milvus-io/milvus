@@ -1253,14 +1253,18 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			numOfGrowingRows += segment.InsertCount()
 		}
 
+		queryView := delegator.GetQueryView()
 		leaderViews = append(leaderViews, &querypb.LeaderView{
 			Collection:             delegator.Collection(),
 			Channel:                key,
 			SegmentDist:            sealedSegments,
 			GrowingSegments:        growingSegments,
-			TargetVersion:          delegator.GetTargetVersion(),
 			NumOfGrowingRows:       numOfGrowingRows,
 			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
+			TargetVersion:          queryView.GetVersion(),
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: queryView.Serviceable(),
+			},
 		})
 		return true
 	})

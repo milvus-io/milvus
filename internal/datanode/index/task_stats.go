@@ -102,7 +102,9 @@ func (st *statsTask) Name() string {
 func (st *statsTask) OnEnqueue(ctx context.Context) error {
 	st.queueDur = 0
 	st.tr.RecordSpan()
-	log.Ctx(ctx).Info("statsTask enqueue", zap.Int64("collectionID", st.req.GetCollectionID()),
+	log.Ctx(ctx).Info("statsTask enqueue",
+		zap.Int64("taskID", st.req.GetTaskID()),
+		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()))
 	return nil
@@ -605,7 +607,7 @@ func buildIndexParams(
 	if req.GetStorageVersion() == storage.StorageV2 {
 		params.SegmentInsertFiles = GetSegmentInsertFiles(
 			req.GetInsertLogs(),
-			req.GetStorageConfig().RootPath,
+			req.GetStorageConfig(),
 			req.GetCollectionID(),
 			req.GetPartitionID(),
 			req.GetTargetSegmentID())

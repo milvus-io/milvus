@@ -74,10 +74,7 @@ func (r *compositeRecord) Column(i FieldID) arrow.Array {
 }
 
 func (r *compositeRecord) Len() int {
-	for _, rec := range r.recs {
-		return rec.Len()
-	}
-	return 0
+	return r.recs[0].Len()
 }
 
 func (r *compositeRecord) Release() {
@@ -396,7 +393,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 
-	m[schemapb.DataType_Array] = byteEntry
+	m[schemapb.DataType_Array] = eagerArrayEntry
 	m[schemapb.DataType_JSON] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
@@ -447,7 +444,21 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i}
 		},
-		fixedSizeDeserializer,
+		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
+			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
+				// convert to []int8
+				bytes := arr.Value(i)
+				int8s := make([]int8, len(bytes))
+				for i, b := range bytes {
+					int8s[i] = int8(b)
+				}
+				return int8s, true
+			}
+			return nil, false
+		},
 		fixedSizeSerializer,
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
@@ -520,7 +531,7 @@ type DeserializeReaderImpl[T any] struct {
 
 // Iterate to next value, return error or EOF if no more value.
 func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
-	if deser.rec == nil || deser.pos >= deser.rec.Len()-1 {
+	if deser.pos == 0 || deser.pos >= len(deser.values) {
 		r, err := deser.rr.Next()
 		if err != nil {
 			return nil, err
@@ -533,11 +544,10 @@ func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 		if err := deser.deserializer(deser.rec, deser.values); err != nil {
 			return nil, err
 		}
-	} else {
-		deser.pos++
 	}
-
-	return &deser.values[deser.pos], nil
+	ret := &deser.values[deser.pos]
+	deser.pos++
+	return ret, nil
 }
 
 func (deser *DeserializeReaderImpl[T]) Close() error {

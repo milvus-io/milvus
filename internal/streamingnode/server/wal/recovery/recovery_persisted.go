@@ -119,7 +119,7 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 			Id: untilMessage.LastConfirmedMessageID().Marshal(),
 		},
 		TimeTick:      untilMessage.TimeTick(),
-		RecoveryMagic: recoveryMagicStreamingInitialized,
+		RecoveryMagic: RecoveryMagicStreamingInitialized,
 	}
 	if err := resource.Resource().StreamingNodeCatalog().SaveConsumeCheckpoint(ctx, channelInfo.Name, checkpoint); err != nil {
 		return nil, errors.Wrap(err, "failed to save checkpoint to catalog")

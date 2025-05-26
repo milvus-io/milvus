@@ -19,6 +19,8 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
+#include "index/IndexFactory.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -206,6 +208,97 @@ TEST_P(GrowingIndexTest, Correctness) {
                             sr->distances_[j] <= 600.0);
             }
         }
+    }
+}
+
+TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
+    constexpr int N = 1024;
+    constexpr int TOPK = 100;
+    constexpr int dim = 128;
+    constexpr int add_cont = 5;
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = data_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.index_type = index_type;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto random = schema->AddDebugField("random", DataType::DOUBLE);
+    auto vec = schema->AddDebugField("embeddings", data_type, 128, metric_type);
+    schema->set_primary_field_id(pk);
+
+    auto dataset = DataGen(schema, N);
+
+    auto build_config = generate_build_conf(index_type, metric_type);
+
+    if (data_type == DataType::VECTOR_FLOAT) {
+        auto index = std::make_unique<milvus::index::VectorMemIndex<float>>(
+            index_type,
+            metric_type,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            milvus::storage::FileManagerContext());
+        auto float_data = dataset.get_col<float>(vec);
+        index->BuildWithDataset(knowhere::GenDataSet(N, dim, float_data.data()),
+                                build_config);
+        for (int i = 0; i < add_cont; i++) {
+            index->AddWithDataset(
+                knowhere::GenDataSet(N, dim, float_data.data()), build_config);
+        }
+        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+    } else if (data_type == DataType::VECTOR_FLOAT16) {
+        auto index = std::make_unique<milvus::index::VectorMemIndex<float16>>(
+            index_type,
+            metric_type,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            milvus::storage::FileManagerContext());
+        auto float16_data = dataset.get_col<float16>(vec);
+        index->BuildWithDataset(
+            knowhere::GenDataSet(N, dim, float16_data.data()), build_config);
+        for (int i = 0; i < add_cont; i++) {
+            index->AddWithDataset(
+                knowhere::GenDataSet(N, dim, float16_data.data()),
+                build_config);
+        }
+        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+    } else if (data_type == DataType::VECTOR_BFLOAT16) {
+        auto index = std::make_unique<milvus::index::VectorMemIndex<bfloat16>>(
+            index_type,
+            metric_type,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            milvus::storage::FileManagerContext());
+        auto bfloat16_data = dataset.get_col<bfloat16>(vec);
+        index->BuildWithDataset(
+            knowhere::GenDataSet(N, dim, bfloat16_data.data()), build_config);
+        for (int i = 0; i < add_cont; i++) {
+            index->AddWithDataset(
+                knowhere::GenDataSet(N, dim, bfloat16_data.data()),
+                build_config);
+        }
+        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+    } else if (is_sparse) {
+        auto index = std::make_unique<milvus::index::VectorMemIndex<float>>(
+            index_type,
+            metric_type,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false,
+            milvus::storage::FileManagerContext());
+        auto sparse_data =
+            dataset.get_col<knowhere::sparse::SparseRow<float>>(vec);
+        index->BuildWithDataset(
+            knowhere::GenDataSet(N, dim, sparse_data.data()), build_config);
+        for (int i = 0; i < add_cont; i++) {
+            index->AddWithDataset(
+                knowhere::GenDataSet(N, dim, sparse_data.data()), build_config);
+        }
+        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+    } else {
+        throw std::invalid_argument("Unsupported data type");
     }
 }
 

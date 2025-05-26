@@ -354,3 +354,119 @@ func TestOperatePrivilegeV2(t *testing.T) {
 	assert.EqualValues(t, "unit_user", newMsg.(*OperatePrivilegeV2Msg).GetGrantor().GetUser().GetName())
 	assert.EqualValues(t, "unit_privilege", newMsg.(*OperatePrivilegeV2Msg).GetGrantor().GetPrivilege().GetName())
 }
+
+func TestCreatePrivilegeGroup(t *testing.T) {
+	var msg TsMsg = &CreatePrivilegeGroupMsg{
+		CreatePrivilegeGroupRequest: &milvuspb.CreatePrivilegeGroupRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:       commonpb.MsgType_CreatePrivilegeGroup,
+				MsgID:         100,
+				Timestamp:     1000,
+				SourceID:      10000,
+				TargetID:      100000,
+				ReplicateInfo: nil,
+			},
+			GroupName: "unit_group",
+		},
+	}
+	assert.EqualValues(t, 100, msg.ID())
+	msg.SetID(200)
+	assert.EqualValues(t, 200, msg.ID())
+	assert.Equal(t, commonpb.MsgType_CreatePrivilegeGroup, msg.Type())
+	assert.EqualValues(t, 10000, msg.SourceID())
+
+	msgBytes, err := msg.Marshal(msg)
+	assert.NoError(t, err)
+
+	var newMsg TsMsg = &CreatePrivilegeGroupMsg{}
+	_, err = newMsg.Unmarshal("1")
+	assert.Error(t, err)
+
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 200, newMsg.ID())
+	assert.EqualValues(t, 1000, newMsg.BeginTs())
+	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_group", newMsg.(*CreatePrivilegeGroupMsg).GetGroupName())
+	assert.EqualValues(t, commonpb.MsgType_CreatePrivilegeGroup, newMsg.Type())
+
+	assert.True(t, msg.Size() > 0)
+}
+
+func TestDropPrivilegeGroup(t *testing.T) {
+	var msg TsMsg = &DropPrivilegeGroupMsg{
+		DropPrivilegeGroupRequest: &milvuspb.DropPrivilegeGroupRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:       commonpb.MsgType_DropPrivilegeGroup,
+				MsgID:         100,
+				Timestamp:     1000,
+				SourceID:      10000,
+				TargetID:      100000,
+				ReplicateInfo: nil,
+			},
+			GroupName: "unit_group",
+		},
+	}
+	assert.EqualValues(t, 100, msg.ID())
+	msg.SetID(200)
+	assert.EqualValues(t, 200, msg.ID())
+	assert.Equal(t, commonpb.MsgType_DropPrivilegeGroup, msg.Type())
+	assert.EqualValues(t, 10000, msg.SourceID())
+
+	msgBytes, err := msg.Marshal(msg)
+	assert.NoError(t, err)
+
+	var newMsg TsMsg = &DropPrivilegeGroupMsg{}
+	_, err = newMsg.Unmarshal("1")
+	assert.Error(t, err)
+
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 200, newMsg.ID())
+	assert.EqualValues(t, 1000, newMsg.BeginTs())
+	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_group", newMsg.(*DropPrivilegeGroupMsg).GetGroupName())
+
+	assert.True(t, msg.Size() > 0)
+}
+
+func TestOperatePrivilegeGroup(t *testing.T) {
+	var msg TsMsg = &OperatePrivilegeGroupMsg{
+		OperatePrivilegeGroupRequest: &milvuspb.OperatePrivilegeGroupRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:       commonpb.MsgType_OperatePrivilegeGroup,
+				MsgID:         100,
+				Timestamp:     1000,
+				SourceID:      10000,
+				TargetID:      100000,
+				ReplicateInfo: nil,
+			},
+			GroupName: "unit_group",
+			Type:      milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
+			Privileges: []*milvuspb.PrivilegeEntity{
+				{Name: "unit_privilege"},
+			},
+		},
+	}
+	assert.EqualValues(t, 100, msg.ID())
+	msg.SetID(200)
+	assert.EqualValues(t, 200, msg.ID())
+	assert.Equal(t, commonpb.MsgType_OperatePrivilegeGroup, msg.Type())
+	assert.EqualValues(t, 10000, msg.SourceID())
+
+	msgBytes, err := msg.Marshal(msg)
+	assert.NoError(t, err)
+
+	var newMsg TsMsg = &OperatePrivilegeGroupMsg{}
+	_, err = newMsg.Unmarshal("1")
+	assert.Error(t, err)
+
+	newMsg, err = newMsg.Unmarshal(msgBytes)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 200, newMsg.ID())
+	assert.EqualValues(t, 1000, newMsg.BeginTs())
+	assert.EqualValues(t, 1000, newMsg.EndTs())
+	assert.EqualValues(t, "unit_group", newMsg.(*OperatePrivilegeGroupMsg).GetGroupName())
+	assert.EqualValues(t, milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup, newMsg.(*OperatePrivilegeGroupMsg).GetType())
+	assert.EqualValues(t, "unit_privilege", newMsg.(*OperatePrivilegeGroupMsg).GetPrivileges()[0].GetName())
+}

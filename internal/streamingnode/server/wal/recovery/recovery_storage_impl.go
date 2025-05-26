@@ -82,12 +82,27 @@ type recoveryStorageImpl struct {
 	segments               map[int64]*segmentRecoveryInfo
 	vchannels              map[string]*vchannelRecoveryInfo
 	checkpoint             *WALCheckpoint
+	flusherCheckpoint      *WALCheckpoint
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
-	persistNotifier chan struct{}
-	gracefulClosed  bool
-	truncator       *samplingTruncator
-	metrics         *recoveryMetrics
+	persistNotifier        chan struct{}
+	gracefulClosed         bool
+	truncator              *samplingTruncator
+	metrics                *recoveryMetrics
+	pendingPersistSnapshot *RecoverySnapshot
+}
+
+// UpdateFlusherCheckpoint updates the checkpoint of flusher.
+// TODO: should be removed in future, after merge the flusher logic into recovery storage.
+func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.flusherCheckpoint == nil || r.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
+		r.flusherCheckpoint = checkpoint
+		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()))
+		return
+	}
+	r.Logger().Warn("update illegal checkpoint of flusher", zap.String("current", r.flusherCheckpoint.MessageID.String()), zap.String("target", checkpoint.MessageID.String()))
 }
 
 // ObserveMessage is called when a new message is observed.
@@ -120,6 +135,9 @@ func (r *recoveryStorageImpl) notifyPersist() {
 func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.dirtyCounter == 0 {
+		return nil
+	}
 
 	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta)
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
@@ -164,16 +182,11 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	}
 	r.handleMessage(msg)
 
-	checkpointUpdates := !r.checkpoint.MessageID.EQ(msg.LastConfirmedMessageID())
 	r.checkpoint.TimeTick = msg.TimeTick()
 	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
-	if checkpointUpdates {
-		// only count the dirty if last confirmed message id is updated.
-		// we always recover from that point, the writeaheadtimetick is just a redundant information.
-		r.dirtyCounter++
-	}
+	r.dirtyCounter++
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
 		r.notifyPersist()
 	}
@@ -376,9 +389,12 @@ func (r *recoveryStorageImpl) handleImport(_ message.ImmutableImportMessageV1) {
 // handleSchemaChange handles the schema change message.
 func (r *recoveryStorageImpl) handleSchemaChange(msg message.ImmutableSchemaChangeMessageV2) {
 	// when schema change happens, we need to flush all segments in the collection.
-	// TODO: add the flush segment list into schema change message.
-	// TODO: persist the schema change into recoveryinfo.
-	r.flushAllSegmentOfCollection(msg, msg.Header().CollectionId)
+	segments := make(map[int64]struct{}, len(msg.Header().FlushedSegmentIds))
+	for _, segmentID := range msg.Header().FlushedSegmentIds {
+		segments[segmentID] = struct{}{}
+	}
+	r.flushSegments(msg, segments)
+	// TODO: persist the schema change into recoveryinfo
 }
 
 // detectInconsistency detects the inconsistency in the recovery storage.
@@ -390,4 +406,12 @@ func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, 
 	// because our meta is not atomic-updated, so these error may be logged if crashes when meta updated partially.
 	r.Logger().Warn("inconsistency detected", fields...)
 	r.metrics.ObserveInconsitentEvent()
+}
+
+// getFlusherCheckpoint returns flusher checkpoint concurrent-safe
+// NOTE: shall not be called with r.mu.Lock()!
+func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.flusherCheckpoint
 }

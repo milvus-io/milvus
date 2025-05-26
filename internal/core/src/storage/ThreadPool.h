@@ -131,31 +131,4 @@ class ThreadPool {
     std::string name_;
 };
 
-class Worker {
- private:
-    int id_;
-    ThreadPool* pool_;
-
- public:
-    Worker(ThreadPool* pool, const int id) : pool_(pool), id_(id) {
-    }
-
-    void
-    operator()() {
-        std::function<void()> func;
-        bool dequeue;
-        while (!pool_->shutdown_) {
-            std::unique_lock<std::mutex> lock(pool_->mutex_);
-            if (pool_->work_queue_.empty()) {
-                pool_->condition_lock_.wait(lock);
-            }
-            dequeue = pool_->work_queue_.dequeue(func);
-            lock.unlock();
-            if (dequeue) {
-                func();
-            }
-        }
-    }
-};
-
 }  // namespace milvus

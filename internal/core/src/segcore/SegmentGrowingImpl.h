@@ -48,7 +48,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           const InsertRecordProto* insert_record_proto) override;
+           InsertRecordProto* insert_record_proto) override;
 
     bool
     Contain(const PkType& pk) const override {

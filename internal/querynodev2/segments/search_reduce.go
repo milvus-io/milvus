@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -127,12 +126,18 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	}
 
 	resultOffsets := make([][]int64, len(searchResultData))
-	for i := 0; i < len(searchResultData); i++ {
+	groupByValIterator := make([]func(int) any, len(searchResultData))
+	for i := range searchResultData {
 		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
 		for j := int64(1); j < info.GetNq(); j++ {
 			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
 		}
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
+		groupByValIterator[i] = typeutil.GetDataIterator(searchResultData[i].GetGroupByFieldValue())
+	}
+	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(searchResultData[0].GetGroupByFieldValue().GetType(), true, int(info.GetTopK()))
+	if err != nil {
+		return nil, err
 	}
 
 	var filteredCount int64
@@ -159,13 +164,9 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			idx := resultOffsets[sel][i] + offsets[sel]
 
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
-			groupByVal := typeutil.GetData(searchResultData[sel].GetGroupByFieldValue(), int(idx))
+			groupByVal := groupByValIterator[sel](int(idx))
 			score := searchResultData[sel].Scores[idx]
 			if _, ok := idSet[id]; !ok {
-				if groupByVal == nil {
-					return ret, merr.WrapErrParameterMissing("GroupByVal returned from segment cannot be null")
-				}
-
 				groupCount := groupByValueMap[groupByVal]
 				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
 					// exceed the limit for group count, filter this entity
@@ -177,10 +178,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
 					typeutil.AppendPKs(ret.Ids, id)
 					ret.Scores = append(ret.Scores, score)
-					if err := typeutil.AppendGroupByValue(ret, groupByVal, searchResultData[sel].GetGroupByFieldValue().GetType()); err != nil {
-						log.Error("Failed to append groupByValues", zap.Error(err))
-						return ret, err
-					}
+					gpFieldBuilder.Add(groupByVal)
 					groupByValueMap[groupByVal] += 1
 					idSet[id] = struct{}{}
 					j++
@@ -198,6 +196,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
+	ret.GroupByFieldValue = gpFieldBuilder.Build()
 	if float64(filteredCount) >= 0.3*float64(groupBound) {
 		log.Warn("GroupBy reduce filtered too many results, "+
 			"this may influence the final result seriously",

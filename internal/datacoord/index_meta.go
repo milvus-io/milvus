@@ -857,6 +857,30 @@ func (m *indexMeta) UpdateVersion(buildID, nodeID UniqueID) error {
 	return m.updateSegIndexMeta(segIdx, updateFunc)
 }
 
+func (m *indexMeta) UpdateIndexState(buildID UniqueID, state commonpb.IndexState, failReason string) error {
+	m.keyLock.Lock(buildID)
+	defer m.keyLock.Unlock(buildID)
+
+	segIdx, ok := m.segmentBuildInfo.Get(buildID)
+	if !ok {
+		return fmt.Errorf("there is no index with buildID: %d", buildID)
+	}
+
+	updateFunc := func(segIdx *model.SegmentIndex) error {
+		segIdx.IndexState = state
+		segIdx.FailReason = failReason
+		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
+	}
+
+	if err := m.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		return err
+	}
+
+	log.Ctx(m.ctx).Info("update index task state success", zap.Int64("buildID", buildID),
+		zap.String("state", state.String()), zap.String("fail reason", failReason))
+	return nil
+}
+
 func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 	m.keyLock.Lock(taskInfo.GetBuildID())
 	defer m.keyLock.Unlock(taskInfo.GetBuildID())

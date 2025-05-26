@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -47,6 +48,35 @@ type IndexTaskInfo struct {
 
 	// task statistics
 	statistic *indexpb.JobInfo
+}
+
+func (i *IndexTaskInfo) Clone() *IndexTaskInfo {
+	return &IndexTaskInfo{
+		Cancel:                    i.Cancel,
+		State:                     i.State,
+		FileKeys:                  common.CloneStringList(i.FileKeys),
+		SerializedSize:            i.SerializedSize,
+		MemSize:                   i.MemSize,
+		FailReason:                i.FailReason,
+		CurrentIndexVersion:       i.CurrentIndexVersion,
+		IndexStoreVersion:         i.IndexStoreVersion,
+		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+		statistic:                 typeutil.Clone(i.statistic),
+	}
+}
+
+func (i *IndexTaskInfo) ToIndexTaskInfo(buildID int64) *workerpb.IndexTaskInfo {
+	return &workerpb.IndexTaskInfo{
+		BuildID:                   buildID,
+		State:                     i.State,
+		IndexFileKeys:             i.FileKeys,
+		SerializedSize:            i.SerializedSize,
+		MemSize:                   i.MemSize,
+		FailReason:                i.FailReason,
+		CurrentIndexVersion:       i.CurrentIndexVersion,
+		IndexStoreVersion:         i.IndexStoreVersion,
+		CurrentScalarIndexVersion: i.CurrentScalarIndexVersion,
+	}
 }
 
 type TaskManager struct {
@@ -327,6 +357,82 @@ type StatsTaskInfo struct {
 	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 }
 
+func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
+	return &StatsTaskInfo{
+		Cancel:           s.Cancel,
+		State:            s.State,
+		FailReason:       s.FailReason,
+		CollID:           s.CollID,
+		PartID:           s.PartID,
+		SegID:            s.SegID,
+		InsertChannel:    s.InsertChannel,
+		NumRows:          s.NumRows,
+		InsertLogs:       s.CloneInsertLogs(),
+		StatsLogs:        s.CloneStatsLogs(),
+		TextStatsLogs:    s.CloneTextStatsLogs(),
+		Bm25Logs:         s.CloneBm25Logs(),
+		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
+	}
+}
+
+func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
+	return &workerpb.StatsResult{
+		TaskID:           taskID,
+		State:            s.State,
+		FailReason:       s.FailReason,
+		CollectionID:     s.CollID,
+		PartitionID:      s.PartID,
+		SegmentID:        s.SegID,
+		Channel:          s.InsertChannel,
+		InsertLogs:       s.InsertLogs,
+		StatsLogs:        s.StatsLogs,
+		TextStatsLogs:    s.TextStatsLogs,
+		Bm25Logs:         s.Bm25Logs,
+		NumRows:          s.NumRows,
+		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
+	}
+}
+
+func (s *StatsTaskInfo) CloneInsertLogs() []*datapb.FieldBinlog {
+	clone := make([]*datapb.FieldBinlog, len(s.InsertLogs))
+	for i, log := range s.InsertLogs {
+		clone[i] = typeutil.Clone(log)
+	}
+	return clone
+}
+
+func (s *StatsTaskInfo) CloneStatsLogs() []*datapb.FieldBinlog {
+	clone := make([]*datapb.FieldBinlog, len(s.StatsLogs))
+	for i, log := range s.StatsLogs {
+		clone[i] = typeutil.Clone(log)
+	}
+	return clone
+}
+
+func (s *StatsTaskInfo) CloneTextStatsLogs() map[int64]*datapb.TextIndexStats {
+	clone := make(map[int64]*datapb.TextIndexStats)
+	for k, v := range s.TextStatsLogs {
+		clone[k] = typeutil.Clone(v)
+	}
+	return clone
+}
+
+func (s *StatsTaskInfo) CloneBm25Logs() []*datapb.FieldBinlog {
+	clone := make([]*datapb.FieldBinlog, len(s.Bm25Logs))
+	for i, log := range s.Bm25Logs {
+		clone[i] = typeutil.Clone(log)
+	}
+	return clone
+}
+
+func (s *StatsTaskInfo) CloneJSONKeyStatsLogs() map[int64]*datapb.JsonKeyStats {
+	clone := make(map[int64]*datapb.JsonKeyStats)
+	for k, v := range s.JSONKeyStatsLogs {
+		clone[k] = typeutil.Clone(v)
+	}
+	return clone
+}
+
 func (m *TaskManager) LoadOrStoreStatsTask(clusterID string, taskID typeutil.UniqueID, info *StatsTaskInfo) *StatsTaskInfo {
 	m.stateLock.Lock()
 	defer m.stateLock.Unlock()
@@ -437,21 +543,7 @@ func (m *TaskManager) GetStatsTaskInfo(clusterID string, taskID typeutil.UniqueI
 	defer m.stateLock.Unlock()
 
 	if info, ok := m.statsTasks[Key{ClusterID: clusterID, TaskID: taskID}]; ok {
-		return &StatsTaskInfo{
-			Cancel:           info.Cancel,
-			State:            info.State,
-			FailReason:       info.FailReason,
-			CollID:           info.CollID,
-			PartID:           info.PartID,
-			SegID:            info.SegID,
-			InsertChannel:    info.InsertChannel,
-			NumRows:          info.NumRows,
-			InsertLogs:       info.InsertLogs,
-			StatsLogs:        info.StatsLogs,
-			TextStatsLogs:    info.TextStatsLogs,
-			Bm25Logs:         info.Bm25Logs,
-			JSONKeyStatsLogs: info.JSONKeyStatsLogs,
-		}
+		return info.Clone()
 	}
 	return nil
 }

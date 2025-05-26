@@ -22,18 +22,22 @@ import (
 )
 
 type Params struct {
-	EnableStorageV2     bool   `json:"enable_storage_v2,omitempty"`
-	BinLogMaxSize       uint64 `json:"binlog_max_size,omitempty"`
-	UseMergeSort        bool   `json:"use_merge_sort,omitempty"`
-	MaxSegmentMergeSort int    `json:"max_segment_merge_sort,omitempty"`
+	EnableStorageV2           bool    `json:"enable_storage_v2,omitempty"`
+	BinLogMaxSize             uint64  `json:"binlog_max_size,omitempty"`
+	UseMergeSort              bool    `json:"use_merge_sort,omitempty"`
+	MaxSegmentMergeSort       int     `json:"max_segment_merge_sort,omitempty"`
+	PreferSegmentSizeRatio    float64 `json:"prefer_segment_size_ratio,omitempty"`
+	BloomFilterApplyBatchSize int     `json:"bloom_filter_apply_batch_size,omitempty"`
 }
 
 func genParams() Params {
 	return Params{
-		EnableStorageV2:     paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
-		BinLogMaxSize:       paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		UseMergeSort:        paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
-		MaxSegmentMergeSort: paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		EnableStorageV2:           paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
+		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
+		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
 	}
 }
 

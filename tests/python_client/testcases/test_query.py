@@ -4205,7 +4205,7 @@ class TestQueryCount(TestcaseBase):
                                         "pk_name": collection_w.primary_field.name})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("index", ct.all_index_types[9:11])
+    @pytest.mark.parametrize("index", ct.all_index_types[10:12])
     def test_counts_expression_sparse_vectors(self, index):
         """
         target: test count with expr

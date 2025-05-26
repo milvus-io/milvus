@@ -67,8 +67,8 @@ func (m *AppendMetrics) StartAppendGuard() *AppendMetricsGuard {
 func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	fields := []zap.Field{
 		log.FieldMessage(m.msg),
-		zap.Duration("append_duration", m.appendDuration),
-		zap.Duration("impl_append_duration", m.implAppendDuration),
+		zap.Duration("appendDuration", m.appendDuration),
+		zap.Duration("implAppendDuration", m.implAppendDuration),
 	}
 	for name, ims := range m.interceptors {
 		for i, im := range ims {
@@ -80,10 +80,10 @@ func (m *AppendMetrics) IntoLogFields() []zap.Field {
 	if m.err != nil {
 		fields = append(fields, zap.Error(m.err))
 	} else {
-		fields = append(fields, zap.String("message_id", m.result.MessageID.String()))
-		fields = append(fields, zap.Uint64("time_tick", m.result.TimeTick))
+		fields = append(fields, zap.String("messageID", m.result.MessageID.String()))
+		fields = append(fields, zap.Uint64("timetick", m.result.TimeTick))
 		if m.result.TxnCtx != nil {
-			fields = append(fields, zap.Int64("txn_id", int64(m.result.TxnCtx.TxnID)))
+			fields = append(fields, zap.Int64("txnID", int64(m.result.TxnCtx.TxnID)))
 		}
 	}
 	return fields

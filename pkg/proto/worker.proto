@@ -11,22 +11,66 @@ import "index_coord.proto";
 
 
 service IndexNode {
-  rpc CreateJob(CreateJobRequest) returns (common.Status) {
-  }
-  rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {
-  }
-  rpc DropJobs(DropJobsRequest) returns (common.Status) {
-  }
-  rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {
-  }
-  rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {
-  }
-  rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {
-  }
-  rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {
-  }
+  // Deprecated
+  rpc CreateJob(CreateJobRequest) returns (common.Status) {}
+  // Deprecated
+  rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {}
+  // Deprecated
+  rpc DropJobs(DropJobsRequest) returns (common.Status) {}
+  // Deprecated
+  rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {}
+  // Deprecated
+  rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {}
+  // Deprecated
+  rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {}
+  // Deprecated
+  rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {}
+
+  rpc CreateTask(CreateTaskRequest) returns (common.Status) {}
+  rpc QueryTask(QueryTaskRequest) returns (QueryTaskResponse) {}
+  rpc DropTask(DropTaskRequest) returns (common.Status) {}
 }
 
+message CreateTaskRequest {
+  // request body
+  bytes payload                  = 1;
+
+  // request properties, must contain:
+  // - clusterID
+  // - taskID
+  // - taskType
+  // - taskSlot
+  map<string, string> properties = 2;
+}
+
+message QueryTaskRequest {
+  // request properties, which contain:
+  // - clusterID
+  // - taskID
+  // - taskType
+  map<string, string> properties = 1;
+}
+
+message QueryTaskResponse {
+  common.Status status           = 1;
+
+  // response body
+  bytes payload                  = 2;
+
+  // response properties, which contain:
+  // - taskState
+  map<string, string> properties = 3;
+}
+
+message DropTaskRequest {
+  // request properties, which contain:
+  // - clusterID
+  // - taskID
+  // - taskType
+  map<string, string> properties = 1;
+}
+
+// CreateJobRequest is CreateIndexRequest
 message CreateJobRequest {
   string clusterID = 1;
   string index_file_prefix = 2;
@@ -63,7 +107,7 @@ message CreateJobRequest {
 
 message QueryJobsRequest {
   string clusterID = 1;
-  repeated int64 buildIDs = 2;
+  repeated int64 taskIDs = 2;
 }
 
 message QueryJobsResponse {
@@ -74,7 +118,7 @@ message QueryJobsResponse {
 
 message DropJobsRequest {
   string clusterID = 1;
-  repeated int64 buildIDs = 2;
+  repeated int64 taskIDs = 2;
 }
 
 message GetJobStatsRequest {

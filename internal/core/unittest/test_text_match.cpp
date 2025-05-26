@@ -951,9 +951,8 @@ TEST(TextMatch, SealedJieBaNullable) {
     }
 }
 
-// TODO(tiered storage 1): this also fails on master branch.
 // Test that growing segment loading flushed binlogs will build text match index.
-TEST(TextMatch, DISABLED_GrowingLoadData) {
+TEST(TextMatch, GrowingLoadData) {
     int64_t N = 7;
     auto schema = GenTestSchema({}, true);
     schema->AddField(

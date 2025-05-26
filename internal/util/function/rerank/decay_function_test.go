@@ -260,10 +260,11 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		nq := int64(1)
 		f, err := newDecayFunction(schema, functionSchema)
 		s.NoError(err)
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*schemapb.SearchResultData{})
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{}, f.GetInputFieldIDs())
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, inputs)
 		s.NoError(err)
-		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{}, ret.Topks)
+		s.Equal(int64(3), ret.searchResultData.TopK)
+		s.Equal([]int64{}, ret.searchResultData.Topks)
 	}
 
 	// no input field exist
@@ -272,8 +273,9 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		f, err := newDecayFunction(schema, functionSchema)
 		data := genSearchResultData(nq, 10, schemapb.DataType_Int64, "noExist", 1000)
 		s.NoError(err)
-		_, err = f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*schemapb.SearchResultData{data})
-		s.ErrorContains(err, "Rerank decay function can not find input field, name")
+
+		_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs())
+		s.ErrorContains(err, "Search reaults mismatch rerank inputs")
 	}
 
 	// singleSearchResultData
@@ -288,27 +290,28 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		f, err := newDecayFunction(schema, functionSchema)
 		s.NoError(err)
 		data := genSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*schemapb.SearchResultData{data})
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs())
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, inputs)
 		s.NoError(err)
-		s.Equal([]int64{3}, ret.Topks)
-		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{6, 3, 7}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{3}, ret.searchResultData.Topks)
+		s.Equal(int64(3), ret.searchResultData.TopK)
+		s.Equal([]int64{6, 3, 7}, ret.searchResultData.Ids.GetIntId().Data)
 	}
-	// nq = 3
+	// // nq = 3
 	{
 		nq := int64(3)
 		f, err := newDecayFunction(schema, functionSchema)
 		s.NoError(err)
 		data := genSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*schemapb.SearchResultData{data})
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs())
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE"}}, inputs)
 		s.NoError(err)
-		s.Equal([]int64{3, 3, 3}, ret.Topks)
-		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{6, 3, 7, 12, 13, 14, 22, 23, 24}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{3, 3, 3}, ret.searchResultData.Topks)
+		s.Equal(int64(3), ret.searchResultData.TopK)
+		s.Equal([]int64{6, 3, 7, 12, 13, 14, 22, 23, 24}, ret.searchResultData.Ids.GetIntId().Data)
 	}
 
-	// multipSearchResultData
-	// nq = 1
+	// // multipSearchResultData
 	functionSchema2 := &schemapb.FunctionSchema{
 		Name:            "test",
 		Type:            schemapb.FunctionType_Rerank,
@@ -320,6 +323,23 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 			{Key: offsetKey, Value: "2"},
 		},
 	}
+	// has empty inputs
+	{
+		nq := int64(1)
+		f, err := newDecayFunction(schema, functionSchema2)
+		s.NoError(err)
+		// ts/id data: 0 - 9
+		data1 := genSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
+		// empty
+		data2 := genSearchResultData(nq, 0, schemapb.DataType_Int64, "ts", 102)
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs())
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, inputs)
+		s.NoError(err)
+		s.Equal([]int64{3}, ret.searchResultData.Topks)
+		s.Equal(int64(3), ret.searchResultData.TopK)
+		s.Equal([]int64{7, 6, 5}, ret.searchResultData.Ids.GetIntId().Data)
+	}
+	// nq = 1
 	{
 		nq := int64(1)
 		f, err := newDecayFunction(schema, functionSchema2)
@@ -328,13 +348,14 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		data1 := genSearchResultData(nq, 10, schemapb.DataType_Int64, "ts", 102)
 		// ts/id data: 0 - 3
 		data2 := genSearchResultData(nq, 4, schemapb.DataType_Int64, "ts", 102)
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false}, []*schemapb.SearchResultData{data1, data2})
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs())
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, -1, -1, 1, false, []string{"COSINE", "COSINE"}}, inputs)
 		s.NoError(err)
-		s.Equal([]int64{3}, ret.Topks)
-		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{7, 6, 5}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{3}, ret.searchResultData.Topks)
+		s.Equal(int64(3), ret.searchResultData.TopK)
+		s.Equal([]int64{7, 6, 5}, ret.searchResultData.Ids.GetIntId().Data)
 	}
-	// nq = 3
+	// // nq = 3
 	{
 		nq := int64(3)
 		f, err := newDecayFunction(schema, functionSchema2)
@@ -347,11 +368,12 @@ func (s *DecayFunctionSuite) TestRerankProcess() {
 		// nq2 ts/id data: 4 - 7
 		// nq3 ts/id data: 8 - 11
 		data2 := genSearchResultData(nq, 4, schemapb.DataType_Int64, "ts", 102)
-		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, 1, -1, 1, false}, []*schemapb.SearchResultData{data1, data2})
+		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs())
+		ret, err := f.Process(context.Background(), &SearchParams{nq, 3, 2, 1, -1, 1, false, []string{"COSINE", "COSINE"}}, inputs)
 		s.NoError(err)
-		s.Equal([]int64{3, 3, 3}, ret.Topks)
-		s.Equal(int64(3), ret.TopK)
-		s.Equal([]int64{7, 6, 5, 6, 11, 5, 10, 11, 20}, ret.Ids.GetIntId().Data)
+		s.Equal([]int64{3, 3, 3}, ret.searchResultData.Topks)
+		s.Equal(int64(3), ret.searchResultData.TopK)
+		s.Equal([]int64{7, 6, 5, 6, 11, 5, 10, 11, 20}, ret.searchResultData.Ids.GetIntId().Data)
 	}
 }
 
@@ -367,52 +389,6 @@ func (s *DecayFunctionSuite) TestDecay() {
 	s.Equal(linearDecay(0, 1, 0.5, 5, 4), 1.0)
 	s.Equal(linearDecay(0, 1, 0.5, 5, 5), 1.0)
 	s.Less(linearDecay(0, 1, 0.5, 5, 6), 1.0)
-}
-
-func (s *DecayFunctionSuite) TestUtil() {
-	inputTypes := []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_Int32, schemapb.DataType_Int16, schemapb.DataType_Int8, schemapb.DataType_Float, schemapb.DataType_Double}
-	for _, tp := range inputTypes {
-		field := genSearchResultData(2, 10, tp, "test", 100)
-		num, err := getNumberic(field.FieldsData[0])
-		s.NoError(err)
-		switch tp {
-		case schemapb.DataType_Int32, schemapb.DataType_Int16, schemapb.DataType_Int8:
-			s.True(len(num.(*numberField[int32]).data) == 20)
-		case schemapb.DataType_Int64:
-			s.True(len(num.(*numberField[int64]).data) == 20)
-		case schemapb.DataType_Float:
-			s.True(len(num.(*numberField[float32]).data) == 20)
-		case schemapb.DataType_Double:
-			s.True(len(num.(*numberField[float64]).data) == 20)
-		}
-	}
-
-	field := genSearchResultData(2, 10, schemapb.DataType_Bool, "test", 100)
-	_, err := getNumberic(field.FieldsData[0])
-	s.ErrorContains(err, "only support numberic field")
-
-	{
-		ids := &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{
-					Data: testutils.GenerateInt64Array(10),
-				},
-			},
-		}
-		mid := newMilvusIDs(ids, schemapb.DataType_Int64).(milvusIDs[int64])
-		s.True(len(mid.data) == 10)
-	}
-	{
-		ids := &schemapb.IDs{
-			IdField: &schemapb.IDs_StrId{
-				StrId: &schemapb.StringArray{
-					Data: testutils.GenerateStringArray(10),
-				},
-			},
-		}
-		mid := newMilvusIDs(ids, schemapb.DataType_String).(milvusIDs[string])
-		s.True(len(mid.data) == 10)
-	}
 }
 
 func genSearchResultData(nq int64, topk int64, dType schemapb.DataType, fieldName string, fieldId int64) *schemapb.SearchResultData {

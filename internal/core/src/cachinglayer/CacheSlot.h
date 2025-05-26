@@ -62,6 +62,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             .Increment();
         internal::cache_cell_count(translator_->meta()->storage_type)
             .Increment(translator_->num_cells());
+        internal::cache_memory_overhead_bytes(translator_->meta()->storage_type)
+            .Increment(memory_overhead());
     }
 
     CacheSlot(const CacheSlot&) = delete;
@@ -90,8 +92,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 SemiInlineGet(PinCells(std::move(cids)));
                 break;
             case CacheWarmupPolicy::CacheWarmupPolicy_Async:
+                // PinCells submits tasks to middle priority thread pool, thus here we submit to
+                // low priority thread pool to avoid dead lock.
                 auto& pool = milvus::ThreadPools::GetThreadPool(
-                    milvus::ThreadPoolPriority::MIDDLE);
+                    milvus::ThreadPoolPriority::LOW);
                 pool.Submit([this, cids = std::move(cids)]() mutable {
                     SemiInlineGet(PinCells(std::move(cids)));
                 });
@@ -166,6 +170,25 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         });
     }
 
+    // Manually evicts the cell if it is not pinned.
+    // Returns true if the cell ends up in a state other than LOADED.
+    bool
+    ManualEvict(cid_t cid) {
+        return cells_[cid].manual_evict();
+    }
+
+    // Returns true if any cell is evicted.
+    bool
+    ManualEvictAll() {
+        bool evicted = false;
+        for (cid_t cid = 0; cid < cells_.size(); ++cid) {
+            if (cells_[cid].manual_evict()) {
+                evicted = true;
+            }
+        }
+        return evicted;
+    }
+
     size_t
     num_cells() const {
         return translator_->num_cells();
@@ -186,6 +209,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             .Decrement();
         internal::cache_cell_count(translator_->meta()->storage_type)
             .Decrement(translator_->num_cells());
+        internal::cache_memory_overhead_bytes(translator_->meta()->storage_type)
+            .Decrement(memory_overhead());
     }
 
  private:
@@ -344,6 +369,12 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         std::unique_ptr<CellT> cell_{nullptr};
         std::chrono::steady_clock::time_point life_start_{};
     };
+
+    size_t
+    memory_overhead() const {
+        return sizeof(*this) + cells_.size() * sizeof(CacheCell);
+    }
+
     const std::unique_ptr<Translator<CellT>> translator_;
     // Each CacheCell's cid_t is its index in vector
     // Once initialized, cells_ should never be resized.

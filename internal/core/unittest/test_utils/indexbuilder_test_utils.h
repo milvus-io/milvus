@@ -28,6 +28,7 @@
 #include "knowhere/comp/index_param.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Types.h"
+#include "knowhere/comp/index_param.h"
 
 constexpr int64_t DIM = 16;
 constexpr int64_t NQ = 10;
@@ -59,7 +60,8 @@ generate_build_conf(const milvus::IndexType& index_type,
             {knowhere::indexparam::M, "4"},
             {knowhere::indexparam::NBITS, "8"},
         };
-    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
@@ -112,6 +114,12 @@ generate_build_conf(const milvus::IndexType& index_type,
         return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::indexparam::DROP_RATIO_BUILD, "0.1"},
+        };
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_SCANN ||
+               index_type == knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
+        return knowhere::Json{
+            {knowhere::meta::METRIC_TYPE, metric_type},
+            {knowhere::meta::DIM, std::to_string(DIM)},
         };
     }
     return knowhere::Json();

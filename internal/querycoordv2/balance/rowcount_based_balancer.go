@@ -65,7 +65,7 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		// pick the node with the least row count and allocate to it.
@@ -150,9 +150,9 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 		}
 
 		// calculate growing segment row count on node
-		views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(node))
-		for _, view := range views {
-			rowcnt += int(view.NumOfGrowingRows)
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
+		for _, channel := range channels {
+			rowcnt += int(channel.View.NumOfGrowingRows)
 		}
 
 		// calculate executing task cost in scheduler
