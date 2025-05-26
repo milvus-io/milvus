@@ -300,7 +300,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 insert_files,
                 info.enable_mmap,
                 row_group_meta_list,
-                field_id_list);
+                field_id_list,
+                load_info.load_priority);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -352,7 +353,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                 ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
             pool.Submit(LoadArrowReaderFromRemote,
                         insert_files,
-                        field_data_info.arrow_reader_channel);
+                        field_data_info.arrow_reader_channel,
+                        load_info.load_priority);
 
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),

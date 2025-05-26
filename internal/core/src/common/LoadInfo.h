@@ -38,6 +38,8 @@ struct LoadFieldDataInfo {
     // mmap file path will be {mmap_dir_path}/{segment_id}/{field_id}
     std::string mmap_dir_path = "";
     int64_t storage_version = 0;
+    milvus::proto::common::LoadPriority load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
 };
 
 struct LoadDeletedRecordInfo {

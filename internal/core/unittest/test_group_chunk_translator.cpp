@@ -115,7 +115,8 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
                                     paths_,
                                     use_mmap,
                                     row_group_meta_list,
-                                    field_id_list);
+                                    field_id_list,
+                                    milvus::proto::common::LoadPriority::LOW);
 
     // num cells
     EXPECT_EQ(translator.num_cells(), row_group_meta_list[0].size());
