@@ -148,6 +148,8 @@ TEST(Sealed, without_predicate) {
 
     sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
+    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100);
+    EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
 TEST(Sealed, without_search_ef_less_than_limit) {
@@ -982,7 +984,7 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100000);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }

@@ -2507,3 +2507,21 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 	}
 	return false
 }
+
+func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
+	properties := make(map[string]string)
+	for _, pair := range pairs {
+		properties[pair.Key] = pair.Value
+	}
+
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return uint64(time.Duration(ttl) * time.Second)
+	}
+
+	return 0
+}

@@ -129,6 +129,12 @@ func constructCollectionSchema(
 			pk,
 			fVec,
 		},
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "15",
+			},
+		},
 	}
 }
 
