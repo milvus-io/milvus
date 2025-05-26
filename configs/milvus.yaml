@@ -493,6 +493,10 @@ queryNode:
   bloomFilterApplyParallelFactor: 4 # parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
+  idfOracle:
+    enableDisk: true
+    localPath: /var/lib/milvus/bm25_logs
+    writeConcurrency: 4
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:

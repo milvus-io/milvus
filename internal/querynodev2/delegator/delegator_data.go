@@ -903,11 +903,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			pkoracle.WithSegmentIDs(lo.Map(growing, func(entry SegmentEntry, _ int) int64 { return entry.SegmentID })...),
 			pkoracle.WithSegmentType(commonpb.SegmentState_Growing),
 		)
-		if sd.idfOracle != nil {
-			for _, segment := range growing {
-				sd.idfOracle.RemoveGrowing(segment.SegmentID)
-			}
-		}
 	}
 
 	var releaseErr error
