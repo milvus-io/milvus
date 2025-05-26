@@ -53,6 +53,7 @@ type AutoIndexConfig struct {
 	ScalarVarcharIndexType ParamItem `refreshable:"true"`
 	ScalarBoolIndexType    ParamItem `refreshable:"true"`
 	ScalarFloatIndexType   ParamItem `refreshable:"true"`
+	ScalarJsonIndexType    ParamItem `refreshable:"true"`
 
 	BitmapCardinalityLimit ParamItem `refreshable:"true"`
 }
@@ -166,7 +167,7 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
 		Version:      "2.4.0",
-		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED"}`,
+		DefaultValue: `{"int": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float": "INVERTED", "json": "INVERTED"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
 
@@ -206,6 +207,18 @@ func (p *AutoIndexConfig) init(base *BaseTable) {
 		},
 	}
 	p.ScalarFloatIndexType.Init(base.mgr)
+
+	p.ScalarJsonIndexType = ParamItem{
+		Version: "2.5.12",
+		Formatter: func(v string) string {
+			m := p.ScalarAutoIndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m["json"]
+		},
+	}
+	p.ScalarJsonIndexType.Init(base.mgr)
 
 	p.BitmapCardinalityLimit = ParamItem{
 		Key:          "scalarAutoIndex.params.bitmapCardinalityLimit",
