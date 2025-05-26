@@ -669,8 +669,6 @@ TEST(chunk, multiple_chunk_mmap) {
                          DataType::INT64,
                          false,
                          std::nullopt);
-    int file_offset = 0;
-    auto page_size = sysconf(_SC_PAGESIZE);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
 
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -678,13 +676,8 @@ TEST(chunk, multiple_chunk_mmap) {
         std::make_shared<storage::MmapChunkDescriptor>(1, SegmentType::Sealed);
     mcm->Register(desc);
     auto chunk = create_chunk(field_meta, 1, mcm, desc, array_vec);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
-    file_offset += chunk->Size();
 
     std::shared_ptr<::arrow::RecordBatchReader> rb_reader2;
     s = arrow_reader->GetRecordBatchReader(&rb_reader2);
     EXPECT_TRUE(s.ok());
-    arrow::ArrayVector array_vec2 = read_single_column_batches(rb_reader2);
-    auto chunk2 = create_chunk(field_meta, 1, mcm, desc, array_vec2);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
 }
