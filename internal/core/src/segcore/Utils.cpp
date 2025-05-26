@@ -944,11 +944,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
 // segcore use default remote chunk manager to load data from minio/s3
 void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
-                          std::shared_ptr<ArrowReaderChannel> channel) {
+                          std::shared_ptr<ArrowReaderChannel> channel,
+                          milvus::proto::common::LoadPriority priority) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
 
         std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
             futures;
@@ -980,11 +982,13 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel) {
+                         FieldDataChannelPtr channel,
+                         milvus::proto::common::LoadPriority priority) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
 
         std::vector<std::future<FieldDataPtr>> futures;
         futures.reserve(remote_files.size());

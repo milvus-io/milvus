@@ -86,7 +86,7 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
         config_[milvus::index::MMAP_FILE_PATH] = filepath.string();
     }
 
-    LOG_DEBUG("load index with configs: {}", config_.dump());
+    LOG_INFO("load index with configs: {}", config_.dump());
     index->Load(ctx_, config_);
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
