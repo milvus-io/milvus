@@ -2851,9 +2851,38 @@ type queryNodeConfig struct {
 	// Json Key Stats
 	JSONKeyStatsCommitInterval        ParamItem `refreshable:"false"`
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
+
+	// Idf Oracle
+	IDFEnableDisk       ParamItem `refreshable:"true"`
+	IDFLocalPath        ParamItem `refreshable:"true"`
+	IDFWriteConcurrenct ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
+	p.IDFEnableDisk = ParamItem{
+		Key:          "queryNode.idfOracle.enableDisk",
+		Version:      "2.6.0",
+		Export:       true,
+		DefaultValue: "true",
+	}
+	p.IDFEnableDisk.Init(base.mgr)
+
+	p.IDFLocalPath = ParamItem{
+		Key:          "queryNode.idfOracle.localPath",
+		Version:      "2.6.0",
+		Export:       true,
+		DefaultValue: "/var/lib/milvus/bm25_logs",
+	}
+	p.IDFLocalPath.Init(base.mgr)
+
+	p.IDFWriteConcurrenct = ParamItem{
+		Key:          "queryNode.idfOracle.writeConcurrency",
+		Version:      "2.6.0",
+		Export:       true,
+		DefaultValue: "4",
+	}
+	p.IDFWriteConcurrenct.Init(base.mgr)
+
 	p.SoPath = ParamItem{
 		Key:          "queryNode.soPath",
 		Version:      "2.3.0",
@@ -5104,13 +5133,13 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxParallelSyncMgrTasks = ParamItem{
 		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
 		Version:      "2.3.4",
-		DefaultValue: "256",
+		DefaultValue: "64",
 		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
 		Formatter: func(v string) string {
 			concurrency := getAsInt(v)
 			if concurrency < 1 {
-				log.Warn("positive parallel task number, reset to default 256", zap.String("value", v))
-				return "256" // MaxParallelSyncMgrTasks must >= 1
+				log.Warn("positive parallel task number, reset to default 64", zap.String("value", v))
+				return "64" // MaxParallelSyncMgrTasks must >= 1
 			}
 			return strconv.FormatInt(int64(concurrency), 10)
 		},
@@ -5642,8 +5671,8 @@ the value should be in the range of (0, 1), 0.6 by default.`,
 		Version: "2.6.0",
 		Doc: `The high watermark of total growing segment bytes for one streaming node,
 If the total bytes of growing segment is greater than this threshold,
-a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default`,
-		DefaultValue: "0.4",
+a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.2 by default`,
+		DefaultValue: "0.2",
 		Export:       true,
 	}
 	p.FlushGrowingSegmentBytesHwmThreshold.Init(base.mgr)
@@ -5653,8 +5682,8 @@ a flush process will be triggered to decrease total bytes of growing segment unt
 		Version: "2.6.0",
 		Doc: `The lower watermark of total growing segment bytes for one streaming node,
 growing segment flush process will try to flush some growing segment into sealed 
-until the total bytes of growing segment is less than this threshold, 0.2 by default.`,
-		DefaultValue: "0.2",
+until the total bytes of growing segment is less than this threshold, 0.1 by default.`,
+		DefaultValue: "0.1",
 		Export:       true,
 	}
 	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
