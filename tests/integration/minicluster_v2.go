@@ -394,19 +394,41 @@ func (cluster *MiniClusterV2) Stop() error {
 	if cluster.clientConn != nil {
 		cluster.clientConn.Close()
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if cluster.Proxy != nil {
+			cluster.Proxy.Stop()
+			log.Info("mini cluster proxy stopped")
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cluster.StopAllDataNodes()
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cluster.StopAllStreamingNodes()
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cluster.StopAllQueryNodes()
+	}()
+	wg.Wait()
 	if cluster.MixCoord != nil {
 		cluster.MixCoord.Stop()
 		log.Info("mini cluster rootCoord stopped")
 	}
-
-	if cluster.Proxy != nil {
-		cluster.Proxy.Stop()
-		log.Info("mini cluster proxy stopped")
-	}
-
-	cluster.StopAllDataNodes()
-	cluster.StopAllStreamingNodes()
-	cluster.StopAllQueryNodes()
+	streaming.Release()
+	log.Info("mini cluster streaming released")
 
 	cluster.EtcdCli.KV.Delete(cluster.ctx, params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
 	defer cluster.EtcdCli.Close()
@@ -420,7 +442,6 @@ func (cluster *MiniClusterV2) Stop() error {
 		}
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
-	streaming.Release()
 	return nil
 }
 

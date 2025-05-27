@@ -234,7 +234,7 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 func (t *timetickSync) addSession(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	rangeChecker := semver.MustParseRange(">=2.6.0")
+	rangeChecker := semver.MustParseRange(">=2.6.0-dev")
 	if rangeChecker(sess.Version) {
 		log.Info("new proxy with no timetick join, ignored",
 			zap.String("version", sess.Version.String()),
