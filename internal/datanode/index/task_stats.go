@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -164,6 +165,12 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
 	)
+
+	err := initcore.InitRemoteArrowFileSystemWithStorageConfig(st.req.StorageConfig)
+	if err != nil {
+		log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
+		return err
+	}
 	return nil
 }
 
@@ -346,6 +353,7 @@ func (st *statsTask) Execute(ctx context.Context) error {
 }
 
 func (st *statsTask) PostExecute(ctx context.Context) error {
+	initcore.CleanRemoteArrowFileSystem()
 	return nil
 }
 

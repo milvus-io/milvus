@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -212,6 +213,12 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		zap.Int32("currentIndexVersion", it.req.GetCurrentIndexVersion()),
 		zap.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
 	)
+
+	err := initcore.InitRemoteArrowFileSystemWithStorageConfig(it.req.StorageConfig)
+	if err != nil {
+		log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
+		return err
+	}
 	return nil
 }
 
@@ -371,6 +378,7 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		zap.Uint64("serializedSize", serializedSize),
 		zap.Int64("memSize", indexStats.MemSize),
 		zap.Strings("indexFiles", saveFileKeys))
+	initcore.CleanRemoteArrowFileSystem()
 	return nil
 }
 
