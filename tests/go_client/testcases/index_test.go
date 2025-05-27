@@ -242,20 +242,29 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 	var expFields []string
 	var idx index.Index
 	for _, field := range schema.Fields {
-		if field.DataType == entity.FieldTypeBinaryVector {
-			idx = index.NewAutoIndex(entity.JACCARD)
-		} else {
+		if field.DataType == entity.FieldTypeJSON {
 			idx = index.NewAutoIndex(entity.IP)
-		}
-		idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-		common.CheckErr(t, err, true)
-		err = idxTask.Await(ctx)
-		common.CheckErr(t, err, true)
+			opt := client.NewCreateIndexOption(schema.CollectionName, field.Name, idx)
+			opt.WithExtraParam("json_path", field.Name)
+			opt.WithExtraParam("json_cast_type", "varchar")
+			_, err := mc.CreateIndex(ctx, opt)
+			common.CheckErr(t, err, true)
+		} else {
+			if field.DataType == entity.FieldTypeBinaryVector {
+				idx = index.NewAutoIndex(entity.JACCARD)
+			} else {
+				idx = index.NewAutoIndex(entity.IP)
+			}
+			idxTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
+			common.CheckErr(t, err, true)
+			err = idxTask.Await(ctx)
+			common.CheckErr(t, err, true)
 
-		// describe index
-		descIdx, descErr := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, field.Name))
-		common.CheckErr(t, descErr, true)
-		common.CheckIndex(t, descIdx, index.NewGenericIndex(field.Name, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
+			// describe index
+			descIdx, descErr := mc.DescribeIndex(ctx, client.NewDescribeIndexOption(schema.CollectionName, field.Name))
+			common.CheckErr(t, descErr, true)
+			common.CheckIndex(t, descIdx, index.NewGenericIndex(field.Name, idx.Params()), common.TNewCheckIndexOpt(common.DefaultNb))
+		}
 		expFields = append(expFields, field.Name)
 	}
 
