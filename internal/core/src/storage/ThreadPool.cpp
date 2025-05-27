@@ -19,6 +19,41 @@
 
 namespace milvus {
 
+int CPU_NUM = DEFAULT_CPU_NUM;
+
+std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT(
+    DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
+std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT(
+    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
+std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT(
+    DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
+
+void
+SetHighPriorityThreadCoreCoefficient(const float coefficient) {
+    HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
+    LOG_INFO("set high priority thread pool core coefficient: {}",
+             HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+}
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const float coefficient) {
+    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
+    LOG_INFO("set middle priority thread pool core coefficient: {}",
+             MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+}
+
+void
+SetLowPriorityThreadCoreCoefficient(const float coefficient) {
+    LOW_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
+    LOG_INFO("set low priority thread pool core coefficient: {}",
+             LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
+}
+
+void
+InitCpuNum(const int num) {
+    CPU_NUM = num;
+}
+
 void
 ThreadPool::Init() {
     std::lock_guard<std::mutex> lock(mutex_);

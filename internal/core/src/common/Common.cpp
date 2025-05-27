@@ -22,12 +22,6 @@ namespace milvus {
 int CPU_NUM = DEFAULT_CPU_NUM;
 
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
-std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT(
-    DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
-std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT(
-    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
-std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT(
-    DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);
 std::atomic<bool> OPTIMIZE_EXPR_ENABLED(DEFAULT_OPTIMIZE_EXPR_ENABLED);
@@ -40,36 +34,9 @@ std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED(
     DEFAULT_CONFIG_PARAM_TYPE_CHECK_ENABLED);
 
 void
-InitCpuNum(const int num) {
-    CPU_NUM = num;
-    LOG_INFO("set cpu num: {}", CPU_NUM);
-}
-
-void
 SetIndexSliceSize(const int64_t size) {
     FILE_SLICE_SIZE.store(size << 20);
     LOG_INFO("set config index slice size (byte): {}", FILE_SLICE_SIZE.load());
-}
-
-void
-SetHighPriorityThreadCoreCoefficient(const float coefficient) {
-    HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
-    LOG_INFO("set high priority thread pool core coefficient: {}",
-             HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load());
-}
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient) {
-    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
-    LOG_INFO("set middle priority thread pool core coefficient: {}",
-             MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load());
-}
-
-void
-SetLowPriorityThreadCoreCoefficient(const float coefficient) {
-    LOW_PRIORITY_THREAD_CORE_COEFFICIENT.store(coefficient);
-    LOG_INFO("set low priority thread pool core coefficient: {}",
-             LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load());
 }
 
 void
