@@ -98,8 +98,8 @@ func (si *statsInspector) Stop() {
 func (si *statsInspector) reloadFromMeta() {
 	tasks := si.mt.statsTaskMeta.GetAllTasks()
 	for _, st := range tasks {
-		if st.GetState() == indexpb.JobState_JobStateFinished ||
-			st.GetState() == indexpb.JobState_JobStateFailed {
+		if st.GetState() != indexpb.JobState_JobStateInit &&
+			st.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
 		segment := si.mt.GetHealthySegment(si.ctx, st.GetSegmentID())

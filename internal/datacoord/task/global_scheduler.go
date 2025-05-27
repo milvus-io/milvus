@@ -73,6 +73,7 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 		task.SetTaskTime(taskcommon.TimeStart, time.Now())
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
+	log.Ctx(s.ctx).Info("task enqueued", WrapTaskLog(task)...)
 }
 
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {

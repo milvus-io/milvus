@@ -200,8 +200,8 @@ func (i *indexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
-			if segIndex.IsDeleted || segIndex.IndexState == commonpb.IndexState_Finished ||
-				segIndex.IndexState == commonpb.IndexState_Failed {
+			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
+				segIndex.IndexState != commonpb.IndexState_InProgress) {
 				continue
 			}
 
