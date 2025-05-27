@@ -3188,9 +3188,13 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
+		spanPerNq := span
+		if qt.SearchRequest.GetNq() > 0 {
+			spanPerNq = span / time.Duration(qt.SearchRequest.GetNq())
+		}
+		if spanPerNq >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
+				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
