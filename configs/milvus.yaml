@@ -329,6 +329,7 @@ proxy:
   slowQuerySpanInSeconds: 5 # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode

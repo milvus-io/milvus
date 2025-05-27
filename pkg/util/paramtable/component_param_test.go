@@ -489,6 +489,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
+
+		assert.Equal(t, 1.0, Params.PartialResultRequiredDataRatio.GetAsFloat())
+		params.Save(Params.PartialResultRequiredDataRatio.Key, "0.8")
+		assert.Equal(t, 0.8, Params.PartialResultRequiredDataRatio.GetAsFloat())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
