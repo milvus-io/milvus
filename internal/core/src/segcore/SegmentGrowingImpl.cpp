@@ -871,7 +871,7 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
             bitset_chunk.set();
             return;
         }
-        auto pilot = upper_bound(timestamps, 0, size, timestamp);
+        auto pilot = upper_bound(timestamps, 0, size, collection_ttl);
         BitsetType bitset;
         bitset.reserve(size);
         bitset.resize(pilot, true);
