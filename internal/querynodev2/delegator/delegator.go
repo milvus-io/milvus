@@ -224,33 +224,34 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest, targetID int64) *internalpb.SearchRequest {
 	// Create a new SearchRequest with the same fields
 	nodeReq := &internalpb.SearchRequest{
-		Base:               &commonpb.MsgBase{TargetID: targetID},
-		ReqID:              req.ReqID,
-		DbID:               req.DbID,
-		CollectionID:       req.CollectionID,
-		PartitionIDs:       req.PartitionIDs, // Shallow copy: Same underlying slice
-		Dsl:                req.Dsl,
-		PlaceholderGroup:   req.PlaceholderGroup, // Shallow copy: Same underlying byte slice
-		DslType:            req.DslType,
-		SerializedExprPlan: req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
-		OutputFieldsId:     req.OutputFieldsId,     // Shallow copy: Same underlying slice
-		MvccTimestamp:      req.MvccTimestamp,
-		GuaranteeTimestamp: req.GuaranteeTimestamp,
-		TimeoutTimestamp:   req.TimeoutTimestamp,
-		Nq:                 req.Nq,
-		Topk:               req.Topk,
-		MetricType:         req.MetricType,
-		IgnoreGrowing:      req.IgnoreGrowing,
-		Username:           req.Username,
-		SubReqs:            req.SubReqs, // Shallow copy: Same underlying slice of pointers
-		IsAdvanced:         req.IsAdvanced,
-		Offset:             req.Offset,
-		ConsistencyLevel:   req.ConsistencyLevel,
-		GroupByFieldId:     req.GroupByFieldId,
-		GroupSize:          req.GroupSize,
-		FieldId:            req.FieldId,
-		IsTopkReduce:       req.IsTopkReduce,
-		IsRecallEvaluation: req.IsRecallEvaluation,
+		Base:                    &commonpb.MsgBase{TargetID: targetID},
+		ReqID:                   req.ReqID,
+		DbID:                    req.DbID,
+		CollectionID:            req.CollectionID,
+		PartitionIDs:            req.PartitionIDs, // Shallow copy: Same underlying slice
+		Dsl:                     req.Dsl,
+		PlaceholderGroup:        req.PlaceholderGroup, // Shallow copy: Same underlying byte slice
+		DslType:                 req.DslType,
+		SerializedExprPlan:      req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
+		OutputFieldsId:          req.OutputFieldsId,     // Shallow copy: Same underlying slice
+		MvccTimestamp:           req.MvccTimestamp,
+		GuaranteeTimestamp:      req.GuaranteeTimestamp,
+		TimeoutTimestamp:        req.TimeoutTimestamp,
+		Nq:                      req.Nq,
+		Topk:                    req.Topk,
+		MetricType:              req.MetricType,
+		IgnoreGrowing:           req.IgnoreGrowing,
+		Username:                req.Username,
+		SubReqs:                 req.SubReqs, // Shallow copy: Same underlying slice of pointers
+		IsAdvanced:              req.IsAdvanced,
+		Offset:                  req.Offset,
+		ConsistencyLevel:        req.ConsistencyLevel,
+		GroupByFieldId:          req.GroupByFieldId,
+		GroupSize:               req.GroupSize,
+		FieldId:                 req.FieldId,
+		IsTopkReduce:            req.IsTopkReduce,
+		IsRecallEvaluation:      req.IsRecallEvaluation,
+		CollectionTtlTimestamps: req.CollectionTtlTimestamps,
 	}
 
 	return nodeReq
@@ -394,30 +395,31 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
 			newRequest := &internalpb.SearchRequest{
-				Base:               req.GetReq().GetBase(),
-				ReqID:              req.GetReq().GetReqID(),
-				DbID:               req.GetReq().GetDbID(),
-				CollectionID:       req.GetReq().GetCollectionID(),
-				PartitionIDs:       subReq.GetPartitionIDs(),
-				Dsl:                subReq.GetDsl(),
-				PlaceholderGroup:   subReq.GetPlaceholderGroup(),
-				DslType:            subReq.GetDslType(),
-				SerializedExprPlan: subReq.GetSerializedExprPlan(),
-				OutputFieldsId:     req.GetReq().GetOutputFieldsId(),
-				MvccTimestamp:      req.GetReq().GetMvccTimestamp(),
-				GuaranteeTimestamp: req.GetReq().GetGuaranteeTimestamp(),
-				TimeoutTimestamp:   req.GetReq().GetTimeoutTimestamp(),
-				Nq:                 subReq.GetNq(),
-				Topk:               subReq.GetTopk(),
-				MetricType:         subReq.GetMetricType(),
-				IgnoreGrowing:      subReq.GetIgnoreGrowing(),
-				Username:           req.GetReq().GetUsername(),
-				IsAdvanced:         false,
-				GroupByFieldId:     subReq.GetGroupByFieldId(),
-				GroupSize:          subReq.GetGroupSize(),
-				FieldId:            subReq.GetFieldId(),
-				IsTopkReduce:       req.GetReq().GetIsTopkReduce(),
-				IsIterator:         req.GetReq().GetIsIterator(),
+				Base:                    req.GetReq().GetBase(),
+				ReqID:                   req.GetReq().GetReqID(),
+				DbID:                    req.GetReq().GetDbID(),
+				CollectionID:            req.GetReq().GetCollectionID(),
+				PartitionIDs:            subReq.GetPartitionIDs(),
+				Dsl:                     subReq.GetDsl(),
+				PlaceholderGroup:        subReq.GetPlaceholderGroup(),
+				DslType:                 subReq.GetDslType(),
+				SerializedExprPlan:      subReq.GetSerializedExprPlan(),
+				OutputFieldsId:          req.GetReq().GetOutputFieldsId(),
+				MvccTimestamp:           req.GetReq().GetMvccTimestamp(),
+				GuaranteeTimestamp:      req.GetReq().GetGuaranteeTimestamp(),
+				TimeoutTimestamp:        req.GetReq().GetTimeoutTimestamp(),
+				Nq:                      subReq.GetNq(),
+				Topk:                    subReq.GetTopk(),
+				MetricType:              subReq.GetMetricType(),
+				IgnoreGrowing:           subReq.GetIgnoreGrowing(),
+				Username:                req.GetReq().GetUsername(),
+				IsAdvanced:              false,
+				GroupByFieldId:          subReq.GetGroupByFieldId(),
+				GroupSize:               subReq.GetGroupSize(),
+				FieldId:                 subReq.GetFieldId(),
+				IsTopkReduce:            req.GetReq().GetIsTopkReduce(),
+				IsIterator:              req.GetReq().GetIsIterator(),
+				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -430,7 +432,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				if searchReq.GetReq().GetMvccTimestamp() == 0 {
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
-
+				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
 				results, err := sd.search(ctx, searchReq, sealed, growing)
 				if err != nil {
 					return nil, err
