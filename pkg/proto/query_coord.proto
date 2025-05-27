@@ -177,6 +177,7 @@ service QueryNode {
     // it's basically same as `Delete` but cost less memory pressure.
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
+    rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -944,4 +945,15 @@ message UpdateLoadConfigRequest {
     repeated int64 collectionIDs = 3;
     int32 replica_number = 4;
     repeated string resource_groups = 5;
+}
+
+message RunAnalyzerRequest{
+    common.MsgBase base = 1;
+    string channel = 2;
+    int64 field_id = 3;
+    repeated string analyzer_names = 4;
+    repeated bytes placeholder =5;
+
+    bool with_detail = 6;
+    bool with_hash = 7;
 }

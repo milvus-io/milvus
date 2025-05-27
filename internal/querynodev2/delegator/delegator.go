@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -94,6 +95,9 @@ type ShardDelegator interface {
 	UpdateTSafe(ts uint64)
 	GetTSafe() uint64
 
+	// analyzer
+	RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error)
+
 	// control
 	Serviceable() bool
 	Start()
@@ -142,9 +146,12 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	// fieldId -> functionRunner map for search function field
+	// outputFieldId -> functionRunner map for search function field
 	functionRunners map[UniqueID]function.FunctionRunner
 	isBM25Field     map[UniqueID]bool
+
+	// analyzerFieldID -> analyzerRunner map for run analyzer.
+	analyzerRunners map[UniqueID]function.Analyzer
 
 	// current forward policy
 	l0ForwardPolicy string
@@ -914,6 +921,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
 		functionRunners:  make(map[int64]function.FunctionRunner),
+		analyzerRunners:  make(map[UniqueID]function.Analyzer),
 		isBM25Field:      make(map[int64]bool),
 		l0ForwardPolicy:  policy,
 	}
@@ -925,6 +933,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 				return nil, err
 			}
 			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
+			// bm25 input field could use same runner between function and analyzer.
+			sd.analyzerRunners[tf.InputFieldIds[0]] = functionRunner.(function.Analyzer)
 			if tf.GetType() == schemapb.FunctionType_BM25 {
 				sd.isBM25Field[tf.OutputFieldIds[0]] = true
 			}
@@ -940,4 +950,44 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sd.tsCond = sync.NewCond(&m)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	analyzer, ok := sd.analyzerRunners[req.GetFieldId()]
+	if !ok {
+		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25 input field", req.GetFieldId())
+	}
+
+	var result [][]*milvuspb.AnalyzerToken
+	texts := lo.Map(req.GetPlaceholder(), func(bytes []byte, _ int) string {
+		return string(bytes)
+	})
+
+	var err error
+	if len(analyzer.GetInputFields()) == 1 {
+		result, err = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
+	} else {
+		analyzerNames := req.GetAnalyzerNames()
+		if len(analyzerNames) == 0 {
+			return nil, merr.WrapErrAsInputError(fmt.Errorf("analyzer names must be set for multi analyzer"))
+		}
+
+		if len(analyzerNames) == 1 && len(texts) > 1 {
+			analyzerNames = make([]string, len(texts))
+			for i := range analyzerNames {
+				analyzerNames[i] = req.AnalyzerNames[0]
+			}
+		}
+		result, err = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts, analyzerNames)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.Map(result, func(tokens []*milvuspb.AnalyzerToken, _ int) *milvuspb.AnalyzerResult {
+		return &milvuspb.AnalyzerResult{
+			Tokens: tokens,
+		}
+	}), nil
 }
