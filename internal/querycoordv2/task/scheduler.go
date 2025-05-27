@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	. "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -297,6 +298,9 @@ type taskScheduler struct {
 	// nodeID -> collectionID -> taskDelta
 	segmentTaskDelta *ExecutingTaskDelta
 	channelTaskDelta *ExecutingTaskDelta
+
+	// balance channel task waiting ts
+	balanceChannelTaskWaitingTs *ConcurrentMap[UniqueID, time.Time]
 }
 
 func NewScheduler(ctx context.Context,
@@ -322,15 +326,16 @@ func NewScheduler(ctx context.Context,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
-		collKeyLock:      lock.NewKeyLock[int64](),
-		tasks:            NewConcurrentMap[UniqueID, struct{}](),
-		segmentTasks:     NewConcurrentMap[replicaSegmentIndex, Task](),
-		channelTasks:     NewConcurrentMap[replicaChannelIndex, Task](),
-		processQueue:     newTaskQueue(),
-		waitQueue:        newTaskQueue(),
-		taskStats:        expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
-		segmentTaskDelta: NewExecutingTaskDelta(),
-		channelTaskDelta: NewExecutingTaskDelta(),
+		collKeyLock:                 lock.NewKeyLock[int64](),
+		tasks:                       NewConcurrentMap[UniqueID, struct{}](),
+		segmentTasks:                NewConcurrentMap[replicaSegmentIndex, Task](),
+		channelTasks:                NewConcurrentMap[replicaChannelIndex, Task](),
+		processQueue:                newTaskQueue(),
+		waitQueue:                   newTaskQueue(),
+		taskStats:                   expirable.NewLRU[UniqueID, Task](256, nil, time.Minute*15),
+		segmentTaskDelta:            NewExecutingTaskDelta(),
+		channelTaskDelta:            NewExecutingTaskDelta(),
+		balanceChannelTaskWaitingTs: NewConcurrentMap[UniqueID, time.Time](),
 	}
 }
 
@@ -862,14 +867,30 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			default:
 				newDelegatorReady = true
 			}
+
+			// for balance channel task, if the new delegator is not ready, wait for it to prevent release the old delegator too early
+			// cause balance channel will block balance segment, so we need to prevent balance channel waiting forever
+			// so we add param to control the waiting timeout, and cancel the task if timeout
 			if !newDelegatorReady {
-				log.Ctx(scheduler.ctx).
-					WithRateGroup("qcv2.preProcess", 1, 60).
-					RatedInfo(30, "Blocking reduce action in balance channel task",
+				startWaitingTs, ok := scheduler.balanceChannelTaskWaitingTs.Get(task.ID())
+				if !ok {
+					startWaitingTs = time.Now()
+					scheduler.balanceChannelTaskWaitingTs.Insert(task.ID(), startWaitingTs)
+				}
+
+				if time.Since(startWaitingTs) > paramtable.Get().QueryCoordCfg.BalanceChannelTaskWaitingTimeout.GetAsDuration(time.Millisecond) {
+					scheduler.balanceChannelTaskWaitingTs.Remove(task.ID())
+					log.Info("balance channel task waiting timeout for new delegator ready, cancel task",
+						zap.Int64("taskID", task.ID()),
 						zap.Int64("collectionID", task.CollectionID()),
 						zap.String("channelName", task.Shard()),
-						zap.Int64("taskID", task.ID()))
+						zap.Duration("waitingTime", time.Since(startWaitingTs)))
+					task.SetStatus(TaskStatusCanceled)
+				}
 				break
+			} else {
+				// new delegator ready, clean waiting ts
+				scheduler.balanceChannelTaskWaitingTs.Remove(task.ID())
 			}
 		}
 		task.StepUp()

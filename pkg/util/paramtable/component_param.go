@@ -2096,6 +2096,8 @@ type queryCoordConfig struct {
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
 	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
 	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
+
+	BalanceChannelTaskWaitingTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2719,6 +2721,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
+
+	p.BalanceChannelTaskWaitingTimeout = ParamItem{
+		Key:          "queryCoord.balanceChannelTaskWaitingTimeout",
+		Version:      "2.5.13",
+		DefaultValue: "60000",
+		Doc:          "the timeout for waiting new delegator ready in balance channel task",
+		Export:       false,
+	}
+	p.BalanceChannelTaskWaitingTimeout.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

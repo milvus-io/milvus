@@ -2015,3 +2015,217 @@ func newReplicaDefaultRG(replicaID int64) *meta.Replica {
 		typeutil.NewUniqueSet(),
 	)
 }
+
+func (suite *TaskSuite) TestBalanceChannelTaskWaitingTimeout() {
+	ctx := context.Background()
+	collectionID := suite.collection
+	partitionID := int64(1)
+	channel := "channel-timeout-test"
+	vchannel := &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channel,
+	}
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+		},
+	}
+
+	suite.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1), utils.CreateTestPartition(collectionID, 1))
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.target.UpdateCollectionCurrentTarget(ctx, collectionID)
+	suite.target.UpdateCollectionNextTarget(ctx, collectionID)
+
+	// Set up old delegator distribution
+	suite.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node:    1,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Status:       &querypb.LeaderViewStatus{Serviceable: false},
+		},
+	})
+
+	// Create balance channel task (move from node 2 to node 1)
+	task, err := NewChannelTask(context.Background(),
+		10*time.Second,
+		WrapIDSource(2),
+		collectionID,
+		suite.replica,
+		NewChannelAction(1, ActionTypeGrow, channel),
+		NewChannelAction(2, ActionTypeReduce, channel),
+	)
+	suite.NoError(err)
+	task.SetID(1001)
+
+	// Initialize balanceChannelTaskWaitingTs if not already initialized
+	if suite.scheduler.balanceChannelTaskWaitingTs == nil {
+		suite.scheduler.balanceChannelTaskWaitingTs = typeutil.NewConcurrentMap[typeutil.UniqueID, time.Time]()
+	}
+
+	// Set a very short timeout for testing (1 millisecond)
+	originalTimeout := paramtable.Get().QueryCoordCfg.BalanceChannelTaskWaitingTimeout.GetValue()
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceChannelTaskWaitingTimeout.Key, "1")
+	defer paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceChannelTaskWaitingTimeout.Key, originalTimeout)
+
+	// First preProcess call should record the waiting start time
+	result := suite.scheduler.preProcess(task)
+	suite.True(result)                            // Should return true because new delegator is not ready
+	suite.Equal(0, task.step)                     // Task should not step up
+	suite.Equal(TaskStatusStarted, task.Status()) // Task should still be started
+
+	// Verify that waiting timestamp is recorded
+	_, exists := suite.scheduler.balanceChannelTaskWaitingTs.Get(task.ID())
+	suite.True(exists)
+
+	// Wait for timeout to exceed
+	time.Sleep(2 * time.Millisecond)
+
+	// Second preProcess call should timeout and cancel the task
+	result = suite.scheduler.preProcess(task)
+	suite.False(result)                            // Should return false because task is canceled
+	suite.Equal(TaskStatusCanceled, task.Status()) // Task should be canceled
+
+	// Verify that waiting timestamp is removed after timeout
+	_, exists = suite.scheduler.balanceChannelTaskWaitingTs.Get(task.ID())
+	suite.False(exists)
+}
+
+func (suite *TaskSuite) TestBalanceChannelTaskWaitingTimeoutWithNewDelegatorReady() {
+	ctx := context.Background()
+	collectionID := suite.collection
+	partitionID := int64(1)
+	channel := "channel-ready-test"
+	vchannel := &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channel,
+	}
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+		},
+	}
+
+	suite.meta.PutCollection(ctx, utils.CreateTestCollection(collectionID, 1), utils.CreateTestPartition(collectionID, 1))
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.target.UpdateCollectionCurrentTarget(ctx, collectionID)
+	suite.target.UpdateCollectionNextTarget(ctx, collectionID)
+
+	// Set up old delegator distribution
+	suite.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node:    1,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Version:      2,
+			Status:       &querypb.LeaderViewStatus{Serviceable: false},
+		},
+	})
+
+	// Create balance channel task (move from node 2 to node 1)
+	task, err := NewChannelTask(context.Background(),
+		10*time.Second,
+		WrapIDSource(2),
+		collectionID,
+		suite.replica,
+		NewChannelAction(1, ActionTypeGrow, channel),
+		NewChannelAction(2, ActionTypeReduce, channel),
+	)
+	suite.NoError(err)
+	task.SetID(1002)
+
+	// Initialize balanceChannelTaskWaitingTs if not already initialized
+	if suite.scheduler.balanceChannelTaskWaitingTs == nil {
+		suite.scheduler.balanceChannelTaskWaitingTs = typeutil.NewConcurrentMap[typeutil.UniqueID, time.Time]()
+	}
+
+	// First preProcess call should record the waiting start time
+	result := suite.scheduler.preProcess(task)
+	suite.True(result)        // Should return true because new delegator is not ready
+	suite.Equal(0, task.step) // Task should not step up
+
+	// Verify that waiting timestamp is recorded
+	_, exists := suite.scheduler.balanceChannelTaskWaitingTs.Get(task.ID())
+	suite.True(exists)
+
+	// Now set up new delegator distribution (new delegator becomes ready)
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: collectionID,
+			ChannelName:  channel,
+		},
+		Node:    1,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:           1,
+			CollectionID: collectionID,
+			Channel:      channel,
+			Version:      2,
+			Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		},
+	})
+
+	// Second preProcess call should succeed because new delegator is ready
+	result = suite.scheduler.preProcess(task)
+	suite.True(result)                            // Should return true because task can proceed
+	suite.Equal(1, task.step)                     // Task should step up
+	suite.Equal(TaskStatusStarted, task.Status()) // Task should still be started
+
+	// Verify that waiting timestamp is removed when delegator becomes ready
+	_, exists = suite.scheduler.balanceChannelTaskWaitingTs.Get(task.ID())
+	suite.False(exists)
+}
