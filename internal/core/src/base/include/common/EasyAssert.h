@@ -21,8 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
-#include "pb/common.pb.h"
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 
 #include "fmt/core.h"
 

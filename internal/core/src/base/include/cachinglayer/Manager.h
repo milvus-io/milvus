@@ -17,7 +17,7 @@
 #include "cachinglayer/lrucache/DList.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 
 namespace milvus::cachinglayer {
 

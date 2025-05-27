@@ -18,8 +18,6 @@
 #define MILVUS_THREADPOOLS_H
 
 #include "ThreadPool.h"
-#include "common/Common.h"
-
 namespace milvus {
 
 enum ThreadPoolPriority {

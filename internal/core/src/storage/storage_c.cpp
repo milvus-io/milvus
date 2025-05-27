@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"

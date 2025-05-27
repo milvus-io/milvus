@@ -20,7 +20,7 @@
 #include "common/Types.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 #include "segcore/memory_planner.h"
 
 #include <string>

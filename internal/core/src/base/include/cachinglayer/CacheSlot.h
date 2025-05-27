@@ -26,11 +26,9 @@
 #include "cachinglayer/lrucache/ListNode.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
-#include "common/EasyAssert.h"
-#include "common/type_c.h"
 #include "log/Log.h"
-#include "monitor/prometheus_client.h"
-#include "storage/ThreadPools.h"
+#include "common/CommonMonitor.h"
+#include "common/ThreadPools.h"
 
 namespace milvus::cachinglayer {
 

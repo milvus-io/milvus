@@ -14,10 +14,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "ThreadPool.h"
+#include "common/ThreadPool.h"
 #include "log/Log.h"
 
 namespace milvus {
+
+int CPU_NUM = DEFAULT_CPU_NUM;
+
+int64_t HIGH_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+
+void
+SetHighPriorityThreadCoreCoefficient(const int64_t coefficient) {
+    HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_INFO("set high priority thread pool core coefficient: {}",
+             HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
+}
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const int64_t coefficient) {
+    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_INFO("set middle priority thread pool core coefficient: {}",
+             MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
+}
+
+void
+SetLowPriorityThreadCoreCoefficient(const int64_t coefficient) {
+    LOW_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_INFO("set low priority thread pool core coefficient: {}",
+             LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
+}
+
+void
+SetCpuNum(const int num) {
+    CPU_NUM = num;
+}
 
 void
 ThreadPool::Init() {

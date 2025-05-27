@@ -22,7 +22,7 @@
 #include "common/Types.h"
 #include "common/SystemProperty.h"
 #include "segcore/Utils.h"
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 #include "mmap/Types.h"
 
 namespace milvus::segcore::storagev1translator {

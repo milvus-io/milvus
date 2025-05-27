@@ -49,9 +49,9 @@
 #include "log/Log.h"
 #include "storage/DataCodec.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 #include "storage/Util.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 
 namespace milvus::index {
 
