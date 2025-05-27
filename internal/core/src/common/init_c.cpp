@@ -18,6 +18,8 @@
 #include "common/init_c.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
+#include "storage/ThreadPool.h"
+#include "log/Log.h"
 
 std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
     flag10;

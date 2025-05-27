@@ -20,13 +20,6 @@
 namespace milvus {
 
 int64_t FILE_SLICE_SIZE = DEFAULT_INDEX_FILE_SLICE_SIZE;
-float HIGH_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
-float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
-float LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
-    DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
-int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 bool OPTIMIZE_EXPR_ENABLED = DEFAULT_OPTIMIZE_EXPR_ENABLED;
 
@@ -41,35 +34,9 @@ SetIndexSliceSize(const int64_t size) {
 }
 
 void
-SetHighPriorityThreadCoreCoefficient(const float coefficient) {
-    HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set high priority thread pool core coefficient: {}",
-             HIGH_PRIORITY_THREAD_CORE_COEFFICIENT);
-}
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient) {
-    MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set middle priority thread pool core coefficient: {}",
-             MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT);
-}
-
-void
-SetLowPriorityThreadCoreCoefficient(const float coefficient) {
-    LOW_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
-    LOG_INFO("set low priority thread pool core coefficient: {}",
-             LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
-}
-
-void
 SetDefaultExecEvalExprBatchSize(int64_t val) {
     EXEC_EVAL_EXPR_BATCH_SIZE = val;
     LOG_INFO("set default expr eval batch size: {}", EXEC_EVAL_EXPR_BATCH_SIZE);
-}
-
-void
-SetCpuNum(const int num) {
-    CPU_NUM = num;
 }
 
 void

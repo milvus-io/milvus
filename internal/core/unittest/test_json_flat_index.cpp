@@ -29,7 +29,7 @@
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
 #include "index/IndexFactory.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
 #include "index/Index.h"
