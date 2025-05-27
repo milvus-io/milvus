@@ -52,6 +52,7 @@ func (ai *analyzeInspector) reloadFromMeta() {
 	analyzeTasks := ai.mt.analyzeMeta.GetAllTasks()
 	for _, t := range analyzeTasks {
 		if t.GetState() != indexpb.JobState_JobStateInit &&
+			t.GetState() != indexpb.JobState_JobStateRetry &&
 			t.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}

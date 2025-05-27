@@ -99,6 +99,7 @@ func (si *statsInspector) reloadFromMeta() {
 	tasks := si.mt.statsTaskMeta.GetAllTasks()
 	for _, st := range tasks {
 		if st.GetState() != indexpb.JobState_JobStateInit &&
+			st.GetState() != indexpb.JobState_JobStateRetry &&
 			st.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
