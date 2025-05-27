@@ -1074,8 +1074,22 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 
 void
 SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                                         Timestamp timestamp) const {
-    // DO NOTHING
+                                         Timestamp timestamp,
+                                         Timestamp collection_ttl) const {
+    if (collection_ttl > 0) {
+        auto& timestamps = get_timestamps();
+        auto size = bitset_chunk.size();
+        if (timestamps[size - 1] <= collection_ttl) {
+            bitset_chunk.set();
+            return;
+        }
+        auto pilot = upper_bound(timestamps, 0, size, collection_ttl);
+        BitsetType bitset;
+        bitset.reserve(size);
+        bitset.resize(pilot, true);
+        bitset.resize(size, false);
+        bitset_chunk |= bitset;
+    }
 }
 
 void
