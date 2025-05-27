@@ -27,16 +27,15 @@ endif()
 
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
-include_directories(${MILVUS_ENGINE_SRC}/base/include)
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
-add_subdirectory( base )
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )
@@ -75,7 +74,7 @@ set(LINK_TARGETS
     tantivy_binding
     knowhere
     milvus-storage
-    milvus_base
+    milvus-common
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS})
 
