@@ -864,7 +864,20 @@ void
 SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                          Timestamp timestamp,
                                          Timestamp collection_ttl) const {
-    // DO NOTHING
+    if (collection_ttl > 0) {
+        auto& timestamps = get_timestamps();
+        auto size = bitset_chunk.size();
+        if (timestamps[size - 1] <= collection_ttl) {
+            bitset_chunk.set();
+            return;
+        }
+        auto pilot = upper_bound(timestamps, 0, size, timestamp);
+        BitsetType bitset;
+        bitset.reserve(size);
+        bitset.resize(pilot, true);
+        bitset.resize(size, false);
+        bitset_chunk |= bitset;
+    }
 }
 
 void
