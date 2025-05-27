@@ -40,7 +40,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
           timestamp_(timestamp),
           placeholder_group_(placeholder_group),
           consystency_level_(consystency_level),
-          collection_ttl_(collection_ttl_) {
+          collection_ttl_timestamp_(collection_ttl_timestamp_) {
     }
 
     SearchResult
@@ -61,7 +61,7 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
  private:
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
-    Timestamp collection_ttl_;
+    Timestamp collection_ttl_timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
     SearchResultOpt search_result_opt_;
@@ -137,7 +137,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
                                                      segment,
                                                      active_count,
                                                      timestamp_,
-                                                     collection_ttl_,
+                                                     collection_ttl_timestamp_,
                                                      consystency_level_);
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
@@ -193,7 +193,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                                      segment,
                                                      active_count,
                                                      timestamp_,
-                                                     collection_ttl_,
+                                                     collection_ttl_timestamp_,
                                                      consystency_level_);
 
     // Do task execution

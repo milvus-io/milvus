@@ -192,7 +192,6 @@ AsyncRetrieve(CTraceContext c_trace,
               uint64_t collection_ttl) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
-
     auto future = milvus::futures::Future<CRetrieveResult>::async(
         milvus::futures::getGlobalCPUExecutor(),
         milvus::futures::ExecutePriority::HIGH,

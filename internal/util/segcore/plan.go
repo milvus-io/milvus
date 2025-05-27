@@ -126,7 +126,7 @@ func NewSearchRequest(collection *CCollection, req *querypb.SearchRequest, place
 		searchFieldID:     int64(fieldID),
 		mvccTimestamp:     req.GetReq().GetMvccTimestamp(),
 		consistencyLevel:  req.GetReq().GetConsistencyLevel(),
-		collectionTTL:     req.GetReq().GetCollectionTtl(),
+		collectionTTL:     req.GetReq().GetCollectionTtlTimestamps(),
 	}, nil
 }
 
