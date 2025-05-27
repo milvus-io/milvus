@@ -481,9 +481,11 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
-	physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
-	expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
-	t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+	if collectionInfo.collectionTTL != 0 {
+		physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+	}
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
 		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)

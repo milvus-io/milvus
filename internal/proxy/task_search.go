@@ -264,9 +264,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.SearchRequest.Username = username
 	}
 
-	physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
-	expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
-	t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+	if collectionInfo.collectionTTL != 0 {
+		physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+	}
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
