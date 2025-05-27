@@ -38,7 +38,6 @@ import (
 type embeddingNode struct {
 	BaseNode
 
-	// schema      *schemapb.CollectionSchema
 	metaCache   metacache.MetaCache
 	pkField     *schemapb.FieldSchema
 	channelName string
