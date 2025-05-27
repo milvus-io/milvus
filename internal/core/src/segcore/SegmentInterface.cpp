@@ -18,7 +18,7 @@
 #include "common/SystemProperty.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "query/ExecPlanNodeVisitor.h"
 
 namespace milvus::segcore {

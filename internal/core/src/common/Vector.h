@@ -18,7 +18,7 @@
 
 #include <memory>
 
-#include "EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "Types.h"
 #include "bitset/bitset.h"
 #include "common/FieldData.h"

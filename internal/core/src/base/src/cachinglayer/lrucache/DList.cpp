@@ -18,7 +18,7 @@
 
 #include "cachinglayer/Utils.h"
 #include "cachinglayer/lrucache/ListNode.h"
-#include "monitor/prometheus_client.h"
+#include "common/CommonMonitor.h"
 #include "log/Log.h"
 
 namespace milvus::cachinglayer::internal {

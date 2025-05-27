@@ -13,7 +13,7 @@
 
 #include "common/type_c.h"
 #include <future>
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 
 #include "common/FieldData.h"
 #include "common/LoadInfo.h"

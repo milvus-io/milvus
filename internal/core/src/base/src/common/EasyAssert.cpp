@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include <iostream>
-#include "EasyAssert.h"
+#include "common/EasyAssert.h"
 #include "fmt/core.h"
 #include <boost/stacktrace.hpp>
 #include <sstream>
