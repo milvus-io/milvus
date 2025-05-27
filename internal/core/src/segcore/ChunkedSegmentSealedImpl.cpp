@@ -1610,13 +1610,27 @@ ChunkedSegmentSealedImpl::get_active_count(Timestamp ts) const {
 
 void
 ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                                               Timestamp timestamp) const {
+                                               Timestamp timestamp,
+                                               Timestamp collection_ttl) const {
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
     auto timestamps_data =
         (const milvus::Timestamp*)insert_record_.timestamps_.get_chunk_data(0);
     auto timestamps_data_size = insert_record_.timestamps_.get_chunk_size(0);
+    if (collection_ttl > 0) {
+        auto range =
+            insert_record_.timestamp_index_.get_active_range(collection_ttl);
+        if (range.first == range.second &&
+            range.first == timestamps_data_size) {
+            bitset_chunk.set();
+            return;
+        } else {
+            auto ttl_mask = TimestampIndex::GenerateTTLBitset(
+                timestamps_data, timestamps_data_size, collection_ttl, range);
+            bitset_chunk |= ttl_mask;
+        }
+    }
 
     AssertInfo(timestamps_data_size == get_row_count(),
                fmt::format("Timestamp size not equal to row count: {}, {}",

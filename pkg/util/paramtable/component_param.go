@@ -1991,7 +1991,7 @@ please adjust in embedded Milvus: false`,
 	p.SlowLogSpanInSeconds = ParamItem{
 		Key:          "proxy.slowLogSpanInSeconds",
 		Version:      "2.5.8",
-		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds.",
+		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds. If request type is search, the query time will be divided by nq number.",
 		DefaultValue: "1",
 		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
 		Export:       false,

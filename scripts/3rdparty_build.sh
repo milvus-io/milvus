@@ -22,6 +22,18 @@ if [[ ${SKIP_3RDPARTY} -eq 1 ]]; then
   exit 0
 fi
 
+usage() {
+  echo "Usage: $0 [-o BUILD_OPENDAL] [-t BUILD_TYPE] [-h]"
+  echo "  -o BUILD_OPENDAL  Enable/disable OpenDAL build (ON/OFF, default: OFF)"
+  echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
+  echo "  -h                Show this help message"
+  echo ""
+  echo "Examples:"
+  echo "  $0                          # Build with default settings (Release, OpenDAL OFF)"
+  echo "  $0 -t Debug                 # Build in Debug mode"
+  echo "  $0 -o ON -t RelWithDebInfo  # Build with OpenDAL enabled and RelWithDebInfo"
+}
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
@@ -30,13 +42,36 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 
 BUILD_OPENDAL="OFF"
-while getopts "o:" arg; do
+BUILD_TYPE="Release"
+while getopts "o:t:h" arg; do
   case $arg in
   o)
     BUILD_OPENDAL=$OPTARG
     ;;
+  t)
+    BUILD_TYPE=$OPTARG
+    ;;
+  h)
+    usage
+    exit 0
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
  esac
 done
+
+# Validate build type
+case "${BUILD_TYPE}" in
+  Debug|Release)
+    echo "Build type: ${BUILD_TYPE}"
+    ;;
+  *)
+    echo "Invalid build type: ${BUILD_TYPE}. Valid options are: Debug, Release"
+    exit 1
+    ;;
+esac
 
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 CPP_SRC_DIR="${ROOT_DIR}/internal/core"
@@ -63,7 +98,7 @@ fi
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler=clang -s compiler.version=${llvm_version} -s compiler.libcxx=libc++ -s compiler.cppstd=17 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
@@ -75,9 +110,9 @@ case "${unameOut}" in
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     else
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -r default-conan-local -u || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)

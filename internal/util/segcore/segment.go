@@ -116,6 +116,7 @@ func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*S
 				searchReq.cPlaceholderGroup,
 				C.uint64_t(searchReq.mvccTimestamp),
 				C.int32_t(searchReq.consistencyLevel),
+				C.uint64_t(searchReq.collectionTTL),
 			))
 		},
 		cgo.WithName("search"),
@@ -144,6 +145,7 @@ func (s *cSegmentImpl) Retrieve(ctx context.Context, plan *RetrievePlan) (*Retri
 				C.int64_t(plan.maxLimitSize),
 				C.bool(plan.ignoreNonPk),
 				C.int32_t(plan.consistencyLevel),
+				C.uint64_t(plan.collectionTTL),
 			))
 		},
 		cgo.WithName("retrieve"),

@@ -1691,10 +1691,11 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			}
 			// when use default_value or has set Nullable
 			// it's ok that no corresponding fieldData found
-			dataToAppend := &schemapb.FieldData{
-				Type:      fieldSchema.GetDataType(),
-				FieldName: fieldSchema.GetName(),
+			dataToAppend, err := typeutil.GenEmptyFieldData(fieldSchema)
+			if err != nil {
+				return err
 			}
+			dataToAppend.ValidData = make([]bool, insertMsg.GetNumRows())
 			insertMsg.FieldsData = append(insertMsg.FieldsData, dataToAppend)
 		}
 	}
@@ -2506,4 +2507,22 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 		}
 	}
 	return false
+}
+
+func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
+	properties := make(map[string]string)
+	for _, pair := range pairs {
+		properties[pair.Key] = pair.Value
+	}
+
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return uint64(time.Duration(ttl) * time.Second)
+	}
+
+	return 0
 }
