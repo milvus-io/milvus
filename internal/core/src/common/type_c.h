@@ -35,7 +35,6 @@ typedef enum SegmentType SegmentType;
 enum CacheWarmupPolicy {
     CacheWarmupPolicy_Disable = 0,
     CacheWarmupPolicy_Sync = 1,
-    CacheWarmupPolicy_Async = 2,
 };
 
 typedef enum CacheWarmupPolicy CacheWarmupPolicy;
