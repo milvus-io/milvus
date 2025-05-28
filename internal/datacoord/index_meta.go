@@ -243,7 +243,7 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 
 	jobType := indexpb.JobType_JobTypeIndexJob.String()
 	for k, v := range taskMetrics {
-		metrics.TaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
+		metrics.IndexStatsTaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
 	}
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }

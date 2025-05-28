@@ -99,7 +99,7 @@ func (stm *statsTaskMeta) updateMetrics() {
 
 	jobType := indexpb.JobType_JobTypeStatsJob.String()
 	for k, v := range taskMetrics {
-		metrics.TaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
+		metrics.IndexStatsTaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
 	}
 }
 
