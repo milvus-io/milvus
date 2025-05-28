@@ -93,7 +93,7 @@ func (c *TEIEmbedding) Embedding(texts []string, truncate bool, truncationDirect
 	if c.apiKey != "" {
 		headers["Authorization"] = fmt.Sprintf("Bearer %s", c.apiKey)
 	}
-	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3, 1)
+	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3)
 	if err != nil {
 		return nil, err
 	}

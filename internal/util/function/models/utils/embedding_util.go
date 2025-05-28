@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"time"
 )
@@ -45,7 +46,7 @@ func send(req *http.Request) ([]byte, error) {
 	return body, nil
 }
 
-func RetrySend(ctx context.Context, data []byte, httpMethod string, url string, headers map[string]string, maxRetries int, retryDelay int) ([]byte, error) {
+func RetrySend(ctx context.Context, data []byte, httpMethod string, url string, headers map[string]string, maxRetries int) ([]byte, error) {
 	var err error
 	var body []byte
 	for i := 0; i < maxRetries; i++ {
@@ -60,7 +61,9 @@ func RetrySend(ctx context.Context, data []byte, httpMethod string, url string, 
 		if err == nil {
 			return body, nil
 		}
-		time.Sleep(time.Duration(retryDelay) * time.Second)
+		backoffDelay := 1 << uint(i) * time.Second
+		jitter := time.Duration(rand.Int63n(int64(backoffDelay / 4)))
+		time.Sleep(backoffDelay + jitter)
 	}
 	return nil, err
 }
