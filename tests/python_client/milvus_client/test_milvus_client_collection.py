@@ -207,7 +207,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim = 8
         field_name = "field_new"
@@ -227,7 +227,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim = 8
         field_name = "field_new"
@@ -247,7 +247,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, "field_new"
         error = {ct.err_code: 1100, ct.err_msg: f"added field must be nullable, please check it, "
@@ -266,7 +266,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, "field_new"
         error = {ct.err_code: 1100, ct.err_msg: f"not support to add partition key field, "
@@ -286,7 +286,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, "field_new"
         error = {ct.err_code: 1100, ct.err_msg: f"the maximum length specified for the field({field_name}) "
@@ -305,7 +305,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         field_name = "field_new"
         error = {ct.err_code: 1100, ct.err_msg: f"already has another clutering key field, "
@@ -330,7 +330,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 1100, ct.err_msg: f"duplicate field name: {default_string_field_name}: invalid parameter"}
         schema = self.create_schema(client)[0]
@@ -353,7 +353,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         dim, field_name = 8, "field_new"
         error = {ct.err_code: 1100, ct.err_msg: f"The number of fields has reached the maximum value 64: "
