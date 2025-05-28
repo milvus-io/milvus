@@ -117,7 +117,7 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorMemIndex<T>::VectorIterators(const milvus::DatasetPtr dataset,
                                    const knowhere::Json& conf,
                                    const milvus::BitsetView& bitset) const {
-    return this->index_.AnnIterator(dataset, conf, bitset);
+    return this->index_.AnnIterator(dataset, conf, bitset, false);
 }
 
 template <typename T>
