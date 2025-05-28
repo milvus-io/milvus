@@ -31,6 +31,7 @@
 #endif
 #include <chrono>
 #include <cstdarg>
+#include <iostream>
 #include <cstdio>
 #include <memory>
 #include <stdexcept>

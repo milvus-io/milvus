@@ -42,7 +42,7 @@
 #include "storage/FileManager.h"
 #include "storage/IndexData.h"
 #include "storage/LocalChunkManagerSingleton.h"
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 

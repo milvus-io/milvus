@@ -14,7 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "monitor/monitor_c.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 
 using namespace std;
 

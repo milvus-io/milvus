@@ -16,7 +16,7 @@
 #include <utility>
 
 #include "cachinglayer/Utils.h"
-#include "common/type_c.h"
+#include "common/common_type_c.h"
 
 namespace milvus::cachinglayer {
 

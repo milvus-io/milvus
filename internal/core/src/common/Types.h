@@ -48,6 +48,7 @@
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "Json.h"
+#include "type_c.h"
 
 #include "CustomBitset.h"
 

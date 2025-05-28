@@ -27,7 +27,7 @@
 #include "log/Log.h"
 #include "storage/DataCodec.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore {

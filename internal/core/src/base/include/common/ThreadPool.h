@@ -26,10 +26,33 @@
 #include <utility>
 
 #include "SafeQueue.h"
-#include "common/Common.h"
 #include "log/Log.h"
 
 namespace milvus {
+
+const int DEFAULT_CPU_NUM = 1;
+
+const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
+const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
+const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
+
+extern int64_t HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern int64_t MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern int64_t LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+
+extern int CPU_NUM;
+
+void
+SetHighPriorityThreadCoreCoefficient(const int64_t coefficient);
+
+void
+SetMiddlePriorityThreadCoreCoefficient(const int64_t coefficient);
+
+void
+SetLowPriorityThreadCoreCoefficient(const int64_t coefficient);
+
+void
+SetCpuNum(const int core);
 
 class ThreadPool {
  public:

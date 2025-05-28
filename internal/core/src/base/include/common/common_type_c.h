@@ -9,23 +9,25 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <chrono>
-#include "Executor.h"
-#include "common/Common.h"
-#include "monitor/Monitor.h"
+#pragma once
 
-namespace milvus::futures {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-const int kNumPriority = 3;
+typedef struct CStatus {
+    int error_code;
+    const char* error_msg;
+} CStatus;
 
-folly::CPUThreadPoolExecutor*
-getGlobalCPUExecutor() {
-    auto thread_num = std::thread::hardware_concurrency();
-    static folly::CPUThreadPoolExecutor executor(
-        thread_num,
-        folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(kNumPriority),
-        std::make_shared<folly::NamedThreadFactory>("MILVUS_CPU_"));
-    return &executor;
+enum CacheWarmupPolicy {
+    CacheWarmupPolicy_Disable = 0,
+    CacheWarmupPolicy_Sync = 1,
+    CacheWarmupPolicy_Async = 2,
+};
+
+typedef enum CacheWarmupPolicy CacheWarmupPolicy;
+
+#ifdef __cplusplus
 }
-
-};  // namespace milvus::futures
+#endif

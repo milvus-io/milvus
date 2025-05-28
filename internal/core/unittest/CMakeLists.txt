@@ -11,6 +11,7 @@
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
+include_directories(${CMAKE_HOME_DIRECTORY}/src/base/include)
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -171,6 +172,7 @@ if (LINUX)
             milvus_core
             knowhere
             milvus-storage
+            milvus_base
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()

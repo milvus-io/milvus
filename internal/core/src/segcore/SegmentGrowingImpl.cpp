@@ -41,7 +41,7 @@
 #include "segcore/memory_planner.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
-#include "storage/ThreadPools.h"
+#include "common/ThreadPools.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
