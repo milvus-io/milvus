@@ -215,12 +215,12 @@ class VectorArray : public milvus::VectorTrait {
 
     bool
     is_same_array(const VectorFieldProto& vector_field) {
-        if (element_type_ != DataType(vector_field.data_case())) {
-            return false;
-        }
-
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
+                if (vector_field.data_case() != VectorFieldProto::kFloatVector) {
+                    return false;
+                }
+
                 if (length_ !=
                     vector_field.float_vector().data().size() / dim_) {
                     return false;
@@ -324,12 +324,12 @@ class VectorArrayView {
 
     bool
     is_same_array(const VectorFieldProto& vector_field) {
-        if (element_type_ != DataType(vector_field.data_case())) {
-            return false;
-        }
-
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
+                if (vector_field.data_case() != VectorFieldProto::kFloatVector) {
+                    return false;
+                }
+                
                 if (length_ !=
                     vector_field.float_vector().data().size() / dim_) {
                     return false;

@@ -126,9 +126,26 @@ class FieldMeta {
         Assert(!nullable);
     }
 
+    // array of vector type
+    FieldMeta(FieldName name,
+              FieldId id,
+              DataType type,
+              DataType element_type,
+              int64_t dim,
+              std::optional<knowhere::MetricType> metric_type)
+        : name_(std::move(name)),
+          id_(id),
+          type_(type),
+          nullable_(false),
+          element_type_(element_type),
+          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
+        Assert(type_ == DataType::VECTOR_ARRAY);
+        Assert(IsVectorDataType(element_type_));
+    }
+
     int64_t
     get_dim() const {
-        Assert(IsVectorDataType(type_));
+        Assert(IsVectorDataType(type_) || type_ == DataType::VECTOR_ARRAY);
         // should not attempt to get dim() of a sparse vector from schema.
         Assert(!IsSparseFloatVectorDataType(type_));
         Assert(vector_info_.has_value());
