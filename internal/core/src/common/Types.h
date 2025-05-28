@@ -92,6 +92,7 @@ enum class DataType {
     VECTOR_BFLOAT16 = 103,
     VECTOR_SPARSE_FLOAT = 104,
     VECTOR_INT8 = 105,
+    VECTOR_ARRAY = 106,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -100,9 +101,9 @@ constexpr auto MAX_ROW_COUNT = std::numeric_limits<idx_t>::max();
 
 using OpType = proto::plan::OpType;
 using ArithOpType = proto::plan::ArithOpType;
-using ScalarArray = proto::schema::ScalarField;
+using ScalarFieldProto = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
-using VectorArray = proto::schema::VectorField;
+using VectorFieldProto = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;

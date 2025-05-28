@@ -1030,7 +1030,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) {
     column->BulkArrayAt(
-        [dst](ScalarArray&& array, size_t i) { dst->at(i) = std::move(array); },
+        [dst](ScalarFieldProto&& array, size_t i) { dst->at(i) = std::move(array); },
         seg_offsets,
         count);
 }

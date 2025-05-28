@@ -155,7 +155,7 @@ ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            ScalarArray scalar_array;
+            ScalarFieldProto scalar_array;
             scalar_array.ParseFromArray(str.data(), str.size());
             auto arr = Array(scalar_array);
             size += arr.byte_size();

@@ -234,7 +234,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             std::vector<Array> values(element_count);
             int null_number = 0;
             for (size_t index = 0; index < element_count; ++index) {
-                ScalarArray field_data;
+                ScalarFieldProto field_data;
                 if (array_array->GetString(index) == "") {
                     null_number++;
                     continue;

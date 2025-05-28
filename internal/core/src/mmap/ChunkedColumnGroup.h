@@ -376,7 +376,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     void
-    BulkArrayAt(std::function<void(ScalarArray&&, size_t)> fn,
+    BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {

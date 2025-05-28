@@ -1992,12 +1992,12 @@ TEST(Sealed, QueryAllFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
-    auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
-    auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
-    auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
-    auto string_array_values = dataset.get_col<ScalarArray>(string_array_field);
-    auto double_array_values = dataset.get_col<ScalarArray>(double_array_field);
-    auto float_array_values = dataset.get_col<ScalarArray>(float_array_field);
+    auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
+    auto long_array_values = dataset.get_col<ScalarFieldProto>(long_array_field);
+    auto bool_array_values = dataset.get_col<ScalarFieldProto>(bool_array_field);
+    auto string_array_values = dataset.get_col<ScalarFieldProto>(string_array_field);
+    auto double_array_values = dataset.get_col<ScalarFieldProto>(double_array_field);
+    auto float_array_values = dataset.get_col<ScalarFieldProto>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
     auto float16_vector_values = dataset.get_col<uint8_t>(float16_vec);
     auto bfloat16_vector_values = dataset.get_col<uint8_t>(bfloat16_vec);
@@ -2149,12 +2149,12 @@ TEST(Sealed, QueryAllNullableFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
-    auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
-    auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
-    auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
-    auto string_array_values = dataset.get_col<ScalarArray>(string_array_field);
-    auto double_array_values = dataset.get_col<ScalarArray>(double_array_field);
-    auto float_array_values = dataset.get_col<ScalarArray>(float_array_field);
+    auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
+    auto long_array_values = dataset.get_col<ScalarFieldProto>(long_array_field);
+    auto bool_array_values = dataset.get_col<ScalarFieldProto>(bool_array_field);
+    auto string_array_values = dataset.get_col<ScalarFieldProto>(string_array_field);
+    auto double_array_values = dataset.get_col<ScalarFieldProto>(double_array_field);
+    auto float_array_values = dataset.get_col<ScalarFieldProto>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
 
     auto bool_valid_values = dataset.get_col_valid(bool_field);

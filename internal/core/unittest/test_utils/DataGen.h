@@ -156,8 +156,8 @@ struct GeneratedData {
                     target_field_data.vectors().sparse_float_vector();
                 auto rows = SparseBytesToRows(sparse_float_array.contents());
                 std::copy_n(rows.get(), raw_->num_rows(), ret.data());
-            } else if constexpr (std::is_same_v<T, ScalarArray>) {
-                auto ret_data = reinterpret_cast<ScalarArray*>(ret.data());
+            } else if constexpr (std::is_same_v<T, ScalarFieldProto>) {
+                auto ret_data = reinterpret_cast<ScalarFieldProto*>(ret.data());
                 auto src_data = target_field_data.scalars().array_data().data();
                 std::copy(src_data.begin(), src_data.end(), ret_data);
             } else {
@@ -594,7 +594,7 @@ DataGen(SchemaPtr schema,
                 break;
             }
             case DataType::ARRAY: {
-                vector<ScalarArray> data(N);
+                vector<ScalarFieldProto> data(N);
                 switch (field_meta.get_element_type()) {
                     case DataType::BOOL: {
                         for (int i = 0; i < N / repeat_count; i++) {

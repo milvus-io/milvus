@@ -453,7 +453,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             break;
         }
         case DataType::ARRAY: {
-            auto data = reinterpret_cast<const ScalarArray*>(data_raw);
+            auto data = reinterpret_cast<const ScalarFieldProto*>(data_raw);
             auto obj = scalar_array->mutable_array_data();
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
                 field_meta.get_element_type()));
