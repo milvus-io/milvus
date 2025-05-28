@@ -1393,9 +1393,13 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	}
 
 	syncVersionAction := &querypb.SyncAction{
-		Type:           querypb.SyncType_UpdateVersion,
-		SealedInTarget: []int64{1, 2, 3},
-		TargetVersion:  time.Now().UnixMilli(),
+		Type: querypb.SyncType_UpdateVersion,
+		SealedSegmentRowCount: map[int64]int64{
+			1: 100,
+			2: 200,
+			3: 300,
+		},
+		TargetVersion: time.Now().UnixMilli(),
 	}
 
 	syncReq.Actions = []*querypb.SyncAction{syncVersionAction}

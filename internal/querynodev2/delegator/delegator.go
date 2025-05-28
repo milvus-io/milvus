@@ -30,12 +30,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -88,8 +88,8 @@ type ShardDelegator interface {
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
-	GetQueryView() *channelQueryView
+	SyncTargetVersion(action *querypb.SyncAction, partitions []int64)
+	GetChannelQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
@@ -369,21 +369,32 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		req.Req.GetIsIterator(),
 	)
 
+	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-	if err != nil {
-		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
-		return nil, err
+	var tSafe uint64
+	var err error
+	if partialResultRequiredDataRatio >= 1.0 {
+		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		if err != nil {
+			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+			return nil, err
+		}
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
+	} else {
+		tSafe = sd.GetTSafe()
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
 	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
-	}
+
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to search, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -500,7 +511,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return err
@@ -562,21 +573,31 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		req.Req.GetIsIterator(),
 	)
 
+	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
-	if err != nil {
-		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
-		return nil, err
+	var tSafe uint64
+	var err error
+	if partialResultRequiredDataRatio >= 1.0 {
+		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		if err != nil {
+			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+			return nil, err
+		}
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
+	} else {
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = sd.GetTSafe()
+		}
 	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
-	}
+
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -646,7 +667,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.Req.GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.Req.GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to GetStatistics, current distribution is not servicable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
@@ -708,13 +729,14 @@ func organizeSubTask[T any](ctx context.Context,
 		// update request
 		req := modify(req, scope, segmentIDs, workerID)
 
+		// for partial search, tolerate some worker are offline
 		worker, err := sd.workerManager.GetWorker(ctx, workerID)
 		if err != nil {
-			log.Warn("failed to get worker",
+			log.Warn("failed to get worker for sub task",
 				zap.Int64("nodeID", workerID),
+				zap.Int64s("segments", segmentIDs),
 				zap.Error(err),
 			)
-			return fmt.Errorf("failed to get worker %d, %w", workerID, err)
 		}
 
 		result = append(result, subTask[T]{
@@ -744,50 +766,110 @@ func executeSubTasks[T any, R interface {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(len(tasks))
+	var partialResultRequiredDataRatio float64
+	if taskType == "Query" || taskType == "Search" {
+		partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
+	} else {
+		partialResultRequiredDataRatio = 1.0
+	}
 
-	resultCh := make(chan R, len(tasks))
-	errCh := make(chan error, 1)
+	wg, ctx := errgroup.WithContext(ctx)
+	type channelResult struct {
+		nodeID   int64
+		segments []int64
+		result   R
+		err      error
+	}
+	// Buffered channel to collect results from all goroutines
+	resultCh := make(chan channelResult, len(tasks))
 	for _, task := range tasks {
-		go func(task subTask[T]) {
-			defer wg.Done()
-			result, err := execute(ctx, task.req, task.worker)
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+		task := task // capture loop variable
+		wg.Go(func() error {
+			var result R
+			var err error
+			if task.targetID == -1 || task.worker == nil {
+				var segments []int64
+				if req, ok := any(task.req).(interface{ GetSegmentIDs() []int64 }); ok {
+					segments = req.GetSegmentIDs()
+				} else {
+					segments = []int64{}
+				}
+				err = fmt.Errorf("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+			} else {
+				result, err = execute(ctx, task.req, task.worker)
+				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+				}
 			}
+
 			if err != nil {
 				log.Warn("failed to execute sub task",
 					zap.String("taskType", taskType),
 					zap.Int64("nodeID", task.targetID),
 					zap.Error(err),
 				)
-				select {
-				case errCh <- err: // must be the first
-				default: // skip other errors
+				// check if partial result is disabled, if so, let all sub tasks fail fast
+				if partialResultRequiredDataRatio == 1 {
+					return err
 				}
-				cancel()
-				return
 			}
-			resultCh <- result
-		}(task)
+
+			taskResult := channelResult{
+				nodeID: task.targetID,
+				result: result,
+				err:    err,
+			}
+			if req, ok := any(task.req).(interface{ GetSegmentIDs() []int64 }); ok {
+				taskResult.segments = req.GetSegmentIDs()
+			}
+			resultCh <- taskResult
+			return nil
+		})
 	}
 
-	wg.Wait()
-	close(resultCh)
-	select {
-	case err := <-errCh:
-		log.Warn("Delegator execute subTask failed",
+	// Wait for all tasks to complete
+	if err := wg.Wait(); err != nil {
+		log.Warn("some tasks failed to complete",
 			zap.String("taskType", taskType),
 			zap.Error(err),
 		)
 		return nil, err
-	default:
+	}
+	close(resultCh)
+
+	successSegmentList := []int64{}
+	failureSegmentList := []int64{}
+	var errors []error
+
+	// Collect results
+	results := make([]R, 0, len(tasks))
+	for item := range resultCh {
+		if item.err == nil {
+			successSegmentList = append(successSegmentList, item.segments...)
+			results = append(results, item.result)
+		} else {
+			failureSegmentList = append(failureSegmentList, item.segments...)
+			errors = append(errors, item.err)
+		}
 	}
 
-	results := make([]R, 0, len(tasks))
-	for result := range resultCh {
-		results = append(results, result)
+	accessDataRatio := 1.0
+	totalSegments := len(successSegmentList) + len(failureSegmentList)
+	if totalSegments > 0 {
+		accessDataRatio = float64(len(successSegmentList)) / float64(totalSegments)
+		if accessDataRatio < 1.0 {
+			log.Info("partial result executed successfully",
+				zap.String("taskType", taskType),
+				zap.Float64("successRatio", accessDataRatio),
+				zap.Float64("partialResultRequiredDataRatio", partialResultRequiredDataRatio),
+				zap.Int("totalSegments", totalSegments),
+				zap.Int64s("failureSegmentList", failureSegmentList),
+			)
+		}
+	}
+
+	if accessDataRatio < partialResultRequiredDataRatio {
+		return nil, merr.Combine(errors...)
 	}
 	return results, nil
 }
@@ -891,7 +973,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	log.Info("delegator received update schema event")
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments()
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return err
@@ -1011,6 +1093,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
+	queryView *channelQueryView,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -1041,7 +1124,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(channel),
+		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),
