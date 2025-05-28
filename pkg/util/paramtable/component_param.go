@@ -2928,10 +2928,9 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Doc: `options: sync, async, disable.
+		Doc: `options: sync, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
-- "async": data will be loaded asynchronously into the cache after a segment is loaded.
 - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
 Defaults to "sync", except for vector field which defaults to "disable".`,
 		Export: true,
@@ -2968,7 +2967,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Version:      "2.6.0",
 		DefaultValue: "false",
 		Doc: `Enable eviction for Tiered Storage. Defaults to false.
-Note that if eviction is enabled, cache data loaded during sync/async warmup is also subject to eviction.`,
+Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.`,
 		Export: true,
 	}
 	p.TieredEvictionEnabled.Init(base.mgr)
