@@ -1225,6 +1225,11 @@ streaming:
   walWriteAheadBuffer:
     capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
     keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+  walReadAheadBuffer:
+    # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
+    # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
+    # Use the underlying wal default value if 0 is given.
+    length: 128
   logging:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
