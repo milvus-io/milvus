@@ -5570,6 +5570,9 @@ type streamingConfig struct {
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 
+	// read ahead buffer size
+	WALReadAheadBufferLength ParamItem `refreshable:"true"`
+
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 	// memory usage control
@@ -5710,6 +5713,17 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.WALReadAheadBufferLength = ParamItem{
+		Key:     "streaming.walReadAheadBuffer.length",
+		Version: "2.6.0",
+		Doc: `The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
+Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
+Use the underlying wal default value if 0 is given.`,
+		DefaultValue: "128",
+		Export:       true,
+	}
+	p.WALReadAheadBufferLength.Init(base.mgr)
 
 	p.LoggingAppendSlowThreshold = ParamItem{
 		Key:     "streaming.logging.appendSlowThreshold",

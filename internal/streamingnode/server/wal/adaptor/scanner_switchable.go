@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -178,9 +179,14 @@ func (s *catchupScanner) createReaderWithBackoff(ctx context.Context, deliverPol
 	})
 	backoffTimer.EnableBackoff()
 	for {
+		bufSize := paramtable.Get().StreamingCfg.WALReadAheadBufferLength.GetAsInt()
+		if bufSize < 0 {
+			bufSize = 0
+		}
 		innerScanner, err := s.innerWAL.Read(ctx, walimpls.ReadOption{
-			Name:          s.scannerName,
-			DeliverPolicy: deliverPolicy,
+			Name:                s.scannerName,
+			DeliverPolicy:       deliverPolicy,
+			ReadAheadBufferSize: bufSize,
 		})
 		if err == nil {
 			return innerScanner, nil
