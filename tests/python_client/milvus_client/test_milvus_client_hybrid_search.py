@@ -367,6 +367,16 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
                                         "ids": insert_ids,
                                         "limit": default_limit,
                                         "pk_name": default_primary_key_field_name})
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                  nullable=True, max_length=100)
+        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
+                           filter="field_new is null",
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": len(vectors_to_search),
+                                        "ids": insert_ids,
+                                        "limit": default_limit,
+                                        "pk_name": default_primary_key_field_name})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)

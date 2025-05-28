@@ -160,6 +160,51 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/41702")
+    def test_milvus_client_query_output_fields_dynamic_name(self):
+        """
+        target: test query (high level api) normal case
+        method: create connection, collection, insert, add field name(same as dynamic name) and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=True)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        self.add_collection_field(client, collection_name, field_name=default_string_field_name,
+                                  data_type=DataType.VARCHAR, nullable=True, default_value="default", max_length=64)
+        for row in rows:
+            row[default_string_field_name] = "default"
+        # 3. query using ids
+        self.query(client, collection_name, ids=[i for i in range(default_nb)],
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})
+        # 4. query using filter
+        res = self.query(client, collection_name, filter=default_search_exp,
+                         output_fields=["$meta[default_float_field_name"],
+                         check_task=CheckTasks.check_query_results,
+                         check_items={exp_res: rows,
+                                      "with_vec": True,
+                                      "pk_name": default_primary_key_field_name})[0]
+        assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name,
+                                      default_float_field_name, default_string_field_name}
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_query_output_fields_all(self):
         """
         target: test query (high level api) normal case

@@ -290,6 +290,14 @@ class ResponseChecker:
             for field in res["fields"]:
                 if field["name"] in nullable_fields:
                     assert field["nullable"] is True
+        if check_items.get("add_fields", None) is not None:
+            add_fields = check_items.get("add_fields")
+            if not isinstance(add_fields, list):
+                log.error("add_fields should be a list including all the added fields name")
+                assert False
+            for field in res["fields"]:
+                if field["name"] in add_fields:
+                    assert field["nullable"] is True
         assert res["fields"][0]["is_primary"] is True
         assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)
         assert res["fields"][1]["field_id"] == 101 and (res["fields"][1]["type"] == 101 or 105)

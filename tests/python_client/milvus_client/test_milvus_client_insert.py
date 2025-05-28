@@ -25,6 +25,7 @@ default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_primary_key_field_name = "id"
 default_vector_field_name = "vector"
+default_dynamic_field_name = "field_new"
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
@@ -506,6 +507,145 @@ class TestMilvusClientInsertValid(TestMilvusClientV2Base):
             self.drop_partition(client, collection_name, partition_name)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("default_value", ["a" * 64, "aa"])
+    def test_milvus_client_insert_with_added_field(self, default_value):
+        """
+        target: test search (high level api) normal case
+        method: create connection, collection, insert, add field, insert and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert before add field
+        vectors = cf.gen_vectors(default_nb * 2, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+        # 3. add new field
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
+                                  nullable=True, default_value=default_value, max_length=64)
+        vectors_to_search = [vectors[0]]
+        insert_ids = [i for i in range(default_nb)]
+        # 4. check old dynamic data search is not impacted after add new field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 5. insert data(old + new field)
+        rows_t = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                  default_float_field_name: i * 1.0, default_string_field_name: str(i),
+                  "field_new": "field_new"} for i in range(default_nb, default_nb * 2)]
+        results = self.insert(client, collection_name, rows_t)[0]
+        assert results['insert_count'] == default_nb
+        insert_ids_after_add_field = [i for i in range(default_nb, default_nb * 2)]
+        # 6. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter=f'field_new=="{default_value}"',
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter=f"field_new=='field_new'",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids_after_add_field,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_insert_with_old_and_added_field(self):
+        """
+        target: test search (high level api) normal case
+        method: create connection, collection, insert, add field, insert old/new field and search
+        expected: search/query successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 8
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert before add field
+        rng = np.random.default_rng(seed=19530)
+        vectors = cf.gen_vectors(default_nb * 3, dim, vector_data_type=DataType.FLOAT_VECTOR)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        results = self.insert(client, collection_name, rows)[0]
+        assert results['insert_count'] == default_nb
+        # 3. add new field
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
+                                  nullable=True, max_length=64)
+        vectors_to_search = [vectors[0]]
+        insert_ids = [i for i in range(default_nb)]
+        # 4. check old dynamic data search is not impacted after add new field
+        self.search(client, collection_name, vectors_to_search,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        # 5. insert data(old field)
+        rows_old = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                    default_float_field_name: i * 1.0,
+                    default_string_field_name: str(i)} for i in range(default_nb, default_nb * 2)]
+        results = self.insert(client, collection_name, rows_old)[0]
+        assert results['insert_count'] == default_nb
+        insert_ids_with_old_field = [i for i in range(default_nb, default_nb * 2)]
+        # 6. insert data(new field)
+        rows_new = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
+                     default_float_field_name: i * 1.0, default_string_field_name: str(i),
+                     "field_new": "field_new"} for i in range(default_nb * 2, default_nb * 3)]
+        results = self.insert(client, collection_name, rows_new)[0]
+        assert results['insert_count'] == default_nb
+        insert_ids_with_new_field = [i for i in range(default_nb * 2, default_nb * 3)]
+        # 6. search filtered with the new field
+        self.search(client, collection_name, vectors_to_search,
+                    filter=f'field_new is null',
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids + insert_ids_with_old_field,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.search(client, collection_name, vectors_to_search,
+                    filter=f"field_new=='field_new'",
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(vectors_to_search),
+                                 "ids": insert_ids_with_new_field,
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
