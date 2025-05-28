@@ -4428,7 +4428,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 	defer func() {
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), collection).Inc()
 		if resp.GetStatus().GetCode() != 0 {
-			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
+			log.Warn("GetSegmentsInfo failed", zap.String("err", resp.GetStatus().GetReason()))
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), collection).Inc()
 		} else {
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), collection).Inc()
@@ -7111,4 +7111,36 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 		}, nil
 	}
 	return task.result, nil
+}
+
+func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuotaMetrics")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetQuotaMetricsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive GetQuotaMetrics request")
+
+	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
+	if err != nil {
+		log.Warn("GetQuotaMetrics fail",
+			zap.Error(err))
+		metricsResp.Status = merr.Status(err)
+		return metricsResp, nil
+	}
+	err = merr.Error(metricsResp.GetStatus())
+	if err != nil {
+		metricsResp.Status = merr.Status(err)
+		return metricsResp, nil
+	}
+
+	log.Info("GetQuotaMetrics success", zap.String("metrics", metricsResp.GetMetricsInfo()))
+
+	return metricsResp, nil
 }
