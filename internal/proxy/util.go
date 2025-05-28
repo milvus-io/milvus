@@ -1657,10 +1657,11 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			}
 			// when use default_value or has set Nullable
 			// it's ok that no corresponding fieldData found
-			dataToAppend := &schemapb.FieldData{
-				Type:      fieldSchema.GetDataType(),
-				FieldName: fieldSchema.GetName(),
+			dataToAppend, err := typeutil.GenEmptyFieldData(fieldSchema)
+			if err != nil {
+				return err
 			}
+			dataToAppend.ValidData = make([]bool, insertMsg.GetNumRows())
 			insertMsg.FieldsData = append(insertMsg.FieldsData, dataToAppend)
 		}
 	}
