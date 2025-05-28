@@ -352,7 +352,9 @@ type OptionsGetter interface {
 type JobIDGetter interface {
 	GetJobID() string
 }
-
+type TimestampGetter interface {
+	GetTimestamp() uint64
+}
 type PasswordReq struct {
 	UserName string `json:"userName" binding:"required"`
 	Password string `json:"password" binding:"required"`
@@ -422,6 +424,7 @@ type IndexReq struct {
 	DbName         string `json:"dbName"`
 	CollectionName string `json:"collectionName" binding:"required"`
 	IndexName      string `json:"indexName" binding:"required"`
+	Timestamp      uint64 `json:"timestamp"`
 }
 
 func (req *IndexReq) GetDbName() string { return req.DbName }
@@ -431,6 +434,10 @@ func (req *IndexReq) GetCollectionName() string {
 
 func (req *IndexReq) GetIndexName() string {
 	return req.IndexName
+}
+
+func (req *IndexReq) GetTimestamp() uint64 {
+	return req.Timestamp
 }
 
 type IndexReqWithProperties struct {

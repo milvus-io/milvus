@@ -2240,10 +2240,13 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
 	indexGetter, _ := anyReq.(IndexNameGetter)
+	timeGetter, _ := anyReq.(TimestampGetter)
+
 	req := &milvuspb.DescribeIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 		IndexName:      indexGetter.GetIndexName(),
+		Timestamp:      timeGetter.GetTimestamp(),
 	}
 	c.Set(ContextRequest, req)
 
