@@ -5,7 +5,9 @@ package delegator
 import (
 	context "context"
 
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	internalpb "github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	querypb "github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -813,6 +815,65 @@ func (_c *MockShardDelegator_ReleaseSegments_Call) Return(_a0 error) *MockShardD
 }
 
 func (_c *MockShardDelegator_ReleaseSegments_Call) RunAndReturn(run func(context.Context, *querypb.ReleaseSegmentsRequest, bool) error) *MockShardDelegator_ReleaseSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RunAnalyzer provides a mock function with given fields: ctx, req
+func (_m *MockShardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunAnalyzer")
+	}
+
+	var r0 []*milvuspb.AnalyzerResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.RunAnalyzerRequest) []*milvuspb.AnalyzerResult); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*milvuspb.AnalyzerResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.RunAnalyzerRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockShardDelegator_RunAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunAnalyzer'
+type MockShardDelegator_RunAnalyzer_Call struct {
+	*mock.Call
+}
+
+// RunAnalyzer is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.RunAnalyzerRequest
+func (_e *MockShardDelegator_Expecter) RunAnalyzer(ctx interface{}, req interface{}) *MockShardDelegator_RunAnalyzer_Call {
+	return &MockShardDelegator_RunAnalyzer_Call{Call: _e.mock.On("RunAnalyzer", ctx, req)}
+}
+
+func (_c *MockShardDelegator_RunAnalyzer_Call) Run(run func(ctx context.Context, req *querypb.RunAnalyzerRequest)) *MockShardDelegator_RunAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.RunAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_RunAnalyzer_Call) Return(_a0 []*milvuspb.AnalyzerResult, _a1 error) *MockShardDelegator_RunAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockShardDelegator_RunAnalyzer_Call) RunAndReturn(run func(context.Context, *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error)) *MockShardDelegator_RunAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

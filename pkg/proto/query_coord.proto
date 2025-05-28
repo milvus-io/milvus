@@ -168,6 +168,8 @@ service QueryNode {
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
+
+    rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -961,4 +963,15 @@ message UpdateSchemaRequest {
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
     uint64 version = 4;
+}
+
+message RunAnalyzerRequest{
+    common.MsgBase base = 1;
+    string channel = 2;
+    int64 field_id = 3;
+    repeated string analyzer_names = 4;
+    repeated bytes placeholder =5;
+
+    bool with_detail = 6;
+    bool with_hash = 7;
 }
