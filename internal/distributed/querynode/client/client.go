@@ -361,3 +361,14 @@ func (c *Client) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchReques
 		return client.DeleteBatch(ctx, req)
 	})
 }
+
+func (c *Client) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest, _ ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID),
+	)
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*milvuspb.RunAnalyzerResponse, error) {
+		return client.RunAnalyzer(ctx, req)
+	})
+}

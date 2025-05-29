@@ -1547,6 +1547,7 @@ const (
 	QueryNode_SyncDistribution_FullMethodName     = "/milvus.proto.query.QueryNode/SyncDistribution"
 	QueryNode_Delete_FullMethodName               = "/milvus.proto.query.QueryNode/Delete"
 	QueryNode_DeleteBatch_FullMethodName          = "/milvus.proto.query.QueryNode/DeleteBatch"
+	QueryNode_RunAnalyzer_FullMethodName          = "/milvus.proto.query.QueryNode/RunAnalyzer"
 )
 
 // QueryNodeClient is the client API for QueryNode service.
@@ -1581,6 +1582,7 @@ type QueryNodeClient interface {
 	// DeleteBatch is the API to apply same delete data into multiple segments.
 	// it's basically same as `Delete` but cost less memory pressure.
 	DeleteBatch(ctx context.Context, in *DeleteBatchRequest, opts ...grpc.CallOption) (*DeleteBatchResponse, error)
+	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 }
 
 type queryNodeClient struct {
@@ -1862,6 +1864,15 @@ func (c *queryNodeClient) DeleteBatch(ctx context.Context, in *DeleteBatchReques
 	return out, nil
 }
 
+func (c *queryNodeClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
+	out := new(milvuspb.RunAnalyzerResponse)
+	err := c.cc.Invoke(ctx, QueryNode_RunAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryNodeServer is the server API for QueryNode service.
 // All implementations should embed UnimplementedQueryNodeServer
 // for forward compatibility
@@ -1894,6 +1905,7 @@ type QueryNodeServer interface {
 	// DeleteBatch is the API to apply same delete data into multiple segments.
 	// it's basically same as `Delete` but cost less memory pressure.
 	DeleteBatch(context.Context, *DeleteBatchRequest) (*DeleteBatchResponse, error)
+	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 }
 
 // UnimplementedQueryNodeServer should be embedded to have forward compatible implementations.
@@ -1974,6 +1986,9 @@ func (UnimplementedQueryNodeServer) Delete(context.Context, *DeleteRequest) (*co
 }
 func (UnimplementedQueryNodeServer) DeleteBatch(context.Context, *DeleteBatchRequest) (*DeleteBatchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteBatch not implemented")
+}
+func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
 }
 
 // UnsafeQueryNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -2443,6 +2458,24 @@ func _QueryNode_DeleteBatch_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).RunAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_RunAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).RunAnalyzer(ctx, req.(*RunAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryNode_ServiceDesc is the grpc.ServiceDesc for QueryNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2541,6 +2574,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteBatch",
 			Handler:    _QueryNode_DeleteBatch_Handler,
+		},
+		{
+			MethodName: "RunAnalyzer",
+			Handler:    _QueryNode_RunAnalyzer_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

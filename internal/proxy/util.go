@@ -99,6 +99,26 @@ func isNumber(c uint8) bool {
 	return true
 }
 
+// check run analyzer params when collection name was set
+func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
+	if req.GetAnalyzerParams() != "" {
+		return fmt.Errorf("run analyzer can't use analyzer params and (collection,field) in same time")
+	}
+
+	if req.GetFieldName() == "" {
+		return fmt.Errorf("must set field name when collection name was set")
+	}
+
+	if req.GetAnalyzerNames() != nil {
+		if len(req.GetAnalyzerNames()) != 1 && len(req.GetAnalyzerNames()) != len(req.GetPlaceholder()) {
+			return fmt.Errorf("only support set one analyzer name for all text or set analyzer name for each text, but now analzer name num: %d, text num: %d",
+				len(req.GetAnalyzerNames()), len(req.GetPlaceholder()))
+		}
+	}
+
+	return nil
+}
+
 func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)

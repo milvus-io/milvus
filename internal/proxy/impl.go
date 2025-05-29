@@ -7042,14 +7042,12 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
-	// TODO: use collection analyzer when collection name and field name not none
+func (node *Proxy) runAnalyzer(req *milvuspb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
 	if err != nil {
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(err),
-		}, nil
+		return nil, err
 	}
+
 	defer tokenizer.Destroy()
 
 	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
@@ -7075,9 +7073,90 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 			results[i].Tokens = append(results[i].Tokens, token)
 		}
 	}
+	return results, nil
+}
 
-	return &milvuspb.RunAnalyzerResponse{
-		Status:  merr.Status(nil),
-		Results: results,
-	}, nil
+func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RunAnalyzer")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if len(req.Placeholder) == 0 {
+		return &milvuspb.RunAnalyzerResponse{
+			Status:  merr.Status(nil),
+			Results: make([]*milvuspb.AnalyzerResult, 0),
+		}, nil
+	}
+
+	if req.GetCollectionName() == "" {
+		results, err := node.runAnalyzer(req)
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		return &milvuspb.RunAnalyzerResponse{
+			Status:  merr.Status(nil),
+			Results: results,
+		}, nil
+	}
+
+	if err := validateRunAnalyzer(req); err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(merr.WrapErrAsInputError(err)),
+		}, nil
+	}
+
+	method := "RunAnalyzer"
+	task := &RunAnalyzerTask{
+		ctx:                ctx,
+		lb:                 node.lbPolicy,
+		Condition:          NewTaskCondition(ctx),
+		RunAnalyzerRequest: req,
+	}
+
+	if err := node.sched.dqQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+		)
+
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			metrics.AbandonLabel,
+			req.GetDbName(),
+			req.GetCollectionName(),
+		).Inc()
+
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+		)
+
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			metrics.FailLabel,
+			req.GetDbName(),
+			req.GetCollectionName(),
+		).Inc()
+
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return task.result, nil
 }

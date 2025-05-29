@@ -378,6 +378,41 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.True(merr.IsCanceledOrTimeout(err))
 }
 
+func (s *LBPolicySuite) TestExecuteOneChannel() {
+	ctx := context.Background()
+	mockErr := errors.New("mock error")
+	// test  all channel success
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil)
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	err := s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		nq:             1,
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+			return nil
+		},
+	})
+	s.NoError(err)
+
+	// test get shard leader failed
+	s.qc.ExpectedCalls = nil
+	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
+	s.qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(nil, mockErr)
+	err = s.lbPolicy.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		nq:             1,
+		exec: func(ctx context.Context, ui UniqueID, qn types.QueryNodeClient, channel string) error {
+			return nil
+		},
+	})
+	s.ErrorIs(err, mockErr)
+}
+
 func (s *LBPolicySuite) TestExecute() {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
