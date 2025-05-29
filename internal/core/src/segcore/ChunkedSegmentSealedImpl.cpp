@@ -323,10 +323,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
-        LOG_INFO("segment {} loads field {} with num_rows {}",
+        LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
-                 num_rows);
+                 num_rows,
+                 is_sorted_by_pk_);
 
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto insert_files = info.insert_files;
