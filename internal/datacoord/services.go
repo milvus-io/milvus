@@ -1030,6 +1030,17 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		resp.Status = merr.Status(merr.WrapErrChannelNotAvailable(req.GetVchannel(), "start position is nil"))
 		return resp, nil
 	}
+	segmentsNotCreatedByStreaming := make([]*datapb.SegmentNotCreatedByStreaming, 0)
+	for _, segmentID := range channelInfo.GetUnflushedSegmentIds() {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment != nil && !segment.IsCreatedByStreaming {
+			segmentsNotCreatedByStreaming = append(segmentsNotCreatedByStreaming, &datapb.SegmentNotCreatedByStreaming{
+				CollectionId: segment.CollectionID,
+				PartitionId:  segment.PartitionID,
+				SegmentId:    segmentID,
+			})
+		}
+	}
 
 	log.Info("datacoord get channel recovery info",
 		zap.String("channel", channelInfo.GetChannelName()),
@@ -1038,10 +1049,12 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 		zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 		zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+		zap.Int("# of segments not created by streaming", len(segmentsNotCreatedByStreaming)),
 	)
 
 	resp.Info = channelInfo
 	resp.Schema = collection.Schema
+	resp.SegmentsNotCreatedByStreaming = segmentsNotCreatedByStreaming
 	return resp, nil
 }
 
