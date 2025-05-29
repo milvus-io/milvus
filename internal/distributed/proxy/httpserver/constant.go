@@ -161,6 +161,7 @@ const (
 
 	HTTPReturnMinIndexVersion = "minIndexVersion"
 	HTTPReturnMaxIndexVersion = "maxIndexVersion"
+	HTTPReturnIndexParams     = "indexParams"
 
 	HTTPReturnDistance = "distance"
 
