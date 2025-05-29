@@ -17,6 +17,7 @@ package querynodev2
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math/rand"
 	"path"
@@ -2375,6 +2376,55 @@ func (suite *ServiceSuite) TestUpdateSchema() {
 		defer suite.node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := suite.node.UpdateSchema(ctx, req)
 		suite.Error(merr.CheckRPCCall(status, err))
+	})
+}
+
+func (suite *ServiceSuite) TestRunAnalyzer() {
+	ctx := context.Background()
+	suite.Run("delegator not exist", func() {
+		resp, err := suite.node.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			Channel:     suite.vchannel,
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.Require().NoError(err)
+		suite.Require().Error(merr.Error(resp.GetStatus()))
+	})
+
+	suite.Run("normal run", func() {
+		delegator := &delegator.MockShardDelegator{}
+		suite.node.delegators.Insert(suite.vchannel, delegator)
+		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+
+		delegator.EXPECT().RunAnalyzer(mock.Anything, mock.Anything).Return(
+			[]*milvuspb.AnalyzerResult{}, nil)
+
+		_, err := suite.node.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			Channel:     suite.vchannel,
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.Require().NoError(err)
+	})
+
+	suite.Run("run analyzer failed", func() {
+		delegator := &delegator.MockShardDelegator{}
+		suite.node.delegators.Insert(suite.vchannel, delegator)
+		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+
+		delegator.EXPECT().RunAnalyzer(mock.Anything, mock.Anything).Return(
+			nil, fmt.Errorf("mock error"))
+
+		resp, err := suite.node.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			Channel:     suite.vchannel,
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+
+		suite.Require().NoError(err)
+		suite.Require().Error(merr.Error(resp.GetStatus()))
 	})
 }
 
