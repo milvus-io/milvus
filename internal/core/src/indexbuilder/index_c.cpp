@@ -164,10 +164,11 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->opt_fields().size()) {
         config[VEC_OPT_FIELDS] = get_opt_field(info->opt_fields());
     }
-    config["lack_binlog_rows"] = info->lack_binlog_rows();
+    config[LACK_BINLOG_ROWS_KEY] = info->lack_binlog_rows();
     if (info->partition_key_isolation()) {
         config[PARTITION_KEY_ISOLATION_KEY] = info->partition_key_isolation();
     }
+    config[INDEX_NUM_ROWS_KEY] = info->num_rows();
     config[STORAGE_VERSION_KEY] = info->storage_version();
     if (info->storage_version() == STORAGE_V2) {
         config[SEGMENT_INSERT_FILES_KEY] =
