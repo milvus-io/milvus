@@ -8,13 +8,13 @@ import (
 )
 
 // newPChannelMeta creates a new PChannelMeta.
-func newPChannelMeta(name string) *PChannelMeta {
+func newPChannelMeta(name string, accessMode types.AccessMode) *PChannelMeta {
 	return &PChannelMeta{
 		inner: &streamingpb.PChannelMeta{
 			Channel: &streamingpb.PChannelInfo{
 				Name:       name,
 				Term:       1,
-				AccessMode: streamingpb.PChannelAccessMode(types.AccessModeRW),
+				AccessMode: streamingpb.PChannelAccessMode(accessMode),
 			},
 			Node:      nil,
 			State:     streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNINITIALIZED,
@@ -113,8 +113,8 @@ type mutablePChannel struct {
 }
 
 // TryAssignToServerID assigns the channel to a server.
-func (m *mutablePChannel) TryAssignToServerID(streamingNode types.StreamingNodeInfo) bool {
-	if m.CurrentServerID() == streamingNode.ServerID && m.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED {
+func (m *mutablePChannel) TryAssignToServerID(accessMode types.AccessMode, streamingNode types.StreamingNodeInfo) bool {
+	if m.ChannelInfo().AccessMode == accessMode && m.CurrentServerID() == streamingNode.ServerID && m.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED {
 		// if the channel is already assigned to the server, return false.
 		return false
 	}
@@ -128,6 +128,7 @@ func (m *mutablePChannel) TryAssignToServerID(streamingNode types.StreamingNodeI
 	}
 
 	// otherwise update the channel into assgining state.
+	m.inner.Channel.AccessMode = streamingpb.PChannelAccessMode(accessMode)
 	m.inner.Channel.Term++
 	m.inner.Node = types.NewProtoFromStreamingNodeInfo(streamingNode)
 	m.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING

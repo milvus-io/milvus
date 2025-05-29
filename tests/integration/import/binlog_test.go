@@ -109,13 +109,13 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
 
 	// delete
 	beginIndex := 0

@@ -39,7 +39,7 @@ func TestPChannel(t *testing.T) {
 		},
 	}, pchannel.CurrentAssignment())
 
-	pchannel = newPChannelMeta("test-channel")
+	pchannel = newPChannelMeta("test-channel", types.AccessModeRW)
 	assert.Equal(t, "test-channel", pchannel.Name())
 	assert.Equal(t, int64(1), pchannel.CurrentTerm())
 	assert.Empty(t, pchannel.AssignHistories())
@@ -53,7 +53,7 @@ func TestPChannel(t *testing.T) {
 	newServerID := types.StreamingNodeInfo{
 		ServerID: 456,
 	}
-	assert.True(t, mutablePChannel.TryAssignToServerID(newServerID))
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, newServerID))
 	updatedChannelInfo := newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
 
 	assert.Equal(t, "test-channel", pchannel.Name())
@@ -69,7 +69,7 @@ func TestPChannel(t *testing.T) {
 
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
 
-	mutablePChannel.TryAssignToServerID(types.StreamingNodeInfo{ServerID: 789})
+	mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789})
 	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
 	assert.Equal(t, "test-channel", updatedChannelInfo.Name())
 	assert.Equal(t, int64(3), updatedChannelInfo.CurrentTerm())
@@ -94,7 +94,7 @@ func TestPChannel(t *testing.T) {
 
 	// Test reassigned
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
-	assert.False(t, mutablePChannel.TryAssignToServerID(types.StreamingNodeInfo{ServerID: 789}))
+	assert.False(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789}))
 
 	// Test MarkAsUnavailable
 	mutablePChannel = updatedChannelInfo.CopyForWrite()
@@ -107,4 +107,9 @@ func TestPChannel(t *testing.T) {
 	updatedChannelInfo = newPChannelMetaFromProto(mutablePChannel.IntoRawMeta())
 	assert.False(t, updatedChannelInfo.IsAssigned())
 	assert.Equal(t, streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE, updatedChannelInfo.State())
+
+	// Test assign on unavailable
+	mutablePChannel = updatedChannelInfo.CopyForWrite()
+	assert.True(t, mutablePChannel.TryAssignToServerID(types.AccessModeRW, types.StreamingNodeInfo{ServerID: 789}))
+	assert.Len(t, mutablePChannel.AssignHistories(), 1)
 }

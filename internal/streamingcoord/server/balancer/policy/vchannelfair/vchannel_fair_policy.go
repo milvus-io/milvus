@@ -28,11 +28,10 @@ func (p *policy) Name() string {
 }
 
 // Balance will balance the load of streaming node by vchannel count.
-func (p *policy) Balance(currentLayout balancer.CurrentLayout) (balancer.ExpectedLayout, error) {
+func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.ExpectedLayout, err error) {
 	if currentLayout.TotalNodes() == 0 {
 		return balancer.ExpectedLayout{}, errors.New("no available streaming node")
 	}
-
 	// update policy configuration before balancing.
 	p.updatePolicyConfiguration()
 

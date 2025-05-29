@@ -248,13 +248,13 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// unsupported index type
 	indexParams := []*commonpb.KeyValuePair{
@@ -408,13 +408,13 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	indexType := integration.IndexSparseInvertedIndex
 	metricType := metric.IP
