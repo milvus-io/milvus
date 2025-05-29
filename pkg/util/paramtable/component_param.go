@@ -2096,6 +2096,9 @@ type queryCoordConfig struct {
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
 	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
 	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
+
+	// query node task parallelism factor
+	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2719,6 +2722,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
+
+	p.QueryNodeTaskParallelismFactor = ParamItem{
+		Key:          "queryCoord.queryNodeTaskParallelismFactor",
+		Version:      "2.5.14",
+		DefaultValue: "1",
+		Doc:          "the parallelism factor for query node task, which permit query node execute cpuNum * parallelismFactor tasks in parallel",
+		Export:       false,
+	}
+	p.QueryNodeTaskParallelismFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
