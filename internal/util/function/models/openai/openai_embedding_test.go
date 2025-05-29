@@ -218,8 +218,8 @@ func TestEmbeddingFailed(t *testing.T) {
 func TestTimeout(t *testing.T) {
 	var st int32 = 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// (Timeout 1s + Wait 1s) * Retry 3
-		time.Sleep(6 * time.Second)
+		// (Timeout 1s + 2s + 4s + Wait 1s * 3)
+		time.Sleep(11 * time.Second)
 		atomic.AddInt32(&st, 1)
 		w.WriteHeader(http.StatusUnauthorized)
 	}))

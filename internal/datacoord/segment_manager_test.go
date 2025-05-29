@@ -1070,3 +1070,26 @@ func TestSegmentManager_CleanZeroSealedSegmentsOfChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestDropSegmentOfPartition(t *testing.T) {
+	paramtable.Init()
+	mockAllocator := newMockAllocator(t)
+	meta, err := newMemoryMeta(t)
+	assert.NoError(t, err)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.AllocID(context.Background())
+	assert.NoError(t, err)
+	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+	segmentManager, _ := newSegmentManager(meta, mockAllocator)
+	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 100, "c1", 1000, storage.StorageV1)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1, len(allocations))
+	segID := allocations[0].SegmentID
+	segment := meta.GetHealthySegment(context.TODO(), segID)
+	assert.NotNil(t, segment)
+
+	segmentManager.DropSegmentsOfPartition(context.Background(), "c1", []int64{100})
+	segment = meta.GetHealthySegment(context.TODO(), segID)
+	assert.NotNil(t, segment)
+}

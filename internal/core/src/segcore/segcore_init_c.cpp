@@ -35,7 +35,7 @@ SegcoreSetChunkRows(const int64_t value) {
 }
 
 extern "C" void
-SegcoreSetEnableTempSegmentIndex(const bool value) {
+SegcoreSetEnableInterminSegmentIndex(const bool value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_enable_interim_segment_index(value);
@@ -53,6 +53,57 @@ SegcoreSetNprobe(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();
     config.set_nprobe(value);
+}
+
+extern "C" CStatus
+SegcoreSetDenseVectorInterminIndexType(const char* value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    try {
+        config.set_dense_vector_intermin_index_type(std::string(value));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+extern "C" CStatus
+SegcoreSetDenseVectorInterminIndexRefineQuantType(const char* value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    try {
+        config.set_refine_quant_type(std::string(value));
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+extern "C" void
+SegcoreSetDenseVectorInterminIndexRefineWithQuantFlag(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_refine_with_quant_flag(value);
+}
+
+extern "C" void
+SegcoreSetSubDim(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_sub_dim(value);
+}
+
+extern "C" void
+SegcoreSetRefineRatio(const float value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_refine_ratio(value);
 }
 
 extern "C" void

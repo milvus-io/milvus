@@ -105,6 +105,7 @@ const (
 	TransferReplicaTaskName       = "TransferReplicaTask"
 	ListResourceGroupsTaskName    = "ListResourceGroupsTask"
 	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
+	RunAnalyzerTaskName           = "RunAnalyzer"
 
 	CreateDatabaseTaskName   = "CreateCollectionTask"
 	DropDatabaseTaskName     = "DropDatabaseTaskName"
@@ -1274,14 +1275,18 @@ const (
 	MmapEnabledKey = "mmap_enabled"
 )
 
-var allowedProps = []string{
+var allowedAlterProps = []string{
 	common.MaxLengthKey,
 	common.MmapEnabledKey,
 	common.MaxCapacityKey,
 }
 
-func IsKeyAllowed(key string) bool {
-	for _, allowedKey := range allowedProps {
+var allowedDropProps = []string{
+	common.MmapEnabledKey,
+}
+
+func IsKeyAllowAlter(key string) bool {
+	for _, allowedKey := range allowedAlterProps {
 		if key == allowedKey {
 			return true
 		}
@@ -1289,15 +1294,29 @@ func IsKeyAllowed(key string) bool {
 	return false
 }
 
+func IsKeyAllowDrop(key string) bool {
+	for _, allowedKey := range allowedDropProps {
+		if key == allowedKey {
+			return true
+		}
+	}
+	return false
+}
+
+func updateKey(key string) string {
+	var updatedKey string
+	if key == MmapEnabledKey {
+		updatedKey = common.MmapEnabledKey
+	} else {
+		updatedKey = key
+	}
+	return updatedKey
+}
+
 func updatePropertiesKeys(oldProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	props := make(map[string]string)
 	for _, prop := range oldProps {
-		var updatedKey string
-		if prop.Key == MmapEnabledKey {
-			updatedKey = common.MmapEnabledKey
-		} else {
-			updatedKey = prop.Key
-		}
+		updatedKey := updateKey(prop.Key)
 		props[updatedKey] = prop.Value
 	}
 
@@ -1317,21 +1336,30 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	isCollectionLoadedFn := func() (bool, error) {
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+		if err != nil {
+			return false, err
+		}
+		loaded, err1 := isCollectionLoaded(ctx, t.mixCoord, collectionID)
+		if err1 != nil {
+			return false, err1
+		}
+		return loaded, nil
+	}
+
 	t.Properties = updatePropertiesKeys(t.Properties)
 	for _, prop := range t.Properties {
-		if !IsKeyAllowed(prop.Key) {
+		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
 		}
 		// Check the value type based on the key
 		switch prop.Key {
 		case common.MmapEnabledKey:
-			collectionID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), t.CollectionName)
+			loaded, err := isCollectionLoadedFn()
 			if err != nil {
 				return err
-			}
-			loaded, err1 := isCollectionLoaded(ctx, t.mixCoord, collectionID)
-			if err1 != nil {
-				return err1
 			}
 			if loaded {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter collection field properties if collection loaded")
@@ -1382,6 +1410,27 @@ func (t *alterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
+
+	deleteKeys := make([]string, 0)
+	for _, key := range t.DeleteKeys {
+		updatedKey := updateKey(key)
+		if !IsKeyAllowDrop(updatedKey) {
+			return merr.WrapErrParameterInvalidMsg("%s is not allowed to drop in collection field param", key)
+		}
+
+		if updatedKey == common.MmapEnabledKey {
+			loaded, err := isCollectionLoadedFn()
+			if err != nil {
+				return err
+			}
+			if loaded {
+				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not drop collection field properties if collection loaded")
+			}
+		}
+
+		deleteKeys = append(deleteKeys, updatedKey)
+	}
+	t.DeleteKeys = deleteKeys
 
 	return nil
 }
@@ -2862,6 +2911,125 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 }
 
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type RunAnalyzerTask struct {
+	baseTask
+	Condition
+	*milvuspb.RunAnalyzerRequest
+	ctx          context.Context
+	collectionID typeutil.UniqueID
+	fieldID      typeutil.UniqueID
+	dbName       string
+	lb           LBPolicy
+
+	result *milvuspb.RunAnalyzerResponse
+}
+
+func (t *RunAnalyzerTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *RunAnalyzerTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *RunAnalyzerTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *RunAnalyzerTask) Name() string {
+	return RunAnalyzerTaskName
+}
+
+func (t *RunAnalyzerTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *RunAnalyzerTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *RunAnalyzerTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *RunAnalyzerTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *RunAnalyzerTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_RunAnalyzer
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
+	dbName := t.GetDbName()
+	if dbName == "" {
+		dbName = "default"
+	}
+	t.dbName = dbName
+
+	collID, err := globalMetaCache.GetCollectionID(ctx, dbName, t.GetCollectionName())
+	if err != nil { // err is not nil if collection not exists
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+
+	t.collectionID = collID
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, t.GetCollectionName())
+	if err != nil { // err is not nil if collection not exists
+		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
+	}
+
+	fieldId, ok := schema.MapFieldID(t.GetFieldName())
+	if !ok {
+		return merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(t.GetFieldName()))
+	}
+
+	t.fieldID = fieldId
+	t.result = &milvuspb.RunAnalyzerResponse{}
+	return nil
+}
+
+func (t *RunAnalyzerTask) runAnalyzerOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+	resp, err := qn.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+		Channel:       channel,
+		FieldId:       t.fieldID,
+		AnalyzerNames: t.GetAnalyzerNames(),
+		Placeholder:   t.GetPlaceholder(),
+		WithDetail:    t.GetWithDetail(),
+		WithHash:      t.GetWithHash(),
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := merr.Error(resp.GetStatus()); err != nil {
+		return err
+	}
+	t.result = resp
+	return nil
+}
+
+func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
+	err := t.lb.ExecuteOneChannel(ctx, CollectionWorkLoad{
+		db:             t.dbName,
+		collectionName: t.GetCollectionName(),
+		collectionID:   t.collectionID,
+		nq:             int64(len(t.GetPlaceholder())),
+		exec:           t.runAnalyzerOnShardleader,
+	})
+
+	return err
+}
+
+func (t *RunAnalyzerTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

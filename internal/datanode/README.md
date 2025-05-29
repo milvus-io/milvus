@@ -5,6 +5,6 @@ DataNode is the component to write insert and delete messages into persistent bl
 ## Dependency
 
 - KV store: a kv store that persists messages into blob storage.
-- Message stream: receive messages and publish imformation
+- Message stream: receive messages and publish information
 - Root Coordinator: get the latest unique IDs.
 - Data Coordinator: get the flush information and which message stream to subscribe.

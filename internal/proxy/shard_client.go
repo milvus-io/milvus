@@ -20,12 +20,13 @@ import (
 type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
 
 type nodeInfo struct {
-	nodeID  UniqueID
-	address string
+	nodeID      UniqueID
+	address     string
+	serviceable bool
 }
 
 func (n nodeInfo) String() string {
-	return fmt.Sprintf("<NodeID: %d>", n.nodeID)
+	return fmt.Sprintf("<NodeID: %d, serviceable: %v, address: %s>", n.nodeID, n.serviceable, n.address)
 }
 
 var errClosed = errors.New("client is closed")
@@ -153,8 +154,10 @@ func (n *shardClient) close() {
 // roundRobinSelectClient selects a client in a round-robin manner
 type shardClientMgr interface {
 	GetClient(ctx context.Context, nodeInfo nodeInfo) (types.QueryNodeClient, error)
-	Close()
 	SetClientCreatorFunc(creator queryNodeCreatorFunc)
+
+	Start()
+	Close()
 }
 
 type shardClientMgrImpl struct {
@@ -195,7 +198,6 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 		opt(s)
 	}
 
-	go s.PurgeClient()
 	return s
 }
 
@@ -234,6 +236,10 @@ func (c *shardClientMgrImpl) PurgeClient() {
 			})
 		}
 	}
+}
+
+func (c *shardClientMgrImpl) Start() {
+	go c.PurgeClient()
 }
 
 // Close release clients

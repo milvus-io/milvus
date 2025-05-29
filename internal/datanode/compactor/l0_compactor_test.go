@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -65,6 +66,9 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 		},
 	}
 	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan)
+	var err error
+	s.task.compactionParams, err = compaction.ParseParamsFromJSON("")
+	s.Require().NoError(err)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,

@@ -194,7 +194,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 }
@@ -216,7 +216,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil, s.chunkManager)
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -419,7 +419,16 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.Require().NoError(err)
 
 	// sync target version, make delegator serviceable
-	s.delegator.SyncTargetVersion(time.Now().UnixNano(), []int64{500}, []int64{1001}, []int64{1000}, nil, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:   2001,
+		GrowingInTarget: []int64{1001},
+		SealedSegmentRowCount: map[int64]int64{
+			1000: 100,
+		},
+		DroppedInTarget: []int64{},
+		Checkpoint:      &msgpb.MsgPosition{},
+		DeleteCP:        &msgpb.MsgPosition{},
+	}, []int64{500, 501})
 	s.delegator.ProcessDelete([]*DeleteData{
 		{
 			PartitionID: 500,
@@ -799,7 +808,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 					return s.mq, nil
 				},
-			}, 10000, nil, nil)
+			}, 10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())
@@ -945,6 +954,15 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
+	for {
+		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
+			return
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+}
+
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 	s.genCollectionWithFunction()
 
@@ -1004,7 +1022,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SyncDistribution(snapshot)
+		s.delegator.idfOracle.SetNext(snapshot)
+		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
@@ -1160,7 +1179,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SyncDistribution(snapshot)
+		s.delegator.idfOracle.SetNext(snapshot)
+		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
@@ -1411,8 +1431,15 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
-	s.Equal(int64(5), s.delegator.GetQueryView().GetVersion())
+	s.delegator.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:   5,
+		GrowingInTarget: []int64{1},
+		SealedInTarget:  []int64{2},
+		DroppedInTarget: []int64{3, 4},
+		Checkpoint:      &msgpb.MsgPosition{},
+		DeleteCP:        &msgpb.MsgPosition{},
+	}, []int64{500, 501})
+	s.Equal(int64(5), s.delegator.GetChannelQueryView().GetVersion())
 }
 
 func (s *DelegatorDataSuite) TestLevel0Deletions() {

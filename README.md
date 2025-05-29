@@ -246,7 +246,7 @@ Reference to cite when you use Milvus in a research paper:
 }
 ```
 <!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-437-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-405-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Abhijnan-Bajpai"><img src="https://avatars.githubusercontent.com/u/57059194?v=4" width="30px" /></a>
@@ -260,7 +260,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/Aredcap"><img src="https://avatars.githubusercontent.com/u/40494761?v=4" width="30px" /></a>
 <a href="https://github.com/ArenaSu"><img src="https://avatars.githubusercontent.com/u/21214629?v=4" width="30px" /></a>
 <a href="https://github.com/Armaggheddon"><img src="https://avatars.githubusercontent.com/u/47779194?v=4" width="30px" /></a>
-<a href="https://github.com/Arya0812"><img src="https://avatars.githubusercontent.com/u/114047052?v=4" width="30px" /></a>
 <a href="https://github.com/BUPTAnderson"><img src="https://avatars.githubusercontent.com/u/13449703?v=4" width="30px" /></a>
 <a href="https://github.com/Ben-Aaron-Bio-Rad"><img src="https://avatars.githubusercontent.com/u/54123439?v=4" width="30px" /></a>
 <a href="https://github.com/Bennu-Li"><img src="https://avatars.githubusercontent.com/u/53458891?v=4" width="30px" /></a>
@@ -277,17 +276,13 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/DLT1412"><img src="https://avatars.githubusercontent.com/u/8294986?v=4" width="30px" /></a>
 <a href="https://github.com/DanielHuang1983"><img src="https://avatars.githubusercontent.com/u/4417873?v=4" width="30px" /></a>
 <a href="https://github.com/Deep1Shikha"><img src="https://avatars.githubusercontent.com/u/47516502?v=4" width="30px" /></a>
-<a href="https://github.com/DerekChia"><img src="https://avatars.githubusercontent.com/u/1457728?v=4" width="30px" /></a>
 <a href="https://github.com/DingQK"><img src="https://avatars.githubusercontent.com/u/58072531?v=4" width="30px" /></a>
 <a href="https://github.com/DiptoChakrabarty"><img src="https://avatars.githubusercontent.com/u/45638240?v=4" width="30px" /></a>
-<a href="https://github.com/Emma-Song"><img src="https://avatars.githubusercontent.com/u/64460989?v=4" width="30px" /></a>
 <a href="https://github.com/EricStarer"><img src="https://avatars.githubusercontent.com/u/34002927?v=4" width="30px" /></a>
 <a href="https://github.com/Erzangel"><img src="https://avatars.githubusercontent.com/u/57399897?v=4" width="30px" /></a>
 <a href="https://github.com/Fierralin"><img src="https://avatars.githubusercontent.com/u/8857059?v=4" width="30px" /></a>
 <a href="https://github.com/FluorineDog"><img src="https://avatars.githubusercontent.com/u/15663612?v=4" width="30px" /></a>
-<a href="https://github.com/Giriraj-Roy"><img src="https://avatars.githubusercontent.com/u/88903134?v=4" width="30px" /></a>
 <a href="https://github.com/Gofastasf"><img src="https://avatars.githubusercontent.com/u/159963288?v=4" width="30px" /></a>
-<a href="https://github.com/Googleaa"><img src="https://avatars.githubusercontent.com/u/55842817?v=4" width="30px" /></a>
 <a href="https://github.com/Gracieeea"><img src="https://avatars.githubusercontent.com/u/50101579?v=4" width="30px" /></a>
 <a href="https://github.com/GuanyunFeng"><img src="https://avatars.githubusercontent.com/u/40229765?v=4" width="30px" /></a>
 <a href="https://github.com/GuoRentong"><img src="https://avatars.githubusercontent.com/u/57477222?v=4" width="30px" /></a>
@@ -295,11 +290,12 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/Hard-Coder05"><img src="https://avatars.githubusercontent.com/u/54059881?v=4" width="30px" /></a>
 <a href="https://github.com/Heisenberg-Y"><img src="https://avatars.githubusercontent.com/u/35055583?v=4" width="30px" /></a>
 <a href="https://github.com/HesterG"><img src="https://avatars.githubusercontent.com/u/17645053?v=4" width="30px" /></a>
+<a href="https://github.com/Hoyaspark"><img src="https://avatars.githubusercontent.com/u/88016041?v=4" width="30px" /></a>
 <a href="https://github.com/HuaSheng2000"><img src="https://avatars.githubusercontent.com/u/34791273?v=4" width="30px" /></a>
 <a href="https://github.com/HuangHua"><img src="https://avatars.githubusercontent.com/u/2274405?v=4" width="30px" /></a>
+<a href="https://github.com/HurSungYun"><img src="https://avatars.githubusercontent.com/u/8033896?v=4" width="30px" /></a>
 <a href="https://github.com/Ice-YcY"><img src="https://avatars.githubusercontent.com/u/85332705?v=4" width="30px" /></a>
 <a href="https://github.com/JackLCL"><img src="https://avatars.githubusercontent.com/u/53512883?v=4" width="30px" /></a>
-<a href="https://github.com/Jacksonxhx"><img src="https://avatars.githubusercontent.com/u/139523303?v=4" width="30px" /></a>
 <a href="https://github.com/JadeFlute0127"><img src="https://avatars.githubusercontent.com/u/35321989?v=4" width="30px" /></a>
 <a href="https://github.com/Janglearnstocode"><img src="https://avatars.githubusercontent.com/u/204587742?v=4" width="30px" /></a>
 <a href="https://github.com/Javajava1"><img src="https://avatars.githubusercontent.com/u/29594737?v=4" width="30px" /></a>
@@ -317,7 +313,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/LionelDong"><img src="https://avatars.githubusercontent.com/u/7533395?v=4" width="30px" /></a>
 <a href="https://github.com/LocoRichard"><img src="https://avatars.githubusercontent.com/u/81553353?v=4" width="30px" /></a>
 <a href="https://github.com/LoveEachDay"><img src="https://avatars.githubusercontent.com/u/1573213?v=4" width="30px" /></a>
-<a href="https://github.com/Lumina2025"><img src="https://avatars.githubusercontent.com/u/201706568?v=4" width="30px" /></a>
 <a href="https://github.com/MrPresent-Han"><img src="https://avatars.githubusercontent.com/u/116052805?v=4" width="30px" /></a>
 <a href="https://github.com/NavanshGoel"><img src="https://avatars.githubusercontent.com/u/74401713?v=4" width="30px" /></a>
 <a href="https://github.com/NicoYuan1986"><img src="https://avatars.githubusercontent.com/u/109071306?v=4" width="30px" /></a>
@@ -328,7 +323,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/PowderLi"><img src="https://avatars.githubusercontent.com/u/135960789?v=4" width="30px" /></a>
 <a href="https://github.com/PwzXxm"><img src="https://avatars.githubusercontent.com/u/6563846?v=4" width="30px" /></a>
 <a href="https://github.com/QipengZhou"><img src="https://avatars.githubusercontent.com/u/5410298?v=4" width="30px" /></a>
-<a href="https://github.com/RafaelDSS"><img src="https://avatars.githubusercontent.com/u/27598602?v=4" width="30px" /></a>
 <a href="https://github.com/RangerCD"><img src="https://avatars.githubusercontent.com/u/6872198?v=4" width="30px" /></a>
 <a href="https://github.com/Raysilience"><img src="https://avatars.githubusercontent.com/u/45241093?v=4" width="30px" /></a>
 <a href="https://github.com/Reidddddd"><img src="https://avatars.githubusercontent.com/u/5352837?v=4" width="30px" /></a>
@@ -342,9 +336,9 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/SkyYang"><img src="https://avatars.githubusercontent.com/u/4702509?v=4" width="30px" /></a>
 <a href="https://github.com/SnowyOwl-KHY"><img src="https://avatars.githubusercontent.com/u/10348819?v=4" width="30px" /></a>
 <a href="https://github.com/SpadeA-Tang"><img src="https://avatars.githubusercontent.com/u/71589810?v=4" width="30px" /></a>
-<a href="https://github.com/Spnetic-5"><img src="https://avatars.githubusercontent.com/u/66636289?v=4" width="30px" /></a>
 <a href="https://github.com/Sunt-ing"><img src="https://avatars.githubusercontent.com/u/43040147?v=4" width="30px" /></a>
 <a href="https://github.com/SwaggySong"><img src="https://avatars.githubusercontent.com/u/36157116?v=4" width="30px" /></a>
+<a href="https://github.com/TheShubhendra"><img src="https://avatars.githubusercontent.com/u/37535104?v=4" width="30px" /></a>
 <a href="https://github.com/Thor-ChenBiao"><img src="https://avatars.githubusercontent.com/u/104345188?v=4" width="30px" /></a>
 <a href="https://github.com/ThreadDao"><img src="https://avatars.githubusercontent.com/u/27288593?v=4" width="30px" /></a>
 <a href="https://github.com/ThyeeZz"><img src="https://avatars.githubusercontent.com/u/41352919?v=4" width="30px" /></a>
@@ -367,7 +361,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/aakejiang"><img src="https://avatars.githubusercontent.com/u/68629395?v=4" width="30px" /></a>
 <a href="https://github.com/aaronjin2010"><img src="https://avatars.githubusercontent.com/u/48044391?v=4" width="30px" /></a>
 <a href="https://github.com/abd-770"><img src="https://avatars.githubusercontent.com/u/92085834?v=4" width="30px" /></a>
-<a href="https://github.com/aharonh"><img src="https://avatars.githubusercontent.com/u/350928?v=4" width="30px" /></a>
 <a href="https://github.com/akihoni"><img src="https://avatars.githubusercontent.com/u/36330442?v=4" width="30px" /></a>
 <a href="https://github.com/alexanderguzhva"><img src="https://avatars.githubusercontent.com/u/10901481?v=4" width="30px" /></a>
 <a href="https://github.com/alwayslove2013"><img src="https://avatars.githubusercontent.com/u/22510720?v=4" width="30px" /></a>
@@ -375,7 +368,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/any35"><img src="https://avatars.githubusercontent.com/u/2082210?v=4" width="30px" /></a>
 <a href="https://github.com/aoiasd"><img src="https://avatars.githubusercontent.com/u/45024769?v=4" width="30px" /></a>
 <a href="https://github.com/arijit-chowdhury-genea"><img src="https://avatars.githubusercontent.com/u/104769013?v=4" width="30px" /></a>
-<a href="https://github.com/armanexplorer"><img src="https://avatars.githubusercontent.com/u/44166374?v=4" width="30px" /></a>
 <a href="https://github.com/ashkrisk"><img src="https://avatars.githubusercontent.com/u/137368647?v=4" width="30px" /></a>
 <a href="https://github.com/ashyshyshyman"><img src="https://avatars.githubusercontent.com/u/50362613?v=4" width="30px" /></a>
 <a href="https://github.com/avats-dev"><img src="https://avatars.githubusercontent.com/u/35889327?v=4" width="30px" /></a>
@@ -398,11 +390,8 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/charlspjohn"><img src="https://avatars.githubusercontent.com/u/14850736?v=4" width="30px" /></a>
 <a href="https://github.com/chasingegg"><img src="https://avatars.githubusercontent.com/u/18375889?v=4" width="30px" /></a>
 <a href="https://github.com/chengpu"><img src="https://avatars.githubusercontent.com/u/2233492?v=4" width="30px" /></a>
-<a href="https://github.com/chensanle"><img src="https://avatars.githubusercontent.com/u/31087327?v=4" width="30px" /></a>
 <a href="https://github.com/chenxingqiang"><img src="https://avatars.githubusercontent.com/u/12387235?v=4" width="30px" /></a>
-<a href="https://github.com/chinalu"><img src="https://avatars.githubusercontent.com/u/167307?v=4" width="30px" /></a>
 <a href="https://github.com/chinamcafee"><img src="https://avatars.githubusercontent.com/u/3439961?v=4" width="30px" /></a>
-<a href="https://github.com/christy"><img src="https://avatars.githubusercontent.com/u/94918?v=4" width="30px" /></a>
 <a href="https://github.com/chuangfengwang"><img src="https://avatars.githubusercontent.com/u/24692397?v=4" width="30px" /></a>
 <a href="https://github.com/chyezh"><img src="https://avatars.githubusercontent.com/u/20332315?v=4" width="30px" /></a>
 <a href="https://github.com/cjrh"><img src="https://avatars.githubusercontent.com/u/480395?v=4" width="30px" /></a>
@@ -428,22 +417,18 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/del-zhenwu"><img src="https://avatars.githubusercontent.com/u/56623710?v=4" width="30px" /></a>
 <a href="https://github.com/dengxiaohai"><img src="https://avatars.githubusercontent.com/u/137682492?v=4" width="30px" /></a>
 <a href="https://github.com/disflyer"><img src="https://avatars.githubusercontent.com/u/22723892?v=4" width="30px" /></a>
-<a href="https://github.com/dnoliver"><img src="https://avatars.githubusercontent.com/u/7730267?v=4" width="30px" /></a>
+<a href="https://github.com/divyaruhil"><img src="https://avatars.githubusercontent.com/u/117009486?v=4" width="30px" /></a>
 <a href="https://github.com/donno2048"><img src="https://avatars.githubusercontent.com/u/61805754?v=4" width="30px" /></a>
-<a href="https://github.com/douglarek"><img src="https://avatars.githubusercontent.com/u/1488134?v=4" width="30px" /></a>
 <a href="https://github.com/drow931"><img src="https://avatars.githubusercontent.com/u/11514434?v=4" width="30px" /></a>
 <a href="https://github.com/dvzubarev"><img src="https://avatars.githubusercontent.com/u/14878830?v=4" width="30px" /></a>
 <a href="https://github.com/dyhyfu"><img src="https://avatars.githubusercontent.com/u/64584368?v=4" width="30px" /></a>
 <a href="https://github.com/eddumelendez"><img src="https://avatars.githubusercontent.com/u/1810547?v=4" width="30px" /></a>
-<a href="https://github.com/egoebelbecker"><img src="https://avatars.githubusercontent.com/u/5241455?v=4" width="30px" /></a>
 <a href="https://github.com/ehooi"><img src="https://avatars.githubusercontent.com/u/1306183?v=4" width="30px" /></a>
 <a href="https://github.com/elfisworking"><img src="https://avatars.githubusercontent.com/u/37609214?v=4" width="30px" /></a>
 <a href="https://github.com/eli-b"><img src="https://avatars.githubusercontent.com/u/834999?v=4" width="30px" /></a>
 <a href="https://github.com/elstic"><img src="https://avatars.githubusercontent.com/u/48523564?v=4" width="30px" /></a>
-<a href="https://github.com/eltociear"><img src="https://avatars.githubusercontent.com/u/22633385?v=4" width="30px" /></a>
 <a href="https://github.com/eolivelli"><img src="https://avatars.githubusercontent.com/u/9469110?v=4" width="30px" /></a>
 <a href="https://github.com/erdustiggen"><img src="https://avatars.githubusercontent.com/u/25433850?v=4" width="30px" /></a>
-<a href="https://github.com/ericljx2020-gmail"><img src="https://avatars.githubusercontent.com/u/68884486?v=4" width="30px" /></a>
 <a href="https://github.com/feisiyicl"><img src="https://avatars.githubusercontent.com/u/64510805?v=4" width="30px" /></a>
 <a href="https://github.com/fengjun2016"><img src="https://avatars.githubusercontent.com/u/23044049?v=4" width="30px" /></a>
 <a href="https://github.com/filip-halt"><img src="https://avatars.githubusercontent.com/u/81822489?v=4" width="30px" /></a>
@@ -458,8 +443,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/gifi-siby"><img src="https://avatars.githubusercontent.com/u/176461003?v=4" width="30px" /></a>
 <a href="https://github.com/git-hulk"><img src="https://avatars.githubusercontent.com/u/4987594?v=4" width="30px" /></a>
 <a href="https://github.com/godchen0212"><img src="https://avatars.githubusercontent.com/u/67679556?v=4" width="30px" /></a>
-<a href="https://github.com/goodhamgupta"><img src="https://avatars.githubusercontent.com/u/14368181?v=4" width="30px" /></a>
-<a href="https://github.com/gouzil"><img src="https://avatars.githubusercontent.com/u/66515297?v=4" width="30px" /></a>
 <a href="https://github.com/gracezzzzz"><img src="https://avatars.githubusercontent.com/u/56617657?v=4" width="30px" /></a>
 <a href="https://github.com/grtoverflow"><img src="https://avatars.githubusercontent.com/u/8500564?v=4" width="30px" /></a>
 <a href="https://github.com/gruebel"><img src="https://avatars.githubusercontent.com/u/33207684?v=4" width="30px" /></a>
@@ -468,9 +451,9 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/guoxiangzhou"><img src="https://avatars.githubusercontent.com/u/52496626?v=4" width="30px" /></a>
 <a href="https://github.com/hadim"><img src="https://avatars.githubusercontent.com/u/528003?v=4" width="30px" /></a>
 <a href="https://github.com/haorenfsa"><img src="https://avatars.githubusercontent.com/u/15938850?v=4" width="30px" /></a>
+<a href="https://github.com/hckex"><img src="https://avatars.githubusercontent.com/u/33862757?v=4" width="30px" /></a>
 <a href="https://github.com/hedane"><img src="https://avatars.githubusercontent.com/u/12457872?v=4" width="30px" /></a>
 <a href="https://github.com/henryoswald"><img src="https://avatars.githubusercontent.com/u/343366?v=4" width="30px" /></a>
-<a href="https://github.com/hey-hoho"><img src="https://avatars.githubusercontent.com/u/8401517?v=4" width="30px" /></a>
 <a href="https://github.com/hishope"><img src="https://avatars.githubusercontent.com/u/153272819?v=4" width="30px" /></a>
 <a href="https://github.com/huanghaoyuanhhy"><img src="https://avatars.githubusercontent.com/u/103482615?v=4" width="30px" /></a>
 <a href="https://github.com/huangjincheng2022"><img src="https://avatars.githubusercontent.com/u/98305308?v=4" width="30px" /></a>
@@ -482,22 +465,20 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/jackyu2020"><img src="https://avatars.githubusercontent.com/u/64533877?v=4" width="30px" /></a>
 <a href="https://github.com/jaelgu"><img src="https://avatars.githubusercontent.com/u/86251631?v=4" width="30px" /></a>
 <a href="https://github.com/jaime0815"><img src="https://avatars.githubusercontent.com/u/4024711?v=4" width="30px" /></a>
-<a href="https://github.com/jalakoo"><img src="https://avatars.githubusercontent.com/u/960717?v=4" width="30px" /></a>
 <a href="https://github.com/jeffoverflow"><img src="https://avatars.githubusercontent.com/u/24581746?v=4" width="30px" /></a>
-<a href="https://github.com/jeffreye"><img src="https://avatars.githubusercontent.com/u/1737680?v=4" width="30px" /></a>
 <a href="https://github.com/jennyli-z"><img src="https://avatars.githubusercontent.com/u/93511422?v=4" width="30px" /></a>
 <a href="https://github.com/jhonroxton"><img src="https://avatars.githubusercontent.com/u/105436184?v=4" width="30px" /></a>
 <a href="https://github.com/jiangyinzuo"><img src="https://avatars.githubusercontent.com/u/40995042?v=4" width="30px" /></a>
 <a href="https://github.com/jiaoew1991"><img src="https://avatars.githubusercontent.com/u/2297455?v=4" width="30px" /></a>
 <a href="https://github.com/jielinxu"><img src="https://avatars.githubusercontent.com/u/52057195?v=4" width="30px" /></a>
 <a href="https://github.com/jingkl"><img src="https://avatars.githubusercontent.com/u/34296482?v=4" width="30px" /></a>
-<a href="https://github.com/jinhonglin-ryan"><img src="https://avatars.githubusercontent.com/u/123346659?v=4" width="30px" /></a>
 <a href="https://github.com/jjyaoao"><img src="https://avatars.githubusercontent.com/u/88936287?v=4" width="30px" /></a>
 <a href="https://github.com/jkx8fc"><img src="https://avatars.githubusercontent.com/u/31717785?v=4" width="30px" /></a>
 <a href="https://github.com/joeyjooste"><img src="https://avatars.githubusercontent.com/u/72280325?v=4" width="30px" /></a>
 <a href="https://github.com/john-h-luo"><img src="https://avatars.githubusercontent.com/u/67673717?v=4" width="30px" /></a>
+<a href="https://github.com/jperez999"><img src="https://avatars.githubusercontent.com/u/37191411?v=4" width="30px" /></a>
+<a href="https://github.com/juliens"><img src="https://avatars.githubusercontent.com/u/195661?v=4" width="30px" /></a>
 <a href="https://github.com/junjiejiangjjj"><img src="https://avatars.githubusercontent.com/u/14136703?v=4" width="30px" /></a>
-<a href="https://github.com/jxdv"><img src="https://avatars.githubusercontent.com/u/138708600?v=4" width="30px" /></a>
 <a href="https://github.com/jyc4617"><img src="https://avatars.githubusercontent.com/u/3044583?v=4" width="30px" /></a>
 <a href="https://github.com/kartikcho"><img src="https://avatars.githubusercontent.com/u/48270786?v=4" width="30px" /></a>
 <a href="https://github.com/kateshaowanjou"><img src="https://avatars.githubusercontent.com/u/58837504?v=4" width="30px" /></a>
@@ -512,9 +493,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/leykun10"><img src="https://avatars.githubusercontent.com/u/45382760?v=4" width="30px" /></a>
 <a href="https://github.com/lhotari"><img src="https://avatars.githubusercontent.com/u/66864?v=4" width="30px" /></a>
 <a href="https://github.com/liliu-z"><img src="https://avatars.githubusercontent.com/u/105927039?v=4" width="30px" /></a>
-<a href="https://github.com/linchpinlin"><img src="https://avatars.githubusercontent.com/u/31131753?v=4" width="30px" /></a>
 <a href="https://github.com/linhgao"><img src="https://avatars.githubusercontent.com/u/102851605?v=4" width="30px" /></a>
-<a href="https://github.com/lixiangMindSpore"><img src="https://avatars.githubusercontent.com/u/78945582?v=4" width="30px" /></a>
 <a href="https://github.com/liyun95"><img src="https://avatars.githubusercontent.com/u/105278390?v=4" width="30px" /></a>
 <a href="https://github.com/locustbaby"><img src="https://avatars.githubusercontent.com/u/21237232?v=4" width="30px" /></a>
 <a href="https://github.com/loguo"><img src="https://avatars.githubusercontent.com/u/15364733?v=4" width="30px" /></a>
@@ -522,16 +501,14 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/lowener"><img src="https://avatars.githubusercontent.com/u/9810050?v=4" width="30px" /></a>
 <a href="https://github.com/lsgrep"><img src="https://avatars.githubusercontent.com/u/3893940?v=4" width="30px" /></a>
 <a href="https://github.com/lwglgy"><img src="https://avatars.githubusercontent.com/u/26682620?v=4" width="30px" /></a>
-<a href="https://github.com/maclandrol"><img src="https://avatars.githubusercontent.com/u/5290110?v=4" width="30px" /></a>
 <a href="https://github.com/madogar"><img src="https://avatars.githubusercontent.com/u/36537062?v=4" width="30px" /></a>
 <a href="https://github.com/maksspace"><img src="https://avatars.githubusercontent.com/u/9841409?v=4" width="30px" /></a>
-<a href="https://github.com/manifoldhiker"><img src="https://avatars.githubusercontent.com/u/22048793?v=4" width="30px" /></a>
-<a href="https://github.com/manoj9896"><img src="https://avatars.githubusercontent.com/u/51627080?v=4" width="30px" /></a>
 <a href="https://github.com/matchyc"><img src="https://avatars.githubusercontent.com/u/57976772?v=4" width="30px" /></a>
 <a href="https://github.com/matrixji"><img src="https://avatars.githubusercontent.com/u/183388?v=4" width="30px" /></a>
 <a href="https://github.com/mausch"><img src="https://avatars.githubusercontent.com/u/95194?v=4" width="30px" /></a>
+<a href="https://github.com/mcamou"><img src="https://avatars.githubusercontent.com/u/87200?v=4" width="30px" /></a>
+<a href="https://github.com/michaelkl"><img src="https://avatars.githubusercontent.com/u/1443825?v=4" width="30px" /></a>
 <a href="https://github.com/mihailyanchev"><img src="https://avatars.githubusercontent.com/u/34907806?v=4" width="30px" /></a>
-<a href="https://github.com/miia12"><img src="https://avatars.githubusercontent.com/u/22544815?v=4" width="30px" /></a>
 <a href="https://github.com/mileyzjq"><img src="https://avatars.githubusercontent.com/u/37039827?v=4" width="30px" /></a>
 <a href="https://github.com/milvus-ci-robot"><img src="https://avatars.githubusercontent.com/u/87847967?v=4" width="30px" /></a>
 <a href="https://github.com/mimoning"><img src="https://avatars.githubusercontent.com/u/19261942?v=4" width="30px" /></a>
@@ -548,14 +525,13 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/op-hunter"><img src="https://avatars.githubusercontent.com/u/5617677?v=4" width="30px" /></a>
 <a href="https://github.com/ownbylichaobao"><img src="https://avatars.githubusercontent.com/u/37684963?v=4" width="30px" /></a>
 <a href="https://github.com/panjf2000"><img src="https://avatars.githubusercontent.com/u/7496278?v=4" width="30px" /></a>
-<a href="https://github.com/parsa-ra"><img src="https://avatars.githubusercontent.com/u/11356471?v=4" width="30px" /></a>
-<a href="https://github.com/peckjon"><img src="https://avatars.githubusercontent.com/u/5299412?v=4" width="30px" /></a>
 <a href="https://github.com/pengjeck"><img src="https://avatars.githubusercontent.com/u/14035577?v=4" width="30px" /></a>
 <a href="https://github.com/phantom8548"><img src="https://avatars.githubusercontent.com/u/11576622?v=4" width="30px" /></a>
 <a href="https://github.com/pingliu"><img src="https://avatars.githubusercontent.com/u/6415493?v=4" width="30px" /></a>
 <a href="https://github.com/ponponon"><img src="https://avatars.githubusercontent.com/u/38725104?v=4" width="30px" /></a>
 <a href="https://github.com/preetham"><img src="https://avatars.githubusercontent.com/u/9149028?v=4" width="30px" /></a>
 <a href="https://github.com/presburger"><img src="https://avatars.githubusercontent.com/u/49336176?v=4" width="30px" /></a>
+<a href="https://github.com/proost"><img src="https://avatars.githubusercontent.com/u/34047134?v=4" width="30px" /></a>
 <a href="https://github.com/psc0606"><img src="https://avatars.githubusercontent.com/u/7888889?v=4" width="30px" /></a>
 <a href="https://github.com/punkerpunker"><img src="https://avatars.githubusercontent.com/u/54440025?v=4" width="30px" /></a>
 <a href="https://github.com/qbzenker"><img src="https://avatars.githubusercontent.com/u/51972064?v=4" width="30px" /></a>
@@ -568,7 +544,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/sageanya"><img src="https://avatars.githubusercontent.com/u/37909674?v=4" width="30px" /></a>
 <a href="https://github.com/saisona"><img src="https://avatars.githubusercontent.com/u/10884762?v=4" width="30px" /></a>
 <a href="https://github.com/saivarunk"><img src="https://avatars.githubusercontent.com/u/2976867?v=4" width="30px" /></a>
-<a href="https://github.com/sapora1"><img src="https://avatars.githubusercontent.com/u/59124772?v=4" width="30px" /></a>
 <a href="https://github.com/sarah-inkeep"><img src="https://avatars.githubusercontent.com/u/129242944?v=4" width="30px" /></a>
 <a href="https://github.com/scipe"><img src="https://avatars.githubusercontent.com/u/3996622?v=4" width="30px" /></a>
 <a href="https://github.com/scsven"><img src="https://avatars.githubusercontent.com/u/100122127?v=4" width="30px" /></a>
@@ -588,7 +563,6 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/siriusctrl"><img src="https://avatars.githubusercontent.com/u/26541600?v=4" width="30px" /></a>
 <a href="https://github.com/slobentanzer"><img src="https://avatars.githubusercontent.com/u/13223629?v=4" width="30px" /></a>
 <a href="https://github.com/smellthemoon"><img src="https://avatars.githubusercontent.com/u/64083300?v=4" width="30px" /></a>
-<a href="https://github.com/snewcomer"><img src="https://avatars.githubusercontent.com/u/7374640?v=4" width="30px" /></a>
 <a href="https://github.com/snyk-bot"><img src="https://avatars.githubusercontent.com/u/19733683?v=4" width="30px" /></a>
 <a href="https://github.com/songxianj"><img src="https://avatars.githubusercontent.com/u/107831450?v=4" width="30px" /></a>
 <a href="https://github.com/soothing-rain"><img src="https://avatars.githubusercontent.com/u/69466447?v=4" width="30px" /></a>
@@ -598,11 +572,9 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/sre-ro"><img src="https://avatars.githubusercontent.com/u/93502486?v=4" width="30px" /></a>
 <a href="https://github.com/sreyan-ghosh"><img src="https://avatars.githubusercontent.com/u/60854658?v=4" width="30px" /></a>
 <a href="https://github.com/ss892714028"><img src="https://avatars.githubusercontent.com/u/34635663?v=4" width="30px" /></a>
-<a href="https://github.com/stefanwebb"><img src="https://avatars.githubusercontent.com/u/4926302?v=4" width="30px" /></a>
 <a href="https://github.com/stephen37"><img src="https://avatars.githubusercontent.com/u/6506810?v=4" width="30px" /></a>
 <a href="https://github.com/stevetracvc"><img src="https://avatars.githubusercontent.com/u/70416691?v=4" width="30px" /></a>
 <a href="https://github.com/stuartjing"><img src="https://avatars.githubusercontent.com/u/3454260?v=4" width="30px" /></a>
-<a href="https://github.com/sty945"><img src="https://avatars.githubusercontent.com/u/10708326?v=4" width="30px" /></a>
 <a href="https://github.com/sunby"><img src="https://avatars.githubusercontent.com/u/9817127?v=4" width="30px" /></a>
 <a href="https://github.com/sutcalag"><img src="https://avatars.githubusercontent.com/u/83750738?v=4" width="30px" /></a>
 <a href="https://github.com/sworddish"><img src="https://avatars.githubusercontent.com/u/219938?v=4" width="30px" /></a>
@@ -620,11 +592,11 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/trovwu"><img src="https://avatars.githubusercontent.com/u/89676996?v=4" width="30px" /></a>
 <a href="https://github.com/ulovecode"><img src="https://avatars.githubusercontent.com/u/30142181?v=4" width="30px" /></a>
 <a href="https://github.com/unfode"><img src="https://avatars.githubusercontent.com/u/95689995?v=4" width="30px" /></a>
+<a href="https://github.com/virgo-o"><img src="https://avatars.githubusercontent.com/u/138708600?v=4" width="30px" /></a>
 <a href="https://github.com/vladwa"><img src="https://avatars.githubusercontent.com/u/22994848?v=4" width="30px" /></a>
 <a href="https://github.com/vsanna"><img src="https://avatars.githubusercontent.com/u/7834445?v=4" width="30px" /></a>
 <a href="https://github.com/vtereshyn"><img src="https://avatars.githubusercontent.com/u/32247411?v=4" width="30px" /></a>
 <a href="https://github.com/wangting0128"><img src="https://avatars.githubusercontent.com/u/26307815?v=4" width="30px" /></a>
-<a href="https://github.com/want-fly"><img src="https://avatars.githubusercontent.com/u/36727480?v=4" width="30px" /></a>
 <a href="https://github.com/water32"><img src="https://avatars.githubusercontent.com/u/13234561?v=4" width="30px" /></a>
 <a href="https://github.com/wayblink"><img src="https://avatars.githubusercontent.com/u/18096561?v=4" width="30px" /></a>
 <a href="https://github.com/weiZhenkun"><img src="https://avatars.githubusercontent.com/u/27683687?v=4" width="30px" /></a>
@@ -642,6 +614,7 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/xiaocai2333"><img src="https://avatars.githubusercontent.com/u/46207236?v=4" width="30px" /></a>
 <a href="https://github.com/xiaofan-luan"><img src="https://avatars.githubusercontent.com/u/83447078?v=4" width="30px" /></a>
 <a href="https://github.com/xiaohu4313888"><img src="https://avatars.githubusercontent.com/u/39088547?v=4" width="30px" /></a>
+<a href="https://github.com/xiaowshi"><img src="https://avatars.githubusercontent.com/u/45102896?v=4" width="30px" /></a>
 <a href="https://github.com/xiedeyantu"><img src="https://avatars.githubusercontent.com/u/49781471?v=4" width="30px" /></a>
 <a href="https://github.com/xige-16"><img src="https://avatars.githubusercontent.com/u/20124155?v=4" width="30px" /></a>
 <a href="https://github.com/xiyichan"><img src="https://avatars.githubusercontent.com/u/34647972?v=4" width="30px" /></a>
@@ -660,13 +633,8 @@ Reference to cite when you use Milvus in a research paper:
 <a href="https://github.com/yiwen92"><img src="https://avatars.githubusercontent.com/u/34636520?v=4" width="30px" /></a>
 <a href="https://github.com/yongpengli-z"><img src="https://avatars.githubusercontent.com/u/103410837?v=4" width="30px" /></a>
 <a href="https://github.com/youny626"><img src="https://avatars.githubusercontent.com/u/9016120?v=4" width="30px" /></a>
-<a href="https://github.com/ytang07"><img src="https://avatars.githubusercontent.com/u/17556662?v=4" width="30px" /></a>
-<a href="https://github.com/yuhaowin"><img src="https://avatars.githubusercontent.com/u/34699768?v=4" width="30px" /></a>
 <a href="https://github.com/yuyicai"><img src="https://avatars.githubusercontent.com/u/13033733?v=4" width="30px" /></a>
-<a href="https://github.com/yuyu-wy"><img src="https://avatars.githubusercontent.com/u/81746160?v=4" width="30px" /></a>
 <a href="https://github.com/yxm1536"><img src="https://avatars.githubusercontent.com/u/62009483?v=4" width="30px" /></a>
-<a href="https://github.com/yylstudy"><img src="https://avatars.githubusercontent.com/u/26402953?v=4" width="30px" /></a>
-<a href="https://github.com/zamanmub"><img src="https://avatars.githubusercontent.com/u/32416908?v=4" width="30px" /></a>
 <a href="https://github.com/zander-bobronnikov"><img src="https://avatars.githubusercontent.com/u/183726703?v=4" width="30px" /></a>
 <a href="https://github.com/zc2638"><img src="https://avatars.githubusercontent.com/u/28284116?v=4" width="30px" /></a>
 <a href="https://github.com/zc277584121"><img src="https://avatars.githubusercontent.com/u/17022025?v=4" width="30px" /></a>
