@@ -251,6 +251,13 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		}
 	}()
 
+	queryView := delegator.NewChannelQueryView(
+		channel.GetUnflushedSegmentIds(),
+		req.GetSealedSegmentRowCount(),
+		req.GetPartitionIDs(),
+		req.GetTargetVersion(),
+	)
+
 	delegator, err := delegator.NewShardDelegator(
 		ctx,
 		req.GetCollectionID(),
@@ -264,6 +271,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		channel.GetSeekPosition().GetTimestamp(),
 		node.queryHook,
 		node.chunkManager,
+		queryView,
 	)
 	if err != nil {
 		log.Warn("failed to create shard delegator", zap.Error(err))
@@ -883,7 +891,6 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 	defer func() {
 		node.manager.Collection.Unref(req.GetReq().GetCollectionID(), 1)
 	}()
-
 	// Send task to scheduler and wait until it finished.
 	task := tasks.NewQueryTask(queryCtx, collection, node.manager, req)
 	if err := node.scheduler.Add(task); err != nil {
@@ -1253,7 +1260,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			numOfGrowingRows += segment.InsertCount()
 		}
 
-		queryView := delegator.GetQueryView()
+		queryView := delegator.GetChannelQueryView()
 		leaderViews = append(leaderViews, &querypb.LeaderView{
 			Collection:             delegator.Collection(),
 			Channel:                key,
@@ -1356,16 +1363,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(flushedInfo)
-			deleteCP := action.GetDeleteCP()
-			if deleteCP == nil {
-				// for compatible with 2.4, we use checkpoint as deleteCP when deleteCP is nil
-				deleteCP = action.GetCheckpoint()
-				log.Info("use checkpoint as deleteCP",
-					zap.String("channelName", req.GetChannel()),
-					zap.Time("deleteSeekPos", tsoutil.PhysicalTime(action.GetCheckpoint().GetTimestamp())))
-			}
-			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), req.GetLoadMeta().GetPartitionIDs(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint(), deleteCP)
+			shardDelegator.SyncTargetVersion(action, req.GetLoadMeta().GetPartitionIDs())
 		case querypb.SyncType_UpdatePartitionStats:
 			log.Info("sync update partition stats versions")
 			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)
@@ -1525,6 +1523,31 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 	return &querypb.DeleteBatchResponse{
 		Status:    merr.Success(),
 		FailedIds: errSet.Collect(),
+	}, nil
+}
+
+func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	// get delegator
+	sd, ok := node.delegators.Get(req.GetChannel())
+	if !ok {
+		err := merr.WrapErrChannelNotFound(req.GetChannel())
+		log.Warn("RunAnalyzer failed, failed to get shard delegator", zap.Error(err))
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	// run analyzer
+	results, err := sd.RunAnalyzer(ctx, req)
+	if err != nil {
+		log.Warn("failed to search on delegator", zap.Error(err))
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &milvuspb.RunAnalyzerResponse{
+		Status:  merr.Status(nil),
+		Results: results,
 	}, nil
 }
 

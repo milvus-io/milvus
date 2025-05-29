@@ -84,6 +84,25 @@ TimestampIndex::GenerateBitset(Timestamp query_timestamp,
     return bitset;
 }
 
+BitsetType
+TimestampIndex::GenerateTTLBitset(const Timestamp* timestamps,
+                                  int64_t size,
+                                  Timestamp expire_ts,
+                                  std::pair<int64_t, int64_t> active_range) {
+    auto beg = active_range.first;
+    auto end = active_range.second;
+
+    BitsetType bitset;
+    bitset.reserve(size);
+    bitset.resize(beg, true);
+    bitset.resize(size, false);
+
+    for (int64_t i = beg; i < end; ++i) {
+        bitset[i] = timestamps[i] <= expire_ts;
+    }
+    return bitset;
+}
+
 std::vector<int64_t>
 GenerateFakeSlices(const Timestamp* timestamps,
                    int64_t size,

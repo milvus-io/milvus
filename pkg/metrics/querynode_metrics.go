@@ -814,6 +814,18 @@ var (
 			cgoNameLabelName,
 			cgoTypeLabelName,
 		})
+
+	QueryNodePartialResultCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "partial_result_count",
+			Help:      "count of partial result",
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+			collectionIDLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -885,6 +897,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
 	registry.MustRegister(QueryNodeCGOCallLatency)
+	registry.MustRegister(QueryNodePartialResultCount)
 	// Add cgo metrics
 	RegisterCGOMetrics(registry)
 
@@ -927,6 +940,13 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 			})
 
 	QueryNodeSQCount.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+
+	QueryNodePartialResultCount.
 		DeletePartialMatch(
 			prometheus.Labels{
 				nodeIDLabelName:       nodeIDLabel,

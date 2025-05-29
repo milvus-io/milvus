@@ -288,7 +288,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	nodeList = append(nodeList, ddNode)
 
 	if len(info.GetSchema().GetFunctions()) > 0 {
-		emNode, err := newEmbeddingNode(channelName, info.GetSchema())
+		emNode, err := newEmbeddingNode(channelName, config.metacache)
 		if err != nil {
 			return nil, err
 		}

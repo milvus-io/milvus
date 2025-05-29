@@ -424,11 +424,11 @@ func TestComponentParam(t *testing.T) {
 		chunkRows = Params.ChunkRows.GetAsInt64()
 		assert.Equal(t, int64(8192), chunkRows)
 
-		enableInterimIndex := Params.EnableTempSegmentIndex.GetAsBool()
+		enableInterimIndex := Params.EnableInterminSegmentIndex.GetAsBool()
 		assert.Equal(t, true, enableInterimIndex)
 
 		params.Save("queryNode.segcore.interimIndex.enableIndex", "true")
-		enableInterimIndex = Params.EnableTempSegmentIndex.GetAsBool()
+		enableInterimIndex = Params.EnableInterminSegmentIndex.GetAsBool()
 		assert.Equal(t, true, enableInterimIndex)
 
 		assert.Equal(t, false, Params.KnowhereScoreConsistency.GetAsBool())
@@ -489,6 +489,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "/var/lib/milvus/data/mmap", Params.MmapDirPath.GetValue())
 
 		assert.Equal(t, 60*time.Second, Params.DiskSizeFetchInterval.GetAsDuration(time.Second))
+
+		assert.Equal(t, 1.0, Params.PartialResultRequiredDataRatio.GetAsFloat())
+		params.Save(Params.PartialResultRequiredDataRatio.Key, "0.8")
+		assert.Equal(t, 0.8, Params.PartialResultRequiredDataRatio.GetAsFloat())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

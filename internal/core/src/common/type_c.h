@@ -35,7 +35,6 @@ typedef enum SegmentType SegmentType;
 enum CacheWarmupPolicy {
     CacheWarmupPolicy_Disable = 0,
     CacheWarmupPolicy_Sync = 1,
-    CacheWarmupPolicy_Async = 2,
 };
 
 typedef enum CacheWarmupPolicy CacheWarmupPolicy;
@@ -112,6 +111,9 @@ typedef struct CMmapConfig {
     uint64_t fix_file_size;
     bool growing_enable_mmap;
     bool scalar_index_enable_mmap;
+    bool scalar_field_enable_mmap;
+    bool vector_index_enable_mmap;
+    bool vector_field_enable_mmap;
 } CMmapConfig;
 
 typedef struct CTraceConfig {

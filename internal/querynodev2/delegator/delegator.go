@@ -30,12 +30,13 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
@@ -88,8 +89,8 @@ type ShardDelegator interface {
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, partitions []int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition, deleteSeekPos *msgpb.MsgPosition)
-	GetQueryView() *channelQueryView
+	SyncTargetVersion(action *querypb.SyncAction, partitions []int64)
+	GetChannelQueryView() *channelQueryView
 	GetDeleteBufferSize() (entryNum int64, memorySize int64)
 
 	// manage exclude segments
@@ -100,6 +101,9 @@ type ShardDelegator interface {
 	// tsafe
 	UpdateTSafe(ts uint64)
 	GetTSafe() uint64
+
+	// analyzer
+	RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error)
 
 	// control
 	Serviceable() bool
@@ -149,9 +153,12 @@ type shardDelegator struct {
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
 
-	// fieldId -> functionRunner map for search function field
+	// outputFieldId -> functionRunner map for search function field
 	functionRunners map[UniqueID]function.FunctionRunner
 	isBM25Field     map[UniqueID]bool
+
+	// analyzerFieldID -> analyzerRunner map for run analyzer.
+	analyzerRunners map[UniqueID]function.Analyzer
 
 	// current forward policy
 	l0ForwardPolicy string
@@ -224,33 +231,34 @@ func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int
 func (sd *shardDelegator) shallowCopySearchRequest(req *internalpb.SearchRequest, targetID int64) *internalpb.SearchRequest {
 	// Create a new SearchRequest with the same fields
 	nodeReq := &internalpb.SearchRequest{
-		Base:               &commonpb.MsgBase{TargetID: targetID},
-		ReqID:              req.ReqID,
-		DbID:               req.DbID,
-		CollectionID:       req.CollectionID,
-		PartitionIDs:       req.PartitionIDs, // Shallow copy: Same underlying slice
-		Dsl:                req.Dsl,
-		PlaceholderGroup:   req.PlaceholderGroup, // Shallow copy: Same underlying byte slice
-		DslType:            req.DslType,
-		SerializedExprPlan: req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
-		OutputFieldsId:     req.OutputFieldsId,     // Shallow copy: Same underlying slice
-		MvccTimestamp:      req.MvccTimestamp,
-		GuaranteeTimestamp: req.GuaranteeTimestamp,
-		TimeoutTimestamp:   req.TimeoutTimestamp,
-		Nq:                 req.Nq,
-		Topk:               req.Topk,
-		MetricType:         req.MetricType,
-		IgnoreGrowing:      req.IgnoreGrowing,
-		Username:           req.Username,
-		SubReqs:            req.SubReqs, // Shallow copy: Same underlying slice of pointers
-		IsAdvanced:         req.IsAdvanced,
-		Offset:             req.Offset,
-		ConsistencyLevel:   req.ConsistencyLevel,
-		GroupByFieldId:     req.GroupByFieldId,
-		GroupSize:          req.GroupSize,
-		FieldId:            req.FieldId,
-		IsTopkReduce:       req.IsTopkReduce,
-		IsRecallEvaluation: req.IsRecallEvaluation,
+		Base:                    &commonpb.MsgBase{TargetID: targetID},
+		ReqID:                   req.ReqID,
+		DbID:                    req.DbID,
+		CollectionID:            req.CollectionID,
+		PartitionIDs:            req.PartitionIDs, // Shallow copy: Same underlying slice
+		Dsl:                     req.Dsl,
+		PlaceholderGroup:        req.PlaceholderGroup, // Shallow copy: Same underlying byte slice
+		DslType:                 req.DslType,
+		SerializedExprPlan:      req.SerializedExprPlan, // Shallow copy: Same underlying byte slice
+		OutputFieldsId:          req.OutputFieldsId,     // Shallow copy: Same underlying slice
+		MvccTimestamp:           req.MvccTimestamp,
+		GuaranteeTimestamp:      req.GuaranteeTimestamp,
+		TimeoutTimestamp:        req.TimeoutTimestamp,
+		Nq:                      req.Nq,
+		Topk:                    req.Topk,
+		MetricType:              req.MetricType,
+		IgnoreGrowing:           req.IgnoreGrowing,
+		Username:                req.Username,
+		SubReqs:                 req.SubReqs, // Shallow copy: Same underlying slice of pointers
+		IsAdvanced:              req.IsAdvanced,
+		Offset:                  req.Offset,
+		ConsistencyLevel:        req.ConsistencyLevel,
+		GroupByFieldId:          req.GroupByFieldId,
+		GroupSize:               req.GroupSize,
+		FieldId:                 req.FieldId,
+		IsTopkReduce:            req.IsTopkReduce,
+		IsRecallEvaluation:      req.IsRecallEvaluation,
+		CollectionTtlTimestamps: req.CollectionTtlTimestamps,
 	}
 
 	return nodeReq
@@ -369,21 +377,32 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		req.Req.GetIsIterator(),
 	)
 
+	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
-	if err != nil {
-		log.Warn("delegator search failed to wait tsafe", zap.Error(err))
-		return nil, err
+	var tSafe uint64
+	var err error
+	if partialResultRequiredDataRatio >= 1.0 {
+		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		if err != nil {
+			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+			return nil, err
+		}
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
+	} else {
+		tSafe = sd.GetTSafe()
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
 	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
-	}
+
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to search, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -394,30 +413,32 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
 		for index, subReq := range req.GetReq().GetSubReqs() {
 			newRequest := &internalpb.SearchRequest{
-				Base:               req.GetReq().GetBase(),
-				ReqID:              req.GetReq().GetReqID(),
-				DbID:               req.GetReq().GetDbID(),
-				CollectionID:       req.GetReq().GetCollectionID(),
-				PartitionIDs:       subReq.GetPartitionIDs(),
-				Dsl:                subReq.GetDsl(),
-				PlaceholderGroup:   subReq.GetPlaceholderGroup(),
-				DslType:            subReq.GetDslType(),
-				SerializedExprPlan: subReq.GetSerializedExprPlan(),
-				OutputFieldsId:     req.GetReq().GetOutputFieldsId(),
-				MvccTimestamp:      req.GetReq().GetMvccTimestamp(),
-				GuaranteeTimestamp: req.GetReq().GetGuaranteeTimestamp(),
-				TimeoutTimestamp:   req.GetReq().GetTimeoutTimestamp(),
-				Nq:                 subReq.GetNq(),
-				Topk:               subReq.GetTopk(),
-				MetricType:         subReq.GetMetricType(),
-				IgnoreGrowing:      subReq.GetIgnoreGrowing(),
-				Username:           req.GetReq().GetUsername(),
-				IsAdvanced:         false,
-				GroupByFieldId:     subReq.GetGroupByFieldId(),
-				GroupSize:          subReq.GetGroupSize(),
-				FieldId:            subReq.GetFieldId(),
-				IsTopkReduce:       req.GetReq().GetIsTopkReduce(),
-				IsIterator:         req.GetReq().GetIsIterator(),
+				Base:                    req.GetReq().GetBase(),
+				ReqID:                   req.GetReq().GetReqID(),
+				DbID:                    req.GetReq().GetDbID(),
+				CollectionID:            req.GetReq().GetCollectionID(),
+				PartitionIDs:            subReq.GetPartitionIDs(),
+				Dsl:                     subReq.GetDsl(),
+				PlaceholderGroup:        subReq.GetPlaceholderGroup(),
+				DslType:                 subReq.GetDslType(),
+				SerializedExprPlan:      subReq.GetSerializedExprPlan(),
+				OutputFieldsId:          req.GetReq().GetOutputFieldsId(),
+				MvccTimestamp:           req.GetReq().GetMvccTimestamp(),
+				GuaranteeTimestamp:      req.GetReq().GetGuaranteeTimestamp(),
+				TimeoutTimestamp:        req.GetReq().GetTimeoutTimestamp(),
+				Nq:                      subReq.GetNq(),
+				Topk:                    subReq.GetTopk(),
+				MetricType:              subReq.GetMetricType(),
+				IgnoreGrowing:           subReq.GetIgnoreGrowing(),
+				Username:                req.GetReq().GetUsername(),
+				IsAdvanced:              false,
+				GroupByFieldId:          subReq.GetGroupByFieldId(),
+				GroupSize:               subReq.GetGroupSize(),
+				FieldId:                 subReq.GetFieldId(),
+				IsTopkReduce:            req.GetReq().GetIsTopkReduce(),
+				IsIterator:              req.GetReq().GetIsIterator(),
+				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
+				AnalyzerName:            subReq.GetAnalyzerName(),
 			}
 			future := conc.Go(func() (*internalpb.SearchResults, error) {
 				searchReq := &querypb.SearchRequest{
@@ -430,7 +451,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 				if searchReq.GetReq().GetMvccTimestamp() == 0 {
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
-
+				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
 				results, err := sd.search(ctx, searchReq, sealed, growing)
 				if err != nil {
 					return nil, err
@@ -500,7 +521,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return err
@@ -562,21 +583,31 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		req.Req.GetIsIterator(),
 	)
 
+	partialResultRequiredDataRatio := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
-	if err != nil {
-		log.Warn("delegator query failed to wait tsafe", zap.Error(err))
-		return nil, err
+	var tSafe uint64
+	var err error
+	if partialResultRequiredDataRatio >= 1.0 {
+		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		if err != nil {
+			log.Warn("delegator search failed to wait tsafe", zap.Error(err))
+			return nil, err
+		}
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = tSafe
+		}
+	} else {
+		if req.GetReq().GetMvccTimestamp() == 0 {
+			req.Req.MvccTimestamp = sd.GetTSafe()
+		}
 	}
-	if req.GetReq().GetMvccTimestamp() == 0 {
-		req.Req.MvccTimestamp = tSafe
-	}
+
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.GetReq().GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -646,7 +677,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(req.Req.GetPartitionIDs()...)
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.Req.GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to GetStatistics, current distribution is not servicable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
@@ -708,13 +739,14 @@ func organizeSubTask[T any](ctx context.Context,
 		// update request
 		req := modify(req, scope, segmentIDs, workerID)
 
+		// for partial search, tolerate some worker are offline
 		worker, err := sd.workerManager.GetWorker(ctx, workerID)
 		if err != nil {
-			log.Warn("failed to get worker",
+			log.Warn("failed to get worker for sub task",
 				zap.Int64("nodeID", workerID),
+				zap.Int64s("segments", segmentIDs),
 				zap.Error(err),
 			)
-			return fmt.Errorf("failed to get worker %d, %w", workerID, err)
 		}
 
 		result = append(result, subTask[T]{
@@ -744,50 +776,110 @@ func executeSubTasks[T any, R interface {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(len(tasks))
+	var partialResultRequiredDataRatio float64
+	if taskType == "Query" || taskType == "Search" {
+		partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
+	} else {
+		partialResultRequiredDataRatio = 1.0
+	}
 
-	resultCh := make(chan R, len(tasks))
-	errCh := make(chan error, 1)
+	wg, ctx := errgroup.WithContext(ctx)
+	type channelResult struct {
+		nodeID   int64
+		segments []int64
+		result   R
+		err      error
+	}
+	// Buffered channel to collect results from all goroutines
+	resultCh := make(chan channelResult, len(tasks))
 	for _, task := range tasks {
-		go func(task subTask[T]) {
-			defer wg.Done()
-			result, err := execute(ctx, task.req, task.worker)
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+		task := task // capture loop variable
+		wg.Go(func() error {
+			var result R
+			var err error
+			if task.targetID == -1 || task.worker == nil {
+				var segments []int64
+				if req, ok := any(task.req).(interface{ GetSegmentIDs() []int64 }); ok {
+					segments = req.GetSegmentIDs()
+				} else {
+					segments = []int64{}
+				}
+				err = fmt.Errorf("segments not loaded in any worker: %v", segments[:min(len(segments), 10)])
+			} else {
+				result, err = execute(ctx, task.req, task.worker)
+				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					err = fmt.Errorf("worker(%d) query failed: %s", task.targetID, result.GetStatus().GetReason())
+				}
 			}
+
 			if err != nil {
 				log.Warn("failed to execute sub task",
 					zap.String("taskType", taskType),
 					zap.Int64("nodeID", task.targetID),
 					zap.Error(err),
 				)
-				select {
-				case errCh <- err: // must be the first
-				default: // skip other errors
+				// check if partial result is disabled, if so, let all sub tasks fail fast
+				if partialResultRequiredDataRatio == 1 {
+					return err
 				}
-				cancel()
-				return
 			}
-			resultCh <- result
-		}(task)
+
+			taskResult := channelResult{
+				nodeID: task.targetID,
+				result: result,
+				err:    err,
+			}
+			if req, ok := any(task.req).(interface{ GetSegmentIDs() []int64 }); ok {
+				taskResult.segments = req.GetSegmentIDs()
+			}
+			resultCh <- taskResult
+			return nil
+		})
 	}
 
-	wg.Wait()
-	close(resultCh)
-	select {
-	case err := <-errCh:
-		log.Warn("Delegator execute subTask failed",
+	// Wait for all tasks to complete
+	if err := wg.Wait(); err != nil {
+		log.Warn("some tasks failed to complete",
 			zap.String("taskType", taskType),
 			zap.Error(err),
 		)
 		return nil, err
-	default:
+	}
+	close(resultCh)
+
+	successSegmentList := []int64{}
+	failureSegmentList := []int64{}
+	var errors []error
+
+	// Collect results
+	results := make([]R, 0, len(tasks))
+	for item := range resultCh {
+		if item.err == nil {
+			successSegmentList = append(successSegmentList, item.segments...)
+			results = append(results, item.result)
+		} else {
+			failureSegmentList = append(failureSegmentList, item.segments...)
+			errors = append(errors, item.err)
+		}
 	}
 
-	results := make([]R, 0, len(tasks))
-	for result := range resultCh {
-		results = append(results, result)
+	accessDataRatio := 1.0
+	totalSegments := len(successSegmentList) + len(failureSegmentList)
+	if totalSegments > 0 {
+		accessDataRatio = float64(len(successSegmentList)) / float64(totalSegments)
+		if accessDataRatio < 1.0 {
+			log.Info("partial result executed successfully",
+				zap.String("taskType", taskType),
+				zap.Float64("successRatio", accessDataRatio),
+				zap.Float64("partialResultRequiredDataRatio", partialResultRequiredDataRatio),
+				zap.Int("totalSegments", totalSegments),
+				zap.Int64s("failureSegmentList", failureSegmentList),
+			)
+		}
+	}
+
+	if accessDataRatio < partialResultRequiredDataRatio {
+		return nil, merr.Combine(errors...)
 	}
 	return results, nil
 }
@@ -891,7 +983,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	log.Info("delegator received update schema event")
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments()
+	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return err
@@ -1011,6 +1103,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
 	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
 	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
+	queryView *channelQueryView,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
@@ -1041,7 +1134,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		segmentManager: manager.Segment,
 		workerManager:  workerManager,
 		lifetime:       lifetime.NewLifetime(lifetime.Initializing),
-		distribution:   NewDistribution(channel),
+		distribution:   NewDistribution(channel, queryView),
 		deleteBuffer: deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock,
 			[]string{fmt.Sprint(paramtable.GetNodeID()), channel}),
 		pkOracle:         pkoracle.NewPkOracle(),
@@ -1053,6 +1146,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
 		functionRunners:  make(map[int64]function.FunctionRunner),
+		analyzerRunners:  make(map[UniqueID]function.Analyzer),
 		isBM25Field:      make(map[int64]bool),
 		l0ForwardPolicy:  policy,
 	}
@@ -1064,6 +1158,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 				return nil, err
 			}
 			sd.functionRunners[tf.OutputFieldIds[0]] = functionRunner
+			// bm25 input field could use same runner between function and analyzer.
+			sd.analyzerRunners[tf.InputFieldIds[0]] = functionRunner.(function.Analyzer)
 			if tf.GetType() == schemapb.FunctionType_BM25 {
 				sd.isBM25Field[tf.OutputFieldIds[0]] = true
 			}
@@ -1080,4 +1176,44 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sd.tsCond = sync.NewCond(&m)
 	log.Info("finish build new shardDelegator")
 	return sd, nil
+}
+
+func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
+	analyzer, ok := sd.analyzerRunners[req.GetFieldId()]
+	if !ok {
+		return nil, fmt.Errorf("analyzer runner for field %d not exist, now only support run analyzer by field if field was bm25 input field", req.GetFieldId())
+	}
+
+	var result [][]*milvuspb.AnalyzerToken
+	texts := lo.Map(req.GetPlaceholder(), func(bytes []byte, _ int) string {
+		return string(bytes)
+	})
+
+	var err error
+	if len(analyzer.GetInputFields()) == 1 {
+		result, err = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts)
+	} else {
+		analyzerNames := req.GetAnalyzerNames()
+		if len(analyzerNames) == 0 {
+			return nil, merr.WrapErrAsInputError(fmt.Errorf("analyzer names must be set for multi analyzer"))
+		}
+
+		if len(analyzerNames) == 1 && len(texts) > 1 {
+			analyzerNames = make([]string, len(texts))
+			for i := range analyzerNames {
+				analyzerNames[i] = req.AnalyzerNames[0]
+			}
+		}
+		result, err = analyzer.BatchAnalyze(req.WithDetail, req.WithHash, texts, analyzerNames)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return lo.Map(result, func(tokens []*milvuspb.AnalyzerToken, _ int) *milvuspb.AnalyzerResult {
+		return &milvuspb.AnalyzerResult{
+			Tokens: tokens,
+		}
+	}), nil
 }

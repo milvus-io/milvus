@@ -177,7 +177,8 @@ class VectorFieldIndexing : public FieldIndexing {
     explicit VectorFieldIndexing(const FieldMeta& field_meta,
                                  const FieldIndexMeta& field_index_meta,
                                  int64_t segment_max_row_count,
-                                 const SegcoreConfig& segcore_config);
+                                 const SegcoreConfig& segcore_config,
+                                 const VectorBase* field_raw_data);
 
     void
     BuildIndexRange(int64_t ack_beg,
@@ -230,14 +231,14 @@ class VectorFieldIndexing : public FieldIndexing {
     has_raw_data() const override;
 
     knowhere::Json
-    get_build_params() const;
+    get_build_params(DataType data_type) const;
 
     SearchInfo
     get_search_params(const SearchInfo& searchInfo) const;
 
  private:
     void
-    recreate_index();
+    recreate_index(DataType data_type, const VectorBase* field_raw_data);
     // current number of rows in index.
     std::atomic<idx_t> index_cur_ = 0;
     // whether the growing index has been built.
@@ -254,21 +255,23 @@ std::unique_ptr<FieldIndexing>
 CreateIndex(const FieldMeta& field_meta,
             const FieldIndexMeta& field_index_meta,
             int64_t segment_max_row_count,
-            const SegcoreConfig& segcore_config);
+            const SegcoreConfig& segcore_config,
+            const VectorBase* field_raw_data = nullptr);
 
 class IndexingRecord {
  public:
     explicit IndexingRecord(const Schema& schema,
                             const IndexMetaPtr& indexMetaPtr,
-                            const SegcoreConfig& segcore_config)
+                            const SegcoreConfig& segcore_config,
+                            const InsertRecord<false>* insert_record)
         : schema_(schema),
           index_meta_(indexMetaPtr),
           segcore_config_(segcore_config) {
-        Initialize();
+        Initialize(insert_record);
     }
 
     void
-    Initialize() {
+    Initialize(const InsertRecord<false>* insert_record) {
         int offset_id = 0;
         auto enable_growing_mmap = storage::MmapManager::GetInstance()
                                        .GetMmapConfig()
@@ -294,12 +297,15 @@ class IndexingRecord {
                         index_meta_->GetFieldIndexMeta(field_id);
                     //Disable growing index for flat
                     if (!vec_field_meta.IsFlatIndex()) {
+                        auto field_raw_data =
+                            insert_record->get_data_base(field_id);
                         field_indexings_.try_emplace(
                             field_id,
                             CreateIndex(field_meta,
                                         vec_field_meta,
                                         index_meta_->GetIndexMaxRowCount(),
-                                        segcore_config_));
+                                        segcore_config_,
+                                        field_raw_data));
                     }
                 }
             }
@@ -327,6 +333,20 @@ class IndexingRecord {
                 size,
                 field_raw_data,
                 stream_data->vectors().float_vector().data().data());
+        } else if (type == DataType::VECTOR_FLOAT16 &&
+                   reserved_offset + size >= indexing->get_build_threshold()) {
+            indexing->AppendSegmentIndexDense(
+                reserved_offset,
+                size,
+                field_raw_data,
+                stream_data->vectors().float16_vector().data());
+        } else if (type == DataType::VECTOR_BFLOAT16 &&
+                   reserved_offset + size >= indexing->get_build_threshold()) {
+            indexing->AppendSegmentIndexDense(
+                reserved_offset,
+                size,
+                field_raw_data,
+                stream_data->vectors().bfloat16_vector().data());
         } else if (type == DataType::VECTOR_SPARSE_FLOAT) {
             auto data = SparseBytesToRows(
                 stream_data->vectors().sparse_float_vector().contents());
@@ -353,7 +373,9 @@ class IndexingRecord {
         auto type = indexing->get_field_meta().get_data_type();
         const void* p = data->Data();
 
-        if (type == DataType::VECTOR_FLOAT &&
+        if ((type == DataType::VECTOR_FLOAT ||
+             type == DataType::VECTOR_FLOAT16 ||
+             type == DataType::VECTOR_BFLOAT16) &&
             reserved_offset + size >= indexing->get_build_threshold()) {
             auto vec_base = record.get_data_base(fieldId);
             indexing->AppendSegmentIndexDense(
@@ -385,6 +407,10 @@ class IndexingRecord {
             if (indexing->get_field_meta().get_data_type() ==
                     DataType::VECTOR_FLOAT ||
                 indexing->get_field_meta().get_data_type() ==
+                    DataType::VECTOR_FLOAT16 ||
+                indexing->get_field_meta().get_data_type() ==
+                    DataType::VECTOR_BFLOAT16 ||
+                indexing->get_field_meta().get_data_type() ==
                     DataType::VECTOR_SPARSE_FLOAT) {
                 indexing->GetDataFromIndex(
                     seg_offsets, count, element_size, output_raw);
@@ -408,7 +434,8 @@ class IndexingRecord {
             const FieldIndexing& indexing = get_field_indexing(fieldId);
             return indexing.has_raw_data();
         }
-        return true;
+        // if this field id not in IndexingRecord or not build index, we should find raw data in InsertRecord instead of IndexingRecord.
+        return false;
     }
 
     // concurrent
