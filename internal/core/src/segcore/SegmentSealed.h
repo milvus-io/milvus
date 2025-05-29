@@ -103,7 +103,8 @@ class SegmentSealed : public SegmentInternalInterface {
     HasIndex(FieldId field_id,
              const std::string& path,
              DataType data_type,
-             bool any_type = false) const override {
+             bool any_type = false,
+             bool is_json_contain = false) const override {
         JSONIndexKey key;
         key.field_id = field_id;
         key.nested_path = path;
@@ -114,7 +115,7 @@ class SegmentSealed : public SegmentInternalInterface {
         if (any_type) {
             return true;
         }
-        return index->second->IsDataTypeSupported(data_type);
+        return index->second->IsDataTypeSupported(data_type, is_json_contain);
     }
 
  protected:

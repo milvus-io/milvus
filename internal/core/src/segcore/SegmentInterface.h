@@ -305,7 +305,8 @@ class SegmentInternalInterface : public SegmentInterface {
     HasIndex(FieldId field_id,
              const std::string& nested_path,
              DataType data_type,
-             bool any_type = false) const = 0;
+             bool any_type = false,
+             bool is_array = false) const = 0;
 
     virtual bool
     HasFieldData(FieldId field_id) const = 0;
