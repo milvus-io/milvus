@@ -16,7 +16,7 @@ type INVERTEDChecker struct {
 	scalarIndexChecker
 }
 
-var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR"}
+var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR"}
 
 func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
 	// check json index params
