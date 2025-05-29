@@ -5,10 +5,6 @@ import copy
 from check.func_check import ResponseChecker, Error
 from utils.util_log import test_log as log
 
-# enable_traceback = os.getenv('ENABLE_TRACEBACK', "True")
-# log.info(f"enable_traceback:{enable_traceback}")
-
-
 log_row_length = 300
 
 
@@ -20,7 +16,6 @@ def api_request_catch():
                 if "enable_traceback" in _kwargs:
                     del _kwargs["enable_traceback"]
                 res = func(*args, **_kwargs)
-                # if enable_traceback == "True":
                 if kwargs.get("enable_traceback", True):
                     res_str = str(res)
                     log_res = res_str[0:log_row_length] + '......' if len(res_str) > log_row_length else res_str
@@ -30,7 +25,6 @@ def api_request_catch():
             except Exception as e:
                 e_str = str(e)
                 log_e = e_str[0:log_row_length] + '......' if len(e_str) > log_row_length else e_str
-                # if enable_traceback == "True":
                 if kwargs.get("enable_traceback", True):
                     log.error(traceback.format_exc())
                     log.error("(api_response) : %s" % log_e)
@@ -44,12 +38,12 @@ def api_request(_list, **kwargs):
     if isinstance(_list, list):
         func = _list[0]
         if callable(func):
-            arg = _list[1:]
-            arg_str = str(arg)
-            log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
-            # if enable_traceback == "True":
             if kwargs.get("enable_traceback", True):
-                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, str(kwargs)))
+                arg = _list[1:]
+                arg_str = str(arg)
+                log_arg = arg_str[0:log_row_length] + '...' if len(arg_str) > log_row_length else arg_str
+                log_kwargs = str(kwargs)[0:log_row_length] + '...' if len(str(kwargs)) > log_row_length else str(kwargs)
+                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, log_kwargs))
             return func(*arg, **kwargs)
     return False, False
 
@@ -57,16 +51,17 @@ def api_request(_list, **kwargs):
 def logger_interceptor():
     def wrapper(func):
         def log_request(*arg, **kwargs):
-            arg = arg[1:]
-            arg_str = str(arg)
-            log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
             if kwargs.get("enable_traceback", True):
-                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__name__, log_arg, str(kwargs)))
+                arg = arg[1:]
+                arg_str = str(arg)
+                log_arg = arg_str[0:log_row_length] + '...' if len(arg_str) > log_row_length else arg_str
+                log_kwargs = str(kwargs)[0:log_row_length] + '...' if len(str(kwargs)) > log_row_length else str(kwargs)
+                log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__name__, log_arg, log_kwargs))
 
         def log_response(res, **kwargs):
             if kwargs.get("enable_traceback", True):
                 res_str = str(res)
-                log_res = res_str[0:log_row_length] + '......' if len(res_str) > log_row_length else res_str
+                log_res = res_str[0:log_row_length] + '...' if len(res_str) > log_row_length else res_str
                 log.debug("(api_response) : [%s] %s " % (func.__name__, log_res))
             return res, True
 
