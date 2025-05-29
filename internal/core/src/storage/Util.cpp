@@ -1138,21 +1138,11 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
 
-    int64_t lack_binlog_rows = 0;
-    if (storage_version == STORAGE_V2) {
-        // storage v2, lack_binlog_rows is not accurate
-        // calculate dataset length and recalculate
-        auto total_rows =
-            index::GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
-                .value_or(0);
-        for (auto& field_data : field_datas) {
-            total_rows -= field_data->get_num_rows();
-        }
-    } else {
-        // storage version is v1, lack_binlog_rows could be trusted
-        lack_binlog_rows =
-            index::GetValueFromConfig<int64_t>(config, LACK_BINLOG_ROWS_KEY)
-                .value_or(0);
+    int64_t lack_binlog_rows =
+        index::GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
+            .value_or(0);
+    for (auto& field_data : field_datas) {
+        lack_binlog_rows -= field_data->get_num_rows();
     }
 
     if (lack_binlog_rows > 0) {
