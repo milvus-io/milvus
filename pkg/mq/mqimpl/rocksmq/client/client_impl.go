@@ -127,8 +127,8 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 
 func (c *client) consume(consumer *consumer) {
 	defer func() {
-		close(consumer.stopCh)
 		c.wg.Done()
+		consumer.wg.Done()
 	}()
 
 	if err := c.blockUntilInitDone(consumer); err != nil {
@@ -161,6 +161,9 @@ func (c *client) consume(consumer *consumer) {
 		}
 
 		select {
+		case <-consumer.ctx.Done():
+			log.Info("Consumer is closed, consumer goroutine exit")
+			return
 		case <-c.closeCh:
 			log.Info("Client is closed, consumer goroutine exit")
 			return
