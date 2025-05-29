@@ -32,11 +32,11 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
 add_subdirectory( pb )
-add_subdirectory( log )
 add_subdirectory( config )
 add_subdirectory( common )
 add_subdirectory( monitor )
@@ -49,13 +49,11 @@ add_subdirectory( clustering )
 add_subdirectory( exec )
 add_subdirectory( bitset )
 add_subdirectory( futures )
-add_subdirectory( cachinglayer )
 
 milvus_add_pkg_config("milvus_core")
 
 add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_pb>
-    $<TARGET_OBJECTS:milvus_log>
     $<TARGET_OBJECTS:milvus_config>
     $<TARGET_OBJECTS:milvus_common>
     $<TARGET_OBJECTS:milvus_monitor>
@@ -68,7 +66,6 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_exec>
     $<TARGET_OBJECTS:milvus_bitset>
     $<TARGET_OBJECTS:milvus_futures>
-    $<TARGET_OBJECTS:milvus_cachinglayer>
 )
 
 set(LINK_TARGETS 
@@ -77,6 +74,7 @@ set(LINK_TARGETS
     tantivy_binding
     knowhere
     milvus-storage
+    milvus-common
     ${OpenMP_CXX_FLAGS}
     ${CONAN_LIBS})
 

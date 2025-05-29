@@ -34,7 +34,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/InsertData.h"
-#include "storage/ThreadPool.h"
+#include "common/ThreadPool.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/DiskFileManagerImpl.h"

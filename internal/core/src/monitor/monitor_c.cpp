@@ -12,7 +12,7 @@
 #include <string.h>
 
 #include "monitor_c.h"
-#include "prometheus_client.h"
+#include "common/PrometheusClient.h"
 
 char*
 GetCoreMetrics() {

@@ -249,7 +249,8 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             }
             auto index = index::CreateStringIndexSort();
             std::vector<uint8_t> buffer(arr.ByteSizeLong());
-            ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
+            ASSERT_TRUE(
+                arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
             index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
             LoadIndexInfo info{
                 .field_id = schema->get_field_id(FieldName("str")).get(),
