@@ -73,7 +73,8 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
         // dim is unused for sparse float vector
         dim_ =
             (IsVectorDataType(column_type_) &&
-             !IsSparseFloatVectorDataType(column_type_))
+             !IsSparseFloatVectorDataType(column_type_)) &&
+                    column_type_ != DataType::VECTOR_ARRAY
                 ? GetDimensionFromFileMetaData(
                       file_meta->schema()->Column(column_index), column_type_)
                 : 1;

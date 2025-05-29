@@ -21,6 +21,7 @@
 #include "arrow/array/array_base.h"
 #include "arrow/record_batch.h"
 #include "common/Array.h"
+#include "common/VectorArray.h"
 #include "common/ChunkTarget.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
@@ -329,6 +330,67 @@ class ArrayChunk : public Chunk {
  private:
     milvus::DataType element_type_;
     uint32_t* offsets_lens_;
+};
+
+// A VectorArrayChunk is similar to an ArrayChunk but is specialized for storing arrays of vectors.
+// Key differences and characteristics:
+// - No Nullability: VectorArrayChunk does not support null values. Unlike ArrayChunk, it does not have a null bitmap.
+// - Fixed Vector Dimensions: All vectors within a VectorArrayChunk have the same, fixed dimension, specified at creation.
+//   However, each row (array of vectors) can contain a variable number of these fixed-dimension vectors.
+//
+// Due to these characteristics, the data layout is simpler:
+// [offsets_lens][all_vector_data_concatenated]
+//
+// Example:
+// Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to
+// create a VectorArrayChunk for these arrays. The data block might look like this:
+//
+// [offsets_lens][all_vector_data_concatenated]
+// [24, 3, 36, 2, 44, 4, 60] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+class VectorArrayChunk : public Chunk {
+ public:
+    VectorArrayChunk(int64_t dim,
+                     int32_t row_nums,
+                     char* data,
+                     uint64_t size,
+                     milvus::DataType element_type)
+        : Chunk(row_nums, data, size, false),
+          dim_(dim),
+          element_type_(element_type) {
+        offsets_lens_ = reinterpret_cast<uint32_t*>(data);
+    }
+
+    VectorArrayView
+    View(int64_t idx) const {
+        int idx_off = 2 * idx;
+        auto offset = offsets_lens_[idx_off];
+        auto len = offsets_lens_[idx_off + 1];
+        auto next_offset = offsets_lens_[idx_off + 2];
+        auto data_ptr = data_ + offset;
+        return VectorArrayView(
+            data_ptr, dim_, len, next_offset - offset, element_type_);
+    }
+
+    std::vector<VectorArrayView>
+    Views() const {
+        std::vector<VectorArrayView> views;
+        views.reserve(row_nums_);
+        for (int64_t i = 0; i < row_nums_; i++) {
+            views.emplace_back(View(i));
+        }
+        return views;
+    }
+
+    const char*
+    ValueAt(int64_t idx) const override {
+        PanicInfo(ErrorCode::Unsupported,
+                  "VectorArrayChunk::ValueAt is not supported");
+    }
+
+ private:
+    int64_t dim_;
+    uint32_t* offsets_lens_;
+    milvus::DataType element_type_;
 };
 
 class SparseFloatVectorChunk : public Chunk {

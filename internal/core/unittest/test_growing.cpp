@@ -279,6 +279,74 @@ TEST_P(GrowingTest, FillData) {
     }
 }
 
+TEST_P(GrowingTest, FillVectorArrayData) {
+    auto schema = std::make_shared<Schema>();
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_float_vector = schema->AddDebugArrayVectorField(
+        "array_float_vector", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(true);
+    std::map<FieldId, FieldIndexMeta> filedMap = {};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    auto segment_growing = CreateGrowingSegment(schema, metaPtr, 1, config);
+    auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+    int64_t per_batch = 1000;
+    int64_t n_batch = 3;
+    int64_t dim = 128;
+    for (int64_t i = 0; i < n_batch; i++) {
+        auto dataset = DataGen(schema, per_batch);
+
+        auto offset = segment->PreInsert(per_batch);
+        segment->Insert(offset,
+                        per_batch,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+        auto num_inserted = (i + 1) * per_batch;
+        auto ids_ds = GenRandomIds(num_inserted);
+        auto int64_result = segment->bulk_subscript(
+            int64_field, ids_ds->GetIds(), num_inserted);
+        auto array_float_vector_result = segment->bulk_subscript(
+            array_float_vector, ids_ds->GetIds(), num_inserted);
+
+        EXPECT_EQ(int64_result->scalars().long_data().data_size(),
+                  num_inserted);
+        EXPECT_EQ(
+            array_float_vector_result->vectors().array_vector().data_size(),
+            num_inserted);
+
+        if (i == 0) {
+            // Verify vector array data
+            auto verify_float_vectors = [](auto arr1, auto arr2) {
+                static constexpr float EPSILON = 1e-6;
+                EXPECT_EQ(arr1.size(), arr2.size());
+                for (int64_t i = 0; i < arr1.size(); ++i) {
+                    EXPECT_NEAR(arr1[i], arr2[i], EPSILON);
+                }
+            };
+
+            auto array_vec_values =
+                dataset.get_col<VectorFieldProto>(array_float_vector);
+            for (int64_t i = 0; i < per_batch; ++i) {
+                auto arrow_array = array_float_vector_result->vectors()
+                                       .array_vector()
+                                       .data()[i]
+                                       .float_vector()
+                                       .data();
+                auto expected_array =
+                    array_vec_values[ids_ds->GetIds()[i]].float_vector().data();
+                verify_float_vectors(arrow_array, expected_array);
+            }
+        }
+
+        EXPECT_EQ(int64_result->valid_data_size(), 0);
+        EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
+    }
+}
+
 TEST(Growing, FillNullableData) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;

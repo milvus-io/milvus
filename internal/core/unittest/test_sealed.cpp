@@ -1993,11 +1993,16 @@ TEST(Sealed, QueryAllFields) {
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
     auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
-    auto long_array_values = dataset.get_col<ScalarFieldProto>(long_array_field);
-    auto bool_array_values = dataset.get_col<ScalarFieldProto>(bool_array_field);
-    auto string_array_values = dataset.get_col<ScalarFieldProto>(string_array_field);
-    auto double_array_values = dataset.get_col<ScalarFieldProto>(double_array_field);
-    auto float_array_values = dataset.get_col<ScalarFieldProto>(float_array_field);
+    auto long_array_values =
+        dataset.get_col<ScalarFieldProto>(long_array_field);
+    auto bool_array_values =
+        dataset.get_col<ScalarFieldProto>(bool_array_field);
+    auto string_array_values =
+        dataset.get_col<ScalarFieldProto>(string_array_field);
+    auto double_array_values =
+        dataset.get_col<ScalarFieldProto>(double_array_field);
+    auto float_array_values =
+        dataset.get_col<ScalarFieldProto>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
     auto float16_vector_values = dataset.get_col<uint8_t>(float16_vec);
     auto bfloat16_vector_values = dataset.get_col<uint8_t>(bfloat16_vec);
@@ -2150,11 +2155,16 @@ TEST(Sealed, QueryAllNullableFields) {
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
     auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
-    auto long_array_values = dataset.get_col<ScalarFieldProto>(long_array_field);
-    auto bool_array_values = dataset.get_col<ScalarFieldProto>(bool_array_field);
-    auto string_array_values = dataset.get_col<ScalarFieldProto>(string_array_field);
-    auto double_array_values = dataset.get_col<ScalarFieldProto>(double_array_field);
-    auto float_array_values = dataset.get_col<ScalarFieldProto>(float_array_field);
+    auto long_array_values =
+        dataset.get_col<ScalarFieldProto>(long_array_field);
+    auto bool_array_values =
+        dataset.get_col<ScalarFieldProto>(bool_array_field);
+    auto string_array_values =
+        dataset.get_col<ScalarFieldProto>(string_array_field);
+    auto double_array_values =
+        dataset.get_col<ScalarFieldProto>(double_array_field);
+    auto float_array_values =
+        dataset.get_col<ScalarFieldProto>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
 
     auto bool_valid_values = dataset.get_col_valid(bool_field);
@@ -2268,4 +2278,60 @@ TEST(Sealed, SearchSortedPk) {
     auto offsets2 = segment->search_pk(PkType(pk_values[100]), int64_t(105));
     EXPECT_EQ(6, offsets2.size());
     EXPECT_EQ(100, offsets2[0].get());
+}
+
+TEST(Sealed, QueryVectorArrayAllFields) {
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugArrayVectorField(
+        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    std::map<FieldId, FieldIndexMeta> filedMap{};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+    auto segment_sealed = CreateSealedSegment(schema, metaPtr);
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
+
+    int64_t dataset_size = 1000;
+    int64_t dim = 128;
+    auto dataset = DataGen(schema, dataset_size);
+    segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
+
+    auto int64_values = dataset.get_col<int64_t>(int64_field);
+    auto array_vec_values = dataset.get_col<VectorFieldProto>(array_vec);
+
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto int64_result =
+        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
+    auto array_float_vector_result =
+        segment->bulk_subscript(array_vec, ids_ds->GetIds(), dataset_size);
+
+    EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
+    EXPECT_EQ(array_float_vector_result->vectors().array_vector().data_size(),
+              dataset_size);
+
+    auto verify_float_vectors = [](auto arr1, auto arr2) {
+        static constexpr float EPSILON = 1e-6;
+        EXPECT_EQ(arr1.size(), arr2.size());
+        for (int64_t i = 0; i < arr1.size(); ++i) {
+            EXPECT_NEAR(arr1[i], arr2[i], EPSILON);
+        }
+    };
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        auto arrow_array = array_float_vector_result->vectors()
+                               .array_vector()
+                               .data()[i]
+                               .float_vector()
+                               .data();
+        auto expected_array =
+            array_vec_values[ids_ds->GetIds()[i]].float_vector().data();
+        verify_float_vectors(arrow_array, expected_array);
+    }
+
+    EXPECT_EQ(int64_result->valid_data_size(), 0);
+    EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
 }

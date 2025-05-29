@@ -89,6 +89,10 @@ ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+    }
+
     if (field_meta.is_vector()) {
         LoadVecIndex(info);
     } else {
@@ -446,6 +450,11 @@ ChunkedSegmentSealedImpl::AddFieldDataInfoForSealed(
 int64_t
 ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
+
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+    }
+
     if (field_meta.is_vector()) {
         return int64_t(vector_indexings_.is_ready(field_id));
     }
@@ -1029,8 +1038,23 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) {
-    column->BulkArrayAt(
-        [dst](ScalarFieldProto&& array, size_t i) { dst->at(i) = std::move(array); },
+    column->BulkArrayAt([dst](ScalarFieldProto&& array,
+                              size_t i) { dst->at(i) = std::move(array); },
+                        seg_offsets,
+                        count);
+}
+
+template <typename T>
+void
+ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<T>* dst) {
+    column->BulkVectorArrayAt(
+        [dst](VectorFieldProto&& array, size_t i) {
+            dst->at(i) = std::move(array);
+        },
         seg_offsets,
         count);
 }
@@ -1076,9 +1100,9 @@ ChunkedSegmentSealedImpl::fill_with_empty(FieldId field_id,
                                           int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        return CreateVectorDataArray(count, field_meta);
+        return CreateEmptyVectorDataArray(count, field_meta);
     }
-    return CreateScalarDataArray(count, field_meta);
+    return CreateEmptyScalarDataArray(count, field_meta);
 }
 
 void
@@ -1353,6 +1377,14 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
+        case DataType::VECTOR_ARRAY: {
+            bulk_subscript_vector_array_impl(
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_array_vector()->mutable_data());
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
@@ -1472,13 +1504,14 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
             return vec_index->HasRawData();
         } else if (get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
-                    "vector index is not ready");
+                       "vector index is not ready");
             auto accessor =
                 SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
                                   ->indexing_->PinCells({0}));
             auto vec_index = accessor->get_cell_of(0);
-            return vec_index->HasRawData() || get_bit(field_data_ready_bitset_, fieldID);
-        } 
+            return vec_index->HasRawData() ||
+                   get_bit(field_data_ready_bitset_, fieldID);
+        }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
@@ -1931,6 +1964,11 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
         case milvus::DataType::ARRAY: {
             column = std::make_shared<ChunkedArrayColumn>(std::move(translator),
                                                           field_meta);
+            break;
+        }
+        case milvus::DataType::VECTOR_ARRAY: {
+            column = std::make_shared<ChunkedVectorArrayColumn>(
+                std::move(translator), field_meta);
             break;
         }
         default: {

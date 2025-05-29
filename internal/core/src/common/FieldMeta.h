@@ -237,6 +237,8 @@ class FieldMeta {
         static const size_t JSON_SIZE = 512;
         if (is_vector()) {
             return GetDataTypeSize(type_, get_dim());
+        } else if (type_ == DataType::VECTOR_ARRAY) {
+            PanicInfo(DataTypeInvalid, "Not implemented");
         } else if (is_string()) {
             Assert(string_info_.has_value());
             return string_info_->max_length;

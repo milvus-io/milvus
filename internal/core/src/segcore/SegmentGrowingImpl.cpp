@@ -42,6 +42,7 @@
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
+#include "common/TypeTraits.h"
 
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -644,7 +645,7 @@ SegmentGrowingImpl::bulk_subscript(
     Assert(!dynamic_field_names.empty());
     auto& field_meta = schema_->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
-    auto result = CreateScalarDataArray(count, field_meta);
+    auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
         auto res = result->mutable_valid_data()->mutable_data();
@@ -671,7 +672,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     auto& field_meta = schema_->operator[](field_id);
     auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
-        auto result = CreateVectorDataArray(count, field_meta);
+        auto result = CreateEmptyVectorDataArray(count, field_meta);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             bulk_subscript_impl<FloatVector>(field_id,
                                              field_meta.get_sizeof(),
@@ -724,6 +725,13 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 seg_offsets,
                 count,
                 result->mutable_vectors()->mutable_int8_vector()->data());
+        } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+            bulk_subscript_vector_array_impl(*vec_ptr,
+                                             seg_offsets,
+                                             count,
+                                             result->mutable_vectors()
+                                                 ->mutable_array_vector()
+                                                 ->mutable_data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");
         }
@@ -733,7 +741,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
 
-    auto result = CreateScalarDataArray(count, field_meta);
+    auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
         auto res = result->mutable_valid_data()->mutable_data();
@@ -982,6 +990,24 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Array>*>(&vec_raw);
+    AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
+    auto& vec = *vec_ptr;
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset != INVALID_SEG_OFFSET) {
+            dst->at(i) = vec[offset].output_data();
+        }
+    }
+}
+
+template <typename T>
+void
+SegmentGrowingImpl::bulk_subscript_vector_array_impl(
+    const VectorBase& vec_raw,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<T>* dst) const {
+    auto vec_ptr = dynamic_cast<const ConcurrentVector<VectorArray>*>(&vec_raw);
     AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
     auto& vec = *vec_ptr;
     for (int64_t i = 0; i < count; ++i) {

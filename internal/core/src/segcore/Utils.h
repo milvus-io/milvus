@@ -48,10 +48,10 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // Note: this is temporary solution.
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
-CreateScalarDataArray(int64_t count, const FieldMeta& field_meta);
+CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-CreateVectorDataArray(int64_t count, const FieldMeta& field_meta);
+CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,

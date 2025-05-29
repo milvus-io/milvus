@@ -55,7 +55,7 @@ set(MILVUS_TEST_FILES
         # test_futures.cpp
         # test_group_by.cpp
         # test_iterative_filter.cpp
-        # test_growing.cpp
+        test_growing.cpp
         # test_growing_index.cpp
         # test_hybrid_index.cpp
         # test_index_c_api.cpp
@@ -79,7 +79,7 @@ set(MILVUS_TEST_FILES
         # test_relational.cpp
         # test_retrieve.cpp
         # test_scalar_index.cpp
-        # test_sealed.cpp
+        test_sealed.cpp
         # test_segcore.cpp
         # test_similarity_corelation.cpp
         # test_span.cpp

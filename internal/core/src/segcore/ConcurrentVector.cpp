@@ -47,6 +47,14 @@ VectorBase::set_data_raw(ssize_t element_offset,
         } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
             return set_data_raw(
                 element_offset, VEC_FIELD_DATA(data, int8), element_count);
+        } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+            auto& array_vector = data->vectors().array_vector().data();
+            std::vector<VectorArray> data_raw{};
+            data_raw.reserve(array_vector.size());
+            for (auto& e : array_vector) {
+                data_raw.emplace_back(VectorArray(e));
+            }
+            return set_data_raw(element_offset, data_raw.data(), element_count);
         } else {
             PanicInfo(DataTypeInvalid, "unsupported vector type");
         }

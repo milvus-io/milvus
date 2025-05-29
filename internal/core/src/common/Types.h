@@ -247,6 +247,8 @@ GetDataTypeName(DataType data_type) {
             return "vector_sparse_float";
         case DataType::VECTOR_INT8:
             return "vector_int8";
+        case DataType::VECTOR_ARRAY:
+            return "vector_array";
         default:
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
     }
@@ -328,7 +330,7 @@ IsJsonDataType(DataType data_type) {
 
 inline bool
 IsArrayDataType(DataType data_type) {
-    return data_type == DataType::ARRAY;
+    return data_type == DataType::ARRAY || data_type == DataType::VECTOR_ARRAY;
 }
 
 inline bool
@@ -400,7 +402,8 @@ IsFloatVectorDataType(DataType data_type) {
 inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
-           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type);
+           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type) ||
+           data_type == DataType::VECTOR_ARRAY;
 }
 
 inline bool
@@ -651,6 +654,15 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
 
+template <>
+struct TypeTraits<DataType::VECTOR_ARRAY> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::VECTOR_ARRAY;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "VECTOR_ARRAY";
+};
+
 inline DataType
 FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
     switch (val_case) {
@@ -734,6 +746,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_INT8:
                 name = "VECTOR_INT8";
+                break;
+            case milvus::DataType::VECTOR_ARRAY:
+                name = "VECTOR_ARRAY";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

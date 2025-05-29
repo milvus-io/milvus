@@ -28,7 +28,8 @@ class ChunkedColumnInterface {
 
     // Default implementation does nothing.
     virtual void
-    ManualEvictCache() const {}
+    ManualEvictCache() const {
+    }
 
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
@@ -79,6 +80,9 @@ class ChunkedColumnInterface {
     virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
     ArrayViews(int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
+
+    virtual PinWrapper<std::vector<VectorArrayView>>
+    VectorArrayViews(int64_t chunk_id) const = 0;
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -133,6 +137,15 @@ class ChunkedColumnInterface {
                   "BulkArrayAt only supported for ChunkedArrayColumn");
     }
 
+    virtual void
+    BulkVectorArrayAt(std::function<void(VectorFieldProto&&, size_t)> fn,
+                      const int64_t* offsets,
+                      int64_t count) const {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "BulkVectorArrayAt only supported for ChunkedVectorArrayColumn");
+    }
+
     static bool
     IsChunkedVariableColumnDataType(DataType data_type) {
         return data_type == DataType::STRING ||
@@ -143,6 +156,11 @@ class ChunkedColumnInterface {
     static bool
     IsChunkedArrayColumnDataType(DataType data_type) {
         return data_type == DataType::ARRAY;
+    }
+
+    static bool
+    IsChunkedVectorArrayColumnDataType(DataType data_type) {
+        return data_type == DataType::VECTOR_ARRAY;
     }
 
     static bool

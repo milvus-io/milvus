@@ -282,6 +282,7 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::StringBuilder>();
         }
         case DataType::ARRAY:
+        case DataType::VECTOR_ARRAY:
         case DataType::JSON: {
             return std::make_shared<arrow::BinaryBuilder>();
         }
@@ -405,6 +406,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::utf8(), nullable)});
         }
         case DataType::ARRAY:
+        case DataType::VECTOR_ARRAY:
         case DataType::JSON: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
@@ -932,6 +934,9 @@ CreateFieldData(const DataType& type,
         case DataType::VECTOR_INT8:
             return std::make_shared<FieldData<Int8Vector>>(
                 dim, type, total_num_rows);
+        case DataType::VECTOR_ARRAY:
+            return std::make_shared<FieldData<VectorArray>>(type,
+                                                            total_num_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +

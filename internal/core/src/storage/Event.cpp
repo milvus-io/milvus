@@ -247,6 +247,8 @@ BaseEventData::Serialize() {
         auto data_type = field_data->get_data_type();
         std::shared_ptr<PayloadWriter> payload_writer;
         if (IsVectorDataType(data_type) &&
+            // each element will be serialized as bytes so no need dim info
+            data_type != DataType::VECTOR_ARRAY &&
             !IsSparseFloatVectorDataType(data_type)) {
             payload_writer = std::make_unique<PayloadWriter>(
                 data_type, field_data->get_dim(), field_data->IsNullable());
@@ -307,6 +309,21 @@ BaseEventData::Serialize() {
                     payload_writer->add_one_binary_payload(
                         static_cast<const uint8_t*>(row->data()),
                         row->data_byte_size());
+                }
+                break;
+            }
+            case DataType::VECTOR_ARRAY: {
+                for (size_t offset = 0; offset < field_data->get_num_rows();
+                     ++offset) {
+                    auto array = static_cast<const VectorArray*>(
+                        field_data->RawValue(offset));
+                    auto array_string =
+                        array->output_data().SerializeAsString();
+                    auto size = array_string.size();
+
+                    payload_writer->add_one_binary_payload(
+                        reinterpret_cast<const uint8_t*>(array_string.c_str()),
+                        size);
                 }
                 break;
             }
