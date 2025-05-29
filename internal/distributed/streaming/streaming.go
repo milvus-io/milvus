@@ -134,6 +134,7 @@ type Broadcast interface {
 
 	// Ack acknowledges a broadcast message at the specified vchannel.
 	// It must be called after the message is comsumed by the unique-consumer.
+	// It will only return error when the ctx is canceled.
 	Ack(ctx context.Context, req types.BroadcastAckRequest) error
 }
 

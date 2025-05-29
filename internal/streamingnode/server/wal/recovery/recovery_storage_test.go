@@ -130,7 +130,7 @@ func TestRecoveryStorage(t *testing.T) {
 
 		msgs := b.generateStreamMessage()
 		for _, msg := range msgs {
-			rs.ObserveMessage(msg)
+			rs.ObserveMessage(context.Background(), msg)
 		}
 		rs.Close()
 		var partitionNum int
