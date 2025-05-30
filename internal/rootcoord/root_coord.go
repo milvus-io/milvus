@@ -1784,6 +1784,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 	}
 
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
+	physicalTs, _ := tsoutil.ParseTS(ts)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate timestamp", zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err))
@@ -1795,7 +1796,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 
 	// return first available timestamp
 	ts = ts - uint64(in.GetCount()) + 1
-	metrics.RootCoordTimestamp.Set(float64(ts))
+	metrics.RootCoordTimestamp.Set(float64(physicalTs.Unix()))
 	return &rootcoordpb.AllocTimestampResponse{
 		Status:    merr.Success(),
 		Timestamp: ts,
