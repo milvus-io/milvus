@@ -25,6 +25,7 @@ import (
 type DataSorter struct {
 	InsertCodec *InsertCodec
 	InsertData  *InsertData
+	AllFields   []*schemapb.FieldSchema
 }
 
 // getRowIDFieldData returns auto generated row id Field
@@ -50,7 +51,14 @@ func (ds *DataSorter) Len() int {
 
 // Swap swaps each field's i-th and j-th element
 func (ds *DataSorter) Swap(i, j int) {
-	for _, field := range ds.InsertCodec.Schema.Schema.Fields {
+	if ds.AllFields == nil {
+		allFields := ds.InsertCodec.Schema.Schema.Fields
+		for _, field := range ds.InsertCodec.Schema.Schema.StructFields {
+			allFields = append(allFields, field.Fields...)
+		}
+		ds.AllFields = allFields
+	}
+	for _, field := range ds.AllFields {
 		singleData, has := ds.InsertData.Data[field.FieldID]
 		if !has {
 			continue
