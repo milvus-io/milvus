@@ -167,7 +167,7 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         key.nested_path = path;
         key.field_id = field_id;
         json_indexings_[key] =
-            std::move(const_cast<LoadIndexInfo&>(info).index);
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
         return;
     }
 
