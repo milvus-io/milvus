@@ -93,13 +93,13 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// load without index on vector fields
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -312,13 +312,13 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// load without index on vector fields
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -349,6 +349,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	})
 	s.NoError(err)
 	s.NoError(merr.Error(loadStatus))
+	s.WaitForLoad(ctx, collectionName)
 
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)

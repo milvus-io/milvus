@@ -12,10 +12,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
 // NewCataLog creates a new catalog instance
 // streamingcoord-meta
+// ├── version
 // ├── broadcast
 // │   ├── task-1
 // │   └── task-2
@@ -32,6 +34,34 @@ func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
 // catalog is a kv based catalog.
 type catalog struct {
 	metaKV kv.MetaKv
+}
+
+// GetVersion returns the streaming version
+func (c *catalog) GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
+	value, err := c.metaKV.Load(ctx, VersionPrefix)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	info := &streamingpb.StreamingVersion{}
+	if err = proto.Unmarshal([]byte(value), info); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal streaming version failed")
+	}
+	return info, nil
+}
+
+// SaveVersion saves the streaming version
+func (c *catalog) SaveVersion(ctx context.Context, version *streamingpb.StreamingVersion) error {
+	if version == nil {
+		return errors.New("version is nil")
+	}
+	v, err := proto.Marshal(version)
+	if err != nil {
+		return errors.Wrapf(err, "marshal streaming version failed")
+	}
+	return c.metaKV.Save(ctx, VersionPrefix, string(v))
 }
 
 // ListPChannels returns all pchannels

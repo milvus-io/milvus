@@ -164,13 +164,13 @@ func (s *InternaltlsTestSuit) run() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -331,5 +331,7 @@ func (s *InternaltlsTestSuit) TearDownSuite() {
 }
 
 func TestInternalTLS(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(InternaltlsTestSuit))
 }

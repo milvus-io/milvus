@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -142,13 +143,17 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	s.True(has)
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-	segments, err := c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
-	}
-	log.Info("TestShowSegments succeed")
+	assert.Eventually(s.T(), func() bool {
+		segments, err := c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		if len(segments) != 0 {
+			for _, segment := range segments {
+				log.Info("ShowSegments result", zap.String("segment", segment.String()))
+			}
+			return true
+		}
+		return false
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 func (s *MetaWatcherSuite) TestShowReplicas() {
@@ -241,12 +246,17 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	})
 	s.NoError(err)
 
-	segments, err := c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
-	}
+	assert.Eventually(s.T(), func() bool {
+		segments, err := c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		if len(segments) != 0 {
+			for _, segment := range segments {
+				log.Info("ShowSegments result", zap.String("segment", segment.String()))
+			}
+			return true
+		}
+		return false
+	}, 5*time.Second, 100*time.Millisecond)
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
 	s.Require().NotEmpty(segmentIDs)

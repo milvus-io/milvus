@@ -186,6 +186,7 @@ func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALIm
 	}()
 
 	wg.Wait()
+	f.testReadWithFastClose(ctx, w)
 
 	f.assertSortedMessageList(read1)
 	f.assertSortedMessageList(read2)
@@ -307,6 +308,25 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 	assert.NoError(f.t, err)
 	ids[f.messageCount-1] = msg.IntoImmutableMessage(id)
 	return ids, nil
+}
+
+func (f *testOneWALImplsFramework) testReadWithFastClose(ctx context.Context, w WALImpls) {
+	wg := sync.WaitGroup{}
+	wg.Add(10)
+	for i := 0; i < 10; i++ {
+		name := fmt.Sprintf("scanner-fast-close-%d", i)
+		go func() {
+			defer wg.Done()
+			s, err := w.Read(ctx, ReadOption{
+				Name:                name,
+				DeliverPolicy:       options.DeliverPolicyAll(),
+				ReadAheadBufferSize: 128,
+			})
+			assert.NoError(f.t, err)
+			s.Close()
+		}()
+	}
+	wg.Wait()
 }
 
 func (f *testOneWALImplsFramework) testRead(ctx context.Context, w ROWALImpls, name string) ([]message.ImmutableMessage, error) {

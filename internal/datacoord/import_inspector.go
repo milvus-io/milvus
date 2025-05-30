@@ -62,6 +62,7 @@ func NewImportInspector(ctx context.Context, meta *meta, importMeta ImportMeta, 
 }
 
 func (s *importInspector) Start() {
+	s.reloadFromMeta()
 	log.Ctx(s.ctx).Info("start import inspector")
 	ticker := time.NewTicker(Params.DataCoordCfg.ImportScheduleInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
@@ -80,6 +81,21 @@ func (s *importInspector) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closeChan)
 	})
+}
+
+func (s *importInspector) reloadFromMeta() {
+	jobs := s.importMeta.GetJobBy(s.ctx)
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].GetJobID() < jobs[j].GetJobID()
+	})
+	for _, job := range jobs {
+		tasks := s.importMeta.GetTaskBy(s.ctx, WithJob(job.GetJobID()))
+		for _, task := range tasks {
+			if task.GetState() == datapb.ImportTaskStateV2_InProgress {
+				s.scheduler.Enqueue(task)
+			}
+		}
+	}
 }
 
 func (s *importInspector) inspect() {

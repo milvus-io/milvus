@@ -224,9 +224,9 @@ type commonConfig struct {
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
 	IndexSliceSize                      ParamItem `refreshable:"false"`
-	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"false"`
-	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"false"`
-	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
+	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
+	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -1991,7 +1991,7 @@ please adjust in embedded Milvus: false`,
 	p.SlowLogSpanInSeconds = ParamItem{
 		Key:          "proxy.slowLogSpanInSeconds",
 		Version:      "2.5.8",
-		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds.",
+		Doc:          "query whose executed time exceeds the `slowLogSpanInSeconds` will have slow log, in seconds. If request type is search, the query time will be divided by nq number.",
 		DefaultValue: "1",
 		FallbackKeys: []string{"proxy.slowQuerySpanInSeconds"},
 		Export:       false,
@@ -2733,9 +2733,14 @@ type queryNodeConfig struct {
 	// segcore
 	KnowhereThreadPoolSize        ParamItem `refreshable:"false"`
 	ChunkRows                     ParamItem `refreshable:"false"`
-	EnableTempSegmentIndex        ParamItem `refreshable:"false"`
+	EnableInterminSegmentIndex    ParamItem `refreshable:"false"`
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
+	InterimIndexSubDim            ParamItem `refreshable:"false"`
+	InterimIndexRefineRatio       ParamItem `refreshable:"false"`
+	InterimIndexRefineQuantType   ParamItem `refreshable:"false"`
+	InterimIndexRefineWithQuant   ParamItem `refreshable:"false"`
+	DenseVectorInterminIndexType  ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
@@ -2856,6 +2861,8 @@ type queryNodeConfig struct {
 	IDFEnableDisk       ParamItem `refreshable:"true"`
 	IDFLocalPath        ParamItem `refreshable:"true"`
 	IDFWriteConcurrenct ParamItem `refreshable:"true"`
+	// partial search
+	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2921,10 +2928,9 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Key:          "queryNode.segcore.tieredStorage.warmup.scalarField",
 		Version:      "2.6.0",
 		DefaultValue: "sync",
-		Doc: `options: sync, async, disable.
+		Doc: `options: sync, disable.
 Specifies the timing for warming up the Tiered Storage cache.
 - "sync": data will be loaded into the cache before a segment is considered loaded.
-- "async": data will be loaded asynchronously into the cache after a segment is loaded.
 - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
 Defaults to "sync", except for vector field which defaults to "disable".`,
 		Export: true,
@@ -2961,7 +2967,7 @@ Defaults to "sync", except for vector field which defaults to "disable".`,
 		Version:      "2.6.0",
 		DefaultValue: "false",
 		Doc: `Enable eviction for Tiered Storage. Defaults to false.
-Note that if eviction is enabled, cache data loaded during sync/async warmup is also subject to eviction.`,
+Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.`,
 		Export: true,
 	}
 	p.TieredEvictionEnabled.Init(base.mgr)
@@ -3127,7 +3133,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	}
 	p.ChunkRows.Init(base.mgr)
 
-	p.EnableTempSegmentIndex = ParamItem{
+	p.EnableInterminSegmentIndex = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.enableIndex",
 		Version:      "2.0.0",
 		DefaultValue: "false",
@@ -3136,7 +3142,34 @@ Milvus will eventually seals and indexes all segments, but enabling this optimiz
 This defaults to true, indicating that Milvus creates temporary index for growing segments and the sealed segments that are not indexed upon searches.`,
 		Export: true,
 	}
-	p.EnableTempSegmentIndex.Init(base.mgr)
+	p.EnableInterminSegmentIndex.Init(base.mgr)
+
+	p.DenseVectorInterminIndexType = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.denseVectorIndexType",
+		Version:      "2.5.4",
+		DefaultValue: "IVF_FLAT_CC",
+		Doc:          `Dense vector intermin index type`,
+		Export:       true,
+	}
+	p.DenseVectorInterminIndexType.Init(base.mgr)
+
+	p.InterimIndexRefineQuantType = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.refineQuantType",
+		Version:      "2.5.6",
+		DefaultValue: "NONE",
+		Doc:          `Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'`,
+		Export:       true,
+	}
+	p.InterimIndexRefineQuantType.Init(base.mgr)
+
+	p.InterimIndexRefineWithQuant = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.refineWithQuant",
+		Version:      "2.5.6",
+		DefaultValue: "true",
+		Doc:          `whether to use refineQuantType to refine for fatser but loss a little precision`,
+		Export:       true,
+	}
+	p.InterimIndexRefineWithQuant.Init(base.mgr)
 
 	p.KnowhereScoreConsistency = ParamItem{
 		Key:          "queryNode.segcore.knowhereScoreConsistency",
@@ -3152,7 +3185,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.interimIndex.nlist",
 		Version:      "2.0.0",
 		DefaultValue: "128",
-		Doc:          "temp index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
+		Doc:          "interim index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8",
 		Export:       true,
 	}
 	p.InterimIndexNlist.Init(base.mgr)
@@ -3202,6 +3235,30 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export: true,
 	}
 	p.InterimIndexNProbe.Init(base.mgr)
+
+	p.InterimIndexSubDim = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.subDim",
+		Version:      "2.5.4",
+		DefaultValue: "2",
+		Doc:          "interim index sub dim, recommend to (subDim % vector dim == 0)",
+		Export:       true,
+	}
+	p.InterimIndexSubDim.Init(base.mgr)
+
+	p.InterimIndexRefineRatio = ParamItem{
+		Key:     "queryNode.segcore.interimIndex.refineRatio",
+		Version: "2.5.4",
+		Formatter: func(v string) string {
+			if getAsFloat(v) < 1.0 {
+				return "1.0"
+			}
+			return v
+		},
+		DefaultValue: "2.0",
+		Doc:          "interim index parameters, should set to be >= 1.0",
+		Export:       true,
+	}
+	p.InterimIndexRefineRatio.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",
@@ -3786,6 +3843,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.WorkerPoolingSize.Init(base.mgr)
+
+	p.PartialResultRequiredDataRatio = ParamItem{
+		Key:          "proxy.partialResultRequiredDataRatio",
+		Version:      "2.6.0",
+		DefaultValue: "1",
+		Doc:          `partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result`,
+		Export:       true,
+	}
+	p.PartialResultRequiredDataRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -5504,6 +5570,9 @@ type streamingConfig struct {
 	WALWriteAheadBufferCapacity  ParamItem `refreshable:"true"`
 	WALWriteAheadBufferKeepalive ParamItem `refreshable:"true"`
 
+	// read ahead buffer size
+	WALReadAheadBufferLength ParamItem `refreshable:"true"`
+
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
 	// memory usage control
@@ -5644,6 +5713,17 @@ it also determine the depth of depth first search method that is used to find th
 		Export:       true,
 	}
 	p.WALWriteAheadBufferKeepalive.Init(base.mgr)
+
+	p.WALReadAheadBufferLength = ParamItem{
+		Key:     "streaming.walReadAheadBuffer.length",
+		Version: "2.6.0",
+		Doc: `The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
+Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
+Use the underlying wal default value if 0 is given.`,
+		DefaultValue: "128",
+		Export:       true,
+	}
+	p.WALReadAheadBufferLength.Init(base.mgr)
 
 	p.LoggingAppendSlowThreshold = ParamItem{
 		Key:     "streaming.logging.appendSlowThreshold",

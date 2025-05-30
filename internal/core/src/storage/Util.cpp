@@ -1023,10 +1023,24 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     AssertInfo(remote_files.size() > 0, "remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
+    // remote files might not followed the sequence of column group id,
+    // so we need to put into map<column_group_id, remote_chunk_files>
+    std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
     for (int i = 0; i < remote_files.size(); i++) {
         auto& remote_chunk_files = remote_files[i];
         AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
 
+        // find second last of / to get group_id
+        std::string path = remote_chunk_files[0];
+        size_t last_slash = path.find_last_of("/");
+        size_t second_last_slash = path.find_last_of("/", last_slash - 1);
+        int64_t group_id = std::stol(path.substr(
+            second_last_slash + 1, last_slash - second_last_slash - 1));
+
+        column_group_files[group_id] = remote_chunk_files;
+    }
+
+    for (auto& [column_group_id, remote_chunk_files] : column_group_files) {
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         // read first file to get path and column offset of the field id
@@ -1045,9 +1059,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         AssertInfo(column_offset.path_index < remote_files.size(),
                    "column offset path index {} is out of range",
                    column_offset.path_index);
-        if (column_offset.path_index != i) {
+        if (column_offset.path_index != column_group_id) {
             LOG_INFO("Skip group id {} since target field shall be in group {}",
-                     i,
+                     column_group_id,
                      column_offset.path_index);
             continue;
         }

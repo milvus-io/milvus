@@ -553,6 +553,7 @@ func (c *compactionInspector) submitTask(t CompactionTask) error {
 func (c *compactionInspector) restoreTask(t CompactionTask) {
 	c.executingGuard.Lock()
 	c.executingTasks[t.GetTaskProto().GetPlanID()] = t
+	c.scheduler.Enqueue(t)
 	c.executingGuard.Unlock()
 	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
 }

@@ -69,10 +69,11 @@ func (s *globalTaskScheduler) Enqueue(task Task) {
 	case taskcommon.Init:
 		task.SetTaskTime(taskcommon.TimeQueue, time.Now())
 		s.pendingTasks.Push(task)
-	case taskcommon.InProgress:
+	case taskcommon.InProgress, taskcommon.Retry:
 		task.SetTaskTime(taskcommon.TimeStart, time.Now())
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
+	log.Ctx(s.ctx).Info("task enqueued", WrapTaskLog(task)...)
 }
 
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {

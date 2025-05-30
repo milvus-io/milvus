@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -545,7 +546,14 @@ func TestGcPartitionData(t *testing.T) {
 	defer streamingutil.UnsetStreamingServiceEnabled()
 
 	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).Return(streaming.AppendResponses{})
+	broadcast := mock_streaming.NewMockBroadcast(t)
+	broadcast.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{
+		BroadcastID: 0,
+		AppendResults: map[string]*types.AppendResult{
+			"ch-0": {},
+		},
+	}, nil)
+	wal.EXPECT().Broadcast().Return(broadcast)
 	streaming.SetWALForTest(wal)
 
 	tsoAllocator := mocktso.NewAllocator(t)

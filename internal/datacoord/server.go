@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -54,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
@@ -328,7 +330,18 @@ func (s *Server) initDataCoord() error {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
+
+	s.initMessageAckCallback()
 	return nil
+}
+
+// initMessageAckCallback initializes the message ack callback.
+// TODO: we should build a ddl framework to handle the message ack callback for ddl messages
+func (s *Server) initMessageAckCallback() {
+	registry.RegisterMessageAckCallback(message.MessageTypeDropPartition, func(ctx context.Context, msg message.MutableMessage) error {
+		dropPartitionMsg := message.MustAsMutableDropPartitionMessageV1(msg)
+		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{dropPartitionMsg.Header().PartitionId})
+	})
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:

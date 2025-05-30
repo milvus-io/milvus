@@ -24,9 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -106,12 +104,6 @@ func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 
 func TestFlushMsgHandler_HandlSchemaChange(t *testing.T) {
 	vchannel := "ch-0"
-
-	w := mock_streaming.NewMockWALAccesser(t)
-	b := mock_streaming.NewMockBroadcast(t)
-	w.EXPECT().Broadcast().Return(b)
-	b.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
-	streaming.SetWALForTest(w)
 
 	// test failed
 	wbMgr := writebuffer.NewMockBufferManager(t)

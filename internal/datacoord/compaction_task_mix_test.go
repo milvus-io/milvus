@@ -90,3 +90,27 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
 	})
 }
+
+func (s *MixCompactionTaskSuite) TestProcess() {
+	s.Run("test process states", func() {
+		testCases := []struct {
+			state         datapb.CompactionTaskState
+			processResult bool
+		}{
+			{state: datapb.CompactionTaskState_unknown, processResult: false},
+			{state: datapb.CompactionTaskState_pipelining, processResult: false},
+			{state: datapb.CompactionTaskState_executing, processResult: false},
+			{state: datapb.CompactionTaskState_failed, processResult: true},
+			{state: datapb.CompactionTaskState_timeout, processResult: true},
+		}
+
+		for _, tc := range testCases {
+			task := newMixCompactionTask(&datapb.CompactionTask{
+				PlanID: 1,
+				State:  tc.state,
+			}, nil, s.mockMeta)
+			res := task.Process()
+			s.Equal(tc.processResult, res)
+		}
+	})
+}

@@ -12,6 +12,7 @@
 package client
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
@@ -28,7 +29,10 @@ type consumer struct {
 
 	startOnce sync.Once
 
-	stopCh    chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	msgMutex  chan struct{}
 	initCh    chan struct{}
 	messageCh chan common.Message
@@ -54,12 +58,15 @@ func newConsumer(c *client, options ConsumerOptions) (*consumer, error) {
 	// only used for
 	initCh := make(chan struct{}, 1)
 	initCh <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &consumer{
 		topic:        options.Topic,
 		client:       c,
 		consumerName: options.SubscriptionName,
 		options:      options,
-		stopCh:       make(chan struct{}),
+		ctx:          ctx,
+		cancel:       cancel,
+		wg:           sync.WaitGroup{},
 		msgMutex:     make(chan struct{}, 1),
 		initCh:       initCh,
 		messageCh:    messageCh,
@@ -85,11 +92,15 @@ func getExistedConsumer(c *client, options ConsumerOptions, msgMutex chan struct
 		messageCh = make(chan common.Message, 1)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &consumer{
 		topic:        options.Topic,
 		client:       c,
 		consumerName: options.SubscriptionName,
 		options:      options,
+		ctx:          ctx,
+		cancel:       cancel,
+		wg:           sync.WaitGroup{},
 		msgMutex:     msgMutex,
 		messageCh:    messageCh,
 	}, nil
@@ -114,6 +125,7 @@ func (c *consumer) MsgMutex() chan struct{} {
 func (c *consumer) Chan() <-chan common.Message {
 	c.startOnce.Do(func() {
 		c.client.wg.Add(1)
+		c.wg.Add(1)
 		go c.client.consume(c)
 	})
 	return c.messageCh
@@ -141,7 +153,8 @@ func (c *consumer) Close() {
 		close(c.msgMutex)
 		return
 	}
-	<-c.stopCh
+	c.cancel()
+	c.wg.Wait()
 }
 
 func (c *consumer) GetLatestMsgID() (int64, error) {

@@ -71,29 +71,34 @@ func TestBalancer(t *testing.T) {
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
 	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
 	catalog.EXPECT().ListPChannel(mock.Anything).RunAndReturn(func(ctx context.Context) ([]*streamingpb.PChannelMeta, error) {
 		return []*streamingpb.PChannelMeta{
 			{
 				Channel: &streamingpb.PChannelInfo{
-					Name: "test-channel-1",
-					Term: 1,
+					Name:       "test-channel-1",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY,
 				},
 				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
 				Node:  &streamingpb.StreamingNodeInfo{ServerId: 1},
 			},
 			{
 				Channel: &streamingpb.PChannelInfo{
-					Name: "test-channel-2",
-					Term: 1,
+					Name:       "test-channel-2",
+					Term:       1,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY,
 				},
-				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED,
+				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_UNAVAILABLE,
 				Node:  &streamingpb.StreamingNodeInfo{ServerId: 4},
 			},
 			{
 				Channel: &streamingpb.PChannelInfo{
-					Name: "test-channel-3",
-					Term: 2,
+					Name:       "test-channel-3",
+					Term:       2,
+					AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY,
 				},
 				State: streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING,
 				Node:  &streamingpb.StreamingNodeInfo{ServerId: 2},
@@ -121,37 +126,50 @@ func TestBalancer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
-	ctx1, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	err = b.WatchChannelAssignments(ctx1, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
-		assert.Len(t, relations, 2)
+	doneErr := errors.New("done")
+	err = b.WatchChannelAssignments(context.Background(), func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+		for _, relation := range relations {
+			assert.Equal(t, relation.Channel.AccessMode, types.AccessModeRO)
+		}
+		if len(relations) == 3 {
+			return doneErr
+		}
 		return nil
 	})
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, doneErr)
 	resource.Resource().ETCD().Delete(context.Background(), proxyPath1)
 	resource.Resource().ETCD().Delete(context.Background(), proxyPath2)
 	resource.Resource().ETCD().Delete(context.Background(), dataNodePath)
+
+	checkReady := func() {
+		err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+			// should one pchannel be assigned to per nodes
+			nodeIDs := typeutil.NewSet[int64]()
+			if len(relations) == 3 {
+				rwCount := types.AccessModeRW
+				for _, relation := range relations {
+					if relation.Channel.AccessMode == types.AccessModeRW {
+						rwCount++
+					}
+					nodeIDs.Insert(relation.Node.ServerID)
+				}
+				if rwCount == 3 {
+					assert.Equal(t, 3, nodeIDs.Len())
+					return doneErr
+				}
+			}
+			return nil
+		})
+		assert.ErrorIs(t, err, doneErr)
+	}
+	checkReady()
 
 	b.MarkAsUnavailable(ctx, []types.PChannelInfo{{
 		Name: "test-channel-1",
 		Term: 1,
 	}})
 	b.Trigger(ctx)
-
-	doneErr := errors.New("done")
-	err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
-		// should one pchannel be assigned to per nodes
-		nodeIDs := typeutil.NewSet[int64]()
-		if len(relations) == 3 {
-			for _, status := range relations {
-				nodeIDs.Insert(status.Node.ServerID)
-			}
-			assert.Equal(t, 3, nodeIDs.Len())
-			return doneErr
-		}
-		return nil
-	})
-	assert.ErrorIs(t, err, doneErr)
+	checkReady()
 
 	// create a inifite block watcher and can be interrupted by close of balancer.
 	f := syncutil.NewFuture[error]()

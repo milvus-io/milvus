@@ -100,6 +100,26 @@ func isNumber(c uint8) bool {
 	return true
 }
 
+// check run analyzer params when collection name was set
+func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
+	if req.GetAnalyzerParams() != "" {
+		return fmt.Errorf("run analyzer can't use analyzer params and (collection,field) in same time")
+	}
+
+	if req.GetFieldName() == "" {
+		return fmt.Errorf("must set field name when collection name was set")
+	}
+
+	if req.GetAnalyzerNames() != nil {
+		if len(req.GetAnalyzerNames()) != 1 && len(req.GetAnalyzerNames()) != len(req.GetPlaceholder()) {
+			return fmt.Errorf("only support set one analyzer name for all text or set analyzer name for each text, but now analzer name num: %d, text num: %d",
+				len(req.GetAnalyzerNames()), len(req.GetPlaceholder()))
+		}
+	}
+
+	return nil
+}
+
 func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
@@ -1691,10 +1711,11 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			}
 			// when use default_value or has set Nullable
 			// it's ok that no corresponding fieldData found
-			dataToAppend := &schemapb.FieldData{
-				Type:      fieldSchema.GetDataType(),
-				FieldName: fieldSchema.GetName(),
+			dataToAppend, err := typeutil.GenEmptyFieldData(fieldSchema)
+			if err != nil {
+				return err
 			}
+			dataToAppend.ValidData = make([]bool, insertMsg.GetNumRows())
 			insertMsg.FieldsData = append(insertMsg.FieldsData, dataToAppend)
 		}
 	}
@@ -2506,4 +2527,22 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 		}
 	}
 	return false
+}
+
+func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
+	properties := make(map[string]string)
+	for _, pair := range pairs {
+		properties[pair.Key] = pair.Value
+	}
+
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return uint64(time.Duration(ttl) * time.Second)
+	}
+
+	return 0
 }

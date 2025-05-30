@@ -25,4 +25,5 @@ func TestInit(t *testing.T) {
 
 func TestInitForTest(t *testing.T) {
 	InitForTest()
+	Release()
 }

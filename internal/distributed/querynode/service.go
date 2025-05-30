@@ -398,3 +398,7 @@ func (s *Server) DeleteBatch(ctx context.Context, req *querypb.DeleteBatchReques
 func (s *Server) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	return s.querynode.UpdateSchema(ctx, req)
 }
+
+func (s *Server) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return s.querynode.RunAnalyzer(ctx, req)
+}

@@ -253,7 +253,7 @@ download-milvus-proto:
 
 build-3rdparty:
 	@echo "Build 3rdparty ..."
-	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal})
+	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal} -t ${mode})
 
 generated-proto-without-cpp: download-milvus-proto get-proto-deps
 	@echo "Generate proto ..."

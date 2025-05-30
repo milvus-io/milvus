@@ -125,8 +125,7 @@ func (s *mixCoordImpl) Register() error {
 func (s *mixCoordImpl) Init() error {
 	log := log.Ctx(s.ctx)
 	var initErr error
-	if err := s.initSession(); err != nil {
-		initErr = err
+	if initErr = s.initSession(); initErr != nil {
 		return initErr
 	}
 	s.factory.Init(Params)
@@ -151,10 +150,9 @@ func (s *mixCoordImpl) Init() error {
 		s.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("MixCoord enter standby mode successfully")
 	} else {
-		var err error
 		s.initOnce.Do(func() {
-			if err = s.initInternal(); err != nil {
-				log.Error("mixCoord init failed", zap.Error(err))
+			if initErr = s.initInternal(); initErr != nil {
+				log.Error("mixCoord init failed", zap.Error(initErr))
 			}
 		})
 	}
@@ -178,7 +176,7 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	if err := s.streamingCoord.Start(s.ctx); err != nil {
-		log.Error("streamCoord init failed", zap.Error(err))
+		log.Error("streamCoord start failed", zap.Error(err))
 		return err
 	}
 
@@ -188,7 +186,7 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	if err := s.datacoordServer.Start(); err != nil {
-		log.Error("dataCoord init failed", zap.Error(err))
+		log.Error("dataCoord start failed", zap.Error(err))
 		return err
 	}
 
@@ -198,7 +196,7 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	if err := s.queryCoordServer.Start(); err != nil {
-		log.Error("queryCoord init failed", zap.Error(err))
+		log.Error("queryCoord start failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -312,6 +310,7 @@ func (s *mixCoordImpl) GetStateCode() commonpb.StateCode {
 func (s *mixCoordImpl) GracefulStop() {
 	if s.streamingCoord != nil {
 		s.streamingCoord.Stop()
+		s.streamingCoord = nil
 	}
 }
 

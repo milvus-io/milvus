@@ -125,7 +125,8 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
-    } else if (get_bit(binlog_index_bitset_, field_id)) {
+    }
+    if (get_bit(binlog_index_bitset_, field_id)) {
         set_bit(binlog_index_bitset_, field_id, false);
         vector_indexings_.drop_field_indexing(field_id);
     }
@@ -322,10 +323,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_data_info =
             FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
-        LOG_INFO("segment {} loads field {} with num_rows {}",
+        LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
-                 num_rows);
+                 num_rows,
+                 is_sorted_by_pk_);
 
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto insert_files = info.insert_files;
@@ -1371,7 +1373,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         return fill_with_empty(field_id, count);
     }
 
-    if (!HasIndex(field_id)) {
+    if (HasFieldData(field_id)) {
         Assert(get_bit(field_data_ready_bitset_, field_id));
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
@@ -1461,16 +1463,23 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
     auto fieldID = FieldId(field_id);
     const auto& field_meta = schema_->operator[](fieldID);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        if (get_bit(index_ready_bitset_, fieldID) |
-            get_bit(binlog_index_bitset_, fieldID)) {
+        if (get_bit(index_ready_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
-            AssertInfo(
-                index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
-                "index_has_raw_data_ is not set for fieldID: " +
-                    std::to_string(fieldID.get()));
-            return index_has_raw_data_.at(fieldID);
-        }
+            auto accessor =
+                SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
+                                  ->indexing_->PinCells({0}));
+            auto vec_index = accessor->get_cell_of(0);
+            return vec_index->HasRawData();
+        } else if (get_bit(binlog_index_bitset_, fieldID)) {
+            AssertInfo(vector_indexings_.is_ready(fieldID),
+                    "vector index is not ready");
+            auto accessor =
+                SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
+                                  ->indexing_->PinCells({0}));
+            auto vec_index = accessor->get_cell_of(0);
+            return vec_index->HasRawData() || get_bit(field_data_ready_bitset_, fieldID);
+        } 
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
@@ -1610,13 +1619,27 @@ ChunkedSegmentSealedImpl::get_active_count(Timestamp ts) const {
 
 void
 ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                                               Timestamp timestamp) const {
+                                               Timestamp timestamp,
+                                               Timestamp collection_ttl) const {
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                "num chunk not equal to 1 for sealed segment");
     auto timestamps_data =
         (const milvus::Timestamp*)insert_record_.timestamps_.get_chunk_data(0);
     auto timestamps_data_size = insert_record_.timestamps_.get_chunk_size(0);
+    if (collection_ttl > 0) {
+        auto range =
+            insert_record_.timestamp_index_.get_active_range(collection_ttl);
+        if (range.first == range.second &&
+            range.first == timestamps_data_size) {
+            bitset_chunk.set();
+            return;
+        } else {
+            auto ttl_mask = TimestampIndex::GenerateTTLBitset(
+                timestamps_data, timestamps_data_size, collection_ttl, range);
+            bitset_chunk |= ttl_mask;
+        }
+    }
 
     AssertInfo(timestamps_data_size == get_row_count(),
                fmt::format("Timestamp size not equal to row count: {}, {}",
@@ -1666,6 +1689,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         }
         // check data type
         if (field_meta.get_data_type() != DataType::VECTOR_FLOAT &&
+            field_meta.get_data_type() != DataType::VECTOR_FLOAT16 &&
+            field_meta.get_data_type() != DataType::VECTOR_BFLOAT16 &&
             !is_sparse) {
             return false;
         }
@@ -1710,7 +1735,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         auto dim = is_sparse ? std::numeric_limits<uint32_t>::max()
                              : field_meta.get_dim();
 
-        auto build_config = field_binlog_config->GetBuildBaseParams();
+        auto build_config =
+            field_binlog_config->GetBuildBaseParams(field_meta.get_data_type());
         build_config[knowhere::meta::DIM] = std::to_string(dim);
         build_config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
         auto index_metric = field_binlog_config->GetMetricType();
@@ -1730,7 +1756,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
                         index_metric,
                         build_config,
                         dim,
-                        is_sparse);
+                        is_sparse,
+                        field_meta.get_data_type());
 
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
@@ -1743,13 +1770,13 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             set_bit(binlog_index_bitset_, field_id, true);
             index_has_raw_data_[field_id] = true;
             LOG_INFO(
-                "replace binlog with binlog index in segment {}, field {}.",
+                "replace binlog with intermin index in segment {}, field {}.",
                 this->get_segment_id(),
                 field_id.get());
         }
         return true;
     } catch (std::exception& e) {
-        LOG_WARN("fail to generate binlog index, because {}", e.what());
+        LOG_WARN("fail to generate intermin index, because {}", e.what());
         return false;
     }
 }
