@@ -538,5 +538,7 @@ func (s *PartialSearchTestSuit) TestSkipWaitTSafe() {
 }
 
 func TestPartialResult(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(PartialSearchTestSuit))
 }

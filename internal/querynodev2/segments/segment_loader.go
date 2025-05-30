@@ -230,7 +230,7 @@ type segmentLoader struct {
 var _ Loader = (*segmentLoader)(nil)
 
 func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
-	if segmentInfo.GetStorageVersion() == 2 {
+	if segmentInfo.GetStorageVersion() == 2 && paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
 		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
@@ -1712,9 +1712,12 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 				return merr.WrapErrIndexNotFound("index file list empty")
 			}
 
-			fieldInfo, ok := fieldInfos[info.GetFieldID()]
-			if !ok {
-				return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+			// TODO add field info sync between segcore and go segment for storage v2
+			if loadInfo.GetStorageVersion() != 2 {
+				fieldInfo, ok := fieldInfos[info.GetFieldID()]
+				if !ok {
+					return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+				}
 			}
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {

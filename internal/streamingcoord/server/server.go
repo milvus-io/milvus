@@ -11,6 +11,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/policy" // register the balancer policy
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -106,5 +107,7 @@ func (s *Server) Stop() {
 	} else {
 		s.logger.Info("broadcaster not ready, skip close")
 	}
+	s.logger.Info("release streamingcoord resource...")
+	resource.Release()
 	s.logger.Info("streamingcoord server stopped")
 }

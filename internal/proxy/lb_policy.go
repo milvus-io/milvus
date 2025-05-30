@@ -17,6 +17,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -56,6 +57,7 @@ type CollectionWorkLoad struct {
 
 type LBPolicy interface {
 	Execute(ctx context.Context, workload CollectionWorkLoad) error
+	ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error
 	ExecuteWithRetry(ctx context.Context, workload ChannelWorkload) error
 	UpdateCostMetrics(node int64, cost *internalpb.CostAggregation)
 	Start(ctx context.Context)
@@ -310,6 +312,36 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 	}
 
 	return wg.Wait()
+}
+
+// Execute will execute any one channel in collection workload
+func (lb *LBPolicyImpl) ExecuteOneChannel(ctx context.Context, workload CollectionWorkLoad) error {
+	dml2leaders, err := lb.GetShardLeaders(ctx, workload.db, workload.collectionName, workload.collectionID, true)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to get shards", zap.Error(err))
+		return err
+	}
+
+	// let every request could retry at least twice, which could retry after update shard leader cache
+	for k, v := range dml2leaders {
+		channel := k
+		nodes := v
+		channelRetryTimes := lb.retryOnReplica
+		if len(nodes) > 0 {
+			channelRetryTimes *= len(nodes)
+		}
+		return lb.ExecuteWithRetry(ctx, ChannelWorkload{
+			db:             workload.db,
+			collectionName: workload.collectionName,
+			collectionID:   workload.collectionID,
+			channel:        channel,
+			shardLeaders:   nodes,
+			nq:             workload.nq,
+			exec:           workload.exec,
+			retryTimes:     uint(channelRetryTimes),
+		})
+	}
+	return fmt.Errorf("no acitvate sheard leader exist for collection: %s", workload.collectionName)
 }
 
 func (lb *LBPolicyImpl) UpdateCostMetrics(node int64, cost *internalpb.CostAggregation) {

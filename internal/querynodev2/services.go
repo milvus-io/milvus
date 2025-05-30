@@ -1526,6 +1526,31 @@ func (node *QueryNode) DeleteBatch(ctx context.Context, req *querypb.DeleteBatch
 	}, nil
 }
 
+func (node *QueryNode) RunAnalyzer(ctx context.Context, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	// get delegator
+	sd, ok := node.delegators.Get(req.GetChannel())
+	if !ok {
+		err := merr.WrapErrChannelNotFound(req.GetChannel())
+		log.Warn("RunAnalyzer failed, failed to get shard delegator", zap.Error(err))
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	// run analyzer
+	results, err := sd.RunAnalyzer(ctx, req)
+	if err != nil {
+		log.Warn("failed to search on delegator", zap.Error(err))
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &milvuspb.RunAnalyzerResponse{
+		Status:  merr.Status(nil),
+		Results: results,
+	}, nil
+}
+
 type deleteRequestStringer struct {
 	*querypb.DeleteRequest
 }

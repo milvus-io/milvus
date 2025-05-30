@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/prometheus/client_golang/prometheus"
@@ -88,6 +89,7 @@ func init() {
 	Registry = prometheus.NewRegistry()
 	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	Registry.MustRegister(prometheus.NewGoCollector())
+	common.Version = semver.MustParse("2.5.9")
 }
 
 func runMixCoord(ctx context.Context, localMsg bool) *grpcmixcoord.Server {

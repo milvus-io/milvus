@@ -9,4 +9,5 @@ func ResetRegistration() {
 	localRegistry = make(map[AppendOperatorType]*syncutil.Future[AppendOperator])
 	localRegistry[AppendOperatorTypeMsgstream] = syncutil.NewFuture[AppendOperator]()
 	localRegistry[AppendOperatorTypeStreaming] = syncutil.NewFuture[AppendOperator]()
+	resetMessageAckCallbacks()
 }

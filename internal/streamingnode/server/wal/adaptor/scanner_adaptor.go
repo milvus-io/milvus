@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -101,8 +102,10 @@ type scannerAdaptorImpl struct {
 	reorderBuffer *utility.ReOrderByTimeTickBuffer // support time tick reorder.
 	pendingQueue  *utility.PendingQueue
 	txnBuffer     *utility.TxnBuffer // txn buffer for txn message.
-	cleanup       func()
-	metrics       *metricsutil.ScannerMetrics
+
+	cleanup   func()
+	clearOnce sync.Once
+	metrics   *metricsutil.ScannerMetrics
 }
 
 // Channel returns the channel assignment info of the wal.
@@ -119,11 +122,19 @@ func (s *scannerAdaptorImpl) Chan() <-chan message.ImmutableMessage {
 // Return the error same with `Error`
 func (s *scannerAdaptorImpl) Close() error {
 	err := s.ScannerHelper.Close()
-	if s.cleanup != nil {
-		s.cleanup()
-	}
-	s.metrics.Close()
+	// Close may be called multiple times, so we need to clear the resources only once.
+	s.clear()
 	return err
+}
+
+// clear clears the resources of the scanner.
+func (s *scannerAdaptorImpl) clear() {
+	s.clearOnce.Do(func() {
+		if s.cleanup != nil {
+			s.cleanup()
+		}
+		s.metrics.Close()
+	})
 }
 
 func (s *scannerAdaptorImpl) execute() {

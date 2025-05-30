@@ -23,6 +23,64 @@ func (_m *MockStreamingCoordCataLog) EXPECT() *MockStreamingCoordCataLog_Expecte
 	return &MockStreamingCoordCataLog_Expecter{mock: &_m.Mock}
 }
 
+// GetVersion provides a mock function with given fields: ctx
+func (_m *MockStreamingCoordCataLog) GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVersion")
+	}
+
+	var r0 *streamingpb.StreamingVersion
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (*streamingpb.StreamingVersion, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) *streamingpb.StreamingVersion); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingVersion)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingCoordCataLog_GetVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVersion'
+type MockStreamingCoordCataLog_GetVersion_Call struct {
+	*mock.Call
+}
+
+// GetVersion is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockStreamingCoordCataLog_Expecter) GetVersion(ctx interface{}) *MockStreamingCoordCataLog_GetVersion_Call {
+	return &MockStreamingCoordCataLog_GetVersion_Call{Call: _e.mock.On("GetVersion", ctx)}
+}
+
+func (_c *MockStreamingCoordCataLog_GetVersion_Call) Run(run func(ctx context.Context)) *MockStreamingCoordCataLog_GetVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_GetVersion_Call) Return(_a0 *streamingpb.StreamingVersion, _a1 error) *MockStreamingCoordCataLog_GetVersion_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_GetVersion_Call) RunAndReturn(run func(context.Context) (*streamingpb.StreamingVersion, error)) *MockStreamingCoordCataLog_GetVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListBroadcastTask provides a mock function with given fields: ctx
 func (_m *MockStreamingCoordCataLog) ListBroadcastTask(ctx context.Context) ([]*streamingpb.BroadcastTask, error) {
 	ret := _m.Called(ctx)
@@ -230,6 +288,53 @@ func (_c *MockStreamingCoordCataLog_SavePChannels_Call) Return(_a0 error) *MockS
 }
 
 func (_c *MockStreamingCoordCataLog_SavePChannels_Call) RunAndReturn(run func(context.Context, []*streamingpb.PChannelMeta) error) *MockStreamingCoordCataLog_SavePChannels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveVersion provides a mock function with given fields: ctx, version
+func (_m *MockStreamingCoordCataLog) SaveVersion(ctx context.Context, version *streamingpb.StreamingVersion) error {
+	ret := _m.Called(ctx, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveVersion")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingVersion) error); ok {
+		r0 = rf(ctx, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStreamingCoordCataLog_SaveVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveVersion'
+type MockStreamingCoordCataLog_SaveVersion_Call struct {
+	*mock.Call
+}
+
+// SaveVersion is a helper method to define mock.On call
+//   - ctx context.Context
+//   - version *streamingpb.StreamingVersion
+func (_e *MockStreamingCoordCataLog_Expecter) SaveVersion(ctx interface{}, version interface{}) *MockStreamingCoordCataLog_SaveVersion_Call {
+	return &MockStreamingCoordCataLog_SaveVersion_Call{Call: _e.mock.On("SaveVersion", ctx, version)}
+}
+
+func (_c *MockStreamingCoordCataLog_SaveVersion_Call) Run(run func(ctx context.Context, version *streamingpb.StreamingVersion)) *MockStreamingCoordCataLog_SaveVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.StreamingVersion))
+	})
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_SaveVersion_Call) Return(_a0 error) *MockStreamingCoordCataLog_SaveVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockStreamingCoordCataLog_SaveVersion_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingVersion) error) *MockStreamingCoordCataLog_SaveVersion_Call {
 	_c.Call.Return(run)
 	return _c
 }

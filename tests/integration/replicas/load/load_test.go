@@ -1032,5 +1032,7 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 }
 
 func TestReplicas(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(LoadTestSuite))
 }
