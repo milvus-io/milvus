@@ -1713,7 +1713,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 			}
 
 			// TODO add field info sync between segcore and go segment for storage v2
-			if loadInfo.GetStorageVersion() != 2 {
+			if loadInfo.GetStorageVersion() != storage.StorageV2 {
 				fieldInfo, ok := fieldInfos[info.GetFieldID()]
 				if !ok {
 					return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
