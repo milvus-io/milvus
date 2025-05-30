@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "common/JsonCastType.h"
+#include "cachinglayer/Utils.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/Index.h"
@@ -55,10 +56,10 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
-    virtual index::IndexBase*
+    virtual PinWrapper<const index::IndexBase*>
     GetJsonIndex(FieldId field_id, std::string path) const override {
         int path_len_diff = std::numeric_limits<int>::max();
-        index::IndexBase* best_match = nullptr;
+        index::CacheIndexBasePtr best_match = nullptr;
         std::string_view path_view = path;
         for (const auto& index : json_indices) {
             if (index.field_id != field_id) {
@@ -75,20 +76,23 @@ class SegmentSealed : public SegmentInternalInterface {
                             path_view.length() - index.nested_path.length();
                         if (current_len_diff < path_len_diff) {
                             path_len_diff = current_len_diff;
-                            best_match = index.index.get();
+                            best_match = index.index;
                         }
                         if (path_len_diff == 0) {
-                            return best_match;
+                            break;
                         }
                     }
                     break;
                 default:
                     if (index.nested_path == path) {
-                        return index.index.get();
+                        best_match = index.index;
+                        break;
                     }
             }
         }
-        return best_match;
+        auto ca = SemiInlineGet(best_match->PinCells({0}));
+        auto index = ca->get_cell_of(0);
+        return PinWrapper<const index::IndexBase*>(ca, index);
     }
 
     virtual void
@@ -126,9 +130,8 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (any_type) {
                     return true;
                 }
-                return index.nested_path == path &&
-                       index.index->IsDataTypeSupported(data_type,
-                                                        is_json_contain);
+                return milvus::index::json::IsDataTypeSupported(
+                    index.cast_type, data_type, is_json_contain);
             });
         return it != json_indices.end();
     }
@@ -147,7 +150,7 @@ class SegmentSealed : public SegmentInternalInterface {
         FieldId field_id;
         std::string nested_path;
         JsonCastType cast_type{JsonCastType::UNKNOWN};
-        index::IndexBasePtr index;
+        index::CacheIndexBasePtr index;
     };
 
     std::vector<JsonIndex> json_indices;
