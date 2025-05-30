@@ -154,7 +154,7 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 
 func (si *statsInspector) triggerSortStatsTask() {
 	invisibleSegments := si.mt.SelectSegments(si.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && seg.GetIsInvisible()
+		return isFlushed(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && seg.GetIsInvisible()
 	}))
 
 	for _, seg := range invisibleSegments {
@@ -162,7 +162,7 @@ func (si *statsInspector) triggerSortStatsTask() {
 	}
 
 	visibleSegments := si.mt.SelectSegments(si.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && !seg.GetIsInvisible()
+		return isFlushed(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsInvisible()
 	}))
 
 	for _, segment := range visibleSegments {

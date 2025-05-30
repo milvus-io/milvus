@@ -766,6 +766,10 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	return false
 }
 
+func isFlushed(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed
+}
+
 func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
 }
