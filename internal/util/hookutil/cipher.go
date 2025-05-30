@@ -26,14 +26,17 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 var (
-	Cipher         atomic.Value
-	initCipherOnce sync.Once
+	Cipher                 atomic.Value
+	initCipherOnce         sync.Once
+	ErrCipherPluginMissing = errors.New("cipher plugin is missing")
 )
 
 // GetCipher returns singleton hook.Cipher instance.
@@ -42,6 +45,68 @@ var (
 func GetCipher() hook.Cipher {
 	InitOnceCipher()
 	return Cipher.Load().(cipherContainer).cipher
+}
+
+func IsClusterEncyptionEnabled() bool {
+	return GetCipher() != nil
+}
+
+const (
+	EncryptionEnabledKey = "cipher.enabled"
+	EncryptionRootKeyKey = "cipher.key"
+	EncryptionEzIDKey    = "cipher.ezID"
+)
+
+type EZ struct {
+	EzID         int64
+	CollectionID int64
+}
+
+type CipherContext struct {
+	EZ
+	key []byte
+}
+
+func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID int64) *EZ {
+	for _, property := range collProperties {
+		if property.Key == EncryptionEzIDKey {
+			ezID, _ := strconv.ParseInt(property.Value, 10, 64)
+			return &EZ{
+				EzID:         ezID,
+				CollectionID: collectionID,
+			}
+		}
+	}
+	return nil
+}
+
+func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) error {
+	if IsDBEncyptionEnabled(dbProperties) {
+		if !IsClusterEncyptionEnabled() {
+			return ErrCipherPluginMissing
+		}
+		for _, property := range dbProperties {
+			if property.Key == EncryptionRootKeyKey {
+				return nil
+			}
+		}
+
+		// set default root key if not set
+		dbProperties = append(dbProperties, &commonpb.KeyValuePair{
+			Key:   EncryptionRootKeyKey,
+			Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
+		})
+	}
+	return nil
+}
+
+func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
+	for _, property := range dbProperties {
+		if property.Key == EncryptionEnabledKey {
+			return true
+		}
+	}
+	return false
 }
 
 // For test only
