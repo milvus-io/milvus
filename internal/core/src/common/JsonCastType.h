@@ -42,6 +42,9 @@ class JsonCastType {
     MilvusDataType
     ToMilvusDataType() const;
 
+    std::string
+    ToString() const;
+
  private:
     JsonCastType(DataType data_type, DataType element_type);
 
