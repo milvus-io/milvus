@@ -1706,6 +1706,66 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		err = w.AddOneJSONToPayload([]byte(`{"1":"1"}`), false)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
+
+	t.Run("TestArrayVector", func(t *testing.T) {
+		w, err := NewPayloadWriter(schemapb.DataType_Array)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{
+					Data: []float32{1.0, 2.0, 3.0, 4.0},
+				},
+			},
+		})
+		assert.NoError(t, err)
+		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{
+					Data: []float32{11.0, 22.0, 33.0, 44.0},
+				},
+			},
+		})
+		assert.NoError(t, err)
+		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{
+					Data: []float32{111.0, 222.0, 333.0, 444.0},
+				},
+			},
+		})
+		assert.NoError(t, err)
+		err = w.FinishPayloadWriter()
+		assert.NoError(t, err)
+		length, err := w.GetPayloadLengthFromWriter()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 3)
+		buffer, err := w.GetPayloadBufferFromWriter()
+		assert.NoError(t, err)
+
+		r, err := NewPayloadReader(schemapb.DataType_ArrayOfVector, buffer, false)
+		assert.NoError(t, err)
+		length, err = r.GetPayloadLengthFromReader()
+		assert.NoError(t, err)
+		assert.Equal(t, length, 3)
+
+		arrayList, err := r.GetVectorArrayFromPayload()
+		assert.NoError(t, err)
+
+		assert.EqualValues(t, []float32{1.0, 2.0, 3.0, 4.0}, arrayList[0].GetFloatVector().GetData())
+		assert.EqualValues(t, []float32{11.0, 22.0, 33.0, 44.0}, arrayList[1].GetFloatVector().GetData())
+		assert.EqualValues(t, []float32{111.0, 222.0, 333.0, 444.0}, arrayList[2].GetFloatVector().GetData())
+
+		iArrayList, _, _, err := r.GetDataFromPayload()
+		arrayList = iArrayList.([]*schemapb.VectorField)
+		assert.NoError(t, err)
+		assert.EqualValues(t, []float32{1.0, 2.0, 3.0, 4.0}, arrayList[0].GetFloatVector().GetData())
+		assert.EqualValues(t, []float32{11.0, 22.0, 33.0, 44.0}, arrayList[1].GetFloatVector().GetData())
+		assert.EqualValues(t, []float32{111.0, 222.0, 333.0, 444.0}, arrayList[2].GetFloatVector().GetData())
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
+	})
 }
 
 func TestPayload_NullableReaderAndWriter(t *testing.T) {

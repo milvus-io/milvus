@@ -10,11 +10,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-func ConvertToArrowSchema(fields []*schemapb.FieldSchema) (*arrow.Schema, error) {
-	arrowFields := make([]arrow.Field, 0, len(fields))
-	for _, field := range fields {
+func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
+	fieldCount := len(schema.GetFields())
+	for _, structField := range schema.GetStructFields() {
+		fieldCount += len(structField.GetFields())
+	}
+	arrowFields := make([]arrow.Field, 0, fieldCount)
+	appendArrowField := func(field *schemapb.FieldSchema) error {
 		if serdeMap[field.DataType].arrowType == nil {
-			return nil, merr.WrapErrParameterInvalidMsg("unknown field data type [%s] for field [%s]", field.DataType, field.GetName())
+			return merr.WrapErrParameterInvalidMsg("unknown field data type [%s] for field [%s]", field.DataType, field.GetName())
 		}
 		var dim int
 		switch field.DataType {
@@ -23,12 +27,26 @@ func ConvertToArrowSchema(fields []*schemapb.FieldSchema) (*arrow.Schema, error)
 			var err error
 			dim, err = GetDimFromParams(field.TypeParams)
 			if err != nil {
-				return nil, merr.WrapErrParameterInvalidMsg("dim not found in field [%s] params", field.GetName())
+				return merr.WrapErrParameterInvalidMsg("dim not found in field [%s] params", field.GetName())
 			}
 		default:
 			dim = 0
 		}
 		arrowFields = append(arrowFields, ConvertToArrowField(field, serdeMap[field.DataType].arrowType(dim)))
+		return nil
+	}
+	for _, field := range schema.GetFields() {
+		if err := appendArrowField(field); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, structField := range schema.GetStructFields() {
+		for _, field := range structField.GetFields() {
+			if err := appendArrowField(field); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return arrow.NewSchema(arrowFields, nil), nil

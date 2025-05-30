@@ -382,6 +382,10 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 		Infos: nil,
 	}
 
+	if len(collSchema.StructFields) > 0 {
+		panic("struct fields are not implemented in row based insert data")
+	}
+
 	for _, field := range collSchema.Fields {
 		if skipFunction && IsBM25FunctionOutputField(field, collSchema) {
 			continue
@@ -520,6 +524,10 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemapb.CollectionSchema) (idata *InsertData, err error) {
 	srcFields := make(map[FieldID]*schemapb.FieldData)
 	for _, field := range msg.FieldsData {
+		if _, ok := field.Field.(*schemapb.FieldData_StructArrays); ok {
+			// unreachable
+			panic("struct is not flattened")
+		}
 		srcFields[field.FieldId] = field
 	}
 
@@ -527,15 +535,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		Data: make(map[FieldID]FieldData),
 	}
 	length := 0
-	for _, field := range collSchema.Fields {
-		if IsBM25FunctionOutputField(field, collSchema) {
-			continue
-		}
-
+	getFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
 		srcField, ok := srcFields[field.GetFieldID()]
 		if !ok && field.GetFieldID() >= common.StartOfUserFieldID {
 			return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
 		}
+
 		var fieldData FieldData
 		switch field.DataType {
 		case schemapb.DataType_FloatVector:
@@ -712,18 +717,59 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				ValidData: validData,
 			}
 
+		case schemapb.DataType_ArrayOfVector:
+			arrayVector := srcField.GetVectors().GetArrayVector()
+
+			fieldData = &VectorArrayFieldData{
+				ElementType: field.GetElementType(),
+				Data:        arrayVector.GetData(),
+				Dim:         arrayVector.GetDim(),
+			}
+
 		default:
 			return nil, merr.WrapErrServiceInternal("data type not handled", field.GetDataType().String())
+		}
+
+		return fieldData, nil
+	}
+
+	handleFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
+		if IsBM25FunctionOutputField(field, collSchema) {
+			return nil, nil
+		}
+
+		fieldData, err := getFieldData(field)
+		if err != nil {
+			return nil, err
 		}
 
 		if length == 0 {
 			length = fieldData.RowNum()
 		}
+
 		if fieldData.RowNum() != length {
 			return nil, merr.WrapErrServiceInternal("row num not match", fmt.Sprintf("field %s row num not match %d, other column %d", field.GetName(), fieldData.RowNum(), length))
 		}
 
+		return fieldData, nil
+	}
+
+	for _, field := range collSchema.Fields {
+		fieldData, err := handleFieldData(field)
+		if err != nil {
+			return nil, err
+		}
 		idata.Data[field.FieldID] = fieldData
+	}
+
+	for _, structField := range collSchema.GetStructFields() {
+		for _, field := range structField.GetFields() {
+			fieldData, err := handleFieldData(field)
+			if err != nil {
+				return nil, err
+			}
+			idata.Data[field.FieldID] = fieldData
+		}
 	}
 
 	idata.Infos = []BlobInfo{
@@ -1320,6 +1366,23 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_Int8Vector{
 							Int8Vector: dataBytes,
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
+		case *VectorArrayFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_ArrayOfVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_ArrayVector{
+							ArrayVector: &schemapb.ArrayVector{
+								Data:        rawData.Data,
+								ElementType: rawData.ElementType,
+								Dim:         int64(rawData.Dim),
+							},
 						},
 						Dim: int64(rawData.Dim),
 					},
