@@ -229,9 +229,11 @@ ArrayChunkWriter::finish() {
         row_nums_, data, size, element_type_, nullable_);
 }
 
-// Deserialize VectorFieldProto (proto::schema::VectorField) from arrow::ArrayVector
+// 1. Deserialize VectorFieldProto (proto::schema::VectorField) from arrow::ArrayVector
 // where VectorFieldProto is vector array and each element it self is a VectorFieldProto.
-// Encode this vector of VectorFieldProto to vector of our local representation of VectorArray.
+// 2. Transform this vector of VectorFieldProto to vector of our local representation of VectorArray.
+// 3. the contents of these VectorArray are concatenated in some format in target_.
+// See more details for the format in the comments of VectorArrayChunk.
 void
 VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
     auto size = 0;

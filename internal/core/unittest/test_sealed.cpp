@@ -2291,15 +2291,12 @@ TEST(Sealed, QueryVectorArrayAllFields) {
     std::map<FieldId, FieldIndexMeta> filedMap{};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
-    auto segment_sealed = CreateSealedSegment(schema, metaPtr);
-    auto segment =
-        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     int64_t dataset_size = 1000;
     int64_t dim = 128;
     auto dataset = DataGen(schema, dataset_size);
-    segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
-    segment = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
+    auto segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto segment = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     auto int64_values = dataset.get_col<int64_t>(int64_field);
     auto array_vec_values = dataset.get_col<VectorFieldProto>(array_vec);
