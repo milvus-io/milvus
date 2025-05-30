@@ -1017,11 +1017,12 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if constexpr (std::is_same_v<S, Json>) {
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            Json json = column->RawJsonAt(offset);
-            dst->at(i) = std::move(std::string(json.data()));
-        }
+        column->BulkRawJsonAt(
+            [&](Json json, size_t offset, bool is_valid) {
+                dst->at(offset) = std::move(std::string(json.data()));
+            },
+            seg_offsets,
+            count);
     } else {
         static_assert(std::is_same_v<S, std::string>);
         column->BulkRawStringAt(
@@ -1441,12 +1442,13 @@ ChunkedSegmentSealedImpl::bulk_subscript(
             count);
     }
     auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
-    for (int64_t i = 0; i < count; ++i) {
-        auto offset = seg_offsets[i];
-        Json json = column->RawJsonAt(offset);
-        dst->at(i) =
-            ExtractSubJson(std::string(json.data()), dynamic_field_names);
-    }
+    column->BulkRawJsonAt(
+        [&](Json json, size_t offset, bool is_valid) {
+            dst->at(offset) =
+                ExtractSubJson(std::string(json.data()), dynamic_field_names);
+        },
+        seg_offsets,
+        count);
     return ret;
 }
 

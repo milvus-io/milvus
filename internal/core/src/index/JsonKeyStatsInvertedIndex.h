@@ -43,7 +43,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
                                        const char* unique_id,
                                        const std::string& path);
 
-    ~JsonKeyStatsInvertedIndex() override{};
+    ~JsonKeyStatsInvertedIndex() override {};
 
  public:
     IndexStatsPtr
@@ -59,17 +59,29 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
 
     const TargetBitmap
-    FilterByPath(
-        const std::string& path,
-        int32_t row,
-        bool is_growing,
-        bool is_strong_consistency,
-        std::function<bool(
-            bool, uint8_t, uint32_t, uint16_t, uint16_t, int32_t)> filter) {
+    FilterByPath(const std::string& path,
+                 int32_t row,
+                 bool is_growing,
+                 bool is_strong_consistency,
+                 std::function<void(const bool*,
+                                    const uint8_t*,
+                                    const uint32_t*,
+                                    const uint16_t*,
+                                    const uint16_t*,
+                                    const int32_t*,
+                                    TargetBitmap&,
+                                    const size_t size)> filter) {
         auto processArray = [this, &path, row, &filter]() {
             TargetBitmap bitset(row);
             auto array = wrapper_->term_query_i64(path);
             LOG_INFO("json key filter size:{}", array.array_.len);
+            folly::fbvector<bool> valid_array(array.array_.len);
+            std::vector<uint8_t> type_array(array.array_.len);
+            std::vector<uint32_t> row_id_array(array.array_.len);
+            std::vector<uint16_t> offset_array(array.array_.len);
+            std::vector<uint16_t> size_array(array.array_.len);
+            std::vector<int32_t> value_array(array.array_.len);
+
             for (size_t j = 0; j < array.array_.len; j++) {
                 auto the_offset = array.array_.array[j];
 
@@ -79,26 +91,36 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
                     if (row_id >= row) {
                         continue;
                     }
-                    bitset[row_id] = filter(true,
-                                            std::get<0>(tuple),
-                                            std::get<1>(tuple),
-                                            0,
-                                            0,
-                                            std::get<2>(tuple));
+
+                    valid_array[j] = true;
+                    type_array[j] = std::get<0>(tuple);
+                    row_id_array[j] = std::get<1>(tuple);
+                    offset_array[j] = 0;
+                    size_array[j] = 0;
+                    value_array[j] = std::get<2>(tuple);
                 } else {
                     auto tuple = DecodeOffset(the_offset);
                     auto row_id = std::get<1>(tuple);
                     if (row_id >= row) {
                         continue;
                     }
-                    bitset[row_id] = filter(false,
-                                            std::get<0>(tuple),
-                                            std::get<1>(tuple),
-                                            std::get<2>(tuple),
-                                            std::get<3>(tuple),
-                                            0);
+                    valid_array[j] = false;
+                    type_array[j] = std::get<0>(tuple);
+                    row_id_array[j] = std::get<1>(tuple);
+                    offset_array[j] = std::get<2>(tuple);
+                    size_array[j] = std::get<3>(tuple);
+                    value_array[j] = 0;
                 }
             }
+
+            filter(valid_array.data(),
+                   type_array.data(),
+                   row_id_array.data(),
+                   offset_array.data(),
+                   size_array.data(),
+                   value_array.data(),
+                   bitset,
+                   array.array_.len);
 
             return bitset;
         };
