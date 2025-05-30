@@ -128,6 +128,7 @@ func storeCipher(cipher hook.Cipher) {
 
 func initCipher() error {
 	storeCipher(nil)
+	// TODO: Fix: [error="fail to open the cipher plugin, error: plugin.Open(\"/home/yangxuan/Github/milvus-cloud-plugin/so/cipher\"): plugin was built with a different version of package internal/abi"]
 
 	pathGo := paramtable.GetCipherParams().SoPathGo.GetValue()
 	if pathGo == "" {
@@ -138,7 +139,7 @@ func initCipher() error {
 	pathCpp := paramtable.GetCipherParams().SoPathCpp.GetValue()
 	if pathCpp == "" {
 		log.Info("empty so path for cpp plugin, skip to load cipher plugin")
-		return nil
+		// return nil TODO: For test
 	}
 
 	log.Info("start to load cipher plugin", zap.String("path", pathGo))

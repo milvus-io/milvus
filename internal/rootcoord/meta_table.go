@@ -299,7 +299,7 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
-	if hookutil.GetCipher() != nil {
+	if hookutil.IsClusterEncyptionEnabled() {
 		cipherPrors := []*commonpb.KeyValuePair{
 			{
 				Key:   hookutil.EncryptionEnabledKey,
