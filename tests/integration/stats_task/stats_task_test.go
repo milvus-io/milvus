@@ -262,13 +262,13 @@ func (s *StatsTaskCheckerSuite) run() {
 		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 		s.True(has)
 
+		s.WaitForFlush(ctx, ids, flushTs, s.dbName, collectionName)
 		segments, err := c.MetaWatcher.ShowSegments()
 		s.NoError(err)
 		s.NotEmpty(segments)
 		for _, segment := range segments {
 			log.Info("ShowSegments result", zap.String("segment", segment.String()))
 		}
-		s.WaitForFlush(ctx, ids, flushTs, s.dbName, collectionName)
 	}
 
 	// create index

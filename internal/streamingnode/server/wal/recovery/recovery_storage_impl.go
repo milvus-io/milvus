@@ -7,6 +7,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -106,11 +107,21 @@ func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint)
 }
 
 // ObserveMessage is called when a new message is observed.
-func (r *recoveryStorageImpl) ObserveMessage(msg message.ImmutableMessage) {
+func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error {
+	if h := msg.BroadcastHeader(); h != nil {
+		if err := streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
+			BroadcastID: h.BroadcastID,
+			VChannel:    msg.VChannel(),
+		}); err != nil {
+			r.Logger().Warn("failed to ack broadcast message", zap.Error(err))
+			return err
+		}
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	r.observeMessage(msg)
+	return nil
 }
 
 // Close closes the recovery storage and wait the background task stop.

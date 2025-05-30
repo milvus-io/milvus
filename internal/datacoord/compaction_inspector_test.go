@@ -75,6 +75,7 @@ func (s *CompactionPlanHandlerSuite) TestScheduleEmpty() {
 }
 
 func (s *CompactionPlanHandlerSuite) generateInitTasksForSchedule() {
+	s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return()
 	task1 := &mixCompactionTask{
 		meta: s.mockMeta,
 	}
@@ -406,6 +407,8 @@ func (s *CompactionPlanHandlerSuite) TestScheduleNodeWithL0Executing() {
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.SetupTest()
 	ch := "ch1"
+
+	s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return()
 
 	t1 := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:  19530,

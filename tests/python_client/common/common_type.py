@@ -39,8 +39,13 @@ default_double_field_name = "double"
 default_string_field_name = "varchar"
 default_json_field_name = "json_field"
 default_array_field_name = "int_array"
+default_int8_array_field_name = "int8_array"
+default_int16_array_field_name = "int16_array"
 default_int32_array_field_name = "int32_array"
+default_int64_array_field_name = "int64_array"
+default_bool_array_field_name = "bool_array"
 default_float_array_field_name = "float_array"
+default_double_array_field_name = "double_array"
 default_string_array_field_name = "string_array"
 default_float_vec_field_name = "float_vector"
 default_float16_vec_field_name = "float16_vector"
@@ -114,6 +119,8 @@ max_database_num = 64
 max_collections_per_db = 65536
 max_collection_num = 65536
 max_hybrid_search_req_num = 1024
+default_primary_key_field_name = "id"
+default_vector_field_name = "vector"
 
 
 IMAGE_REPOSITORY_MILVUS = "harbor.milvus.io/dockerhub/milvusdb/milvus"
@@ -239,7 +246,7 @@ get_wrong_format_dict = [
 
 get_all_kind_data_distribution = [
     1, np.float64(1.0), np.double(1.0), 9707199254740993.0, 9707199254740992,
-    '1', '123', '321', '213', True, False, [1, 2], [1.0, 2], None, {}, {"a": 1},
+    '1', '123', '321', '213', True, False, None, [1, 2], [1.0, 2],  {}, {"a": 1},
     {'a': 1.0}, {'a': 9707199254740993.0}, {'a': 9707199254740992}, {'a': '1'}, {'a': '123'},
     {'a': '321'}, {'a': '213'}, {'a': True}, {'a': [1, 2, 3]}, {'a': [1.0, 2, '1']}, {'a': [1.0, 2]},
     {'a': None}, {'a': {'b': 1}}, {'a': {'b': 1.0}}, {'a': [{'b': 1}, 2.0, np.double(3.0), '4', True, [1, 3.0], None]}
@@ -321,7 +328,14 @@ privilege_group_privilege_dict = {"Query": False, "Search": False, "GetLoadState
                                   "AlterDatabase": False, "FlushAll": False, "ListPrivilegeGroups": False,
                                   "CreatePrivilegeGroup": False, "DropPrivilegeGroup": False,
                                   "OperatePrivilegeGroup": False}
-
+all_expr_fields = [default_int8_field_name, default_int16_field_name,
+                   default_int32_field_name, default_int64_field_name,
+                   default_float_field_name, default_double_field_name,
+                   default_string_field_name, default_bool_field_name,
+                   default_int8_array_field_name, default_int16_array_field_name,
+                   default_int32_array_field_name, default_int64_array_field_name,
+                   default_bool_array_field_name, default_float_array_field_name,
+                   default_double_array_field_name, default_string_array_field_name]
 
 class CheckTasks:
     """ The name of the method used to check the result """

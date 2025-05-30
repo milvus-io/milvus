@@ -435,6 +435,12 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			IgnoreGrowing:      ignoreGrowing,
 		}
 
+		// set analyzer name for sub search
+		analyzer, err := funcutil.GetAttrByKeyFromRepeatedKV("analyzer_name", subReq.GetSearchParams())
+		if err == nil {
+			internalSubReq.AnalyzerName = analyzer
+		}
+
 		internalSubReq.FieldId = queryInfo.GetQueryFieldId()
 		queryFieldIDs = append(queryFieldIDs, internalSubReq.FieldId)
 		// set PartitionIDs for sub search
@@ -646,6 +652,17 @@ func mergeIDs(idsList []*schemapb.IDs) (*schemapb.IDs, int) {
 
 func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, multipleMilvusResults []*milvuspb.SearchResults, searchMetrics []string) error {
 	var err error
+	processRerank := func(ctx context.Context, results []*milvuspb.SearchResults) (*milvuspb.SearchResults, error) {
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-call-rerank-function-udf")
+		defer sp.End()
+
+		params := rerank.NewSearchParams(
+			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
+			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
+		)
+		return t.functionScore.Process(ctx, params, results)
+	}
+
 	// The first step of hybrid search is without meta information. If rerank requires meta data, we need to do requery.
 	// At this time, outputFields and rerank input_fields will be recalled.
 	// If we want to save memory, we can only recall the rerank input_fields in this step, and recall the output_fields in the third step
@@ -682,12 +699,7 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 		for i := 0; i < len(multipleMilvusResults); i++ {
 			multipleMilvusResults[i].Results.FieldsData = fields[i]
 		}
-		params := rerank.NewSearchParams(
-			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
-		)
-
-		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
+		if t.result, err = processRerank(ctx, multipleMilvusResults); err != nil {
 			return err
 		}
 		if fields, err := t.reorganizeRequeryResults(ctx, queryResult.GetFieldsData(), []*schemapb.IDs{t.result.Results.Ids}); err != nil {
@@ -696,11 +708,7 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 			t.result.Results.FieldsData = fields[0]
 		}
 	} else {
-		params := rerank.NewSearchParams(
-			t.Nq, t.rankParams.limit, t.rankParams.offset, t.rankParams.roundDecimal,
-			t.rankParams.groupByFieldId, t.rankParams.groupSize, t.rankParams.strictGroupSize, searchMetrics,
-		)
-		if t.result, err = t.functionScore.Process(ctx, params, multipleMilvusResults); err != nil {
+		if t.result, err = processRerank(ctx, multipleMilvusResults); err != nil {
 			return err
 		}
 	}
@@ -823,11 +831,15 @@ func (t *searchTask) searchPostProcess(ctx context.Context, span trace.Span, toR
 	}
 
 	if t.functionScore != nil && len(result.Results.FieldsData) != 0 {
-		params := rerank.NewSearchParams(t.Nq, t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(),
-			t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize, []string{metricType})
-		// rank only returns id and score
-		if t.result, err = t.functionScore.Process(ctx, params, []*milvuspb.SearchResults{result}); err != nil {
-			return err
+		{
+			ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-call-rerank-function-udf")
+			defer sp.End()
+			params := rerank.NewSearchParams(t.Nq, t.SearchRequest.GetTopk(), t.SearchRequest.GetOffset(),
+				t.queryInfos[0].RoundDecimal, t.queryInfos[0].GroupByFieldId, t.queryInfos[0].GroupSize, t.queryInfos[0].StrictGroupSize, []string{metricType})
+			// rank only returns id and score
+			if t.result, err = t.functionScore.Process(ctx, params, []*milvuspb.SearchResults{result}); err != nil {
+				return err
+			}
 		}
 		if !t.needRequery {
 			fields, err := t.reorganizeRequeryResults(ctx, result.Results.FieldsData, []*schemapb.IDs{t.result.Results.Ids})

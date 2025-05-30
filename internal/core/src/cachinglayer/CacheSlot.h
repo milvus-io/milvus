@@ -86,21 +86,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
             cids.push_back(i);
         }
-
-        switch (warmup_policy) {
-            case CacheWarmupPolicy::CacheWarmupPolicy_Sync:
-                SemiInlineGet(PinCells(std::move(cids)));
-                break;
-            case CacheWarmupPolicy::CacheWarmupPolicy_Async:
-                // PinCells submits tasks to middle priority thread pool, thus here we submit to
-                // low priority thread pool to avoid dead lock.
-                auto& pool = milvus::ThreadPools::GetThreadPool(
-                    milvus::ThreadPoolPriority::LOW);
-                pool.Submit([this, cids = std::move(cids)]() mutable {
-                    SemiInlineGet(PinCells(std::move(cids)));
-                });
-                break;
-        }
+        SemiInlineGet(PinCells(std::move(cids)));
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>

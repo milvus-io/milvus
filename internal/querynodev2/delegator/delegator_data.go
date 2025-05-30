@@ -997,7 +997,7 @@ func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitio
 }
 
 func (sd *shardDelegator) GetChannelQueryView() *channelQueryView {
-	return sd.distribution.queryView
+	return sd.distribution.GetQueryView()
 }
 
 func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {

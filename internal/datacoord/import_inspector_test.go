@@ -258,6 +258,77 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 	s.Equal(0, len(task.(*importTask).GetSegmentIDs()))
 }
 
+func (s *ImportInspectorSuite) TestReloadFromMeta() {
+	// Test case 1: No jobs and tasks
+	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	s.inspector.reloadFromMeta()
+
+	// Test case 2: Jobs with in-progress tasks
+	jobProto := &datapb.ImportJob{
+		JobID:        1,
+		CollectionID: s.collectionID,
+		TimeoutTs:    math.MaxUint64,
+		Schema:       &schemapb.CollectionSchema{},
+	}
+	job := &importJob{
+		ImportJob: jobProto,
+		tr:        timerecord.NewTimeRecorder("import job"),
+	}
+	s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	err := s.importMeta.AddJob(context.TODO(), job)
+	s.NoError(err)
+
+	// Add an in-progress pre-import task
+	inprogressPreImportTask := &preImportTask{
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("preimport task"),
+	}
+	inprogressPreImportTask.task.Store(&datapb.PreImportTask{
+		JobID:        1,
+		TaskID:       1,
+		CollectionID: s.collectionID,
+		State:        datapb.ImportTaskStateV2_InProgress,
+	})
+	s.catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
+	err = s.importMeta.AddTask(context.TODO(), inprogressPreImportTask)
+	s.NoError(err)
+
+	// Add an in-progress import task
+	inprogressImportTask := &importTask{
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("import task"),
+	}
+	inprogressImportTask.task.Store(&datapb.ImportTaskV2{
+		JobID:        1,
+		TaskID:       2,
+		CollectionID: s.collectionID,
+		State:        datapb.ImportTaskStateV2_InProgress,
+	})
+	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	err = s.importMeta.AddTask(context.TODO(), inprogressImportTask)
+	s.NoError(err)
+
+	// Add an pending import task
+	pendingImportTask := &importTask{
+		importMeta: s.importMeta,
+		tr:         timerecord.NewTimeRecorder("import task"),
+	}
+	pendingImportTask.task.Store(&datapb.ImportTaskV2{
+		JobID:        1,
+		TaskID:       3,
+		CollectionID: s.collectionID,
+		State:        datapb.ImportTaskStateV2_Pending,
+	})
+	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+	err = s.importMeta.AddTask(context.TODO(), pendingImportTask)
+
+	// Mock scheduler expectations
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)
+	s.inspector.reloadFromMeta()
+}
+
 func TestImportInspector(t *testing.T) {
 	suite.Run(t, new(ImportInspectorSuite))
 }

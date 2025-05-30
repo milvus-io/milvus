@@ -1295,6 +1295,147 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 	})
 }
 
+func (s *DelegatorSuite) ResetDelegator() {
+	var err error
+	s.delegator.Close()
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
+		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
+			return s.mq, nil
+		},
+	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.Require().NoError(err)
+}
+
+func (s *DelegatorSuite) TestRunAnalyzer() {
+	ctx := context.Background()
+	s.Run("field analyzer not exist", func() {
+		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId: 100,
+		})
+		s.Require().Error(err)
+	})
+
+	s.Run("normal analyer", func() {
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    100,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "analyzer_params", Value: "{}"}},
+				},
+				{
+					FieldID:  101,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{101},
+			}},
+		}, nil, nil)
+		s.ResetDelegator()
+
+		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		s.Require().NoError(err)
+		s.Equal(2, len(result[0].GetTokens()))
+	})
+
+	s.Run("multi analyzer", func() {
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+						"by_field": "analyzer",
+    					"analyzers": {
+							"default": {}
+						}
+					}`}},
+				},
+				{
+					FieldID:  101,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+				{
+					FieldID:  102,
+					Name:     "analyzer",
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{101},
+			}},
+		}, nil, nil)
+		s.ResetDelegator()
+
+		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:       100,
+			Placeholder:   [][]byte{[]byte("test doc"), []byte("test doc2")},
+			AnalyzerNames: []string{"default"},
+		})
+		s.Require().NoError(err)
+		s.Equal(2, len(result[0].GetTokens()))
+		s.Equal(2, len(result[1].GetTokens()))
+	})
+
+	s.Run("error multi analyzer but no analyzer name", func() {
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "text",
+					DataType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "multi_analyzer_params", Value: `{
+						"by_field": "analyzer",
+    					"analyzers": {
+							"default": {}
+						}
+					}`}},
+				},
+				{
+					FieldID:  101,
+					Name:     "sparse",
+					DataType: schemapb.DataType_SparseFloatVector,
+				},
+				{
+					FieldID:  102,
+					Name:     "analyzer",
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+			Functions: []*schemapb.FunctionSchema{{
+				Type:             schemapb.FunctionType_BM25,
+				InputFieldNames:  []string{"text"},
+				InputFieldIds:    []int64{100},
+				OutputFieldNames: []string{"sparse"},
+				OutputFieldIds:   []int64{101},
+			}},
+		}, nil, nil)
+		s.ResetDelegator()
+
+		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
+			FieldId:     100,
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		s.Require().Error(err)
+	})
+}
+
 func TestDelegatorSuite(t *testing.T) {
 	suite.Run(t, new(DelegatorSuite))
 }

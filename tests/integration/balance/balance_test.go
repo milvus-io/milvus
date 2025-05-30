@@ -310,5 +310,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 }
 
 func TestBalance(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(BalanceTestSuit))
 }

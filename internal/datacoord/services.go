@@ -1030,6 +1030,17 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		resp.Status = merr.Status(merr.WrapErrChannelNotAvailable(req.GetVchannel(), "start position is nil"))
 		return resp, nil
 	}
+	segmentsNotCreatedByStreaming := make([]*datapb.SegmentNotCreatedByStreaming, 0)
+	for _, segmentID := range channelInfo.GetUnflushedSegmentIds() {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment != nil && !segment.IsCreatedByStreaming {
+			segmentsNotCreatedByStreaming = append(segmentsNotCreatedByStreaming, &datapb.SegmentNotCreatedByStreaming{
+				CollectionId: segment.CollectionID,
+				PartitionId:  segment.PartitionID,
+				SegmentId:    segmentID,
+			})
+		}
+	}
 
 	log.Info("datacoord get channel recovery info",
 		zap.String("channel", channelInfo.GetChannelName()),
@@ -1038,10 +1049,12 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 		zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 		zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+		zap.Int("# of segments not created by streaming", len(segmentsNotCreatedByStreaming)),
 	)
 
 	resp.Info = channelInfo
 	resp.Schema = collection.Schema
+	resp.SegmentsNotCreatedByStreaming = segmentsNotCreatedByStreaming
 	return resp, nil
 }
 
@@ -1490,7 +1503,14 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	// For compatibility with old client
 	if req.GetVChannel() != "" && req.GetPosition() != nil {
 		channel := req.GetVChannel()
-		if !s.channelManager.Match(nodeID, channel) {
+		if streamingutil.IsStreamingServiceEnabled() {
+			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
+			if err != nil || targetID != nodeID {
+				err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
+				log.Warn("failed to get latest wal allocated", zap.Error(err))
+				return merr.Status(err), nil
+			}
+		} else if !s.channelManager.Match(nodeID, channel) {
 			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 			return merr.Status(merr.WrapErrChannelNotFound(channel, fmt.Sprintf("from node %d", nodeID))), nil
 		}
@@ -1504,11 +1524,19 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 	checkpoints := lo.Filter(req.GetChannelCheckpoints(), func(cp *msgpb.MsgPosition, _ int) bool {
 		channel := cp.GetChannelName()
-		matched := s.channelManager.Match(nodeID, channel)
-		if !matched {
+		if streamingutil.IsStreamingServiceEnabled() {
+			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
+			if err != nil || targetID != nodeID {
+				err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
+				log.Warn("failed to get latest wal allocated", zap.Error(err))
+				return false
+			}
+			return true
+		} else if !s.channelManager.Match(nodeID, channel) {
 			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+			return false
 		}
-		return matched
+		return true
 	})
 
 	err := s.meta.UpdateChannelCheckpoints(ctx, checkpoints)

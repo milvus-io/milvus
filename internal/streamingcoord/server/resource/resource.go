@@ -62,6 +62,13 @@ func Init(opts ...optResourceInit) {
 	r = newR
 }
 
+// Release release the streamingnode client
+func Release() {
+	if r.streamingNodeManagerClient != nil {
+		r.streamingNodeManagerClient.Close()
+	}
+}
+
 // Resource access the underlying singleton of resources.
 func Resource() *resourceImpl {
 	return r

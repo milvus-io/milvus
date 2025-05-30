@@ -300,8 +300,6 @@ func ConvertCacheWarmupPolicy(policy string) (C.CacheWarmupPolicy, error) {
 	switch policy {
 	case "sync":
 		return C.CacheWarmupPolicy_Sync, nil
-	case "async":
-		return C.CacheWarmupPolicy_Async, nil
 	case "disable":
 		return C.CacheWarmupPolicy_Disable, nil
 	default:
