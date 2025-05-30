@@ -214,10 +214,12 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 		zap.Int32("currentScalarIndexVersion", it.req.GetCurrentScalarIndexVersion()),
 	)
 
-	err := initcore.InitRemoteArrowFileSystemWithStorageConfig(it.req.StorageConfig)
-	if err != nil {
-		log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
-		return err
+	if it.req.GetStorageVersion() == storage.StorageV2 {
+		err := initcore.InitArrowFileSystemWithStorageConfig(it.req.StorageConfig)
+		if err != nil {
+			log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
+			return err
+		}
 	}
 	return nil
 }
@@ -378,7 +380,10 @@ func (it *indexBuildTask) PostExecute(ctx context.Context) error {
 		zap.Uint64("serializedSize", serializedSize),
 		zap.Int64("memSize", indexStats.MemSize),
 		zap.Strings("indexFiles", saveFileKeys))
-	initcore.CleanRemoteArrowFileSystem()
+
+	if it.req.GetStorageVersion() == storage.StorageV2 {
+		initcore.CleanArrowFileSystem()
+	}
 	return nil
 }
 

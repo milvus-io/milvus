@@ -164,12 +164,15 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
+		zap.Any("storageConfig", st.req.StorageConfig),
 	)
 
-	err := initcore.InitRemoteArrowFileSystemWithStorageConfig(st.req.StorageConfig)
-	if err != nil {
-		log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
-		return err
+	if st.req.GetStorageVersion() == storage.StorageV2 {
+		err := initcore.InitArrowFileSystemWithStorageConfig(st.req.StorageConfig)
+		if err != nil {
+			log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
+			return err
+		}
 	}
 	return nil
 }
@@ -353,7 +356,9 @@ func (st *statsTask) Execute(ctx context.Context) error {
 }
 
 func (st *statsTask) PostExecute(ctx context.Context) error {
-	initcore.CleanRemoteArrowFileSystem()
+	if st.req.GetStorageVersion() == storage.StorageV2 {
+		initcore.CleanArrowFileSystem()
+	}
 	return nil
 }
 
