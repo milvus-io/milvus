@@ -9,8 +9,9 @@ const cipherYamlFile = "cipher.yaml"
 type cipherConfig struct {
 	cipherBase *BaseTable
 
-	SoPathGo  ParamItem `refreshable:"false"`
-	SoPathCpp ParamItem `refreshable:"false"`
+	SoPathGo       ParamItem `refreshable:"false"`
+	SoPathCpp      ParamItem `refreshable:"false"`
+	DefaultRootKey ParamItem `refreshable:"false"`
 }
 
 func (c *cipherConfig) init(base *BaseTable) {
@@ -28,6 +29,12 @@ func (c *cipherConfig) init(base *BaseTable) {
 		Version: "2.6.0",
 	}
 	c.SoPathCpp.Init(base.mgr)
+
+	c.DefaultRootKey = ParamItem{
+		Key:     "cipherPlugin.defaultKmsKeyArn",
+		Version: "2.6.0",
+	}
+	c.DefaultRootKey.Init(base.mgr)
 }
 
 func (c *cipherConfig) Save(key string, value string) error {

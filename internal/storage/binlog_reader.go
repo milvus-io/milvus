@@ -107,9 +107,9 @@ func (reader *BinlogReader) Close() {
 	reader.isClose = true
 }
 
-type BinlogReaderOptions func(base *BinlogReader) error
+type BinlogReaderOption func(base *BinlogReader) error
 
-func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOptions {
+func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOption {
 	return func(base *BinlogReader) error {
 		edek, ok := base.descriptorEvent.GetEdek()
 		if !ok {
@@ -133,7 +133,7 @@ func WithReaderDecryptionContext(ezID, collectionID int64) BinlogReaderOptions {
 }
 
 // NewBinlogReader creates binlogReader to read binlog file.
-func NewBinlogReader(data []byte, opts ...BinlogReaderOptions) (*BinlogReader, error) {
+func NewBinlogReader(data []byte, opts ...BinlogReaderOption) (*BinlogReader, error) {
 	buffer := bytes.NewBuffer(data)
 	if _, err := readMagicNumber(buffer); err != nil {
 		return nil, err

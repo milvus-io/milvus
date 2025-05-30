@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -55,8 +54,9 @@ type CompositeBinlogRecordReader struct {
 	schema      *schemapb.CollectionSchema
 	index       map[FieldID]int16
 
-	brs []*BinlogReader
-	rrs []array.RecordReader
+	brs    []*BinlogReader
+	bropts []BinlogReaderOption
+	rrs    []array.RecordReader
 }
 
 func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
@@ -84,7 +84,7 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 	crr.brs = make([]*BinlogReader, len(crr.schema.Fields))
 
 	for _, b := range blobs {
-		reader, err := NewBinlogReader(b.Value)
+		reader, err := NewBinlogReader(b.Value, crr.bropts...)
 		if err != nil {
 			return err
 		}
@@ -214,15 +214,17 @@ func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
 	}
 }
 
-func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*CompositeBinlogRecordReader, error) {
+func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader, opts ...BinlogReaderOption) (*CompositeBinlogRecordReader, error) {
 	index := make(map[FieldID]int16)
 	for i, f := range schema.Fields {
 		index[f.FieldID] = int16(i)
 	}
+
 	return &CompositeBinlogRecordReader{
 		schema:      schema,
 		BlobsReader: blobsReader,
 		index:       index,
+		bropts:      opts,
 	}, nil
 }
 
@@ -830,15 +832,6 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 	bm25Stats := make(map[int64]*BM25Stats, len(bm25FieldIDs))
 	for _, fid := range bm25FieldIDs {
 		bm25Stats[fid] = NewBM25Stats()
-	}
-
-	if hookutil.GetCipher() != nil {
-		var ezID int64 = 0 // TODO: GOOSE, get ezID from schema
-		encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ezID, collectionID)
-		if err != nil {
-			return nil, err
-		}
-		options = append(options, GetEncryptionOptions(edek, encryptor)...)
 	}
 
 	return &CompositeBinlogRecordWriter{
