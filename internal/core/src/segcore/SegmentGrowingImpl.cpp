@@ -1173,17 +1173,28 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
     json_indexes_[field_id] = std::move(index);
 }
 
-std::pair<milvus::Json, bool>
-SegmentGrowingImpl::GetJsonData(FieldId field_id, size_t offset) const {
+void
+SegmentGrowingImpl::BulkGetJsonData(
+    FieldId field_id,
+    std::function<void(milvus::Json, size_t, bool)> fn,
+    const int64_t* offsets,
+    int64_t count) const {
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Json>*>(
         insert_record_.get_data_base(field_id));
     auto& src = *vec_ptr;
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        return std::make_pair(src[offset], valid_data_ptr->is_valid(offset));
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = offsets[i];
+            fn(src[offset], i, valid_data_ptr->is_valid(offset));
+        }
+    } else {
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = offsets[i];
+            fn(src[offset], i, true);
+        }
     }
-    return std::make_pair(src[offset], true);
 }
 
 void

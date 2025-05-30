@@ -1006,11 +1006,12 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if constexpr (std::is_same_v<S, Json>) {
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            Json json = column->RawJsonAt(offset);
-            dst->at(i) = std::move(std::string(json.data()));
-        }
+        column->BulkRawJsonAt(
+            [&](Json json, size_t offset, bool is_valid) {
+                dst->at(offset) = std::move(std::string(json.data()));
+            },
+            seg_offsets,
+            count);
     } else {
         static_assert(std::is_same_v<S, std::string>);
         column->BulkRawStringAt(
@@ -1430,12 +1431,13 @@ ChunkedSegmentSealedImpl::bulk_subscript(
             count);
     }
     auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
-    for (int64_t i = 0; i < count; ++i) {
-        auto offset = seg_offsets[i];
-        Json json = column->RawJsonAt(offset);
-        dst->at(i) =
-            ExtractSubJson(std::string(json.data()), dynamic_field_names);
-    }
+    column->BulkRawJsonAt(
+        [&](Json json, size_t offset, bool is_valid) {
+            dst->at(offset) =
+                ExtractSubJson(std::string(json.data()), dynamic_field_names);
+        },
+        seg_offsets,
+        count);
     return ret;
 }
 
@@ -1472,13 +1474,14 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
             return vec_index->HasRawData();
         } else if (get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
-                    "vector index is not ready");
+                       "vector index is not ready");
             auto accessor =
                 SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
                                   ->indexing_->PinCells({0}));
             auto vec_index = accessor->get_cell_of(0);
-            return vec_index->HasRawData() || get_bit(field_data_ready_bitset_, fieldID);
-        } 
+            return vec_index->HasRawData() ||
+                   get_bit(field_data_ready_bitset_, fieldID);
+        }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {

@@ -28,7 +28,8 @@ class ChunkedColumnInterface {
 
     // Default implementation does nothing.
     virtual void
-    ManualEvictCache() const {}
+    ManualEvictCache() const {
+    }
 
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
@@ -118,8 +119,10 @@ class ChunkedColumnInterface {
                   "variable length type");
     }
 
-    virtual Json
-    RawJsonAt(size_t offset) const {
+    virtual void
+    BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
+                  const int64_t* offsets = nullptr,
+                  int64_t count = 0) const {
         PanicInfo(
             ErrorCode::Unsupported,
             "RawJsonAt only supported for ChunkColumnInterface of Json type");
