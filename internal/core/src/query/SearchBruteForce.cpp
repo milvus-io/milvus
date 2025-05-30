@@ -235,22 +235,22 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
             break;
         case DataType::VECTOR_FLOAT16:
             //todo: if knowhere support real fp16/bf16 bf, change it
             return knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
             break;
         case DataType::VECTOR_BFLOAT16:
             //todo: if knowhere support real fp16/bf16 bf, change it
             return knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
             break;
         case DataType::VECTOR_SPARSE_FLOAT:
             return knowhere::BruteForce::AnnIterator<
                 knowhere::sparse::SparseRow<float>>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
             break;
         default:
             PanicInfo(ErrorCode::Unsupported,

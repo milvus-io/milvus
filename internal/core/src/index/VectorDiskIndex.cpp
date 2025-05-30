@@ -316,7 +316,7 @@ knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
                                        const knowhere::Json& conf,
                                        const BitsetView& bitset) const {
-    return this->index_.AnnIterator(dataset, conf, bitset);
+    return this->index_.AnnIterator(dataset, conf, bitset, false);
 }
 
 template <typename T>
