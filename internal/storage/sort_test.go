@@ -55,7 +55,7 @@ func TestSort(t *testing.T) {
 	}
 
 	t.Run("sort", func(t *testing.T) {
-		gotNumRows, err := Sort(generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := Sort(100000, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -65,7 +65,7 @@ func TestSort(t *testing.T) {
 	})
 
 	t.Run("sort with predicate", func(t *testing.T) {
-		gotNumRows, err := Sort(generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := Sort(100000, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -154,7 +154,7 @@ func BenchmarkSort(b *testing.B) {
 
 	b.Run("sort", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			Sort(generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
+			Sort(100000, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
 				return true
 			})
 		}

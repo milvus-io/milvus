@@ -28,6 +28,7 @@ package index
 import "C"
 
 import (
+	"fmt"
 	"path"
 
 	"github.com/cockroachdb/errors"
@@ -122,4 +123,22 @@ func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, storageConfig *in
 	return &indexcgopb.SegmentInsertFiles{
 		FieldInsertFiles: insertLogs,
 	}
+}
+
+func EstimateBatchSize(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
+	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
+	if err != nil {
+		return 0, err
+	}
+	if sizePerRecord <= 0 || bufferSize <= 0 {
+		return 0, fmt.Errorf("invalid size, sizePerRecord=%d, bufferSize=%d", sizePerRecord, bufferSize)
+	}
+	if 100000*sizePerRecord <= bufferSize {
+		return 100000, nil
+	}
+	ret := int64(bufferSize) / int64(sizePerRecord)
+	if ret <= 0 {
+		return 1, nil
+	}
+	return ret, nil
 }

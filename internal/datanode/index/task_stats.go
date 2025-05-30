@@ -239,8 +239,15 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
 	}
+
+	batchSize, err := EstimateBatchSize(int(st.req.GetBinlogMaxSize()), st.req.GetSchema())
+	if err != nil {
+		log.Warn("estimate batch size failed", zap.Error(err))
+		return nil, err
+	}
+
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(st.req.Schema, rrs, srw, predicate)
+	numValidRows, err := storage.Sort(int(batchSize), st.req.GetSchema(), rrs, srw, predicate)
 	if err != nil {
 		log.Warn("sort failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err

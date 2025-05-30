@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
+func Sort(batchSize int, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (int, error) {
 	records := make([]Record, 0)
@@ -90,7 +90,6 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	}
 
 	rb := NewRecordBuilder(schema)
-	batchSize := 100000
 	writeRecord := func() error {
 		rec := rb.Build()
 		defer rec.Release()
