@@ -472,9 +472,23 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             update_row_count(num_rows);
         }
 
-        if (!generate_interim_index(field_id)) {
+        bool use_interim_index = generate_interim_index(field_id);
+        if (!use_interim_index) {
             std::unique_lock lck(mutex_);
             set_bit(field_data_ready_bitset_, field_id, true);
+        } else {
+            std::unique_lock lck(mutex_);
+            auto field_indexing =
+                vector_indexings_.get_field_indexing(field_id);
+            auto interim_index = dynamic_cast<index::VectorIndex*>(
+                field_indexing->indexing_.get());
+            if (interim_index->HasRawData()) {
+                fields_.erase(field_id);
+                set_bit(field_data_ready_bitset_, field_id, false);
+            } else {
+                // some knowhere view data index not has raw data, still keep it
+                set_bit(field_data_ready_bitset_, field_id, true);
+            }
         }
     }
     {
@@ -603,18 +617,22 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
         insert_record_.seal_pks();
     }
 
-    bool use_interim_index = false;
-    if (generate_interim_index(field_id)) {
-        std::unique_lock lck(mutex_);
-        // mmap_fields is useless, no change
-        fields_.erase(field_id);
-        set_bit(field_data_ready_bitset_, field_id, false);
-        use_interim_index = true;
-    }
-
+    bool use_interim_index = generate_interim_index(field_id);
     if (!use_interim_index) {
         std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, true);
+    } else {
+        std::unique_lock lck(mutex_);
+        auto field_indexing = vector_indexings_.get_field_indexing(field_id);
+        auto interim_index =
+            dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+        if (interim_index->HasRawData()) {
+            fields_.erase(field_id);
+            set_bit(field_data_ready_bitset_, field_id, false);
+        } else {
+            // some knowhere view data index not has raw data, still keep it
+            set_bit(field_data_ready_bitset_, field_id, true);
+        }
     }
 }
 
@@ -2132,13 +2150,6 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
 
         if (enable_binlog_index()) {
             std::unique_lock lck(mutex_);
-            if (vec_index->HasRawData()) {
-                fields_.erase(field_id);
-                set_bit(field_data_ready_bitset_, field_id, false);
-            } else {
-                // some knowhere view data index not has raw data, still keep it
-                set_bit(field_data_ready_bitset_, field_id, true);
-            }
             vector_indexings_.append_field_indexing(
                 field_id, index_metric, std::move(vec_index));
 
