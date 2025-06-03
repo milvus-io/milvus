@@ -287,7 +287,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	isGpuIndex := false
 	req := &segcore.CreateCCollectionRequest{
 		Schema:        loadSchema,
-		LoadFieldList: loadMetaInfo.LoadFields,
+		LoadFieldList: loadFieldIDs.Collect(),
 	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
