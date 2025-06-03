@@ -165,14 +165,6 @@ JsonInvertedIndex<T>::build_index_for_json(
     error_recorder_.PrintErrStats();
 }
 
-template <typename T>
-bool
-JsonInvertedIndex<T>::IsDataTypeSupported(DataType data_type) const {
-    auto type = cast_type_.ToMilvusDataType();
-    return type == data_type ||
-           (data_type == DataType::INT64 && type == DataType::DOUBLE);
-}
-
 template class JsonInvertedIndex<bool>;
 template class JsonInvertedIndex<int64_t>;
 template class JsonInvertedIndex<double>;

@@ -18,6 +18,7 @@
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "index/JsonInvertedIndex.h"
 #include "pb/segcore.pb.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
@@ -52,7 +53,7 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
-    virtual PinWrapper<const index::IndexBase*>
+    virtual PinWrapper<index::IndexBase*>
     GetJsonIndex(FieldId field_id, std::string path) const override {
         JSONIndexKey key;
         key.field_id = field_id;
@@ -61,10 +62,10 @@ class SegmentSealed : public SegmentInternalInterface {
         if (iter == json_indexings_.end()) {
             return nullptr;
         }
-        auto slot = iter->second.get();
+        auto slot = iter->second.index.get();
         auto ca = SemiInlineGet(slot->PinCells({0}));
         auto index = ca->get_cell_of(0);
-        return PinWrapper<const index::IndexBase*>(ca, index);
+        return PinWrapper<index::IndexBase*>(ca, index);
     }
 
     virtual void
@@ -86,7 +87,7 @@ class SegmentSealed : public SegmentInternalInterface {
         key.nested_path = path;
         AssertInfo(json_indexings_.find(key) != json_indexings_.end(),
                    "Cannot find json index with path: " + path);
-        auto slot = json_indexings_.at(key).get();
+        auto slot = json_indexings_.at(key).index.get();
         auto ca = SemiInlineGet(slot->PinCells({0}));
         auto index = ca->get_cell_of(0);
 
@@ -110,7 +111,8 @@ class SegmentSealed : public SegmentInternalInterface {
         if (any_type) {
             return true;
         }
-        return index->second->->IsDataTypeSupported(data_type);
+        return milvus::index::json::IsDataTypeSupported(index->second.cast_type,
+                                                        data_type);
     }
 
  protected:
@@ -121,6 +123,17 @@ class SegmentSealed : public SegmentInternalInterface {
         operator==(const JSONIndexKey& other) const {
             return field_id == other.field_id &&
                    nested_path == other.nested_path;
+        }
+    };
+
+    struct JsonIndexValue {
+        JsonCastType cast_type;
+        index::CacheIndexBasePtr index;
+
+        JsonIndexValue() : cast_type(JsonCastType::UNKNOWN), index(nullptr) {
+        }
+        JsonIndexValue(JsonCastType ct, index::CacheIndexBasePtr idx)
+            : cast_type(ct), index(std::move(idx)) {
         }
     };
 
@@ -135,7 +148,8 @@ class SegmentSealed : public SegmentInternalInterface {
             return hash_result;
         }
     };
-    std::unordered_map<JSONIndexKey, index::CacheIndexBasePtr, hash_helper>
+
+    std::unordered_map<JSONIndexKey, JsonIndexValue, hash_helper>
         json_indexings_;
 };
 

@@ -35,6 +35,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/SystemProperty.h"
@@ -166,8 +167,12 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         JSONIndexKey key;
         key.nested_path = path;
         key.field_id = field_id;
-        json_indexings_[key] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        auto json_cast_type =
+            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+        JsonIndexValue value{
+            json_cast_type,
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index)};
+        json_indexings_[key] = std::move(value);
         return;
     }
 
@@ -1472,13 +1477,14 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
             return vec_index->HasRawData();
         } else if (get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
-                    "vector index is not ready");
+                       "vector index is not ready");
             auto accessor =
                 SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
                                   ->indexing_->PinCells({0}));
             auto vec_index = accessor->get_cell_of(0);
-            return vec_index->HasRawData() || get_bit(field_data_ready_bitset_, fieldID);
-        } 
+            return vec_index->HasRawData() ||
+                   get_bit(field_data_ready_bitset_, fieldID);
+        }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
         return get_bit(field_data_ready_bitset_, fieldID);
     } else {
