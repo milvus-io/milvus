@@ -16485,7 +16485,9 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
     load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, this->json_path}};
+    load_index_info.index_params = {
+        {JSON_PATH, this->json_path},
+        {JSON_CAST_TYPE, this->cast_type.ToString()}};
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16619,7 +16621,8 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
     load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16722,7 +16725,8 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
     load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, json_index_path}};
+    load_index_info.index_params = {{JSON_PATH, json_index_path},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16900,7 +16904,8 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
     load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, GetParam().ToString()}};
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
