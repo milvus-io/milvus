@@ -81,6 +81,9 @@ GroupChunkTranslator::GroupChunkTranslator(
                     column_group_info_.row_count));
 }
 
+GroupChunkTranslator::~GroupChunkTranslator() {
+}
+
 size_t
 GroupChunkTranslator::num_cells() const {
     return meta_.chunk_memory_size_.size();
