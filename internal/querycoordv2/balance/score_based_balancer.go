@@ -468,18 +468,16 @@ func (b *ScoreBasedBalancer) BalanceReplica(ctx context.Context, replica *meta.R
 		)
 		br.AddRecord(StrRecordf("executing stopping balance: %v", roNodes))
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		if b.permitBalanceChannel(replica.GetCollectionID()) {
-			channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
-		}
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
+		channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, rwNodes, roNodes)...)
+		if len(channelPlans) == 0 {
 			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, rwNodes, roNodes)...)
 		}
 	} else {
-		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) {
+		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
 			channelPlans = append(channelPlans, b.genChannelPlan(ctx, br, replica, rwNodes)...)
 		}
 
-		if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
+		if len(channelPlans) == 0 {
 			segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, rwNodes)...)
 		}
 	}
