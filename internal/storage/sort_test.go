@@ -26,6 +26,8 @@ import (
 )
 
 func TestSort(t *testing.T) {
+	const batchSize = 64 * 1024 * 1024
+
 	getReaders := func() []RecordReader {
 		blobs, err := generateTestDataWithSeed(10, 3)
 		assert.NoError(t, err)
@@ -55,7 +57,7 @@ func TestSort(t *testing.T) {
 	}
 
 	t.Run("sort", func(t *testing.T) {
-		gotNumRows, err := Sort(100000, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -65,7 +67,7 @@ func TestSort(t *testing.T) {
 	})
 
 	t.Run("sort with predicate", func(t *testing.T) {
-		gotNumRows, err := Sort(100000, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := Sort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -105,8 +107,10 @@ func TestMergeSort(t *testing.T) {
 		},
 	}
 
+	const batchSize = 64 * 1024 * 1024
+
 	t.Run("merge sort", func(t *testing.T) {
-		gotNumRows, err := MergeSort(generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := MergeSort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			return true
 		})
 		assert.NoError(t, err)
@@ -116,7 +120,7 @@ func TestMergeSort(t *testing.T) {
 	})
 
 	t.Run("merge sort with predicate", func(t *testing.T) {
-		gotNumRows, err := MergeSort(generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
+		gotNumRows, err := MergeSort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
 			return pk >= 20
 		})
@@ -150,11 +154,12 @@ func BenchmarkSort(b *testing.B) {
 		},
 	}
 
+	const batchSize = 64 * 1024 * 1024
 	b.ResetTimer()
 
 	b.Run("sort", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			Sort(100000, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
+			Sort(batchSize, generateTestSchema(), rr, rw, func(r Record, ri, i int) bool {
 				return true
 			})
 		}

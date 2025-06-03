@@ -124,21 +124,3 @@ func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, storageConfig *in
 		FieldInsertFiles: insertLogs,
 	}
 }
-
-func EstimateBatchSize(maxBinlogSize int, schema *schemapb.CollectionSchema) (int64, error) {
-	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
-	if err != nil {
-		return 0, err
-	}
-	if sizePerRecord <= 0 || maxBinlogSize <= 0 {
-		return 0, fmt.Errorf("invalid size, sizePerRecord=%d, maxBinlogSize=%d", sizePerRecord, maxBinlogSize)
-	}
-	if 100000*sizePerRecord <= maxBinlogSize {
-		return 100000, nil
-	}
-	ret := int64(maxBinlogSize) / int64(sizePerRecord)
-	if ret <= 0 {
-		return 1, nil
-	}
-	return ret, nil
-}

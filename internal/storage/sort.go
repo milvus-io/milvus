@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func Sort(batchSize int, schema *schemapb.CollectionSchema, rr []RecordReader,
+func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (int, error) {
 	records := make([]Record, 0)
@@ -99,9 +99,13 @@ func Sort(batchSize int, schema *schemapb.CollectionSchema, rr []RecordReader,
 		return nil
 	}
 
-	for i, idx := range indices {
-		rb.Append(records[idx.ri], idx.i, idx.i+1)
-		if (i+1)%batchSize == 0 {
+	for _, idx := range indices {
+		if err := rb.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
+			return 0, err
+		}
+
+		// Write when accumulated data size reaches batchSize
+		if rb.GetSize() >= batchSize {
 			if err := writeRecord(); err != nil {
 				return 0, err
 			}
@@ -164,7 +168,7 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 	return &pq
 }
 
-func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
+func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (numRows int, err error) {
 	type index struct {
@@ -229,16 +233,15 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		}
 	}
 
-	// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
-	//	small batch size will cause write performance degradation. To work around this issue, we accumulate
-	//	records and write them in batches. This requires additional memory copy.
-	batchSize := 100000
 	rb := NewRecordBuilder(schema)
 
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
 		rb.Append(recs[idx.ri], idx.i, idx.i+1)
-		if rb.GetRowNum()%batchSize == 0 {
+		// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
+		//	small batch size will cause write performance degradation. To work around this issue, we accumulate
+		//	records and write them in batches. This requires additional memory copy.
+		if rb.GetSize() >= batchSize {
 			if err := rw.Write(rb.Build()); err != nil {
 				return 0, err
 			}
