@@ -242,11 +242,12 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
-	AuthorizationEnabled  ParamItem `refreshable:"false"`
-	SuperUsers            ParamItem `refreshable:"true"`
-	DefaultRootPassword   ParamItem `refreshable:"false"`
-	RootShouldBindRole    ParamItem `refreshable:"true"`
-	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	AuthorizationEnabled    ParamItem `refreshable:"false"`
+	SuperUsers              ParamItem `refreshable:"true"`
+	SuperUsersSkipRateLimit ParamItem `refreshable:"true"`
+	DefaultRootPassword     ParamItem `refreshable:"false"`
+	RootShouldBindRole      ParamItem `refreshable:"true"`
+	EnablePublicPrivilege   ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -673,6 +674,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.SuperUsers.Init(base.mgr)
+
+	p.SuperUsersSkipRateLimit = ParamItem{
+		Key:          "common.security.superUsersSkipRateLimit",
+		Version:      "2.5.14",
+		Doc:          `The superusers will ignore rate limit check`,
+		DefaultValue: "",
+		Export:       false, // internal use only
+	}
+	p.SuperUsersSkipRateLimit.Init(base.mgr)
 
 	p.DefaultRootPassword = ParamItem{
 		Key:     "common.security.defaultRootPassword",
