@@ -1200,6 +1200,9 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+    # The timeout of wal balancer operation, 10s by default.
+    # If the operation exceeds this timeout, it will be canceled.
+    operationTimeout: 10s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:

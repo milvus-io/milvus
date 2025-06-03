@@ -5551,6 +5551,7 @@ type streamingConfig struct {
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
+	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
 
 	// balancer Policy
 	WALBalancerPolicyName                           ParamItem `refreshable:"true"`
@@ -5616,6 +5617,15 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+	p.WALBalancerOperationTimeout = ParamItem{
+		Key:     "streaming.walBalancer.operationTimeout",
+		Version: "2.6.0",
+		Doc: `The timeout of wal balancer operation, 10s by default.
+If the operation exceeds this timeout, it will be canceled.`,
+		DefaultValue: "10s",
+		Export:       true,
+	}
+	p.WALBalancerOperationTimeout.Init(base.mgr)
 
 	p.WALBalancerPolicyName = ParamItem{
 		Key:          "streaming.walBalancer.balancePolicy.name",
