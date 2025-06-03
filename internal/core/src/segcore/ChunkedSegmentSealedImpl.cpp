@@ -269,12 +269,22 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             metadata->GetGroupFieldIDList().GetFieldIDList(
                 column_group_id.get());
         std::vector<FieldId> milvus_field_ids;
+
+        // if multiple fields share same column group
+        // hint for not loading certain field shall not be working for now
+        // warmup will be disabled only when all columns are not in load list
+        bool merged_in_load_list = false;
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.emplace_back(field_id_list.Get(i));
+            merged_in_load_list =
+                merged_in_load_list ||
+                schema_->ShallLoadField(FieldId(field_id_list.Get(i)));
         }
 
-        auto column_group_info = FieldDataInfo(
-            column_group_id.get(), num_rows, load_info.mmap_dir_path);
+        auto column_group_info = FieldDataInfo(column_group_id.get(),
+                                               num_rows,
+                                               load_info.mmap_dir_path,
+                                               merged_in_load_list);
         LOG_INFO("segment {} loads column group {} with num_rows {}",
                  this->get_segment_id(),
                  column_group_id.get(),
@@ -321,8 +331,10 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
-        auto field_data_info =
-            FieldDataInfo(field_id.get(), num_rows, load_info.mmap_dir_path);
+        auto field_data_info = FieldDataInfo(field_id.get(),
+                                             num_rows,
+                                             load_info.mmap_dir_path,
+                                             schema_->ShallLoadField(field_id));
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -1872,7 +1884,7 @@ ChunkedSegmentSealedImpl::Reopen(SchemaPtr sch) {
     index_ready_bitset_.resize(sch->size());
     binlog_index_bitset_.resize(sch->size());
 
-    auto absent_fields = sch->absent_fields(*schema_);
+    auto absent_fields = sch->AbsentFields(*schema_);
     for (const auto& field_meta : *absent_fields) {
         // vector field is not supported to be "added field", thus if a vector
         // field is absent, it means for some reason we want to skip loading this
