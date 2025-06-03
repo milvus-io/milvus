@@ -254,11 +254,13 @@ CreateIndex(CIndex* res_index,
         auto status = CStatus();
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
+        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
         return status;
     }
 }
