@@ -1244,7 +1244,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("create collection with function", func(t *testing.T) {
+	t.Run("create collection with function and struct array field", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t, withMockSave(nil), withMockMultiSave(nil))
 		kc := NewCatalog(nil, mockSnapshot)
 		ctx := context.Background()

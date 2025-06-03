@@ -9,6 +9,9 @@ import (
 type KeyValuePairs []*commonpb.KeyValuePair
 
 func (pairs KeyValuePairs) Clone() KeyValuePairs {
+	if pairs == nil {
+		return nil
+	}
 	clone := make(KeyValuePairs, 0, len(pairs))
 	for _, pair := range pairs {
 		clone = append(clone, &commonpb.KeyValuePair{

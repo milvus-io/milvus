@@ -57,6 +57,7 @@ var (
 		AutoID:               false,
 		Description:          "none",
 		Fields:               []*Field{fieldModel},
+		StructArrayFields:    []*StructArrayField{structFieldModel},
 		VirtualChannelNames:  []string{"vch"},
 		PhysicalChannelNames: []string{"pch"},
 		ShardsNum:            common.DefaultShardsNum,
@@ -81,10 +82,11 @@ var (
 	deprecatedColPb = &pb.CollectionInfo{
 		ID: colID,
 		Schema: &schemapb.CollectionSchema{
-			Name:        colName,
-			Description: "none",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{filedSchemaPb},
+			Name:              colName,
+			Description:       "none",
+			AutoID:            false,
+			Fields:            []*schemapb.FieldSchema{filedSchemaPb},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{structFieldPb},
 		},
 		CreateTime:                 1,
 		PartitionIDs:               []int64{partID},
@@ -411,6 +413,80 @@ func TestCollection_Equal(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			args: args{
+				a: Collection{
+					TenantID: "aaa",
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					StructArrayFields: []*StructArrayField{
+						{
+							Name:        "f2",
+							Description: "none",
+							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
+								{Key: "dim", Value: "128"},
+							}}},
+							TypeParams: typeParams,
+						},
+					},
+				},
+				b: Collection{
+					TenantID: "aaa",
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					StructArrayFields: []*StructArrayField{
+						{
+							Name:        "f2",
+							Description: "none",
+							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
+								{Key: "dim", Value: "128"},
+							}}},
+							TypeParams: typeParams,
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				a: Collection{
+					TenantID: "aaa",
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					StructArrayFields: []*StructArrayField{
+						{
+							Name:        "f2",
+							Description: "none",
+							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
+								{Key: "dim", Value: "128"},
+							}}},
+							TypeParams: typeParams,
+						},
+					},
+				},
+				b: Collection{
+					TenantID: "aaa",
+					Fields: []*Field{{Name: "f1", TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "128"},
+					}}},
+					StructArrayFields: []*StructArrayField{
+						{
+							Name:        "f3",
+							Description: "none",
+							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
+								{Key: "dim", Value: "128"},
+							}}},
+							TypeParams: typeParams,
+						},
+					},
+				},
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -483,6 +559,17 @@ func TestClone(t *testing.T) {
 				DefaultValue:     nil,
 				ElementType:      schemapb.DataType_VarChar,
 				Nullable:         true,
+			},
+		},
+		StructArrayFields: []*StructArrayField{
+			{
+				FieldID:     25,
+				Name:        "26",
+				Description: "none",
+				Fields: []*Field{{FieldID: 27, Name: "28", TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				}}},
+				TypeParams: typeParams,
 			},
 		},
 		Functions: []*Function{
