@@ -101,7 +101,7 @@ func (jm *statsJobManager) triggerStatsTaskLoop() {
 
 func (jm *statsJobManager) triggerSortStatsTask() {
 	invisibleSegments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && seg.GetIsInvisible()
+		return isFlushed(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && seg.GetIsInvisible()
 	}))
 
 	for _, seg := range invisibleSegments {
@@ -109,7 +109,7 @@ func (jm *statsJobManager) triggerSortStatsTask() {
 	}
 
 	visibleSegments := jm.mt.SelectSegments(jm.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlush(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsImporting() && !seg.GetIsInvisible()
+		return isFlushed(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() && !seg.GetIsInvisible()
 	}))
 
 	for _, segment := range visibleSegments {
