@@ -69,6 +69,8 @@ func (s *statsTaskMetaSuite) Test_Method() {
 				},
 			}, nil)
 
+			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+
 			m, err := newStatsTaskMeta(context.Background(), catalog)
 			s.NoError(err)
 			s.NotNil(m)
