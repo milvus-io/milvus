@@ -290,15 +290,40 @@ func TestValidateVectorFieldMetricType(t *testing.T) {
 }
 
 func TestValidateDuplicatedFieldName(t *testing.T) {
-	fields := []*schemapb.FieldSchema{
-		{Name: "abc"},
-		{Name: "def"},
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "abc"},
+			{Name: "def"},
+		},
 	}
-	assert.Nil(t, validateDuplicatedFieldName(fields))
-	fields = append(fields, &schemapb.FieldSchema{
+	assert.Nil(t, validateDuplicatedFieldName(schema))
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		Name: "abc",
 	})
-	assert.NotNil(t, validateDuplicatedFieldName(fields))
+	assert.NotNil(t, validateDuplicatedFieldName(schema))
+}
+
+func TestValidateDuplicatedFieldNameWithStructArrayField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "abc"},
+			{Name: "def"},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "struct1",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "abc2"},
+					{Name: "def2"},
+				},
+			},
+		},
+	}
+	assert.Nil(t, validateDuplicatedFieldName(schema))
+	schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, &schemapb.FieldSchema{
+		Name: "abc",
+	})
+	assert.NotNil(t, validateDuplicatedFieldName(schema))
 }
 
 func TestValidatePrimaryKey(t *testing.T) {

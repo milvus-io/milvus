@@ -157,6 +157,13 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 			return true
 		}
 	}
+	for _, f := range schema.GetStructArrayFields() {
+		for _, field := range f.GetFields() {
+			if funcutil.SliceContain(systemFields, field.GetName()) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
@@ -172,6 +179,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName}) {
 		log.Ctx(ctx).Error("schema contains system field",
 			zap.String("RowIDFieldName", RowIDFieldName),
@@ -180,6 +191,11 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
+
+	if err := validateStructArrayFieldDataType(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+
 	return validateFieldDataType(schema.GetFields())
 }
 
@@ -210,6 +226,13 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 			function.OutputFieldIds[idx] = fieldId
 		}
 	}
+
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		if len(structArrayField.GetFunctions()) > 0 {
+			panic("dynamic field is not implemented yet")
+		}
+	}
+
 	return nil
 }
 
@@ -251,6 +274,12 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 	t.appendDynamicField(ctx, &schema)
+
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		if structArrayField.EnableDynamicField {
+			panic("dynamic field is not implemented yet")
+		}
+	}
 
 	if err := t.assignFieldAndFunctionID(&schema); err != nil {
 		return err
@@ -501,6 +530,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
+		StructArrayFields:    model.UnmarshalStructArrayFieldModels(t.schema.StructArrayFields),
 		Functions:            model.UnmarshalFunctionModels(t.schema.Functions),
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
@@ -608,13 +638,14 @@ func executeCreateCollectionTaskSteps(ctx context.Context,
 			vChannels:      col.VirtualChannelNames,
 			startPositions: col.StartPositions,
 			schema: &schemapb.CollectionSchema{
-				Name:        col.Name,
-				DbName:      col.DBName,
-				Description: col.Description,
-				AutoID:      col.AutoID,
-				Fields:      model.MarshalFieldModels(col.Fields),
-				Properties:  col.Properties,
-				Functions:   model.MarshalFunctionModels(col.Functions),
+				Name:              col.Name,
+				DbName:            col.DBName,
+				Description:       col.Description,
+				AutoID:            col.AutoID,
+				Fields:            model.MarshalFieldModels(col.Fields),
+				StructArrayFields: model.MarshalStructArrayFieldModels(col.StructArrayFields),
+				Properties:        col.Properties,
+				Functions:         model.MarshalFunctionModels(col.Functions),
 			},
 			dbProperties: dbProperties,
 		},

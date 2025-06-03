@@ -1012,6 +1012,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			Description:          schema.Description,
 			AutoID:               schema.AutoID,
 			Fields:               model.UnmarshalFieldModels(schema.GetFields()),
+			StructArrayFields:    model.UnmarshalStructArrayFieldModels(schema.GetStructArrayFields()),
 			VirtualChannelNames:  channels.virtualChannels,
 			PhysicalChannelNames: channels.physicalChannels,
 		}

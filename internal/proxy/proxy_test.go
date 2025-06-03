@@ -417,12 +417,7 @@ func TestProxy(t *testing.T) {
 	floatIndexName := "float_index"
 	binaryIndexName := "binary_index"
 	nlist := 10
-	// nprobe := 10
-	// topk := 10
-	// add a test parameter
-	// roundDecimal := 6
 	nq := 10
-	// expr := fmt.Sprintf("%s > 0", int64Field)
 	var segmentIDs []int64
 
 	// an int64 field (pk) & a float vector field
@@ -4879,6 +4874,367 @@ func TestUnhealthProxy_GetIndexStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
+	})
+}
+
+// todo: when struct array field is done, this test will be merged with TestProxy
+func TestProxy_StructArrayField(t *testing.T) {
+	var err error
+	var wg sync.WaitGroup
+	paramtable.Init()
+	params := paramtable.Get()
+	testutil.ResetEnvironment()
+
+	params.RootCoordGrpcServerCfg.IP = "localhost"
+	params.QueryCoordGrpcServerCfg.IP = "localhost"
+	params.DataCoordGrpcServerCfg.IP = "localhost"
+	params.ProxyGrpcServerCfg.IP = "localhost"
+	params.QueryNodeGrpcServerCfg.IP = "localhost"
+	params.DataNodeGrpcServerCfg.IP = "localhost"
+	params.StreamingNodeGrpcServerCfg.IP = "localhost"
+
+	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
+	t.Setenv("ROCKSMQ_PATH", path)
+	defer os.RemoveAll(path)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = GetContext(ctx, "root:123456")
+	localMsg := true
+	factory := dependency.MockDefaultFactory(localMsg, Params)
+	alias := "TestProxy"
+
+	log.Info("Initialize parameter table of Proxy")
+
+	mix := runMixCoord(ctx, localMsg)
+	log.Info("running MixCoord ...")
+
+	dn := runDataNode(ctx, localMsg, alias)
+	log.Info("running DataNode ...")
+
+	qn := runQueryNode(ctx, localMsg, alias)
+	log.Info("running QueryNode ...")
+
+	time.Sleep(10 * time.Millisecond)
+
+	proxy, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	assert.NotNil(t, proxy)
+
+	etcdcli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	defer etcdcli.Close()
+	assert.NoError(t, err)
+	proxy.SetEtcdClient(etcdcli)
+
+	testServer := newProxyTestServer(proxy)
+	wg.Add(1)
+
+	bt := paramtable.NewBaseTable(paramtable.SkipRemote(true))
+	base := &paramtable.ComponentParam{}
+	base.Init(bt)
+	var p paramtable.GrpcServerConfig
+	p.Init(typeutil.ProxyRole, bt)
+	testServer.Proxy.SetAddress(p.GetAddress())
+	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
+
+	go testServer.startGrpc(ctx, &wg, &p)
+	assert.NoError(t, testServer.waitForGrpcReady())
+
+	rootCoordClient, err := mixc.NewClient(ctx)
+	assert.NoError(t, err)
+	err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, typeutil.MixCoordRole, attempts, sleepDuration)
+	assert.NoError(t, err)
+	proxy.SetMixCoordClient(rootCoordClient)
+	log.Info("Proxy set mix coordinator client")
+
+	proxy.SetQueryNodeCreator(defaultQueryNodeClientCreator)
+	log.Info("Proxy set query coordinator client")
+
+	proxy.UpdateStateCode(commonpb.StateCode_Initializing)
+	err = proxy.Init()
+	assert.NoError(t, err)
+
+	err = proxy.Start()
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
+
+	// register proxy
+	err = proxy.Register()
+	assert.NoError(t, err)
+	log.Info("Register proxy done")
+	defer func() {
+		a := []any{mix, qn, dn, proxy}
+		fmt.Println(len(a))
+		// HINT: the order of stopping service refers to the `roles.go` file
+		log.Info("start to stop the services")
+		{
+			err := mix.Stop()
+			assert.NoError(t, err)
+			log.Info("stop MixCoord")
+		}
+
+		{
+			err := dn.Stop()
+			assert.NoError(t, err)
+			log.Info("stop DataNode")
+		}
+
+		{
+			err := proxy.Stop()
+			assert.NoError(t, err)
+			log.Info("stop Proxy")
+		}
+		cancel()
+	}()
+
+	prefix := "test_proxy_"
+	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	collectionName := prefix + funcutil.GenRandomStr()
+	otherCollectionName := collectionName + "_other_" + funcutil.GenRandomStr()
+	shardsNum := common.DefaultShardsNum
+	int64Field := "int64"
+	floatVecField := "fVec"
+	structId := "structI32Array"
+	structVec := "structFloatVecArray"
+	structField := "struct"
+	dim := 128
+
+	// an int64 field (pk) & a float vector field
+	constructCollectionSchema := func() *schemapb.CollectionSchema {
+		pk := &schemapb.FieldSchema{
+			FieldID:      100,
+			Name:         int64Field,
+			IsPrimaryKey: true,
+			Description:  "",
+			DataType:     schemapb.DataType_Int64,
+			TypeParams:   nil,
+			IndexParams:  nil,
+			AutoID:       true,
+		}
+		fVec := &schemapb.FieldSchema{
+			FieldID:      101,
+			Name:         floatVecField,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		// struct schema fields
+		sId := &schemapb.FieldSchema{
+			FieldID:      103,
+			Name:         structId,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_Array,
+			ElementType:  schemapb.DataType_Int32,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "100",
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		sVec := &schemapb.FieldSchema{
+			FieldID:      104,
+			Name:         structVec,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_ArrayOfVector,
+			ElementType:  schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "100",
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		structF := &schemapb.StructArrayFieldSchema{
+			FieldID:            105,
+			Name:               structField,
+			EnableDynamicField: false,
+			Fields:             []*schemapb.FieldSchema{sId, sVec},
+		}
+		return &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				pk,
+				fVec,
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{structF},
+		}
+	}
+	schema := constructCollectionSchema()
+	constructCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
+		bs, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		return &milvuspb.CreateCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         bs,
+			ShardsNum:      shardsNum,
+		}
+	}
+	createCollectionReq := constructCreateCollectionRequest()
+
+	wg.Add(1)
+	t.Run("create collection", func(t *testing.T) {
+		defer wg.Done()
+		req := createCollectionReq
+		resp, err := proxy.CreateCollection(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		reqInvalidField := constructCreateCollectionRequest()
+		schema := constructCollectionSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "StringField",
+			DataType: schemapb.DataType_String,
+		})
+		bs, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		reqInvalidField.CollectionName = "invalid_field_coll"
+		reqInvalidField.Schema = bs
+
+		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("has collection", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.True(t, resp.Value)
+
+		// has other collection: false
+		resp, err = proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.False(t, resp.Value)
+	})
+
+	wg.Add(1)
+	t.Run("describe collection", func(t *testing.T) {
+		defer wg.Done()
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			CollectionID:   collectionID,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, collectionID, resp.CollectionID)
+
+		fieldsMap := make(map[string]*schemapb.FieldSchema)
+		for _, field := range resp.Schema.Fields {
+			fieldsMap[field.Name] = field
+		}
+		for _, structField := range resp.Schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				fieldsMap[field.Name] = field
+			}
+		}
+		assert.Equal(t, len(fieldsMap), len(schema.Fields)+2)
+		for _, field := range schema.Fields {
+			fSchema, ok := fieldsMap[field.Name]
+			assert.True(t, ok)
+			assert.True(t, proto.Equal(field, fSchema))
+		}
+		for _, structField := range schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				fSchema, ok := fieldsMap[field.Name]
+				assert.True(t, ok)
+				assert.True(t, proto.Equal(field, fSchema))
+			}
+		}
+
+		// describe other collection -> fail
+		resp, err = proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+			CollectionID:   collectionID,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("get collection statistics", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		// TODO(dragondriver): check num rows
+
+		// get statistics of other collection -> fail
+		resp, err = proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: otherCollectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("show collections", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:      nil,
+			DbName:    dbName,
+			TimeStamp: 0,
+			Type:      milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Contains(t, resp.CollectionNames, collectionName, "collections: %v", resp.CollectionNames)
 	})
 }
 

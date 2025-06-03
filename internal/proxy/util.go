@@ -443,14 +443,31 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 	return fmt.Errorf(`index param "metric_type" is not specified for index float vector %s`, field.GetName())
 }
 
-func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
+func validateDuplicatedFieldName(schema *schemapb.CollectionSchema) error {
 	names := make(map[string]bool)
-	for _, field := range fields {
-		_, ok := names[field.Name]
+	validateFieldNames := func(name string) error {
+		_, ok := names[name]
 		if ok {
-			return errors.Newf("duplicated field name %s found", field.GetName())
+			return errors.Newf("duplicated field name %s found", name)
 		}
-		names[field.Name] = true
+		names[name] = true
+		return nil
+	}
+	for _, field := range schema.Fields {
+		if err := validateFieldNames(field.Name); err != nil {
+			return err
+		}
+	}
+	for _, structArrayField := range schema.StructArrayFields {
+		if err := validateFieldNames(structArrayField.Name); err != nil {
+			return err
+		}
+
+		for _, field := range structArrayField.Fields {
+			if err := validateFieldNames(field.Name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -481,6 +498,13 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 			}
 		}
 	}
+	for _, structArrayField := range schema.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.GetDataType() != schemapb.DataType_Array || field.GetElementType() != schemapb.DataType_ArrayOfVector {
+
+			}
+		}
+	}
 	return nil
 }
 
@@ -495,6 +519,13 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 			idx = i
 			if !field.IsPrimaryKey {
 				return fmt.Errorf("only primary field can speficy AutoID with true, field name = %s", field.Name)
+			}
+		}
+	}
+	for _, structArrayField := range coll.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.AutoID {
+				return errors.Newf("autoID is not supported for struct field, field name = %s", field.Name)
 			}
 		}
 	}
@@ -539,6 +570,59 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 
 	if err := validateAnalyzer(schema, field); err != nil {
 		return err
+	}
+	return nil
+}
+
+func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {
+	// validate field name
+	var err error
+	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+
+	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
+		return fmt.Errorf("Fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
+	}
+
+	if field.ElementType == schemapb.DataType_ArrayOfStruct || field.ElementType == schemapb.DataType_ArrayOfVector ||
+		field.ElementType == schemapb.DataType_Array {
+		return fmt.Errorf("Nested array is not supported %s", field.Name)
+	}
+
+	if field.DataType == schemapb.DataType_Array {
+		if typeutil.IsVectorType(field.GetElementType()) {
+			return fmt.Errorf("Inconsistent schema: element type of array field %s is a vector type", field.Name)
+		}
+	} else {
+		if !typeutil.IsVectorType(field.GetElementType()) {
+			return fmt.Errorf("Inconsistent schema: element type of array field %s is not a vector type", field.Name)
+		}
+		err = validateDimension(field)
+		if err != nil {
+			return err
+		}
+	}
+
+	// valid max length per row parameters
+	// if max_length not specified, return error
+	if field.ElementType == schemapb.DataType_VarChar {
+		err = validateMaxLengthPerRow(schema.Name, field)
+		if err != nil {
+			return err
+		}
+	}
+
+	// todo(SpadeA): add more check when index is enabled
+
+	return nil
+}
+
+func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
+	for _, subField := range structArrayField.Fields {
+		if err := ValidateFieldsInStruct(subField, schema); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -671,6 +755,15 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	if idx == -1 {
 		return errors.New("primary key is not specified")
 	}
+
+	for _, structArrayField := range coll.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.IsPrimaryKey {
+				return errors.Newf("primary key is not supported for struct field, field name = %s", field.Name)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -992,6 +1085,8 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 		}
 	}
 
+	// todo(Spadea): should be there any check between vectors in struct fields?
+
 	return nil
 }
 
@@ -1020,6 +1115,21 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 
 		if field.IsClusteringKey {
 			return merr.WrapErrParameterInvalidMsg("Clustering Key field %s cannot skip loading", field.GetName())
+		}
+	}
+
+	for _, structArrayField := range schema.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
+			if err != nil {
+				return err
+			}
+			if shouldLoad {
+				if typeutil.IsVectorType(field.ElementType) {
+					vectorCnt++
+				}
+				continue
+			}
 		}
 	}
 

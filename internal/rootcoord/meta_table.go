@@ -540,11 +540,12 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	aliases := mt.listAliasesByID(collectionID)
 	newColl := &model.Collection{
-		CollectionID: collectionID,
-		Partitions:   model.ClonePartitions(coll.Partitions),
-		Fields:       model.CloneFields(coll.Fields),
-		Aliases:      aliases,
-		DBID:         coll.DBID,
+		CollectionID:      collectionID,
+		Partitions:        model.ClonePartitions(coll.Partitions),
+		Fields:            model.CloneFields(coll.Fields),
+		StructArrayFields: model.CloneStructArrayFields(coll.StructArrayFields),
+		Aliases:           aliases,
+		DBID:              coll.DBID,
 	}
 	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
 		return err
