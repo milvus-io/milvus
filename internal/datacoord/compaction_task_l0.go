@@ -291,15 +291,6 @@ func (t *l0CompactionTask) CheckCompactionContainsSegment(segmentID int64) bool 
 	return false
 }
 
-func (t *l0CompactionTask) PreparePlan() bool {
-	sealedSegments, _ := t.selectSealedSegment()
-	sealedSegmentIDs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) int64 {
-		return info.GetID()
-	})
-	exist, hasStating := t.meta.CheckSegmentsStating(context.TODO(), sealedSegmentIDs)
-	return exist && !hasStating
-}
-
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {
 	compactionParams, err := compaction.GenerateJSONParams()
 	if err != nil {
