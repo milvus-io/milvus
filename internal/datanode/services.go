@@ -589,6 +589,12 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		zap.Int64("importUsed", importUsed),
 	)
 
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+
 	return &datapb.QuerySlotResponse{
 		Status:         merr.Success(),
 		AvailableSlots: availableSlots,

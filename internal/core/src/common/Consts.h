@@ -95,6 +95,7 @@ const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
 const std::string STORAGE_VERSION_KEY = "storage_version";
 const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
+const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 
 // storage version
 const int64_t STORAGE_V1 = 1;

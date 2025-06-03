@@ -167,8 +167,9 @@ test_run() {
         Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] = nb;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row;
+            config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -558,8 +559,9 @@ test_string() {
         Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] = nb;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row;
+            config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(

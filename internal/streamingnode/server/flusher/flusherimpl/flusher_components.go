@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -206,16 +207,16 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 			zap.Int64("partitionID", segment.PartitionId),
 			zap.Int64("segmentID", segment.SegmentId),
 		)
-		msg := message.NewFlushMessageBuilderV2().
-			WithVChannel(recoverInfo.GetInfo().GetChannelName()).
-			WithHeader(&message.FlushMessageHeader{
-				CollectionId: segment.CollectionId,
-				PartitionId:  segment.PartitionId,
-				SegmentId:    segment.SegmentId,
-			}).
-			WithBody(&message.FlushMessageBody{}).MustBuildMutable()
 		if err := retry.Do(ctx, func() error {
-			appendResult, err := impl.wal.Append(ctx, msg)
+			msg := message.NewFlushMessageBuilderV2().
+				WithVChannel(recoverInfo.GetInfo().GetChannelName()).
+				WithHeader(&message.FlushMessageHeader{
+					CollectionId: segment.CollectionId,
+					PartitionId:  segment.PartitionId,
+					SegmentId:    segment.SegmentId,
+				}).
+				WithBody(&message.FlushMessageBody{}).MustBuildMutable()
+			appendResult, err := impl.wal.Append(utility.WithFlushFromOldArch(ctx), msg)
 			if err != nil {
 				logger.Warn("fail to append flush message for segments that not created by streaming service into wal", zap.Error(err))
 				return err

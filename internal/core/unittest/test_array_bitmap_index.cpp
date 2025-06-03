@@ -231,8 +231,9 @@ class ArrayBitmapIndexTest : public testing::Test {
         config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "100";
+        config[INDEX_NUM_ROWS_KEY] = nb_;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row_;
+            config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
 
         {

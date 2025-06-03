@@ -305,5 +305,8 @@ func (s *DataNodeSuite) TestSwapQN() {
 }
 
 func TestDataNodeUtil(t *testing.T) {
+	// node id conflict when running multiple node
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(DataNodeSuite))
 }
