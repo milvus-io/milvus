@@ -109,7 +109,7 @@ struct GeneratedData {
             if constexpr (std::is_same_v<T, VectorFieldProto>) {
                 auto ret_data = reinterpret_cast<VectorFieldProto*>(ret.data());
                 auto src_data =
-                    target_field_data.vectors().array_vector().data();
+                    target_field_data.vectors().vector_array().data();
                 std::copy(src_data.begin(), src_data.end(), ret_data);
                 return std::move(ret);
             } else {
@@ -1172,7 +1172,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             case DataType::VECTOR_ARRAY: {
-                auto src_data = data->vectors().array_vector().data();
+                auto src_data = data->vectors().vector_array().data();
                 auto dim = field_meta.get_dim();
                 std::vector<VectorArray> data_raw(src_data.size());
                 for (int i = 0; i < src_data.size(); i++) {

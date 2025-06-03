@@ -217,7 +217,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 break;
             }
             case DataType::VECTOR_ARRAY: {
-                auto& obj = data->vectors().array_vector().data();
+                auto& obj = data->vectors().vector_array().data();
                 switch (field_meta.get_element_type()) {
                     case DataType::VECTOR_FLOAT: {
                         for (auto& e : obj) {
@@ -385,7 +385,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         case DataType::VECTOR_ARRAY: {
-            auto obj = vector_array->mutable_array_vector();
+            auto obj = vector_array->mutable_vector_array();
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
                 field_meta.get_element_type()));
             obj->mutable_data()->Reserve(count);
@@ -570,7 +570,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
             auto vector_type = field_meta.get_element_type();
             switch (vector_type) {
                 case DataType::VECTOR_FLOAT: {
-                    auto obj = vector_array->mutable_array_vector();
+                    auto obj = vector_array->mutable_vector_array();
                     obj->set_element_type(
                         milvus::proto::schema::DataType::FloatVector);
                     obj->set_dim(dim);

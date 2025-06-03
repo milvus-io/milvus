@@ -2284,7 +2284,7 @@ TEST(Sealed, QueryVectorArrayAllFields) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
-    auto array_vec = schema->AddDebugArrayVectorField(
+    auto array_vec = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
@@ -2308,7 +2308,7 @@ TEST(Sealed, QueryVectorArrayAllFields) {
         segment->bulk_subscript(array_vec, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
-    EXPECT_EQ(array_float_vector_result->vectors().array_vector().data_size(),
+    EXPECT_EQ(array_float_vector_result->vectors().vector_array().data_size(),
               dataset_size);
 
     auto verify_float_vectors = [](auto arr1, auto arr2) {
@@ -2320,7 +2320,7 @@ TEST(Sealed, QueryVectorArrayAllFields) {
     };
     for (int64_t i = 0; i < dataset_size; ++i) {
         auto arrow_array = array_float_vector_result->vectors()
-                               .array_vector()
+                               .vector_array()
                                .data()[i]
                                .float_vector()
                                .data();

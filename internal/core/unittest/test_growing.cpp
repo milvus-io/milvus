@@ -419,7 +419,7 @@ TEST(Growing, FillNullableData) {
 TEST_P(GrowingTest, FillVectorArrayData) {
     auto schema = std::make_shared<Schema>();
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
-    auto array_float_vector = schema->AddDebugArrayVectorField(
+    auto array_float_vector = schema->AddDebugVectorArrayField(
         "array_float_vector", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
@@ -453,7 +453,7 @@ TEST_P(GrowingTest, FillVectorArrayData) {
         EXPECT_EQ(int64_result->scalars().long_data().data_size(),
                   num_inserted);
         EXPECT_EQ(
-            array_float_vector_result->vectors().array_vector().data_size(),
+            array_float_vector_result->vectors().vector_array().data_size(),
             num_inserted);
 
         if (i == 0) {
@@ -470,7 +470,7 @@ TEST_P(GrowingTest, FillVectorArrayData) {
                 dataset.get_col<VectorFieldProto>(array_float_vector);
             for (int64_t i = 0; i < per_batch; ++i) {
                 auto arrow_array = array_float_vector_result->vectors()
-                                       .array_vector()
+                                       .vector_array()
                                        .data()[i]
                                        .float_vector()
                                        .data();
@@ -489,7 +489,7 @@ TEST(GrowingTest, LoadVectorArrayData) {
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
-    auto array_float_vector = schema->AddDebugArrayVectorField(
+    auto array_float_vector = schema->AddDebugVectorArrayField(
         "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
     schema->set_primary_field_id(int64_field);
 
@@ -519,7 +519,7 @@ TEST(GrowingTest, LoadVectorArrayData) {
         array_float_vector, ids_ds->GetIds(), dataset_size);
 
     EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
-    EXPECT_EQ(array_float_vector_result->vectors().array_vector().data_size(),
+    EXPECT_EQ(array_float_vector_result->vectors().vector_array().data_size(),
               dataset_size);
 
     auto verify_float_vectors = [](auto arr1, auto arr2) {
@@ -532,7 +532,7 @@ TEST(GrowingTest, LoadVectorArrayData) {
 
     for (int64_t i = 0; i < dataset_size; ++i) {
         auto arrow_array = array_float_vector_result->vectors()
-                               .array_vector()
+                               .vector_array()
                                .data()[i]
                                .float_vector()
                                .data();

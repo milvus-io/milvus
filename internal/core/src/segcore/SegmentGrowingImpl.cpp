@@ -730,7 +730,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                              seg_offsets,
                                              count,
                                              result->mutable_vectors()
-                                                 ->mutable_array_vector()
+                                                 ->mutable_vector_array()
                                                  ->mutable_data());
         } else {
             PanicInfo(DataTypeInvalid, "logical error");

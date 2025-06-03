@@ -237,8 +237,8 @@ ArrayChunkWriter::finish() {
 void
 VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
     auto size = 0;
-    std::vector<VectorArray> array_vectors;
-    array_vectors.reserve(arrow_array_vec.size());
+    std::vector<VectorArray> vector_arrays;
+    vector_arrays.reserve(arrow_array_vec.size());
 
     for (const auto& data : arrow_array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
@@ -248,7 +248,7 @@ VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
             vector_field.ParseFromArray(str.data(), str.size());
             auto arr = VectorArray(vector_field);
             size += arr.byte_size();
-            array_vectors.push_back(std::move(arr));
+            vector_arrays.push_back(std::move(arr));
         }
         row_nums_ += array->length();
     }
@@ -267,8 +267,8 @@ VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
         target_->tell() + sizeof(uint32_t) * (offsets_num + len_num);
     std::vector<uint32_t> offsets(offsets_num);
     std::vector<uint32_t> lens(len_num);
-    for (size_t i = 0; i < array_vectors.size(); i++) {
-        auto& arr = array_vectors[i];
+    for (size_t i = 0; i < vector_arrays.size(); i++) {
+        auto& arr = vector_arrays[i];
         offsets[i] = offset_start_pos;
         lens[i] = arr.length();
         offset_start_pos += arr.byte_size();
@@ -286,7 +286,7 @@ VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
         target_->write(&lens[i], sizeof(uint32_t));
     }
 
-    for (auto& arr : array_vectors) {
+    for (auto& arr : vector_arrays) {
         target_->write(arr.data(), arr.byte_size());
     }
 }

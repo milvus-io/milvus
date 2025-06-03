@@ -107,7 +107,7 @@ class Schema {
 
     // array of vector type
     FieldId
-    AddDebugArrayVectorField(const std::string& name,
+    AddDebugVectorArrayField(const std::string& name,
                              DataType element_type,
                              int64_t dim,
                              std::optional<knowhere::MetricType> metric_type) {

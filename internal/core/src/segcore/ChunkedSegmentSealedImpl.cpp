@@ -1383,7 +1383,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 column.get(),
                 seg_offsets,
                 count,
-                ret->mutable_vectors()->mutable_array_vector()->mutable_data());
+                ret->mutable_vectors()->mutable_vector_array()->mutable_data());
             break;
         }
         default: {
