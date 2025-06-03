@@ -28,7 +28,6 @@ package index
 import "C"
 
 import (
-	"fmt"
 	"path"
 
 	"github.com/cockroachdb/errors"
