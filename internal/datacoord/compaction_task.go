@@ -46,7 +46,6 @@ type CompactionTask interface {
 	NeedReAssignNodeID() bool
 	SaveTaskMeta() error
 
-	PreparePlan() bool
 	CheckCompactionContainsSegment(segmentID int64) bool
 }
 

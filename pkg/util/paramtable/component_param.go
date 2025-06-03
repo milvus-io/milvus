@@ -3995,6 +3995,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionSlotUsage ParamItem `refreshable:"true"`
 	MixCompactionSlotUsage        ParamItem `refreshable:"true"`
 	L0DeleteCompactionSlotUsage   ParamItem `refreshable:"true"`
+	SortCompactionSlotUsage       ParamItem `refreshable:"true"`
 	IndexTaskSlotUsage            ParamItem `refreshable:"true"`
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
@@ -4004,7 +4005,6 @@ type dataCoordConfig struct {
 	StatsTaskTriggerCount             ParamItem `refreshable:"true"`
 	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
 	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
-	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
@@ -4953,6 +4953,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.L0DeleteCompactionSlotUsage.Init(base.mgr)
 
+	p.SortCompactionSlotUsage = ParamItem{
+		Key:          "dataCoord.slot.sortCompactionUsage",
+		Version:      "2.4.6",
+		Doc:          "slot usage of sort compaction task.",
+		DefaultValue: "8",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.SortCompactionSlotUsage.Init(base.mgr)
+
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",
 		Version:      "2.5.8",
@@ -4997,7 +5007,6 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
-		Forbidden:    true,
 	}
 	p.EnableStatsTask.Init(base.mgr)
 
@@ -5068,15 +5077,6 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
-
-	p.EnabledJSONKeyStatsInSort = ParamItem{
-		Key:          "dataCoord.enabledJSONKeyStatsInSort",
-		Version:      "2.5.5",
-		DefaultValue: "false",
-		Doc:          "Indicates whether to enable JSON key stats task with sort",
-		Export:       true,
-	}
-	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

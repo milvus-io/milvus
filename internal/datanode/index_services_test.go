@@ -555,7 +555,7 @@ func (s *IndexServiceSuite) Test_CreateStatsTask() {
 			EndLogID:           s.logID + 200,
 			NumRows:            s.numRows,
 			BinlogMaxSize:      131000,
-			SubJobType:         indexpb.StatsSubJob_Sort,
+			SubJobType:         indexpb.StatsSubJob_JsonKeyIndexJob,
 			EnableJsonKeyStats: false,
 		}
 
@@ -582,9 +582,6 @@ func (s *IndexServiceSuite) Test_CreateStatsTask() {
 			s.NoError(err)
 			s.Equal(1, len(resp.GetStatsJobResults().GetResults()))
 			if resp.GetStatsJobResults().GetResults()[0].GetState() == indexpb.JobState_JobStateFinished {
-				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetInsertLogs()))
-				s.NotZero(len(resp.GetStatsJobResults().GetResults()[0].GetStatsLogs()))
-				s.Equal(s.numRows, resp.GetStatsJobResults().GetResults()[0].GetNumRows())
 				break
 			}
 			s.Equal(indexpb.JobState_JobStateInProgress, resp.GetStatsJobResults().GetResults()[0].GetState())

@@ -243,6 +243,15 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			binlogIO,
 			req,
 		)
+	case datapb.CompactionType_SortCompaction:
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+		}
+		task = compactor.NewSortCompactionTask(
+			taskCtx,
+			binlogIO,
+			req,
+		)
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil

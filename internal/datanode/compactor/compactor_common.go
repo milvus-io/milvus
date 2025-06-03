@@ -96,6 +96,7 @@ func (filter *EntityFilter) isEntityDeleted(pk interface{}, pkTs typeutil.Timest
 		// insert task and delete task has the same ts when upsert
 		// here should be < instead of <=
 		// to avoid the upsert data to be deleted after compact
+		log.Info("is entity deleted", zap.Any("pk", pk), zap.Any("pkTs", pkTs), zap.Any("deleteTs", deleteTs))
 		if pkTs < deleteTs {
 			return true
 		}

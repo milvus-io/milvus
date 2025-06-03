@@ -31,6 +31,8 @@ type mixCompactionTask struct {
 	meta      CompactionMeta
 
 	times *taskcommon.Times
+
+	slotUsage atomic.Int64
 }
 
 func (t *mixCompactionTask) GetTaskID() int64 {
@@ -46,7 +48,18 @@ func (t *mixCompactionTask) GetTaskState() taskcommon.State {
 }
 
 func (t *mixCompactionTask) GetTaskSlot() int64 {
-	return paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	slotUsage := t.slotUsage.Load()
+	if slotUsage == 0 {
+		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
+			segment := t.meta.GetHealthySegment(context.TODO(), t.GetTaskProto().GetInputSegments()[0])
+			if segment != nil {
+				slotUsage = calculateStatsTaskSlot(segment.getSegmentSize())
+			}
+		}
+		t.slotUsage.Store(slotUsage)
+	}
+	return slotUsage
 }
 
 func (t *mixCompactionTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -316,10 +329,6 @@ func (t *mixCompactionTask) SetNodeID(id UniqueID) error {
 
 func (t *mixCompactionTask) SetTask(task *datapb.CompactionTask) {
 	t.taskProto.Store(task)
-}
-
-func (t *mixCompactionTask) PreparePlan() bool {
-	return true
 }
 
 func (t *mixCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
