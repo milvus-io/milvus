@@ -619,6 +619,10 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 }
 
 func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
+	if len(structArrayField.Fields) == 0 {
+		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
+	}
+
 	for _, subField := range structArrayField.Fields {
 		if err := ValidateFieldsInStruct(subField, schema); err != nil {
 			return err

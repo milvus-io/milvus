@@ -522,6 +522,9 @@ func validateFieldDataType(fieldSchemas []*schemapb.FieldSchema) error {
 
 func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldSchema) error {
 	for _, field := range fieldSchemas {
+		if len(field.Fields) == 0 {
+			return merr.WrapErrParameterInvalid("Invalid field", "empty fields in StructArrayField")
+		}
 		for _, subField := range field.GetFields() {
 			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
 				return fmt.Errorf("Fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
