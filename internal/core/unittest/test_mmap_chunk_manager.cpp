@@ -17,29 +17,7 @@ checking register function of mmap chunk manager
 TEST(MmapChunkManager, Register) {
     auto mcm =
         milvus::storage::MmapManager::GetInstance().GetMmapChunkManager();
-    auto get_descriptor =
-        [](int64_t seg_id,
-           SegmentType seg_type) -> milvus::storage::MmapChunkDescriptorPtr {
-        return std::shared_ptr<milvus::storage::MmapChunkDescriptor>(
-            new milvus::storage::MmapChunkDescriptor({seg_id, seg_type}));
-    };
-    int64_t segment_id = 0x0000456789ABCDEF;
-    int64_t flow_segment_id = 0x8000456789ABCDEF;
-    mcm->Register(get_descriptor(segment_id, SegmentType::Growing));
-    ASSERT_TRUE(
-        mcm->HasRegister(get_descriptor(segment_id, SegmentType::Growing)));
-    ASSERT_FALSE(
-        mcm->HasRegister(get_descriptor(segment_id, SegmentType::Sealed)));
-    mcm->Register(get_descriptor(segment_id, SegmentType::Sealed));
-    ASSERT_FALSE(mcm->HasRegister(
-        get_descriptor(flow_segment_id, SegmentType::Growing)));
-    ASSERT_FALSE(
-        mcm->HasRegister(get_descriptor(flow_segment_id, SegmentType::Sealed)));
-
-    mcm->UnRegister(get_descriptor(segment_id, SegmentType::Sealed));
-    ASSERT_TRUE(
-        mcm->HasRegister(get_descriptor(segment_id, SegmentType::Growing)));
-    ASSERT_FALSE(
-        mcm->HasRegister(get_descriptor(segment_id, SegmentType::Sealed)));
-    mcm->UnRegister(get_descriptor(segment_id, SegmentType::Growing));
+    auto segment_descriptor = mcm->Register();
+    ASSERT_TRUE(mcm->HasRegister(segment_descriptor));
+    ASSERT_NO_THROW(mcm->UnRegister(segment_descriptor));
 }

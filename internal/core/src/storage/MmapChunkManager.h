@@ -29,22 +29,26 @@
 #include "common/type_c.h"
 #include "storage/LocalChunkManagerSingleton.h"
 namespace milvus::storage {
-// use segment id and segment type to descripe a segment in mmap chunk manager, segment only in two type (growing or sealed) in mmap chunk manager
 struct MmapChunkDescriptor {
-    struct DescriptorHash {
-        size_t
-        operator()(const MmapChunkDescriptor& x) const {
-            //SegmentType::Growing = 0x01,SegmentType::Sealed = 0x10
-            size_t sign = ((size_t)x.segment_type) << (sizeof(size_t) * 8 - 1);
-            return ((size_t)x.segment_id) | sign;
-        }
-    };
-    bool
-    operator==(const MmapChunkDescriptor& x) const {
-        return segment_id == x.segment_id && segment_type == x.segment_type;
+ public:
+    using ID = uint64_t;
+    MmapChunkDescriptor(const MmapChunkDescriptor&) = delete;
+    MmapChunkDescriptor&
+    operator=(const MmapChunkDescriptor&) = delete;
+
+ protected:
+    friend class
+        MmapChunkManager;  // only MmapChunkManager can create MmapChunkDescriptor
+    const size_t key_id_;
+
+ protected:
+    ID
+    GetId() const {
+        return key_id_;
     }
-    int64_t segment_id;
-    SegmentType segment_type;
+    explicit MmapChunkDescriptor(size_t id) : key_id_(id) {
+    }
+    ~MmapChunkDescriptor() = default;
 };
 using MmapChunkDescriptorPtr = std::shared_ptr<MmapChunkDescriptor>;
 
@@ -180,8 +184,8 @@ class MmapChunkManager {
                               const uint64_t disk_limit,
                               const uint64_t file_size);
     ~MmapChunkManager();
-    void
-    Register(const MmapChunkDescriptorPtr descriptor);
+    MmapChunkDescriptorPtr
+    Register();
     void
     UnRegister(const MmapChunkDescriptorPtr descriptor);
     bool
@@ -208,13 +212,16 @@ class MmapChunkManager {
     }
 
  private:
+    void
+    UnRegister(const MmapChunkDescriptor::ID descriptor_inner_id);
+
+ private:
     mutable std::shared_mutex mtx_;
-    std::unordered_map<MmapChunkDescriptor,
-                       std::vector<MmapBlockPtr>,
-                       MmapChunkDescriptor::DescriptorHash>
+    std::unordered_map<MmapChunkDescriptor::ID, std::vector<MmapBlockPtr>>
         blocks_table_;
     std::unique_ptr<MmapBlocksHandler> blocks_handler_ = nullptr;
     std::string mmap_file_prefix_;
+    std::atomic<uint64_t> descriptor_counter_;
 };
 using MmapChunkManagerPtr = std::shared_ptr<MmapChunkManager>;
 }  // namespace milvus::storage
