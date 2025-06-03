@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
@@ -39,6 +40,18 @@ import (
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		username, _, err := contextutil.GetAuthInfoFromContext(ctx)
+		if err != nil {
+			log.Warn("GetCurUserFromContext fail", zap.Error(err))
+			return ctx, err
+		}
+		superUsers := Params.CommonCfg.SuperUsersSkipRateLimit.GetAsStrings()
+		for _, s := range superUsers {
+			if s == username {
+				return handler(ctx, req)
+			}
+		}
+
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
