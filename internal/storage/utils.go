@@ -718,12 +718,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			}
 
 		case schemapb.DataType_ArrayOfVector:
-			arrayVector := srcField.GetVectors().GetArrayVector()
+			vectorArray := srcField.GetVectors().GetVectorArray()
 
 			fieldData = &VectorArrayFieldData{
 				ElementType: field.GetElementType(),
-				Data:        arrayVector.GetData(),
-				Dim:         arrayVector.GetDim(),
+				Data:        vectorArray.GetData(),
+				Dim:         vectorArray.GetDim(),
 			}
 
 		default:
@@ -1377,8 +1377,8 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
-						Data: &schemapb.VectorField_ArrayVector{
-							ArrayVector: &schemapb.ArrayVector{
+						Data: &schemapb.VectorField_VectorArray{
+							VectorArray: &schemapb.VectorArray{
 								Data:        rawData.Data,
 								ElementType: rawData.ElementType,
 								Dim:         int64(rawData.Dim),

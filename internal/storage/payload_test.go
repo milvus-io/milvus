@@ -1707,7 +1707,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
-	t.Run("TestArrayVector", func(t *testing.T) {
+	t.Run("TestVectorArray", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Array)
 		require.Nil(t, err)
 		require.NotNil(t, w)
