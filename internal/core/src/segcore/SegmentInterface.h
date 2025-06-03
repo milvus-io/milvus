@@ -213,7 +213,7 @@ class SegmentInternalInterface : public SegmentInterface {
                 }
             }
         }
-        return std::make_pair(res, chunk_info.second);
+        return std::make_pair(std::move(res), std::move(chunk_info.second));
     }
 
     template <typename ViewType>
