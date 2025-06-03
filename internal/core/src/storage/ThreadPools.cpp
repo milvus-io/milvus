@@ -14,6 +14,7 @@
 //
 
 #include "ThreadPools.h"
+#include <mutex>
 
 namespace milvus {
 
@@ -21,6 +22,7 @@ std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
 std::map<ThreadPoolPriority, std::string> ThreadPools::name_map;
 std::shared_mutex ThreadPools::mutex_;
+std::once_flag ThreadPools::init_flag;
 
 void
 ThreadPools::ShutDown() {
@@ -33,6 +35,7 @@ ThreadPools::ShutDown() {
 
 ThreadPool&
 ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
+    std::call_once(ThreadPools::init_flag, &ThreadPools::initNameMap);
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto iter = thread_pool_map.find(priority);
     if (iter != thread_pool_map.end()) {
