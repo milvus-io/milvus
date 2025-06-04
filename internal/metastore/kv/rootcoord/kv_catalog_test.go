@@ -215,6 +215,12 @@ func TestCatalog_ListCollections(t *testing.T) {
 			}), ts).
 			Return([]string{"rootcoord/functions/1/1"}, []string{string(fcm)}, nil)
 
+		kv.On("LoadWithPrefix", mock.Anything, mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, StructArrayFieldMetaPrefix)
+			}), ts).
+			Return([]string{}, []string{}, nil)
+
 		kc := NewCatalog(nil, kv)
 		ret, err := kc.ListCollections(ctx, testDb, ts)
 		assert.NoError(t, err)
@@ -264,6 +270,12 @@ func TestCatalog_ListCollections(t *testing.T) {
 				return strings.HasPrefix(prefix, FunctionMetaPrefix)
 			}), ts).
 			Return([]string{"rootcoord/functions/1/1"}, []string{string(fcm)}, nil)
+
+		kv.On("LoadWithPrefix", mock.Anything, mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, StructArrayFieldMetaPrefix)
+			}), ts).
+			Return([]string{}, []string{}, nil)
 
 		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, mock.Anything, ts).Return(nil)
 		kc := NewCatalog(nil, kv)
