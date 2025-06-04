@@ -88,7 +88,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
-			isFlush(segment) &&
+			isFlushed(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
