@@ -672,9 +672,7 @@ TEST(chunk, multiple_chunk_mmap) {
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
 
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    auto desc =
-        std::make_shared<storage::MmapChunkDescriptor>(1, SegmentType::Sealed);
-    mcm->Register(desc);
+    auto desc = mcm->Register();
     auto chunk = create_chunk(field_meta, 1, mcm, desc, array_vec);
 
     std::shared_ptr<::arrow::RecordBatchReader> rb_reader2;

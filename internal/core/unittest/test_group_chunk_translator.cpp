@@ -110,9 +110,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         fr->file_metadata()->GetRowGroupMetadataVector());
 
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-    auto desc = std::make_shared<storage::MmapChunkDescriptor>(
-        segment_id_, SegmentType::Sealed);
-    mcm->Register(desc);
+    auto desc = mcm->Register();
 
     GroupChunkTranslator translator(segment_id_,
                                     field_metas,
@@ -120,7 +118,8 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
                                     paths_,
                                     use_mmap,
                                     row_group_meta_list,
-                                    field_id_list);
+                                    field_id_list,
+                                    desc);
 
     // num cells
     EXPECT_EQ(translator.num_cells(), row_group_meta_list[0].size());
