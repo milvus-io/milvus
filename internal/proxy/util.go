@@ -614,6 +614,11 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 		}
 	}
 
+	// todo(SpadeA): make nullable field in struct array supported
+	if field.GetNullable() {
+		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
+	}
+
 	// todo(SpadeA): add more check when index is enabled
 
 	return nil
