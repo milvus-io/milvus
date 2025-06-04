@@ -400,10 +400,15 @@ IsFloatVectorDataType(DataType data_type) {
 }
 
 inline bool
+IsVectorArrayDataType(DataType data_type) {
+    return data_type == DataType::VECTOR_ARRAY;
+}
+
+inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
            IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type) ||
-           data_type == DataType::VECTOR_ARRAY;
+           IsVectorArrayDataType(data_type);
 }
 
 inline bool

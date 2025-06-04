@@ -145,7 +145,7 @@ class FieldMeta {
 
     int64_t
     get_dim() const {
-        Assert(IsVectorDataType(type_) || type_ == DataType::VECTOR_ARRAY);
+        Assert(IsVectorDataType(type_));
         // should not attempt to get dim() of a sparse vector from schema.
         Assert(!IsSparseFloatVectorDataType(type_));
         Assert(vector_info_.has_value());
@@ -235,10 +235,12 @@ class FieldMeta {
                    "schema");
         static const size_t ARRAY_SIZE = 128;
         static const size_t JSON_SIZE = 512;
-        if (is_vector()) {
+        // assume float vector with dim 512, array length 10
+        static const size_t VECTOR_ARRAY_SIZE = 512 * 10 * 4;
+        if (type_ == DataType::VECTOR_ARRAY) {
+            return VECTOR_ARRAY_SIZE;
+        } else if (is_vector()) {
             return GetDataTypeSize(type_, get_dim());
-        } else if (type_ == DataType::VECTOR_ARRAY) {
-            PanicInfo(DataTypeInvalid, "Not implemented");
         } else if (is_string()) {
             Assert(string_info_.has_value());
             return string_info_->max_length;

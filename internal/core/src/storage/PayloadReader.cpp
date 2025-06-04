@@ -74,7 +74,7 @@ PayloadReader::init(const uint8_t* data, int length, bool is_field_data) {
         dim_ =
             (IsVectorDataType(column_type_) &&
              !IsSparseFloatVectorDataType(column_type_)) &&
-                    column_type_ != DataType::VECTOR_ARRAY
+                    !IsVectorArrayDataType(column_type_)
                 ? GetDimensionFromFileMetaData(
                       file_meta->schema()->Column(column_index), column_type_)
                 : 1;

@@ -73,43 +73,30 @@ class VectorArray : public milvus::VectorTrait {
         std::copy(other.data_, other.data_ + other.size_, data_);
     }
 
-    VectorArray(VectorArray&& other) noexcept
-        : size_(other.size_),
-          length_(other.length_),
-          dim_(other.dim_),
-          element_type_(other.element_type_),
-          data_(other.data_) {
-        // avoid double free
-        other.data_ = nullptr;
+    friend void
+    swap(VectorArray& array1, VectorArray& array2) noexcept {
+        using std::swap;
+        swap(array1.data_, array2.data_);
+        swap(array1.size_, array2.size_);
+        swap(array1.length_, array2.length_);
+        swap(array1.dim_, array2.dim_);
+        swap(array1.element_type_, array2.element_type_);
+    }
+
+    VectorArray(VectorArray&& other) noexcept : VectorArray() {
+        swap(*this, other);
     }
 
     VectorArray&
     operator=(const VectorArray& other) {
-        if (this != &other) {
-            delete[] data_;
-            length_ = other.length_;
-            size_ = other.size_;
-            dim_ = other.dim_;
-            element_type_ = other.element_type_;
-            data_ = new char[size_];
-            std::copy(other.data_, other.data_ + size_, data_);
-        }
+        VectorArray temp(other);
+        swap(*this, temp);
         return *this;
     }
 
     VectorArray&
     operator=(VectorArray&& other) noexcept {
-        if (this != &other) {
-            delete[] data_;
-
-            data_ = other.data_;
-            size_ = other.size_;
-            length_ = other.length_;
-            dim_ = other.dim_;
-            element_type_ = other.element_type_;
-
-            other.data_ = nullptr;
-        }
+        swap(*this, other);
         return *this;
     }
 
@@ -126,16 +113,12 @@ class VectorArray : public milvus::VectorTrait {
 
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                for (int i = 0; i < length_; ++i) {
-                    auto a = get_data<float>(i);
-                    auto b = other.get_data<float>(i);
-                    for (int j = 0; j < dim_; ++j) {
-                        if (a[j] != b[j]) {
-                            return false;
-                        }
-                    }
-                }
-                return true;
+                auto* a = reinterpret_cast<const float*>(data_);
+                auto* b = reinterpret_cast<const float*>(other.data_);
+                return std::equal(
+                    a, a + length_ * dim_, b, [](float x, float y) {
+                        return std::abs(x - y) < 1e-6f;
+                    });
             }
             default: {
                 // TODO(SpadeA): add other vector types
@@ -155,8 +138,9 @@ class VectorArray : public milvus::VectorTrait {
                    length_);
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                return static_cast<VectorElement*>(
-                    reinterpret_cast<float*>(data_) + index * dim_);
+                static_assert(std::is_same_v<VectorElement, float>,
+                              "VectorElement must be float for VECTOR_FLOAT");
+                return reinterpret_cast<VectorElement*>(data_) + index * dim_;
             }
             default: {
                 // TODO(SpadeA): add other vector types
@@ -217,7 +201,8 @@ class VectorArray : public milvus::VectorTrait {
     is_same_array(const VectorFieldProto& vector_field) {
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                if (vector_field.data_case() != VectorFieldProto::kFloatVector) {
+                if (vector_field.data_case() !=
+                    VectorFieldProto::kFloatVector) {
                     return false;
                 }
 
@@ -230,17 +215,12 @@ class VectorArray : public milvus::VectorTrait {
                     return true;
                 }
 
-                for (int i = 0; i < length_; ++i) {
-                    auto a = get_data<float>(i);
-                    auto b =
-                        vector_field.float_vector().data().begin() + i * dim_;
-                    for (int j = 0; j < dim_; ++j) {
-                        if (a[j] != b[j]) {
-                            return false;
-                        }
-                    }
-                }
-                return true;
+                const float* a = reinterpret_cast<const float*>(data_);
+                const float* b = vector_field.float_vector().data().data();
+                return std::equal(
+                    a, a + length_ * dim_, b, [](float x, float y) {
+                        return std::abs(x - y) < 1e-6f;
+                    });
             }
             default: {
                 // TODO(SpadeA): add other vector types
@@ -254,7 +234,9 @@ class VectorArray : public milvus::VectorTrait {
  private:
     int64_t dim_ = 0;
     char* data_{nullptr};
+    // length of the array
     int length_ = 0;
+    // size of the array in bytes
     int size_ = 0;
     DataType element_type_ = DataType::NONE;
 };
@@ -289,8 +271,9 @@ class VectorArrayView {
                    length_);
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                return static_cast<VectorElement*>(
-                    reinterpret_cast<float*>(data_) + index * dim_);
+                static_assert(std::is_same_v<VectorElement, float>,
+                              "VectorElement must be float for VECTOR_FLOAT");
+                return reinterpret_cast<VectorElement*>(data_) + index * dim_;
             }
             default: {
                 // TODO(SpadeA): add other vector types
@@ -326,10 +309,11 @@ class VectorArrayView {
     is_same_array(const VectorFieldProto& vector_field) {
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                if (vector_field.data_case() != VectorFieldProto::kFloatVector) {
+                if (vector_field.data_case() !=
+                    VectorFieldProto::kFloatVector) {
                     return false;
                 }
-                
+
                 if (length_ !=
                     vector_field.float_vector().data().size() / dim_) {
                     return false;
@@ -339,17 +323,12 @@ class VectorArrayView {
                     return true;
                 }
 
-                for (int i = 0; i < length_; ++i) {
-                    auto a = get_data<float>(i);
-                    auto b =
-                        vector_field.float_vector().data().begin() + i * dim_;
-                    for (int j = 0; j < dim_; ++j) {
-                        if (a[j] != b[j]) {
-                            return false;
-                        }
-                    }
-                }
-                return true;
+                const float* a = reinterpret_cast<const float*>(data_);
+                const float* b = vector_field.float_vector().data().data();
+                return std::equal(
+                    a, a + length_ * dim_, b, [](float x, float y) {
+                        return std::abs(x - y) < 1e-6f;
+                    });
             }
             default: {
                 // TODO(SpadeA): add other vector types
@@ -363,7 +342,9 @@ class VectorArrayView {
  private:
     char* data_{nullptr};
     int64_t dim_ = 0;
+    // length of the array
     int length_ = 0;
+    // size of the array in bytes
     int size_ = 0;
     DataType element_type_ = DataType::NONE;
 };
