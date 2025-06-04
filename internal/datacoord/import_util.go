@@ -296,13 +296,20 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	// Allocated IDs are used for rowID and the BEGINNING of the logID.
-	allocNum := totalRows + 1
+	// Pre-allocate IDs for autoIDs and logIDs.
+	preAllocIDNum := (totalRows + 1) * paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 
-	idBegin, idEnd, err := alloc.AllocN(allocNum)
+	idBegin, idEnd, err := alloc.AllocN(preAllocIDNum)
 	if err != nil {
 		return nil, err
 	}
+
+	log.Info("pre-allocate ids and ts for import task", WrapTaskLog(task,
+		zap.Int64("totalRows", totalRows),
+		zap.Int64("idBegin", idBegin),
+		zap.Int64("idEnd", idEnd),
+		zap.Uint64("ts", ts))...,
+	)
 
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
