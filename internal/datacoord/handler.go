@@ -79,8 +79,8 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 	)
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
-			(s.GetState() != commonpb.SegmentState_Growing && s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
-			// empty growing segment don't have dml position and start position
+			((s.GetState() != commonpb.SegmentState_Growing && s.GetState() != commonpb.SegmentState_Sealed) && s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+			// empty growing and sealed segment don't have dml position and start position
 			// and it should be recovered for streamingnode, so we add the state-filter here.
 			continue
 		}
