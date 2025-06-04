@@ -269,31 +269,34 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
         }
     }
     // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    auto offsets = str_ids_to_offsets_[MARISA_NULL_KEY_ID];
-    for (size_t i = 0; i < offsets.size(); i++) {
-        bitset.reset(offsets[i]);
-    }
+    SetNull(bitset);
     return bitset;
 }
 
 const TargetBitmap
 StringIndexMarisa::IsNull() {
     TargetBitmap bitset(str_ids_.size());
-    auto offsets = str_ids_to_offsets_[MARISA_NULL_KEY_ID];
-    for (size_t i = 0; i < offsets.size(); i++) {
-        bitset.set(offsets[i]);
-    }
+    SetNull(bitset);
     return bitset;
+}
+
+void
+StringIndexMarisa::SetNull(TargetBitmap& bitset) {
+    for (size_t i = 0; i < bitset.size(); i++) {
+        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+            bitset.set(i);
+        }
+    }
 }
 
 const TargetBitmap
 StringIndexMarisa::IsNotNull() {
     TargetBitmap bitset(str_ids_.size());
-    auto offsets = str_ids_to_offsets_[MARISA_NULL_KEY_ID];
-    for (size_t i = 0; i < offsets.size(); i++) {
-        bitset.set(offsets[i]);
+    for (size_t i = 0; i < bitset.size(); i++) {
+        if (str_ids_[i] != MARISA_NULL_KEY_ID) {
+            bitset.set(i);
+        }
     }
-    bitset.flip();
     return bitset;
 }
 

@@ -736,7 +736,7 @@ ChunkedSegmentSealedImpl::get_chunk_buffer(FieldId field_id,
         }
         return std::make_pair(
             field_data->GetBatchBuffer(chunk_id, start_offset, length),
-            valid_data);
+            std::move(valid_data));
     }
     PanicInfo(ErrorCode::UnexpectedError,
               "get_chunk_buffer only used for  variable column field");
