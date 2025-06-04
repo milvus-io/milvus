@@ -44,7 +44,7 @@ TEST(VectorArray, TestSchema) {
     }
 
     {
-        auto struct_field = proto.add_struct_fields();
+        auto struct_field = proto.add_struct_array_fields();
         struct_field->set_name("struct");
         struct_field->set_fieldid(101);
 
