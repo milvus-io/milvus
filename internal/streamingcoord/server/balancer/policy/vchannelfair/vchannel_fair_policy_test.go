@@ -45,7 +45,7 @@ func TestVChannelFairPolicy(t *testing.T) {
 	}, []int64{2, 3}))
 	assert.NoError(t, err)
 	assert.Equal(t, 10, len(expected.ChannelAssignment))
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].ServerID, expected.ChannelAssignment[newChannelID("c1")].ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].Node.ServerID, expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
 
 	expected, err = policy.Balance(newLayout(map[string]int{
 		"c1":  2,
@@ -76,9 +76,9 @@ func TestVChannelFairPolicy(t *testing.T) {
 	}, []int64{1, 2, 3}))
 	assert.NoError(t, err)
 	assert.Equal(t, 10, len(expected.ChannelAssignment))
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].ServerID, expected.ChannelAssignment[newChannelID("c1")].ServerID)
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].ServerID, expected.ChannelAssignment[newChannelID("c5")].ServerID)
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c5")].ServerID, expected.ChannelAssignment[newChannelID("c1")].ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].Node.ServerID, expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].Node.ServerID, expected.ChannelAssignment[newChannelID("c5")].Node.ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c5")].Node.ServerID, expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
 
 	expected, err = policy.Balance(newLayout(map[string]int{
 		"c1":  -1,
@@ -109,7 +109,7 @@ func TestVChannelFairPolicy(t *testing.T) {
 	}, []int64{1, 2, 3}))
 	assert.NoError(t, err)
 	assert.Equal(t, 10, len(expected.ChannelAssignment))
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].ServerID, expected.ChannelAssignment[newChannelID("c1")].ServerID)
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].ServerID, expected.ChannelAssignment[newChannelID("c5")].ServerID)
-	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c5")].ServerID, expected.ChannelAssignment[newChannelID("c1")].ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].Node.ServerID, expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c3")].Node.ServerID, expected.ChannelAssignment[newChannelID("c5")].Node.ServerID)
+	assert.NotEqual(t, expected.ChannelAssignment[newChannelID("c5")].Node.ServerID, expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
 }

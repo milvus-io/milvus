@@ -82,3 +82,10 @@ func TestReplaceAppendResultTxnContext(t *testing.T) {
 	retrievedResult := ctx.Value(extraAppendResultValue).(*ExtraAppendResult)
 	assert.Equal(t, retrievedResult.TxnCtx.TxnID, newTxnCtx.TxnID)
 }
+
+func TestWithFlushFromOldArch(t *testing.T) {
+	ctx := context.Background()
+	assert.False(t, GetFlushFromOldArch(ctx))
+	ctx = WithFlushFromOldArch(ctx)
+	assert.True(t, GetFlushFromOldArch(ctx))
+}

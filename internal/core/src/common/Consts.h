@@ -56,9 +56,9 @@ const char DEAFULT_QUERY_ID[] = "0";
 const char DEFAULT_TASK_ID[] = "0";
 
 const int64_t DEFAULT_FIELD_MAX_MEMORY_LIMIT = 128 << 20;  // bytes
-const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
-const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
-const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
+const float DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10.0;
+const float DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5.0;
+const float DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1.0;
 
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 16 << 20;  // bytes
 
@@ -95,6 +95,7 @@ const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
 const std::string STORAGE_VERSION_KEY = "storage_version";
 const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
+const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 
 // storage version
 const int64_t STORAGE_V1 = 1;

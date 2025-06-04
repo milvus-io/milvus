@@ -275,27 +275,25 @@ func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Con
 		PartitionID:   partition.PartitionID,
 	}
 
-	msgs := make([]message.MutableMessage, 0, len(vchannels))
-	for _, vchannel := range vchannels {
-		msg, err := message.NewDropPartitionMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&message.DropPartitionMessageHeader{
-				CollectionId: partition.CollectionID,
-				PartitionId:  partition.PartitionID,
-			}).
-			WithBody(req).
-			BuildMutable()
-		if err != nil {
-			return 0, err
-		}
-		msgs = append(msgs, msg)
-	}
-	// Ts is used as barrier time tick to ensure the message's time tick are given after the barrier time tick.
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
+	msg := message.NewDropPartitionMessageBuilderV1().
+		WithBroadcast(vchannels).
+		WithHeader(&message.DropPartitionMessageHeader{
+			CollectionId: partition.CollectionID,
+			PartitionId:  partition.PartitionID,
+		}).
+		WithBody(req).
+		MustBuildBroadcast()
+	r, err := streaming.WAL().Broadcast().Append(ctx, msg)
+	if err != nil {
 		return 0, err
 	}
-	return resp.MaxTimeTick(), nil
+	maxTimeTick := uint64(0)
+	for _, r := range r.AppendResults {
+		if r.TimeTick > maxTimeTick {
+			maxTimeTick = r.TimeTick
+		}
+	}
+	return maxTimeTick, nil
 }
 
 func (c *bgGarbageCollector) GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {

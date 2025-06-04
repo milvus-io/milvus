@@ -1557,6 +1557,16 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
+	s.meta = &meta{
+		segments: NewSegmentsInfo(),
+	}
+	s.meta.segments.segments[1] = NewSegmentInfo(&datapb.SegmentInfo{
+		ID:                   1,
+		CollectionID:         0,
+		PartitionID:          0,
+		State:                commonpb.SegmentState_Growing,
+		IsCreatedByStreaming: false,
+	})
 
 	assert.NoError(t, err)
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{

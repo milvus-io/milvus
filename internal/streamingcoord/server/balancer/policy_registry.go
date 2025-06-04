@@ -17,9 +17,11 @@ var policiesBuilders typeutil.ConcurrentMap[string, PolicyBuilder]
 
 // CurrentLayout is the full topology of streaming node and pChannel.
 type CurrentLayout struct {
-	Channels        map[types.ChannelID]channel.PChannelStatsView // Stats is the statistics of all pchannels.
-	AllNodesInfo    map[int64]types.StreamingNodeInfo             // AllNodesInfo is the full information of all available streaming nodes and related pchannels (contain the node not assign anything on it).
-	ChannelsToNodes map[types.ChannelID]int64                     // ChannelsToNodes maps assigned channel name to node id.
+	Channels           map[channel.ChannelID]types.PChannelInfo
+	Stats              map[channel.ChannelID]channel.PChannelStatsView
+	AllNodesInfo       map[int64]types.StreamingNodeInfo      // AllNodesInfo is the full information of all available streaming nodes and related pchannels (contain the node not assign anything on it).
+	ChannelsToNodes    map[types.ChannelID]int64              // ChannelsToNodes maps assigned channel name to node id.
+	ExpectedAccessMode map[channel.ChannelID]types.AccessMode // ExpectedAccessMode is the expected access mode of all channel.
 }
 
 // TotalChannels returns the total number of channels in the layout.
@@ -30,7 +32,7 @@ func (layout *CurrentLayout) TotalChannels() int {
 // TotalVChannels returns the total number of vchannels in the layout.
 func (layout *CurrentLayout) TotalVChannels() int {
 	cnt := 0
-	for _, stats := range layout.Channels {
+	for _, stats := range layout.Stats {
 		cnt += len(stats.VChannels)
 	}
 	return cnt
@@ -39,7 +41,7 @@ func (layout *CurrentLayout) TotalVChannels() int {
 // TotalVChannelPerCollection returns the total number of vchannels per collection in the layout.
 func (layout *CurrentLayout) TotalVChannelsOfCollection() map[int64]int {
 	cnt := make(map[int64]int)
-	for _, stats := range layout.Channels {
+	for _, stats := range layout.Stats {
 		for _, collectionID := range stats.VChannels {
 			cnt[collectionID]++
 		}
@@ -55,7 +57,7 @@ func (layout *CurrentLayout) TotalNodes() int {
 // GetAllPChannelsSortedByVChannelCountDesc returns all pchannels sorted by vchannel count in descending order.
 func (layout *CurrentLayout) GetAllPChannelsSortedByVChannelCountDesc() []types.ChannelID {
 	sorter := make(byVChannelCountDesc, 0, layout.TotalChannels())
-	for id, stats := range layout.Channels {
+	for id, stats := range layout.Stats {
 		sorter = append(sorter, withVChannelCount{
 			id:            id,
 			vchannelCount: len(stats.VChannels),
@@ -84,14 +86,14 @@ func (a byVChannelCountDesc) Less(i, j int) bool {
 
 // ExpectedLayout is the expected layout of streaming node and pChannel.
 type ExpectedLayout struct {
-	ChannelAssignment map[types.ChannelID]types.StreamingNodeInfo // ChannelAssignment is the assignment of channel to node.
+	ChannelAssignment map[types.ChannelID]types.PChannelInfoAssigned // ChannelAssignment is the assignment of channel to node.
 }
 
 // String returns the string representation of the expected layout.
 func (layout ExpectedLayout) String() string {
 	ss := make([]string, 0, len(layout.ChannelAssignment))
-	for channelID, node := range layout.ChannelAssignment {
-		ss = append(ss, channelID.String()+":"+node.String())
+	for _, assignment := range layout.ChannelAssignment {
+		ss = append(ss, assignment.String())
 	}
 	return strings.Join(ss, ",")
 }

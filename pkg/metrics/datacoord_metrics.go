@@ -355,8 +355,8 @@ var (
 			statusLabelName,
 		})
 
-	// TaskNum records the number of tasks of each type.
-	TaskNum = prometheus.NewGaugeVec(
+	// IndexStatsTaskNum records the number of tasks of each type.
+	IndexStatsTaskNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -375,6 +375,14 @@ var (
 		}, []string{
 			TaskTypeLabel,
 		})
+
+	TaskNumInGlobalScheduler = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "task_num_in_scheduler",
+			Help:      "number of tasks in global scheduler",
+		}, []string{TaskTypeLabel, TaskStateLabel})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -406,9 +414,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
-	registry.MustRegister(TaskNum)
+	registry.MustRegister(IndexStatsTaskNum)
 	registry.MustRegister(TaskVersion)
-
+	registry.MustRegister(TaskNumInGlobalScheduler)
 	registerStreamingCoord(registry)
 }
 

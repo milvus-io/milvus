@@ -17,6 +17,9 @@ func TestCatalog(t *testing.T) {
 	kv := mock_kv.NewMockMetaKv(t)
 
 	kvStorage := make(map[string]string)
+	kv.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (string, error) {
+		return kvStorage[s], nil
+	})
 	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) ([]string, []string, error) {
 		keys := make([]string, 0, len(kvStorage))
 		vals := make([]string, 0, len(kvStorage))
@@ -47,6 +50,16 @@ func TestCatalog(t *testing.T) {
 	metas, err := catalog.ListPChannel(context.Background())
 	assert.NoError(t, err)
 	assert.Empty(t, metas)
+
+	// Version test
+	err = catalog.SaveVersion(context.Background(), &streamingpb.StreamingVersion{
+		Version: 1,
+	})
+	assert.NoError(t, err)
+
+	v, err := catalog.GetVersion(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, v.Version, int64(1))
 
 	// PChannel test
 	err = catalog.SavePChannels(context.Background(), []*streamingpb.PChannelMeta{

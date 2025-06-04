@@ -89,7 +89,12 @@ func (c PChannelInfo) String() string {
 	return fmt.Sprintf("%s:%s@%d", c.Name, c.AccessMode, c.Term)
 }
 
+// PChannelInfoAssigned is a pair that represent a channel assignment of channel
 type PChannelInfoAssigned struct {
 	Channel PChannelInfo
 	Node    StreamingNodeInfo
+}
+
+func (c PChannelInfoAssigned) String() string {
+	return fmt.Sprintf("%s>%s", c.Channel, c.Node)
 }

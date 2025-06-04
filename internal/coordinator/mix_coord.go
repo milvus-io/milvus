@@ -310,6 +310,7 @@ func (s *mixCoordImpl) GetStateCode() commonpb.StateCode {
 func (s *mixCoordImpl) GracefulStop() {
 	if s.streamingCoord != nil {
 		s.streamingCoord.Stop()
+		s.streamingCoord = nil
 	}
 }
 
