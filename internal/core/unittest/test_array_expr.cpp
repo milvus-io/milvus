@@ -564,16 +564,16 @@ TEST(Expr, TestArrayRange) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::map<std::string, std::vector<ScalarArray>> array_cols;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
-        auto new_bool_array_col = raw_data.get_col<ScalarArray>(bool_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
         auto new_string_array_col =
-            raw_data.get_col<ScalarArray>(string_array_fid);
+            raw_data.get_col<ScalarFieldProto>(string_array_fid);
         auto new_float_array_col =
-            raw_data.get_col<ScalarArray>(float_array_fid);
+            raw_data.get_col<ScalarFieldProto>(float_array_fid);
 
         array_cols["long"].insert(array_cols["long"].end(),
                                   new_long_array_col.begin(),
@@ -717,11 +717,11 @@ TEST(Expr, TestArrayEqual) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::vector<ScalarArray> long_array_col;
+    std::vector<ScalarFieldProto> long_array_col;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
         long_array_col.insert(long_array_col.end(),
                               new_long_array_col.begin(),
                               new_long_array_col.end());
@@ -820,13 +820,13 @@ TEST(Expr, TestArrayNullExpr) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::vector<ScalarArray> long_array_col;
+    std::vector<ScalarFieldProto> long_array_col;
     int num_iters = 1;
     FixedVector<bool> valid_data;
 
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
         long_array_col.insert(long_array_col.end(),
                               new_long_array_col.begin(),
                               new_long_array_col.end());
@@ -989,19 +989,19 @@ TEST(Expr, TestArrayContains) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::map<std::string, std::vector<ScalarArray>> array_cols;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_int_array_col = raw_data.get_col<ScalarArray>(int_array_fid);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
-        auto new_bool_array_col = raw_data.get_col<ScalarArray>(bool_array_fid);
+        auto new_int_array_col = raw_data.get_col<ScalarFieldProto>(int_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
         auto new_float_array_col =
-            raw_data.get_col<ScalarArray>(float_array_fid);
+            raw_data.get_col<ScalarFieldProto>(float_array_fid);
         auto new_double_array_col =
-            raw_data.get_col<ScalarArray>(double_array_fid);
+            raw_data.get_col<ScalarFieldProto>(double_array_fid);
         auto new_string_array_col =
-            raw_data.get_col<ScalarArray>(string_array_fid);
+            raw_data.get_col<ScalarFieldProto>(string_array_fid);
 
         array_cols["int"].insert(array_cols["int"].end(),
                                  new_int_array_col.begin(),
@@ -1512,16 +1512,16 @@ TEST(Expr, TestArrayBinaryArith) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::map<std::string, std::vector<ScalarArray>> array_cols;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_int_array_col = raw_data.get_col<ScalarArray>(int_array_fid);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
+        auto new_int_array_col = raw_data.get_col<ScalarFieldProto>(int_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
         auto new_float_array_col =
-            raw_data.get_col<ScalarArray>(float_array_fid);
+            raw_data.get_col<ScalarFieldProto>(float_array_fid);
         auto new_double_array_col =
-            raw_data.get_col<ScalarArray>(double_array_fid);
+            raw_data.get_col<ScalarFieldProto>(double_array_fid);
 
         array_cols["int"].insert(array_cols["int"].end(),
                                  new_int_array_col.begin(),
@@ -2477,12 +2477,12 @@ TEST(Expr, TestArrayStringMatch) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::map<std::string, std::vector<ScalarArray>> array_cols;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
         auto new_string_array_col =
-            raw_data.get_col<ScalarArray>(string_array_fid);
+            raw_data.get_col<ScalarFieldProto>(string_array_fid);
         array_cols["string"].insert(array_cols["string"].end(),
                                     new_string_array_col.begin(),
                                     new_string_array_col.end());
@@ -2581,16 +2581,16 @@ TEST(Expr, TestArrayInTerm) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::map<std::string, std::vector<ScalarArray>> array_cols;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
-        auto new_bool_array_col = raw_data.get_col<ScalarArray>(bool_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
         auto new_float_array_col =
-            raw_data.get_col<ScalarArray>(float_array_fid);
+            raw_data.get_col<ScalarFieldProto>(float_array_fid);
         auto new_string_array_col =
-            raw_data.get_col<ScalarArray>(string_array_fid);
+            raw_data.get_col<ScalarFieldProto>(string_array_fid);
         array_cols["long"].insert(array_cols["long"].end(),
                                   new_long_array_col.begin(),
                                   new_long_array_col.end());
@@ -2798,11 +2798,11 @@ TEST(Expr, TestTermInArray) {
 
     auto seg = CreateGrowingSegment(schema, empty_index_meta);
     int N = 1000;
-    std::map<std::string, std::vector<ScalarArray>> array_cols;
+    std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
+        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
         array_cols["long"].insert(array_cols["long"].end(),
                                   new_long_array_col.begin(),
                                   new_long_array_col.end());

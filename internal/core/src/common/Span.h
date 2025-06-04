@@ -23,6 +23,7 @@
 
 #include "Types.h"
 #include "VectorTrait.h"
+#include "TypeTraits.h"
 
 namespace milvus {
 // type erasure to work around virtual restriction

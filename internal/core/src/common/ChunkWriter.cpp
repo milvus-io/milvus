@@ -155,7 +155,7 @@ ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
-            ScalarArray scalar_array;
+            ScalarFieldProto scalar_array;
             scalar_array.ParseFromArray(str.data(), str.size());
             auto arr = Array(scalar_array);
             size += arr.byte_size();
@@ -227,6 +227,78 @@ ArrayChunkWriter::finish() {
     auto [data, size] = target_->get();
     return std::make_unique<ArrayChunk>(
         row_nums_, data, size, element_type_, nullable_);
+}
+
+// 1. Deserialize VectorFieldProto (proto::schema::VectorField) from arrow::ArrayVector
+// where VectorFieldProto is vector array and each element it self is a VectorFieldProto.
+// 2. Transform this vector of VectorFieldProto to vector of our local representation of VectorArray.
+// 3. the contents of these VectorArray are concatenated in some format in target_.
+// See more details for the format in the comments of VectorArrayChunk.
+void
+VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
+    auto size = 0;
+    std::vector<VectorArray> vector_arrays;
+    vector_arrays.reserve(arrow_array_vec.size());
+
+    for (const auto& data : arrow_array_vec) {
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        for (size_t i = 0; i < array->length(); i++) {
+            auto str = array->GetView(i);
+            VectorFieldProto vector_field;
+            vector_field.ParseFromArray(str.data(), str.size());
+            auto arr = VectorArray(vector_field);
+            size += arr.byte_size();
+            vector_arrays.push_back(std::move(arr));
+        }
+        row_nums_ += array->length();
+    }
+
+    // offsets + lens
+    size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
+    if (file_) {
+        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    } else {
+        target_ = std::make_shared<MemChunkTarget>(size);
+    }
+
+    int offsets_num = row_nums_ + 1;
+    int len_num = row_nums_;
+    uint32_t offset_start_pos =
+        target_->tell() + sizeof(uint32_t) * (offsets_num + len_num);
+    std::vector<uint32_t> offsets(offsets_num);
+    std::vector<uint32_t> lens(len_num);
+    for (size_t i = 0; i < vector_arrays.size(); i++) {
+        auto& arr = vector_arrays[i];
+        offsets[i] = offset_start_pos;
+        lens[i] = arr.length();
+        offset_start_pos += arr.byte_size();
+    }
+    if (offsets_num > 0) {
+        offsets[offsets_num - 1] = offset_start_pos;
+    }
+
+    for (int i = 0; i < offsets.size(); i++) {
+        if (i == offsets.size() - 1) {
+            target_->write(&offsets[i], sizeof(uint32_t));
+            break;
+        }
+        target_->write(&offsets[i], sizeof(uint32_t));
+        target_->write(&lens[i], sizeof(uint32_t));
+    }
+
+    for (auto& arr : vector_arrays) {
+        target_->write(arr.data(), arr.byte_size());
+    }
+}
+
+std::unique_ptr<Chunk>
+VectorArrayChunkWriter::finish() {
+    char padding[MMAP_ARRAY_PADDING];
+    target_->write(padding, MMAP_ARRAY_PADDING);
+
+    auto [data, size] = target_->get();
+    return std::make_unique<VectorArrayChunk>(
+        dim_, row_nums_, data, size, element_type_);
 }
 
 void
@@ -382,6 +454,11 @@ create_chunk(const FieldMeta& field_meta,
             w = std::make_shared<SparseFloatVectorChunkWriter>(nullable);
             break;
         }
+        case milvus::DataType::VECTOR_ARRAY: {
+            w = std::make_shared<VectorArrayChunkWriter>(
+                dim, field_meta.get_element_type());
+            break;
+        }
         default:
             PanicInfo(Unsupported, "Unsupported data type");
     }
@@ -484,6 +561,11 @@ create_chunk(const FieldMeta& field_meta,
         case milvus::DataType::VECTOR_SPARSE_FLOAT: {
             w = std::make_shared<SparseFloatVectorChunkWriter>(
                 file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::VECTOR_ARRAY: {
+            w = std::make_shared<VectorArrayChunkWriter>(
+                dim, field_meta.get_element_type(), file, file_offset);
             break;
         }
         default:

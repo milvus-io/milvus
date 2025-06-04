@@ -58,9 +58,9 @@ class Array {
         }
     }
 
-    explicit Array(const ScalarArray& field_data) {
+    explicit Array(const ScalarFieldProto& field_data) {
         switch (field_data.data_case()) {
-            case ScalarArray::kBoolData: {
+            case ScalarFieldProto::kBoolData: {
                 element_type_ = DataType::BOOL;
                 length_ = field_data.bool_data().data().size();
                 auto data = new bool[length_];
@@ -71,7 +71,7 @@ class Array {
                 data_ = reinterpret_cast<char*>(data);
                 break;
             }
-            case ScalarArray::kIntData: {
+            case ScalarFieldProto::kIntData: {
                 element_type_ = DataType::INT32;
                 length_ = field_data.int_data().data().size();
                 size_ = length_ * sizeof(int32_t);
@@ -82,7 +82,7 @@ class Array {
                 }
                 break;
             }
-            case ScalarArray::kLongData: {
+            case ScalarFieldProto::kLongData: {
                 element_type_ = DataType::INT64;
                 length_ = field_data.long_data().data().size();
                 size_ = length_ * sizeof(int64_t);
@@ -93,7 +93,7 @@ class Array {
                 }
                 break;
             }
-            case ScalarArray::kFloatData: {
+            case ScalarFieldProto::kFloatData: {
                 element_type_ = DataType::FLOAT;
                 length_ = field_data.float_data().data().size();
                 size_ = length_ * sizeof(float);
@@ -104,7 +104,7 @@ class Array {
                 }
                 break;
             }
-            case ScalarArray::kDoubleData: {
+            case ScalarFieldProto::kDoubleData: {
                 element_type_ = DataType::DOUBLE;
                 length_ = field_data.double_data().data().size();
                 size_ = length_ * sizeof(double);
@@ -115,7 +115,7 @@ class Array {
                 }
                 break;
             }
-            case ScalarArray::kStringData: {
+            case ScalarFieldProto::kStringData: {
                 element_type_ = DataType::STRING;
                 length_ = field_data.string_data().data().size();
                 offsets_ptr_ = new uint32_t[length_];
@@ -291,9 +291,9 @@ class Array {
         return offsets_ptr_;
     }
 
-    ScalarArray
+    ScalarFieldProto
     output_data() const {
-        ScalarArray data_array;
+        ScalarFieldProto data_array;
         switch (element_type_) {
             case DataType::BOOL: {
                 for (int j = 0; j < length_; ++j) {
@@ -528,9 +528,9 @@ class ArrayView {
         return reinterpret_cast<T*>(data_)[index];
     }
 
-    ScalarArray
+    ScalarFieldProto
     output_data() const {
-        ScalarArray data_array;
+        ScalarFieldProto data_array;
         switch (element_type_) {
             case DataType::BOOL: {
                 for (int j = 0; j < length_; ++j) {
