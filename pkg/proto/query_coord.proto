@@ -90,6 +90,11 @@ service QueryCoord {
         returns (DescribeResourceGroupResponse) {
     }
 
+    rpc ShowLoadCollections(ShowCollectionsRequest)
+        returns (ShowCollectionsResponse) {
+    }
+    rpc ShowLoadPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {
+    }
 
   // ops interfaces
   rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {}
@@ -108,6 +113,7 @@ service QueryCoord {
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
+
 }
 
 service QueryNode {

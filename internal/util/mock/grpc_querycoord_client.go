@@ -54,7 +54,15 @@ func (m *GrpcQueryCoordClient) ShowCollections(ctx context.Context, in *querypb.
 	return &querypb.ShowCollectionsResponse{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) ShowLoadCollections(ctx context.Context, in *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+	return &querypb.ShowCollectionsResponse{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) ShowPartitions(ctx context.Context, in *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
+	return &querypb.ShowPartitionsResponse{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) ShowLoadPartitions(ctx context.Context, in *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
 	return &querypb.ShowPartitionsResponse{}, m.Err
 }
 

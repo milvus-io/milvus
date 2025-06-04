@@ -2059,6 +2059,124 @@ func (_c *MockQueryCoord_ShowConfigurations_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// ShowLoadCollections provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ShowLoadCollections(_a0 context.Context, _a1 *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShowLoadCollections")
+	}
+
+	var r0 *querypb.ShowCollectionsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowCollectionsRequest) *querypb.ShowCollectionsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ShowCollectionsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ShowCollectionsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ShowLoadCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowLoadCollections'
+type MockQueryCoord_ShowLoadCollections_Call struct {
+	*mock.Call
+}
+
+// ShowLoadCollections is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ShowCollectionsRequest
+func (_e *MockQueryCoord_Expecter) ShowLoadCollections(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowLoadCollections_Call {
+	return &MockQueryCoord_ShowLoadCollections_Call{Call: _e.mock.On("ShowLoadCollections", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ShowLoadCollections_Call) Run(run func(_a0 context.Context, _a1 *querypb.ShowCollectionsRequest)) *MockQueryCoord_ShowLoadCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ShowCollectionsRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ShowLoadCollections_Call) Return(_a0 *querypb.ShowCollectionsResponse, _a1 error) *MockQueryCoord_ShowLoadCollections_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ShowLoadCollections_Call) RunAndReturn(run func(context.Context, *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)) *MockQueryCoord_ShowLoadCollections_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ShowLoadPartitions provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ShowLoadPartitions(_a0 context.Context, _a1 *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ShowLoadPartitions")
+	}
+
+	var r0 *querypb.ShowPartitionsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ShowPartitionsRequest) *querypb.ShowPartitionsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ShowPartitionsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ShowPartitionsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ShowLoadPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowLoadPartitions'
+type MockQueryCoord_ShowLoadPartitions_Call struct {
+	*mock.Call
+}
+
+// ShowLoadPartitions is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ShowPartitionsRequest
+func (_e *MockQueryCoord_Expecter) ShowLoadPartitions(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ShowLoadPartitions_Call {
+	return &MockQueryCoord_ShowLoadPartitions_Call{Call: _e.mock.On("ShowLoadPartitions", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ShowLoadPartitions_Call) Run(run func(_a0 context.Context, _a1 *querypb.ShowPartitionsRequest)) *MockQueryCoord_ShowLoadPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ShowPartitionsRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ShowLoadPartitions_Call) Return(_a0 *querypb.ShowPartitionsResponse, _a1 error) *MockQueryCoord_ShowLoadPartitions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ShowLoadPartitions_Call) RunAndReturn(run func(context.Context, *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error)) *MockQueryCoord_ShowLoadPartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowPartitions provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) ShowPartitions(_a0 context.Context, _a1 *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	ret := _m.Called(_a0, _a1)
