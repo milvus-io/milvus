@@ -332,71 +332,59 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 		return err
 	}
 
+	if fieldSchema.GetNullable() {
+		return nil
+	}
+
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		switch sd := field.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
-			if fieldSchema.GetNullable() {
-				sd.BoolData.Data, err = fillWithNullValueImpl(sd.BoolData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.BoolData.Data, err = fillWithNullValueImpl(sd.BoolData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_IntData:
-			if fieldSchema.GetNullable() {
-				sd.IntData.Data, err = fillWithNullValueImpl(sd.IntData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.IntData.Data, err = fillWithNullValueImpl(sd.IntData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_LongData:
-			if fieldSchema.GetNullable() {
-				sd.LongData.Data, err = fillWithNullValueImpl(sd.LongData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.LongData.Data, err = fillWithNullValueImpl(sd.LongData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_FloatData:
-			if fieldSchema.GetNullable() {
-				sd.FloatData.Data, err = fillWithNullValueImpl(sd.FloatData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.FloatData.Data, err = fillWithNullValueImpl(sd.FloatData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_DoubleData:
-			if fieldSchema.GetNullable() {
-				sd.DoubleData.Data, err = fillWithNullValueImpl(sd.DoubleData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.DoubleData.Data, err = fillWithNullValueImpl(sd.DoubleData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_StringData:
-			if fieldSchema.GetNullable() {
-				sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_ArrayData:
-			if fieldSchema.GetNullable() {
-				sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_JsonData:
-			if fieldSchema.GetNullable() {
-				sd.JsonData.Data, err = fillWithNullValueImpl(sd.JsonData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.JsonData.Data, err = fillWithNullValueImpl(sd.JsonData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		default:

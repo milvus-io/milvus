@@ -276,14 +276,24 @@ type SchemaHelper struct {
 	clusteringKeyOffset int
 	dynamicFieldOffset  int
 	loadFields          Set[int64]
+	// include sub fields in StructArrayField
+	allFields []*schemapb.FieldSchema
 }
 
 func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) (*SchemaHelper, error) {
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
+
+	allFields := make([]*schemapb.FieldSchema, 0, len(schema.Fields)+5)
+	allFields = append(allFields, schema.Fields...)
+	for _, structField := range schema.GetStructArrayFields() {
+		allFields = append(allFields, structField.GetFields()...)
+	}
+
 	schemaHelper := SchemaHelper{
 		schema:              schema,
+		allFields:           allFields,
 		nameOffset:          make(map[string]int),
 		idOffset:            make(map[int64]int),
 		primaryKeyOffset:    -1,
@@ -292,7 +302,7 @@ func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFie
 		dynamicFieldOffset:  -1,
 		loadFields:          NewSet(loadFields...),
 	}
-	for offset, field := range schema.Fields {
+	for offset, field := range allFields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
 			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
 		}
@@ -342,7 +352,7 @@ func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) 
 	if helper.primaryKeyOffset == -1 {
 		return nil, errors.New("failed to get primary key field: no primary in schema")
 	}
-	return helper.schema.Fields[helper.primaryKeyOffset], nil
+	return helper.allFields[helper.primaryKeyOffset], nil
 }
 
 // GetPartitionKeyField returns the schema of the partition key
@@ -350,7 +360,7 @@ func (helper *SchemaHelper) GetPartitionKeyField() (*schemapb.FieldSchema, error
 	if helper.partitionKeyOffset == -1 {
 		return nil, errors.New("failed to get partition key field: no partition key in schema")
 	}
-	return helper.schema.Fields[helper.partitionKeyOffset], nil
+	return helper.allFields[helper.partitionKeyOffset], nil
 }
 
 // GetClusteringKeyField returns the schema of the clustering key.
@@ -359,7 +369,7 @@ func (helper *SchemaHelper) GetClusteringKeyField() (*schemapb.FieldSchema, erro
 	if helper.clusteringKeyOffset == -1 {
 		return nil, errors.New("failed to get clustering key field: not clustering key in schema")
 	}
-	return helper.schema.Fields[helper.clusteringKeyOffset], nil
+	return helper.allFields[helper.clusteringKeyOffset], nil
 }
 
 // GetDynamicField returns the field schema of dynamic field if exists.
@@ -368,7 +378,7 @@ func (helper *SchemaHelper) GetDynamicField() (*schemapb.FieldSchema, error) {
 	if helper.dynamicFieldOffset == -1 {
 		return nil, errors.New("failed to get dynamic field: no dynamic field in schema")
 	}
-	return helper.schema.Fields[helper.dynamicFieldOffset], nil
+	return helper.allFields[helper.dynamicFieldOffset], nil
 }
 
 // GetFieldFromName is used to find the schema by field name
@@ -377,7 +387,7 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 	if !ok {
 		return nil, fmt.Errorf("failed to get field schema by name: fieldName(%s) not found", fieldName)
 	}
-	return helper.schema.Fields[offset], nil
+	return helper.allFields[offset], nil
 }
 
 // GetFieldFromNameDefaultJSON is used to find the schema by field name, if not exist, use json field
@@ -386,7 +396,7 @@ func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*sche
 	if !ok {
 		return helper.getDefaultJSONField(fieldName)
 	}
-	fieldSchema := helper.schema.Fields[offset]
+	fieldSchema := helper.allFields[offset]
 	if !helper.IsFieldLoaded(fieldSchema.GetFieldID()) {
 		return nil, errors.Newf("field %s is not loaded", fieldSchema)
 	}
@@ -430,7 +440,7 @@ func (helper *SchemaHelper) GetFieldFromID(fieldID int64) (*schemapb.FieldSchema
 	if !ok {
 		return nil, fmt.Errorf("fieldID(%d) not found", fieldID)
 	}
-	return helper.schema.Fields[offset], nil
+	return helper.allFields[offset], nil
 }
 
 // GetVectorDimFromID returns the dimension of specified field
