@@ -204,7 +204,7 @@ func TestBinlogValueWriter(t *testing.T) {
 
 		schema := generateTestSchema()
 		// Copy write the generated data
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
@@ -269,7 +269,7 @@ func TestSize(t *testing.T) {
 			},
 		}}
 
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
@@ -307,7 +307,7 @@ func TestSize(t *testing.T) {
 			},
 		}}
 
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
@@ -394,7 +394,7 @@ func BenchmarkSerializeWriter(b *testing.B) {
 	for _, s := range sizes {
 		b.Run(fmt.Sprintf("batch size=%d", s), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+				writers := NewBinlogStreamWriters(0, 0, 0, schema)
 				writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, s)
 				assert.NoError(b, err)
 				for _, v := range values {
@@ -411,7 +411,7 @@ func TestNull(t *testing.T) {
 	t.Run("test null", func(t *testing.T) {
 		schema := generateTestSchema()
 		// Copy write the generated data
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 1024)
 		assert.NoError(t, err)
 

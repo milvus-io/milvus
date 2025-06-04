@@ -44,6 +44,7 @@ type PayloadWriterInterface interface {
 	AddBFloat16VectorToPayload([]byte, int) error
 	AddSparseFloatVectorToPayload(*SparseFloatVectorFieldData) error
 	AddInt8VectorToPayload([]int8, int) error
+	AddOneVectorArrayToPayload(*schemapb.VectorField) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
