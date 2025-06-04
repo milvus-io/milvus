@@ -81,8 +81,10 @@ func (st *statsTask) GetNodeID() int64 {
 
 func (st *statsTask) ResetTask(mt *meta) {
 	// reset isCompacting
-	mt.SetSegmentsCompacting(context.TODO(), []UniqueID{st.segmentID}, false)
-	mt.SetSegmentStating(st.segmentID, false)
+	if st.subJobType == indexpb.StatsSubJob_Sort {
+		mt.SetSegmentCompacting(st.segmentID, false)
+		mt.SetSegmentStating(st.segmentID, false)
+	}
 }
 
 func (st *statsTask) SetQueueTime(t time.Time) {
@@ -137,22 +139,24 @@ func (st *statsTask) GetTaskSlot() int64 {
 
 func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta, compactionHandler compactionPlanContext) error {
 	// mark compacting
-	if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
-		log.Warn("segment is not exist or is compacting, skip stats",
-			zap.Bool("exist", exist), zap.Bool("canDo", canDo))
-		st.SetState(indexpb.JobState_JobStateFailed, "segment is not healthy")
-		st.SetStartTime(time.Now())
-		return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
-	}
+	if st.subJobType == indexpb.StatsSubJob_Sort {
+		if exist, canDo := meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.segmentID}); !exist || !canDo {
+			log.Warn("segment is not exist or is compacting, skip stats",
+				zap.Bool("exist", exist), zap.Bool("canDo", canDo))
+			st.SetState(indexpb.JobState_JobStateFailed, "segment is not healthy")
+			st.SetStartTime(time.Now())
+			return fmt.Errorf("mark segment compacting failed, isCompacting: %v", !canDo)
+		}
 
-	if !compactionHandler.checkAndSetSegmentStating(st.req.GetInsertChannel(), st.segmentID) {
-		log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
-			zap.Int64("segmentID", st.segmentID))
-		st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
-		// reset compacting
-		meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
-		st.SetStartTime(time.Now())
-		return errors.New("segment is contains by l0 compaction")
+		if !compactionHandler.checkAndSetSegmentStating(st.req.GetInsertChannel(), st.segmentID) {
+			log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
+				zap.Int64("segmentID", st.segmentID))
+			st.SetState(indexpb.JobState_JobStateFailed, "segment is contains by l0 compaction")
+			// reset compacting
+			meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
+			st.SetStartTime(time.Now())
+			return errors.New("segment is contains by l0 compaction")
+		}
 	}
 
 	if err := meta.statsTaskMeta.UpdateVersion(st.taskID, nodeID); err != nil {
@@ -354,15 +358,17 @@ func (st *statsTask) DropTaskOnWorker(ctx context.Context, client types.IndexNod
 }
 
 func (st *statsTask) SetJobInfo(meta *meta) error {
+	var err error
 	if st.GetState() == indexpb.JobState_JobStateFinished {
 		switch st.subJobType {
 		case indexpb.StatsSubJob_Sort:
 			// first update segment, failed state cannot generate new segment
-			metricMutation, err := meta.SaveStatsResultSegment(st.segmentID, st.taskInfo)
+			var metricMutation *segMetricMutation
+			metricMutation, err = meta.SaveStatsResultSegment(st.segmentID, st.taskInfo)
 			if err != nil {
 				log.Warn("save sort stats result failed", zap.Int64("taskID", st.taskID),
 					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
+				break
 			}
 			metricMutation.commit()
 
@@ -371,22 +377,28 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 			default:
 			}
 		case indexpb.StatsSubJob_TextIndexJob:
-			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetTextIndexLogs(st.taskInfo.GetTextStatsLogs()))
+			err = meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetTextIndexLogs(st.taskInfo.GetTextStatsLogs()))
 			if err != nil {
 				log.Warn("save text index stats result failed", zap.Int64("taskID", st.taskID),
 					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
+				break
 			}
 		case indexpb.StatsSubJob_JsonKeyIndexJob:
-			err := meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetJsonKeyIndexLogs(st.taskInfo.GetJsonKeyStatsLogs()))
+			err = meta.UpdateSegment(st.taskInfo.GetSegmentID(), SetJsonKeyIndexLogs(st.taskInfo.GetJsonKeyStatsLogs()))
 			if err != nil {
 				log.Warn("save json key index stats result failed", zap.Int64("taskId", st.taskID),
 					zap.Int64("segmentID", st.segmentID), zap.Error(err))
-				return err
+				break
 			}
 		case indexpb.StatsSubJob_BM25Job:
 			// TODO: support bm25 job
 		}
+	}
+
+	// if segment is not found, it means the segment is already dropped,
+	// so we can ignore the error and mark task as finished.
+	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
+		return err
 	}
 
 	// second update the task meta
@@ -396,7 +408,7 @@ func (st *statsTask) SetJobInfo(meta *meta) error {
 	}
 
 	// mark segment compacting false
-	meta.SetSegmentCompacting(st.segmentID, false)
+	st.ResetTask(meta)
 
 	log.Info("SetJobInfo for stats task success", zap.Int64("taskID", st.taskID),
 		zap.Int64("oldSegmentID", st.segmentID), zap.Int64("targetSegmentID", st.taskInfo.GetSegmentID()),
