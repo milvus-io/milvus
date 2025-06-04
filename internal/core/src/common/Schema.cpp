@@ -66,7 +66,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     }
 
     for (const milvus::proto::schema::StructArrayFieldSchema& child :
-         schema_proto.struct_fields()) {
+         schema_proto.struct_array_fields()) {
         for (const auto& sub_field : child.fields()) {
             process_field(sub_field);
         }

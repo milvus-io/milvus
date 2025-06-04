@@ -232,11 +232,11 @@ using JSONChunk = StringChunk;
 // create an ArrayChunk for these arrays. The data block might look like this:
 //
 // [null_bitmap][offsets_lens][array_data]
-// [00000000] [24, 3, 36, 2, 44, 4, 60] [1, 2, 3, 4, 5, 6, 7, 8, 9]
+// [00000000] [29, 3, 41, 2, 49, 4, 65] [1, 2, 3, 4, 5, 6, 7, 8, 9]
 //
 // For string arrays, the structure is more complex as each string element needs its own offset:
 // [null_bitmap][offsets_lens][array1_offsets][array1_data][array2_offsets][array2_data][array3_offsets][array3_data]
-// [00000000] [24, 3, 48, 2, 64, 4, 96] [0, 5, 11, 16] ["hello", "world", "!"] [0, 3, 6] ["foo", "bar"] [0, 6, 12, 18, 24] ["apple", "orange", "banana", "grape"]
+// [00000000] [29, 3, 53, 2, 69, 4, 101] [0, 5, 11, 16] ["hello", "world", "!"] [0, 3, 6] ["foo", "bar"] [0, 6, 12, 18, 24] ["apple", "orange", "banana", "grape"]
 //
 // Here, the null_bitmap is empty (indicating no nulls), the offsets_lens array contains pairs of (offset, length)
 // for each array, and the array_data contains the actual array elements.
@@ -342,11 +342,11 @@ class ArrayChunk : public Chunk {
 // [offsets_lens][all_vector_data_concatenated]
 //
 // Example:
-// Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6]], [[7, 8, 9], [10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to
+// Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to
 // create a VectorArrayChunk for these arrays. The data block might look like this:
 //
 // [offsets_lens][all_vector_data_concatenated]
-// [24, 3, 36, 2, 44, 4, 60] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+// [28, 3, 36, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
 class VectorArrayChunk : public Chunk {
  public:
     VectorArrayChunk(int64_t dim,
