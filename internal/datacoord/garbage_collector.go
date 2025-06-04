@@ -959,65 +959,53 @@ func (gc *garbageCollector) recycleUnusedIndexFilesHelper(
 // recycleUnusedTextIndexFiles load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedTextIndexFiles(ctx context.Context) {
-	{
-		{
-			getStats := func(info *SegmentInfo) []segmentFieldStats {
-				textStatsLogs := info.GetTextStatsLogs()
-				stats := make([]segmentFieldStats, len(textStatsLogs))
-				for _, sLog := range textStatsLogs {
-					stats = append(stats, sLog)
-				}
-				return stats
-			}
-			gc.recycleUnusedIndexFilesHelper(ctx,
-				"recycleUnusedTextIndexFiles",
-				common.TextIndexPath,
-				getStats,
-				"deleteIndexFilesNum")
+	getStats := func(info *SegmentInfo) []segmentFieldStats {
+		textStatsLogs := info.GetTextStatsLogs()
+		stats := make([]segmentFieldStats, 0, len(textStatsLogs))
+		for _, sLog := range textStatsLogs {
+			stats = append(stats, sLog)
 		}
+		return stats
 	}
+	gc.recycleUnusedIndexFilesHelper(ctx,
+		"recycleUnusedTextIndexFiles",
+		common.TextIndexPath,
+		getStats,
+		"deleteIndexFilesNum")
 }
 
 // recycleUnusedJSONIndexFiles load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedJSONIndexFiles(ctx context.Context) {
-	{
-		{
-			getStats := func(info *SegmentInfo) []segmentFieldStats {
-				jsonKeyStats := info.GetJsonKeyStats()
-				stats := make([]segmentFieldStats, len(jsonKeyStats))
-				for _, sLog := range jsonKeyStats {
-					stats = append(stats, sLog)
-				}
-				return stats
-			}
-			gc.recycleUnusedIndexFilesHelper(ctx,
-				"recycleUnusedJSONIndexFiles",
-				common.JSONIndexPath,
-				getStats,
-				"deleteJSONKeyIndexNum")
+	getStats := func(info *SegmentInfo) []segmentFieldStats {
+		jsonKeyStats := info.GetJsonKeyStats()
+		stats := make([]segmentFieldStats, 0, len(jsonKeyStats))
+		for _, sLog := range jsonKeyStats {
+			stats = append(stats, sLog)
 		}
+		return stats
 	}
+	gc.recycleUnusedIndexFilesHelper(ctx,
+		"recycleUnusedJSONIndexFiles",
+		common.JSONIndexPath,
+		getStats,
+		"deleteJSONKeyIndexNum")
 }
 
 // recycleUnusedNgramIndexFiles load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) recycleUnusedNgramIndexFiles(ctx context.Context) {
-	{
-		{
-			getStats := func(info *SegmentInfo) []segmentFieldStats {
-				ngramIndexStats := info.GetNgramIndexStats()
-				stats := make([]segmentFieldStats, len(ngramIndexStats))
-				for _, sLog := range ngramIndexStats {
-					stats = append(stats, sLog)
-				}
-				return stats
-			}
-			gc.recycleUnusedIndexFilesHelper(ctx,
-				"recycleUnusedNgramIndexFiles",
-				common.NgramIndexPath,
-				getStats,
-				"deleteNgramIndexNum")
+	getStats := func(info *SegmentInfo) []segmentFieldStats {
+		ngramIndexStats := info.GetNgramIndexStats()
+		stats := make([]segmentFieldStats, 0, len(ngramIndexStats))
+		for _, sLog := range ngramIndexStats {
+			stats = append(stats, sLog)
 		}
+		return stats
 	}
+	gc.recycleUnusedIndexFilesHelper(ctx,
+		"recycleUnusedNgramIndexFiles",
+		common.NgramIndexPath,
+		getStats,
+		"deleteNgramIndexNum")
 }
