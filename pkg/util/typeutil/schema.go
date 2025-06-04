@@ -1223,12 +1223,28 @@ func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSch
 	return nil, errors.New("vector field is not found")
 }
 
+// GetTotalFieldsNum get total fields number
+func GetTotalFieldsNum(schema *schemapb.CollectionSchema) int {
+	num := len(schema.GetFields())
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		num += len(structArrayField.GetFields())
+	}
+	return num
+}
+
 // GetVectorFieldSchemas get vector fields schema from collection schema.
 func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
 	ret := make([]*schemapb.FieldSchema, 0)
 	for _, fieldSchema := range schema.GetFields() {
 		if IsVectorType(fieldSchema.DataType) {
 			ret = append(ret, fieldSchema)
+		}
+	}
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		for _, fieldSchema := range structArrayField.GetFields() {
+			if IsVectorType(fieldSchema.ElementType) {
+				ret = append(ret, fieldSchema)
+			}
 		}
 	}
 

@@ -290,15 +290,40 @@ func TestValidateVectorFieldMetricType(t *testing.T) {
 }
 
 func TestValidateDuplicatedFieldName(t *testing.T) {
-	fields := []*schemapb.FieldSchema{
-		{Name: "abc"},
-		{Name: "def"},
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "abc"},
+			{Name: "def"},
+		},
 	}
-	assert.Nil(t, validateDuplicatedFieldName(fields))
-	fields = append(fields, &schemapb.FieldSchema{
+	assert.Nil(t, validateDuplicatedFieldName(schema))
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 		Name: "abc",
 	})
-	assert.NotNil(t, validateDuplicatedFieldName(fields))
+	assert.NotNil(t, validateDuplicatedFieldName(schema))
+}
+
+func TestValidateDuplicatedFieldNameWithStructArrayField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "abc"},
+			{Name: "def"},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "struct1",
+				Fields: []*schemapb.FieldSchema{
+					{Name: "abc2"},
+					{Name: "def2"},
+				},
+			},
+		},
+	}
+	assert.Nil(t, validateDuplicatedFieldName(schema))
+	schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, &schemapb.FieldSchema{
+		Name: "abc",
+	})
+	assert.NotNil(t, validateDuplicatedFieldName(schema))
 }
 
 func TestValidatePrimaryKey(t *testing.T) {
@@ -515,183 +540,6 @@ func TestValidateFieldType(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestValidateSchema(t *testing.T) {
-	coll := &schemapb.CollectionSchema{
-		Name:        "coll1",
-		Description: "",
-		AutoID:      false,
-		Fields:      nil,
-	}
-	assert.NotNil(t, validateSchema(coll))
-
-	pf1 := &schemapb.FieldSchema{
-		Name:         "f1",
-		FieldID:      100,
-		IsPrimaryKey: false,
-		Description:  "",
-		DataType:     schemapb.DataType_Int64,
-		TypeParams:   nil,
-		IndexParams:  nil,
-	}
-	coll.Fields = append(coll.Fields, pf1)
-	assert.NotNil(t, validateSchema(coll))
-
-	pf1.IsPrimaryKey = true
-	assert.Nil(t, validateSchema(coll))
-
-	pf1.DataType = schemapb.DataType_Int32
-	assert.NotNil(t, validateSchema(coll))
-
-	pf1.DataType = schemapb.DataType_Int64
-	assert.Nil(t, validateSchema(coll))
-
-	pf2 := &schemapb.FieldSchema{
-		Name:         "f2",
-		FieldID:      101,
-		IsPrimaryKey: true,
-		Description:  "",
-		DataType:     schemapb.DataType_Int64,
-		TypeParams:   nil,
-		IndexParams:  nil,
-	}
-	coll.Fields = append(coll.Fields, pf2)
-	assert.NotNil(t, validateSchema(coll))
-
-	pf2.IsPrimaryKey = false
-	assert.Nil(t, validateSchema(coll))
-
-	pf2.Name = "f1"
-	assert.NotNil(t, validateSchema(coll))
-	pf2.Name = "f2"
-	assert.Nil(t, validateSchema(coll))
-
-	pf2.FieldID = 100
-	assert.NotNil(t, validateSchema(coll))
-
-	pf2.FieldID = 101
-	assert.Nil(t, validateSchema(coll))
-
-	pf2.DataType = -1
-	assert.NotNil(t, validateSchema(coll))
-
-	pf2.DataType = schemapb.DataType_FloatVector
-	assert.NotNil(t, validateSchema(coll))
-
-	pf2.DataType = schemapb.DataType_Int64
-	assert.Nil(t, validateSchema(coll))
-
-	tp3Good := []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "128",
-		},
-	}
-
-	tp3Bad1 := []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "asdfa",
-		},
-	}
-
-	tp3Bad2 := []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "-1",
-		},
-	}
-
-	tp3Bad3 := []*commonpb.KeyValuePair{
-		{
-			Key:   "dimX",
-			Value: "128",
-		},
-	}
-
-	tp3Bad4 := []*commonpb.KeyValuePair{
-		{
-			Key:   common.DimKey,
-			Value: "128",
-		},
-		{
-			Key:   common.DimKey,
-			Value: "64",
-		},
-	}
-
-	ip3Good := []*commonpb.KeyValuePair{
-		{
-			Key:   common.MetricTypeKey,
-			Value: "IP",
-		},
-	}
-
-	ip3Bad1 := []*commonpb.KeyValuePair{
-		{
-			Key:   common.MetricTypeKey,
-			Value: "JACCARD",
-		},
-	}
-
-	ip3Bad2 := []*commonpb.KeyValuePair{
-		{
-			Key:   common.MetricTypeKey,
-			Value: "xxxxxx",
-		},
-	}
-
-	ip3Bad3 := []*commonpb.KeyValuePair{
-		{
-			Key:   common.MetricTypeKey,
-			Value: "L2",
-		},
-		{
-			Key:   common.MetricTypeKey,
-			Value: "IP",
-		},
-	}
-
-	pf3 := &schemapb.FieldSchema{
-		Name:         "f3",
-		FieldID:      102,
-		IsPrimaryKey: false,
-		Description:  "",
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams:   tp3Good,
-		IndexParams:  ip3Good,
-	}
-
-	coll.Fields = append(coll.Fields, pf3)
-	assert.Nil(t, validateSchema(coll))
-
-	pf3.TypeParams = tp3Bad1
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.TypeParams = tp3Bad2
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.TypeParams = tp3Bad3
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.TypeParams = tp3Bad4
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.TypeParams = tp3Good
-	assert.Nil(t, validateSchema(coll))
-
-	pf3.IndexParams = ip3Bad1
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.IndexParams = ip3Bad2
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.IndexParams = ip3Bad3
-	assert.NotNil(t, validateSchema(coll))
-
-	pf3.IndexParams = ip3Good
-	assert.Nil(t, validateSchema(coll))
 }
 
 func TestValidateMultipleVectorFields(t *testing.T) {

@@ -384,6 +384,14 @@ func CheckTimeTickLagExceeded(ctx context.Context, mixcoord types.MixCoord, maxD
 
 func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, fieldSchema := range fieldSchemas {
+		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfStruct {
+			msg := fmt.Sprintf("Invalid field type, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
+		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfVector {
+			msg := fmt.Sprintf("array of vector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg(msg)
+		}
 		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {
 			msg := fmt.Sprintf("vector type not support null, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
@@ -466,6 +474,32 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 	return nil
 }
 
+func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) error {
+	for _, schema := range schemas {
+		// todo(SpadeA): check struct array field schema
+
+		for _, field := range schema.GetFields() {
+			if field.GetNullable() && typeutil.IsVectorType(field.ElementType) {
+				msg := fmt.Sprintf("vector type not support null, data type:%s, element type:%s, name:%s",
+					field.DataType.String(), field.ElementType.String(), field.Name)
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+			if field.GetDefaultValue() != nil {
+				msg := fmt.Sprintf("fields in struct array field not support default_value, data type:%s, element type:%s, name:%s",
+					field.DataType.String(), field.ElementType.String(), field.Name)
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
+			if err := checkDupKvPairs(field.GetTypeParams(), "type"); err != nil {
+				return err
+			}
+			if err := checkDupKvPairs(field.GetIndexParams(), "index"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
 	set := typeutil.NewSet[string]()
 	for _, kv := range params {
@@ -480,7 +514,28 @@ func checkDupKvPairs(params []*commonpb.KeyValuePair, paramType string) error {
 func validateFieldDataType(fieldSchemas []*schemapb.FieldSchema) error {
 	for _, field := range fieldSchemas {
 		if _, ok := schemapb.DataType_name[int32(field.GetDataType())]; !ok || field.GetDataType() == schemapb.DataType_None {
-			return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", field.GetDataType()))
+			return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", field.GetDataType()))
+		}
+	}
+	return nil
+}
+
+func validateStructArrayFieldDataType(fieldSchemas []*schemapb.StructArrayFieldSchema) error {
+	for _, field := range fieldSchemas {
+		if len(field.Fields) == 0 {
+			return merr.WrapErrParameterInvalid("Invalid field", "empty fields in StructArrayField")
+		}
+		for _, subField := range field.GetFields() {
+			if subField.GetDataType() != schemapb.DataType_Array && subField.GetDataType() != schemapb.DataType_ArrayOfVector {
+				return fmt.Errorf("Fields in StructArrayField can only be array or array of vector, but field %s is %s", subField.Name, subField.DataType.String())
+			}
+			if subField.GetElementType() == schemapb.DataType_ArrayOfStruct || subField.GetElementType() == schemapb.DataType_ArrayOfVector ||
+				subField.GetElementType() == schemapb.DataType_Array {
+				return fmt.Errorf("Nested array is not supported %s", subField.Name)
+			}
+			if _, ok := schemapb.DataType_name[int32(subField.GetElementType())]; !ok || subField.GetElementType() == schemapb.DataType_None {
+				return merr.WrapErrParameterInvalid("Invalid field", fmt.Sprintf("field data type: %s is not supported", subField.GetElementType()))
+			}
 		}
 	}
 	return nil
