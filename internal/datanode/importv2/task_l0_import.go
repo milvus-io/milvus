@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -61,8 +60,8 @@ func NewL0ImportTask(req *datapb.ImportRequest,
 	cm storage.ChunkManager,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
-	// Setting end as math.MaxInt64 to incrementally allocate logID.
-	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), math.MaxInt64)
+	// Allocator for autoIDs and logIDs.
+	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &L0ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),
