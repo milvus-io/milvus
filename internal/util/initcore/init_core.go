@@ -191,69 +191,6 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitRemoteArrowFileSystemSingleton failed")
 }
 
-func InitArrowFileSystemWithStorageConfig(config *indexpb.StorageConfig) error {
-	if config.GetStorageType() == "remote" {
-		cAddress := C.CString(config.GetAddress())
-		cBucketName := C.CString(config.GetBucketName())
-		cAccessKey := C.CString(config.GetAccessKeyID())
-		cAccessValue := C.CString(config.GetSecretAccessKey())
-		cRootPath := C.CString(config.GetRootPath())
-		cStorageType := C.CString(config.GetStorageType())
-		cIamEndPoint := C.CString(config.GetIAMEndpoint())
-		cCloudProvider := C.CString(config.GetCloudProvider())
-		cLogLevel := C.CString("warn")
-		cRegion := C.CString(config.GetRegion())
-		cSslCACert := C.CString(config.GetSslCACert())
-		cGcpCredentialJSON := C.CString(config.GetGcpCredentialJSON())
-		defer C.free(unsafe.Pointer(cAddress))
-		defer C.free(unsafe.Pointer(cBucketName))
-		defer C.free(unsafe.Pointer(cAccessKey))
-		defer C.free(unsafe.Pointer(cAccessValue))
-		defer C.free(unsafe.Pointer(cRootPath))
-		defer C.free(unsafe.Pointer(cStorageType))
-		defer C.free(unsafe.Pointer(cIamEndPoint))
-		defer C.free(unsafe.Pointer(cLogLevel))
-		defer C.free(unsafe.Pointer(cRegion))
-		defer C.free(unsafe.Pointer(cCloudProvider))
-		defer C.free(unsafe.Pointer(cSslCACert))
-		defer C.free(unsafe.Pointer(cGcpCredentialJSON))
-		storageConfig := C.CStorageConfig{
-			address:                cAddress,
-			bucket_name:            cBucketName,
-			access_key_id:          cAccessKey,
-			access_key_value:       cAccessValue,
-			root_path:              cRootPath,
-			storage_type:           cStorageType,
-			iam_endpoint:           cIamEndPoint,
-			cloud_provider:         cCloudProvider,
-			log_level:              cLogLevel,
-			useSSL:                 C.bool(config.GetUseSSL()),
-			sslCACert:              cSslCACert,
-			useIAM:                 C.bool(config.GetUseIAM()),
-			region:                 cRegion,
-			useVirtualHost:         C.bool(config.GetUseVirtualHost()),
-			gcp_credential_json:    cGcpCredentialJSON,
-			use_custom_part_upload: true,
-		}
-		if config.GetRequestTimeoutMs() > 0 {
-			storageConfig.requestTimeoutMs = C.int64_t(config.GetRequestTimeoutMs())
-		}
-
-		status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
-		return HandleCStatus(&status, "InitRemoteArrowFileSystemSingleton failed")
-	} else {
-		fmt.Println("!!! local storageConfig", config)
-		cRootPath := C.CString(config.GetRootPath())
-		defer C.free(unsafe.Pointer(cRootPath))
-		status := C.InitLocalArrowFileSystemSingleton(cRootPath)
-		return HandleCStatus(&status, "InitLocalArrowFileSystemSingleton failed")
-	}
-}
-
-func CleanArrowFileSystem() {
-	C.CleanArrowFileSystemSingleton()
-}
-
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())

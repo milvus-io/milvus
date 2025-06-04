@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -166,14 +165,6 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
 		zap.Any("storageConfig", st.req.StorageConfig),
 	)
-
-	if st.req.GetStorageVersion() == storage.StorageV2 {
-		err := initcore.InitArrowFileSystemWithStorageConfig(st.req.StorageConfig)
-		if err != nil {
-			log.Ctx(ctx).Warn("InitRemoteArrowFileSystemWithStorageConfig failed", zap.Error(err))
-			return err
-		}
-	}
 	return nil
 }
 
@@ -199,6 +190,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return st.binlogIO.Upload(ctx, kvs)
 		}),
 		storage.WithVersion(st.req.GetStorageVersion()),
+		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
@@ -244,6 +236,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		storage.WithVersion(st.req.StorageVersion),
 		storage.WithDownloader(st.binlogIO.Download),
 		storage.WithBucketName(st.req.StorageConfig.BucketName),
+		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
@@ -356,9 +349,6 @@ func (st *statsTask) Execute(ctx context.Context) error {
 }
 
 func (st *statsTask) PostExecute(ctx context.Context) error {
-	if st.req.GetStorageVersion() == storage.StorageV2 {
-		initcore.CleanArrowFileSystem()
-	}
 	return nil
 }
 
