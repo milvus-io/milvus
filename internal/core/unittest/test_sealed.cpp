@@ -790,7 +790,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto indexing = GenVecIndexing(
         N, dim, fakevec.data(), knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
 
-    auto segment = CreateSealedSegment(schema, empty_index_meta, 1);
+    auto segment = CreateSealedSegment(schema);
     const char* raw_plan = R"(vector_anns: <
                                     field_id: 100
                                     predicates: <
@@ -1525,7 +1525,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
 
     auto dataset = DataGen(schema, N);
     auto fakevec = dataset.get_col<float>(fakevec_id);
-    auto segment = CreateSealedSegment(schema, empty_index_meta, 1);
+    auto segment = CreateSealedSegment(schema);
 
     const char* raw_plan = R"(vector_anns:<
             field_id:100
