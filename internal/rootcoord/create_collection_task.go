@@ -227,12 +227,6 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 		}
 	}
 
-	for _, structArrayField := range schema.GetStructArrayFields() {
-		if len(structArrayField.GetFunctions()) > 0 {
-			panic("dynamic field is not implemented yet")
-		}
-	}
-
 	return nil
 }
 
@@ -274,12 +268,6 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 	t.appendDynamicField(ctx, &schema)
-
-	for _, structArrayField := range schema.GetStructArrayFields() {
-		if structArrayField.EnableDynamicField {
-			panic("dynamic field is not implemented yet")
-		}
-	}
 
 	if err := t.assignFieldAndFunctionID(&schema); err != nil {
 		return err

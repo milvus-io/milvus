@@ -860,17 +860,12 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 
 	for i, structArrayField := range result.Schema.StructArrayFields {
 		t.result.Schema.StructArrayFields = append(t.result.Schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
-			FieldID:            structArrayField.FieldID,
-			Name:               structArrayField.Name,
-			Fields:             make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
-			Functions:          make([]*schemapb.FunctionSchema, 0, len(structArrayField.Functions)),
-			EnableDynamicField: structArrayField.EnableDynamicField,
+			FieldID: structArrayField.FieldID,
+			Name:    structArrayField.Name,
+			Fields:  make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
 		})
 		for _, field := range structArrayField.Fields {
 			t.result.Schema.StructArrayFields[i].Fields = append(t.result.Schema.StructArrayFields[i].Fields, copyFieldSchema(field))
-		}
-		for _, function := range structArrayField.Functions {
-			t.result.Schema.StructArrayFields[i].Functions = append(t.result.Schema.StructArrayFields[i].Functions, proto.Clone(function).(*schemapb.FunctionSchema))
 		}
 	}
 
