@@ -10,6 +10,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -45,15 +46,17 @@ func TestRecoveryStorage(t *testing.T) {
 
 	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
 	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.SegmentAssignmentMeta, error) {
-		return lo.Values(segmentMetas), nil
+		return lo.MapToSlice(segmentMetas, func(_ int64, v *streamingpb.SegmentAssignmentMeta) *streamingpb.SegmentAssignmentMeta {
+			return proto.Clone(v).(*streamingpb.SegmentAssignmentMeta)
+		}), nil
 	})
 	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, channel string) ([]*streamingpb.VChannelMeta, error) {
-		return lo.Values(vchannelMetas), nil
+		return lo.MapToSlice(vchannelMetas, func(_ string, v *streamingpb.VChannelMeta) *streamingpb.VChannelMeta {
+			return proto.Clone(v).(*streamingpb.VChannelMeta)
+		}), nil
 	})
-	segmentSaveFailure := true
 	snCatalog.EXPECT().SaveSegmentAssignments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[int64]*streamingpb.SegmentAssignmentMeta) error {
-		if segmentSaveFailure {
-			segmentSaveFailure = false
+		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
 		for _, v := range m {
@@ -65,10 +68,8 @@ func TestRecoveryStorage(t *testing.T) {
 		}
 		return nil
 	})
-	vchannelSaveFailure := true
 	snCatalog.EXPECT().SaveVChannels(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string, m map[string]*streamingpb.VChannelMeta) error {
-		if vchannelSaveFailure {
-			vchannelSaveFailure = false
+		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
 		for _, v := range m {
@@ -81,10 +82,8 @@ func TestRecoveryStorage(t *testing.T) {
 		return nil
 	})
 	snCatalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(cp, nil)
-	checkpointSaveFailure := true
 	snCatalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannelName string, checkpoint *streamingpb.WALCheckpoint) error {
-		if checkpointSaveFailure {
-			checkpointSaveFailure = false
+		if rand.Int31n(3) == 0 {
 			return errors.New("save failed")
 		}
 		cp = checkpoint
@@ -131,7 +130,7 @@ func TestRecoveryStorage(t *testing.T) {
 
 		msgs := b.generateStreamMessage()
 		for _, msg := range msgs {
-			rs.ObserveMessage(msg)
+			rs.ObserveMessage(context.Background(), msg)
 		}
 		rs.Close()
 		var partitionNum int
@@ -151,10 +150,21 @@ func TestRecoveryStorage(t *testing.T) {
 		assert.Equal(t, partitionNum, b.partitionNum())
 		assert.Equal(t, collectionNum, b.collectionNum())
 		assert.Equal(t, segmentNum, b.segmentNum())
+		if b.segmentNum() != segmentNum {
+			t.Logf("segmentNum: %d, b.segmentNum: %d", segmentNum, b.segmentNum())
+		}
 
 		if rs.gracefulClosed {
 			// only available when graceful closing
 			assert.Equal(t, b.collectionNum(), len(vchannelMetas))
+			if b.collectionNum() != len(vchannelMetas) {
+				for _, v := range vchannelMetas {
+					t.Logf("vchannel: %s, state: %s", v.Vchannel, v.State)
+				}
+				for id := range b.collectionIDs {
+					t.Logf("collectionID: %d, %s", id, b.vchannels[id])
+				}
+			}
 			partitionNum := 0
 			for _, v := range vchannelMetas {
 				partitionNum += len(v.CollectionInfo.Partitions)
@@ -245,25 +255,28 @@ func (b *streamBuilder) Build(param BuildRecoveryStreamParam) RecoveryStream {
 }
 
 func (b *streamBuilder) generateStreamMessage() []message.ImmutableMessage {
-	ops := []func() message.ImmutableMessage{
-		b.createCollection,
-		b.createPartition,
-		b.createSegment,
-		b.createSegment,
-		b.dropCollection,
-		b.dropPartition,
-		b.flushSegment,
-		b.flushSegment,
-		b.createInsert,
-		b.createInsert,
-		b.createInsert,
-		b.createDelete,
-		b.createDelete,
-		b.createDelete,
-		b.createTxn,
-		b.createTxn,
-		b.createManualFlush,
-		b.createSchemaChange,
+	type opRate struct {
+		op   func() message.ImmutableMessage
+		rate int
+	}
+	opRates := []opRate{
+		{op: b.createCollection, rate: 1},
+		{op: b.createPartition, rate: 1},
+		{op: b.dropCollection, rate: 1},
+		{op: b.dropPartition, rate: 1},
+		{op: b.createSegment, rate: 2},
+		{op: b.flushSegment, rate: 2},
+		{op: b.createInsert, rate: 5},
+		{op: b.createDelete, rate: 5},
+		{op: b.createTxn, rate: 5},
+		{op: b.createManualFlush, rate: 2},
+		{op: b.createSchemaChange, rate: 1},
+	}
+	ops := make([]func() message.ImmutableMessage, 0)
+	for _, opRate := range opRates {
+		for i := 0; i < opRate.rate; i++ {
+			ops = append(ops, opRate.op)
+		}
 	}
 	msgs := make([]message.ImmutableMessage, 0)
 	for i := 0; i < int(rand.Int63n(1000)+1000); i++ {

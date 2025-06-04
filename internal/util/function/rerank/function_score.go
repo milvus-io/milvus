@@ -32,6 +32,7 @@ import (
 
 const (
 	decayFunctionName string = "decay"
+	modelFunctionName string = "model"
 )
 
 type SearchParams struct {
@@ -92,8 +93,10 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	switch rerankerName {
 	case decayFunctionName:
 		rerankFunc, newRerankErr = newDecayFunction(collSchema, funcSchema)
+	case modelFunctionName:
+		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema)
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s]", rerankerName, decayFunctionName)
+		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s]", rerankerName, decayFunctionName, modelFunctionName)
 	}
 
 	if newRerankErr != nil {

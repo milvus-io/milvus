@@ -144,7 +144,7 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() && !segment.GetIsImporting() {
+	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}
@@ -200,8 +200,9 @@ func (i *indexInspector) reloadFromMeta() {
 	segments := i.meta.GetAllSegmentsUnsafe()
 	for _, segment := range segments {
 		for _, segIndex := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
-			if segIndex.IsDeleted || segIndex.IndexState == commonpb.IndexState_Finished ||
-				segIndex.IndexState == commonpb.IndexState_Failed {
+			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
+				segIndex.IndexState != commonpb.IndexState_Retry &&
+				segIndex.IndexState != commonpb.IndexState_InProgress) {
 				continue
 			}
 

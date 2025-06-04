@@ -55,7 +55,7 @@ func TestWALFlusher(t *testing.T) {
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixcoord.Set(mixcoord)
 	rs := mock_recovery.NewMockRecoveryStorage(t)
-	rs.EXPECT().ObserveMessage(mock.Anything).Return()
+	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
 	rs.EXPECT().Close().Return()
 	resource.InitForTest(
 		t,

@@ -706,7 +706,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 			}
 
 			// Remove meta from index meta.
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
 				log.Warn("delete index meta from etcd failed, wait to retry", zap.Error(err))
 				continue
 			}

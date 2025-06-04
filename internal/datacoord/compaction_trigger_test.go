@@ -2077,6 +2077,56 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	assert.False(t, couldDo)
 }
 
+func Test_compactionTrigger_ShouldStrictCompactExpiry(t *testing.T) {
+	trigger := &compactionTrigger{}
+
+	now := time.Now()
+	expireTS := tsoutil.ComposeTSByTime(now, 0)
+	compact := &compactTime{
+		expireTime: expireTS,
+	}
+
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            10,
+			CollectionID:  20,
+			PartitionID:   30,
+			InsertChannel: "test-channel",
+		},
+	}
+
+	t.Run("no tolerance, fromTs before expire time => should compact", func(t *testing.T) {
+		Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "0")
+		defer Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "-1") // reset
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour), 0)
+		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
+		assert.True(t, shouldCompact)
+	})
+
+	t.Run("negative tolerance, disable force expiry compaction => should not compact", func(t *testing.T) {
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour), 0)
+		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
+		assert.False(t, shouldCompact)
+	})
+
+	t.Run("with tolerance, fromTs within tolerance => should NOT compact", func(t *testing.T) {
+		Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "2")
+		defer Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "-1") // reset
+
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-time.Hour), 0) // within 2h tolerance
+		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
+		assert.False(t, shouldCompact)
+	})
+
+	t.Run("with tolerance, fromTs before expireTime - tolerance => should compact", func(t *testing.T) {
+		Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "2")
+		defer Params.Save(Params.DataCoordCfg.CompactionExpiryTolerance.Key, "-1") // reset
+		fromTs := tsoutil.ComposeTSByTime(now.Add(-3*time.Hour), 0)                // earlier than expireTime - 30m
+		shouldCompact := trigger.ShouldCompactExpiry(fromTs, compact, segment)
+		assert.True(t, shouldCompact)
+	})
+}
+
 func Test_compactionTrigger_new(t *testing.T) {
 	type args struct {
 		meta      *meta

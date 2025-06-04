@@ -50,6 +50,21 @@ UpdateSchema(CCollection collection,
 }
 
 CStatus
+UpdateLoadFields(CCollection collection,
+                 const int64_t* field_ids,
+                 const int64_t length) {
+    try {
+        auto col = static_cast<milvus::segcore::Collection*>(collection);
+
+        col->get_schema()->UpdateLoadFields(
+            std::vector<int64_t>(field_ids, field_ids + length));
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 SetIndexMeta(CCollection collection,
              const void* proto_blob,
              const int64_t length) {

@@ -24,7 +24,7 @@ package querynodev2
 #include "segcore/segcore_init_c.h"
 #include "common/init_c.h"
 #include "exec/expression/function/init_c.h"
-
+#include "storage/storage_c.h"
 */
 import "C"
 
@@ -189,6 +189,20 @@ func (node *QueryNode) Register() error {
 	return nil
 }
 
+func ResizeHighPriorityPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(0), C.float(newRatio))
+	}
+}
+
+func (node *QueryNode) RegisterSegcoreConfigWatcher() {
+	pt := paramtable.Get()
+	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
+}
+
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
@@ -201,15 +215,6 @@ func (node *QueryNode) InitSegcore() error {
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
-
-	enableGrowingIndex := C.bool(paramtable.Get().QueryNodeCfg.EnableTempSegmentIndex.GetAsBool())
-	C.SegcoreSetEnableTempSegmentIndex(enableGrowingIndex)
-
-	nlist := C.int64_t(paramtable.Get().QueryNodeCfg.InterimIndexNlist.GetAsInt64())
-	C.SegcoreSetNlist(nlist)
-
-	nprobe := C.int64_t(paramtable.Get().QueryNodeCfg.InterimIndexNProbe.GetAsInt64())
-	C.SegcoreSetNprobe(nprobe)
 
 	// override segcore SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
@@ -226,12 +231,13 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitIndexSliceSize(cIndexSliceSize)
 
 	// set up thread pool for different priorities
-	cHighPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt64())
+	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
-	cMiddlePriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt64())
+	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
-	cLowPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt64())
+	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	node.RegisterSegcoreConfigWatcher()
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
@@ -346,6 +352,11 @@ func (node *QueryNode) InitSegcore() error {
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
 		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs)
+
+	err = initcore.InitInterminIndexConfig(paramtable.Get())
+	if err != nil {
+		return err
+	}
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()

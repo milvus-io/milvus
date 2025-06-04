@@ -168,6 +168,8 @@ service QueryNode {
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
+
+    rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -281,6 +283,7 @@ message GetSegmentInfoResponse {
 message GetShardLeadersRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
+    bool with_unserviceable_shards = 3;
 }
 
 message GetShardLeadersResponse {
@@ -297,6 +300,7 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
     string channel_name = 1;
     repeated int64 node_ids = 2;
     repeated string node_addrs = 3;
+    repeated bool serviceable = 4;
 }
 
 message SyncNewCreatedPartitionRequest {
@@ -334,6 +338,8 @@ message WatchDmChannelsRequest {
     int64 offlineNodeID = 11;
     int64 version = 12;
     repeated index.IndexInfo index_info_list = 13;
+    int64 target_version = 14;
+    map<int64, int64> sealed_segment_row_count = 15; // segmentID -> row count, same as unflushedSegmentIds in vchannelInfo
 }
 
 message UnsubDmChannelRequest {
@@ -626,7 +632,7 @@ message LeaderView {
 }
 
 message LeaderViewStatus {
-    bool serviceable = 10;
+    bool serviceable = 1;
 }
 
 message SegmentDist {
@@ -726,6 +732,7 @@ message SyncAction {
     msg.MsgPosition checkpoint = 11;
     map<int64, int64> partition_stats_versions = 12;
     msg.MsgPosition deleteCP = 13;
+    map<int64, int64> sealed_segment_row_count = 14; // segmentID -> row count, same as sealedInTarget
 }
 
 message SyncDistributionRequest {
@@ -957,4 +964,15 @@ message UpdateSchemaRequest {
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
     uint64 version = 4;
+}
+
+message RunAnalyzerRequest{
+    common.MsgBase base = 1;
+    string channel = 2;
+    int64 field_id = 3;
+    repeated string analyzer_names = 4;
+    repeated bytes placeholder =5;
+
+    bool with_detail = 6;
+    bool with_hash = 7;
 }

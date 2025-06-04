@@ -21,6 +21,7 @@
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "fmt/format.h"
+#include "index/Utils.h"
 #include "log/Log.h"
 
 #include "common/Consts.h"
@@ -1046,10 +1047,23 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     AssertInfo(remote_files.size() > 0, "remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
-    for (int i = 0; i < remote_files.size(); i++) {
-        auto& remote_chunk_files = remote_files[i];
+    // remote files might not followed the sequence of column group id,
+    // so we need to put into map<column_group_id, remote_chunk_files>
+    std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
+    for (auto& remote_chunk_files : remote_files) {
         AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
 
+        // find second last of / to get group_id
+        std::string path = remote_chunk_files[0];
+        size_t last_slash = path.find_last_of("/");
+        size_t second_last_slash = path.find_last_of("/", last_slash - 1);
+        int64_t group_id = std::stol(path.substr(
+            second_last_slash + 1, last_slash - second_last_slash - 1));
+
+        column_group_files[group_id] = remote_chunk_files;
+    }
+
+    for (auto& [column_group_id, remote_chunk_files] : column_group_files) {
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         // read first file to get path and column offset of the field id
@@ -1068,9 +1082,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         AssertInfo(column_offset.path_index < remote_files.size(),
                    "column offset path index {} is out of range",
                    column_offset.path_index);
-        if (column_offset.path_index != i) {
+        if (column_offset.path_index != column_group_id) {
             LOG_INFO("Skip group id {} since target field shall be in group {}",
-                     i,
+                     column_group_id,
                      column_offset.path_index);
             continue;
         }
@@ -1134,6 +1148,46 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         }
     }
     return field_data_list;
+}
+
+std::vector<FieldDataPtr>
+CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
+                           const Config& config) {
+    // download field data
+    auto field_datas = file_manager->CacheRawDataToMemory(config);
+
+    // check storage version
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+
+    int64_t lack_binlog_rows =
+        index::GetValueFromConfig<int64_t>(config, INDEX_NUM_ROWS_KEY)
+            .value_or(0);
+    for (auto& field_data : field_datas) {
+        lack_binlog_rows -= field_data->get_num_rows();
+    }
+
+    if (lack_binlog_rows > 0) {
+        LOG_INFO("create index lack binlog detected, lock row num: {}",
+                 lack_binlog_rows);
+        auto field_schema = file_manager->GetFieldDataMeta().field_schema;
+        auto default_value = [&]() -> std::optional<DefaultValueType> {
+            if (!field_schema.has_default_value()) {
+                return std::nullopt;
+            }
+            return field_schema.default_value();
+        }();
+        auto field_data = storage::CreateFieldData(
+            static_cast<DataType>(field_schema.data_type()),
+            true,
+            1,
+            lack_binlog_rows);
+        field_data->FillFieldData(default_value, lack_binlog_rows);
+        field_datas.insert(field_datas.begin(), field_data);
+    }
+
+    return field_datas;
 }
 
 }  // namespace milvus::storage

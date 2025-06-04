@@ -238,6 +238,7 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 		if err != nil {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.FailLabel, metrics.Leader, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 		}
+		metrics.QueryNodePartialResultCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, fmt.Sprint(req.GetReq().GetCollectionID())).Inc()
 	}()
 
 	log.Debug("start do query with channel",

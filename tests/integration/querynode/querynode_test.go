@@ -111,10 +111,10 @@ func (s *QueryNodeSuite) loadCollection(collectionName string, dim int) {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
 	log.Info("=========================Data flush finished=========================")
 
 	// create index
@@ -303,5 +303,7 @@ func (s *QueryNodeSuite) TestSwapQN() {
 }
 
 func TestQueryNodeUtil(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(QueryNodeSuite))
 }

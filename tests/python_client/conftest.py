@@ -51,8 +51,8 @@ def pytest_addoption(parser):
     parser.addoption('--uri', action='store', default="", help="uri for milvus client")
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
-    # a tei endpoint for text embedding, default is http://10.104.26.196:80 which is deployed in house
-    parser.addoption("--tei_endpoint", action="store", default="http://10.104.26.196:80", help="tei endpoint")
+    # a tei endpoint for text embedding, default is http://10.255.189.92:80 which is deployed in house
+    parser.addoption("--tei_endpoint", action="store", default="http://10.255.189.92:80", help="tei endpoint")
 
 
 @pytest.fixture

@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
@@ -168,7 +168,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	// Check if segment is part of L0 compaction
 	if !st.compactionInspector.checkAndSetSegmentStating(st.GetInsertChannel(), st.GetSegmentID()) {
 		log.Warn("segment is contained by L0 compaction, skipping stats task")
-		// Reset compaction flag
+		// Reset isCompacting flag
 		st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
 		return
 	}
@@ -176,7 +176,7 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	var err error
 	defer func() {
 		if err != nil {
-			// reset compaction flag and stating flag
+			// reset isCompacting flag and stating flag
 			st.resetTask(ctx, err.Error())
 		}
 	}()
@@ -423,6 +423,8 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		// bm25 logs are generated during with segment flush.
 	}
 
+	// Reset isCompacting flag after stats task is finished
+	st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))

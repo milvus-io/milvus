@@ -149,11 +149,11 @@ func (r *LoadResource) IsZero() bool {
 }
 
 type resourceEstimateFactor struct {
-	memoryUsageFactor        float64
-	memoryIndexUsageFactor   float64
-	enableTempSegmentIndex   bool
-	tempSegmentIndexFactor   float64
-	deltaDataExpansionFactor float64
+	memoryUsageFactor          float64
+	memoryIndexUsageFactor     float64
+	EnableInterminSegmentIndex bool
+	tempSegmentIndexFactor     float64
+	deltaDataExpansionFactor   float64
 }
 
 func NewLoader(
@@ -234,7 +234,7 @@ type segmentLoader struct {
 var _ Loader = (*segmentLoader)(nil)
 
 func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
-	if segmentInfo.GetStorageVersion() == 2 {
+	if segmentInfo.GetStorageVersion() == 2 && paramtable.Get().CommonCfg.StorageType.GetValue() != "local" {
 		bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 		for _, fieldBinlog := range segmentInfo.GetBinlogPaths() {
 			for _, binlog := range fieldBinlog.GetBinlogs() {
@@ -1442,11 +1442,11 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	factor := resourceEstimateFactor{
-		memoryUsageFactor:        paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:   paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		enableTempSegmentIndex:   paramtable.Get().QueryNodeCfg.EnableTempSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:   paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor: paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		memoryUsageFactor:          paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
+		memoryIndexUsageFactor:     paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
+		EnableInterminSegmentIndex: paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
+		tempSegmentIndexFactor:     paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
+		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -1595,7 +1595,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		} else {
 			shouldCalculateDataSize = true
 			// querynode will generate a (memory type) intermin index for vector type
-			interimIndexEnable := multiplyFactor.enableTempSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
+			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
 			if interimIndexEnable {
 				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
@@ -1660,7 +1660,9 @@ func DoubleMemorySystemField(fieldID int64) bool {
 
 func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_FloatVector ||
-		dataType == schemapb.DataType_SparseFloatVector
+		dataType == schemapb.DataType_SparseFloatVector ||
+		dataType == schemapb.DataType_Float16Vector ||
+		dataType == schemapb.DataType_BFloat16Vector
 }
 
 func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {
@@ -1734,9 +1736,12 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 				return merr.WrapErrIndexNotFound("index file list empty")
 			}
 
-			fieldInfo, ok := fieldInfos[info.GetFieldID()]
-			if !ok {
-				return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+			// TODO add field info sync between segcore and go segment for storage v2
+			if loadInfo.GetStorageVersion() != storage.StorageV2 {
+				fieldInfo, ok := fieldInfos[info.GetFieldID()]
+				if !ok {
+					return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
+				}
 			}
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {

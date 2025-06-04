@@ -103,6 +103,7 @@ set(MILVUS_TEST_FILES
         test_chunked_column_group.cpp
         test_group_chunk_translator.cpp
         test_chunked_segment_storage_v2.cpp
+        test_thread_pool.cpp
         test_ngram_query.cpp
         )
 

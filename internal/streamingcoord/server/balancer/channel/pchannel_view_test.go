@@ -30,4 +30,13 @@ func TestPChannelView(t *testing.T) {
 	view := newPChannelView(metas)
 	assert.Len(t, view.Channels, 2)
 	assert.Len(t, view.Stats, 2)
+	StaticPChannelStatsManager.Get().AddVChannel(
+		"by-dev-rootcoord-dml_0_100v0",
+		"by-dev-rootcoord-dml_0_101v0",
+	)
+	StaticPChannelStatsManager.Get().RemoveVChannel(
+		"by-dev-rootcoord-dml_0_100v0",
+		"by-dev-rootcoord-dml_0_101v0",
+	)
+	StaticPChannelStatsManager.Get().WatchAtChannelCountChanged()
 }

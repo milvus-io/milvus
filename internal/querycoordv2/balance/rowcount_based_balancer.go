@@ -213,7 +213,7 @@ func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balance
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
 
-	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 	if len(roNodes) != 0 {
@@ -234,7 +234,7 @@ func (b *RowCountBasedBalancer) balanceSegments(ctx context.Context, replica *me
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
 
-	if len(rwNodes) == 0 || !b.permitBalanceSegment(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 	// print current distribution before generating plans

@@ -27,3 +27,12 @@ const (
 	Stats      Type = "Stats"
 	Analyze    Type = "Analyze"
 )
+
+var TypeList = []Type{
+	PreImport,
+	Import,
+	Compaction,
+	Index,
+	Stats,
+	Analyze,
+}

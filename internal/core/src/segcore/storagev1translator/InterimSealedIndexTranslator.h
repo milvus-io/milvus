@@ -27,7 +27,8 @@ class InterimSealedIndexTranslator
         knowhere::MetricType metric_type,
         knowhere::Json build_config,
         int64_t dim,
-        bool is_sparse);
+        bool is_sparse,
+        DataType vec_data_type);
     size_t
     num_cells() const override;
     milvus::cachinglayer::cid_t
@@ -53,6 +54,7 @@ class InterimSealedIndexTranslator
     bool is_sparse_;
     std::string index_key_;
     milvus::cachinglayer::Meta meta_;
+    DataType vec_data_type_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

@@ -731,6 +731,12 @@ def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=Fals
                                                                    is_primary=is_primary, **kwargs)
     return float_vec_field
 
+def gen_int8_vec_field(name=ct.default_int8_vec_field_name, is_primary=False, dim=ct.default_dim,
+                           description=ct.default_desc, **kwargs):
+    int8_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8_VECTOR,
+                                                                   description=description, dim=dim,
+                                                                   is_primary=is_primary, **kwargs)
+    return int8_vec_field
 
 def gen_sparse_vec_field(name=ct.default_sparse_vec_field_name, is_primary=False, description=ct.default_desc, **kwargs):
     sparse_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
@@ -821,7 +827,7 @@ def gen_all_datatype_collection_schema(description=ct.default_desc, primary_fiel
         gen_array_field(name="array_varchar", element_type=DataType.VARCHAR, max_length=200),
         gen_array_field(name="array_bool", element_type=DataType.BOOL),
         gen_float_vec_field(dim=dim),
-        gen_float_vec_field(name="image_emb", dim=dim),
+        gen_int8_vec_field(name="image_emb", dim=dim),
         gen_float_vec_field(name="text_sparse_emb", vector_data_type=DataType.SPARSE_FLOAT_VECTOR),
         gen_float_vec_field(name="voice_emb", dim=dim),
     ]
@@ -1931,6 +1937,15 @@ def get_binary_vec_field_name_list(schema=None):
             vec_fields.append(field.name)
     return vec_fields
 
+def get_int8_vec_field_name_list(schema=None):
+    vec_fields = []
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    for field in fields:
+        if field.dtype in [DataType.INT8_VECTOR]:
+            vec_fields.append(field.name)
+    return vec_fields
 
 def get_bm25_vec_field_name_list(schema=None):
     if not hasattr(schema, "functions"):
@@ -1954,6 +1969,20 @@ def get_dim_by_schema(schema=None):
             return dim
     return None
 
+def get_dense_anns_field_name_list(schema=None):
+    if schema is None:
+        schema = gen_default_collection_schema()
+    fields = schema.fields
+    anns_fields = []
+    for field in fields:
+        if field.dtype in [DataType.FLOAT_VECTOR,DataType.FLOAT16_VECTOR,DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR]:
+            item = {
+                "name": field.name,
+                "dtype": field.dtype,
+                "dim": field.params['dim']
+            }
+            anns_fields.append(item)
+    return anns_fields
 
 def gen_varchar_data(length: int, nb: int, text_mode=False):
     if text_mode:
@@ -2037,6 +2066,16 @@ def gen_data_by_collection_field(field, nb=None, start=None):
         if nb is None:
             return np.array([random.random() for _ in range(int(dim))], dtype=np.float16)
         return [np.array([random.random() for _ in range(int(dim))], dtype=np.float16) for _ in range(int(nb))]
+    if data_type == DataType.INT8_VECTOR:
+        dim = field.params['dim']
+        if nb is None:
+            raw_vector = [random.randint(-128, 127) for _ in range(dim)]
+            int8_vector = np.array(raw_vector, dtype=np.int8)
+            return int8_vector
+        raw_vectors = [[random.randint(-128, 127) for _ in range(dim)] for _ in range(nb)]
+        int8_vectors = [np.array(raw_vector, dtype=np.int8) for raw_vector in raw_vectors]
+        return int8_vectors
+
     if data_type == DataType.BINARY_VECTOR:
         dim = field.params['dim']
         if nb is None:
@@ -2451,7 +2490,8 @@ def gen_json_field_expressions_all_single_operator():
                    "json_field['a'] < 2", "json_field['a'] < 2.0", "json_field['a'] > 0", "json_field['a'] > 0.0",
                    "json_field['a'] <= '1'", "json_field['a'] >= '1'", "json_field['a'] < '2'", "json_field['a'] > '0'",
                    "json_field['a'] == 1", "json_field['a'] == 1.0", "json_field['a'] == True",
-                   "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992", "json_field['a'] == '1'",
+                   "json_field['a'] == 9707199254740993.0", "json_field['a'] == 9707199254740992",
+                   "json_field['a'] == '1'",
                    "json_field['a'] != '1'", "json_field['a'] like '1%'", "json_field['a'] like '%1'",
                    "json_field['a'] like '%1%'", "json_field['a'] LIKE '1%'", "json_field['a'] LIKE '%1'",
                    "json_field['a'] LIKE '%1%'", "EXISTS json_field['a']", "exists json_field['a']",
@@ -2459,7 +2499,8 @@ def gen_json_field_expressions_all_single_operator():
                    "json_field['a'] - 1 <= 0", "json_field['a'] + 1.0 >= 2", "json_field['a'] - 1.0 <= 0",
                    "json_field['a'] * 2 == 2", "json_field['a'] * 1.0 == 1.0", "json_field / 1 == 1",
                    "json_field['a'] / 1.0 == 1", "json_field['a'] % 10 == 1", "json_field['a'] == 1**2",
-                   "json_field['a'][0] == 1 && json_field['a'][1] == 2", "json_field['a'][0] == 1 and json_field['a'][1] == 2",
+                   "json_field['a'][0] == 1 && json_field['a'][1] == 2",
+                   "json_field['a'][0] == 1 and json_field['a'][1] == 2",
                    "json_field['a'][0]['b'] >=1 && json_field['a'][2] == 3",
                    "json_field['a'][0]['b'] >=1 and json_field['a'][2] == 3",
                    "json_field['a'] == 1 || json_field['a'] == '1'", "json_field['a'] == 1 or json_field['a'] == '1'",
@@ -2477,6 +2518,248 @@ def gen_json_field_expressions_all_single_operator():
                    ]
 
     return expressions
+
+def gen_field_expressions_all_single_operator_each_field(field = ct.default_int64_field_name):
+    """
+    Gen a list of filter in expression-format(as a string)
+    """
+    if field in [ct.default_int8_field_name, ct.default_int16_field_name, ct.default_int32_field_name,
+                 ct.default_int64_field_name]:
+        expressions = [f"{field} <= 1", f"{field} >= 1",
+                       f"{field} < 2",  f"{field} > 0",
+                       f"{field} == 1", f"{field} != 1",
+                       f"{field} == 9707199254740992", f"{field} != 9707199254740992",
+                       f"{field} + 1 >= 2", f"{field} - 1 <= 0",
+                       f"{field} * 2 == 2", f"{field} / 1 == 1",
+                       f"{field} % 10 == 1", f"{field} == 1 || {field} == 2",
+                       f"{field} == 1 or {field} == 2",
+                       f"{field} in [1]", f"{field} not in [1]",
+                       f"{field} is null", f"{field} IS NULL",
+                       f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    elif field in [ct.default_bool_field_name]:
+        expressions = [f"{field} == True", f"{field} == False",
+                       f"{field} != True", f"{field} != False",
+                       f"{field} <= True", f"{field} >= True",
+                       f"{field} <= False", f"{field} >= False",
+                       f"{field} < True", f"{field} > True",
+                       f"{field} < False", f"{field} > False",
+                       f"{field} == True && {field} == False",
+                       f"{field} == True and {field} == False ",
+                       f"{field} == True || {field} == False",
+                       f"{field} == True or {field} == False",
+                       f"{field} in [True]", f"{field} in [False]", f"{field} in [True, False]",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"]
+    elif field in [ct.default_float_field_name, ct.default_double_field_name]:
+        expressions = [f"{field} <= 1", f"{field} >= 1",
+                       f"{field} < 2", f"{field} > 0",
+                       f"{field} == 1", f"{field} != 1",
+                       f"{field} == 9707199254740992", f"{field} != 9707199254740992",
+                       f"{field} <= 1.0", f"{field} >= 1.0",
+                       f"{field} < 2.0", f"{field} > 0.0",
+                       f"{field} == 1.0", f"{field} != 1.0",
+                       f"{field} == 9707199254740992.0", f"{field} != 9707199254740992.0",
+                       f"{field} - 1 <= 0", f"{field} + 1.0 >= 2",
+                       f"{field} - 1.0 <= 0", f"{field} * 2 == 2",
+                       f"{field} * 1.0 == 1.0", f"{field} / 1 == 1",
+                       f"{field} / 1.0 == 1.0", f"{field} == 1**2",
+                       f"{field} == 1 && {field} == 2",
+                       f"{field} == 1 and {field} == 2.0",
+                       f"{field} >=1 && {field} == 3.0",
+                       f"{field} >=1 and {field} == 3",
+                       f"{field} == 1 || {field} == 2.0",
+                       f"{field} == 1 or {field} == 2.0",
+                       f"{field} >= 1  || {field} <=2.0",
+                       f"{field} >= 1.0 or {field} <= 2.0",
+                       f"{field} in [1]", f"{field} in [1, 2]",
+                       f"{field} in [1.0]", f"{field} in [1.0, 2.0]",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    elif field in [ct.default_string_field_name]:
+        expressions = [f"{field} <= '1'", f"{field} >= '1'", f"{field} < '2'", f"{field} > '0'",
+                       f"{field} == '1'", f"{field} != '1'", f"{field} like '1%'", f"{field} like '%1'",
+                       f"{field} like '%1%'", f"{field} LIKE '1%'", f"{field} LIKE '%1'",
+                       f"{field} LIKE '%1%'",
+                       f"{field} == '1' && {field} == '2'",
+                       f"{field} == '1' and {field} == '2'",
+                       f"{field} == '1' || {field} == '2'",
+                       f"{field} == '1' or {field} == '2'",
+                       f"{field} >= '1' || {field} <= '2'",
+                       f"{field} >= '1' or {field} <= '2'",
+                       f"{field} in ['1']", f"{field} in ['1', '2']",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    elif field in [ct.default_int8_array_field_name, ct.default_int16_array_field_name,
+                   ct.default_int32_array_field_name, ct.default_int64_array_field_name]:
+        expressions = [f"{field}[0] <= 1", f"{field}[0] >= 1",
+                       f"{field}[0] < 2", f"{field}[0] > 0",
+                       f"{field}[1] == 1", f"{field}[1] != 1",
+                       f"{field}[0] == 9707199254740992", f"{field}[0] != 9707199254740992",
+                       f"{field}[0] + 1 >= 2", f"{field}[0] - 1 <= 0",
+                       f"{field}[0] + 1.0 >= 2", f"{field}[0] - 1.0 <= 0",
+                       f"{field}[0] * 2 == 2", f"{field}[1] * 1.0 == 1.0",
+                       f"{field}[1] / 1 == 1", f"{field}[0] / 1.0 == 1", f"{field}[1] % 10 == 1",
+                       f"{field}[0] == 1 && {field}[1] == 2", f"{field}[0] == 1 and {field}[1] == 2",
+                       f"{field}[0] >=1 && {field}[2] <= 3", f"{field}[0] >=1 and {field}[1] == 2",
+                       f"{field}[0] >=1  || {field}[1] <=2", f"{field}[0] >=1 or {field}[1] <=2",
+                       f"{field}[0] in [1]", f"json_contains({field}, 1)", f"JSON_CONTAINS({field}, 1)",
+                       f"json_contains_all({field}, [1, 2])", f"JSON_CONTAINS_ALL({field}, [1, 2])",
+                       f"json_contains_any({field}, [1, 2])", f"JSON_CONTAINS_ANY({field}, [1, 2])",
+                       f"array_contains({field}, 2)", f"ARRAY_CONTAINS({field}, 2)",
+                       f"array_contains_all({field}, [1, 2])", f"ARRAY_CONTAINS_ALL({field}, [1, 2])",
+                       f"array_contains_any({field}, [1, 2])", f"ARRAY_CONTAINS_ANY({field}, [1, 2])",
+                       f"array_length({field}) < 10", f"ARRAY_LENGTH({field}) < 10",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    elif field in [ct.default_float_array_field_name, ct.default_double_array_field_name]:
+        expressions = [f"{field}[0] <= 1", f"{field}[0] >= 1",
+                       f"{field}[0] < 2", f"{field}[0] > 0",
+                       f"{field}[1] == 1", f"{field}[1] != 1",
+                       f"{field}[0] == 9707199254740992", f"{field}[0] != 9707199254740992",
+                       f"{field}[0] <= 1.0", f"{field}[0] >= 1.0",
+                       f"{field}[0] < 2.0", f"{field}[0] > 0.0",
+                       f"{field}[1] == 1.0", f"{field}[1] != 1.0",
+                       f"{field}[0] == 9707199254740992.0",
+                       f"{field}[0] - 1 <= 0", f"{field}[0] + 1.0 >= 2",
+                       f"{field}[0] - 1.0 <= 0", f"{field}[0] * 2 == 2",
+                       f"{field}[0] * 1.0 == 1.0", f"{field}[0] / 1 == 1",
+                       f"{field}[0] / 1.0 == 1.0", f"{field}[0] == 1**2",
+                       f"{field}[0] == 1 && {field}[1] == 2",
+                       f"{field}[0] == 1 and {field}[1] == 2.0",
+                       f"{field}[0] >=1 && {field}[2] == 3.0",
+                       f"{field}[0] >=1 and {field}[2] == 3",
+                       f"{field}[0] == 1 || {field}[1] == 2.0",
+                       f"{field}[0] == 1 or {field}[1] == 2.0",
+                       f"{field}[0] >= 1  || {field}[1] <=2.0",
+                       f"{field}[0] >= 1.0 or {field}[1] <= 2.0",
+                       f"{field}[0] in [1]", f"{field}[0] in [1.0]", f"json_contains({field}, 1.0)",
+                       f"JSON_CONTAINS({field}, 1.0)", f"json_contains({field}, 1.0)", f"JSON_CONTAINS({field}, 1.0)",
+                       f"json_contains_all({field}, [2.0, 4.0])", f"JSON_CONTAINS_ALL({field}, [2.0, 4.0])",
+                       f"json_contains_any({field}, [2.0, 4.0])", f"JSON_CONTAINS_ANY({field}, [2.0, 4.0])",
+                       f"array_contains({field}, 2.0)", f"ARRAY_CONTAINS({field}, 2.0)",
+                       f"array_contains({field}, 2.0)", f"ARRAY_CONTAINS({field}, 2.0)",
+                       f"array_contains_all({field}, [1.0, 2.0])", f"ARRAY_CONTAINS_ALL({field}, [1.0, 2.0])",
+                       f"array_contains_any({field}, [1.0, 2.0])", f"ARRAY_CONTAINS_ANY({field}, [1.0, 2.0])",
+                       f"array_length({field}) < 10", f"ARRAY_LENGTH({field}) < 10",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    elif field in [ct.default_bool_array_field_name]:
+        expressions = [f"{field}[0] == True", f"{field}[0] == False",
+                       f"{field}[0] != True", f"{field}[0] != False",
+                       f"{field}[0] <= True", f"{field}[0] >= True",
+                       f"{field}[1] <= False", f"{field}[1] >= False",
+                       f"{field}[0] < True", f"{field}[1] > True",
+                       f"{field}[0] < False", f"{field}[0] > False",
+                       f"{field}[0] == True && {field}[1] == False",
+                       f"{field}[0] == True and {field}[1] == False ",
+                       f"{field}[0] == True || {field}[1] == False",
+                       f"{field}[0] == True or {field}[1] == False",
+                       f"{field}[0] in [True]", f"{field}[1] in [False]", f"{field}[0] in [True, False]",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    elif field in [ct.default_string_array_field_name]:
+        expressions = [f"{field}[0] <= '1'", f"{field}[0] >= '1'",
+                       f"{field}[0] < '2'", f"{field}[0] > '0'",
+                       f"{field}[1] == '1'", f"{field}[1] != '1'",
+                       f"{field}[1] like '1%'", f"{field}[1] like '%1'",
+                       f"{field}[1] like '%1%'", f"{field}[1] LIKE '1%'",
+                       f"{field}[1] LIKE '%1'", f"{field}[1] LIKE '%1%'",
+                       f"{field}[1] == '1' && {field}[2] == '2'",
+                       f"{field}[1] == '1' and {field}[2] == '2'",
+                       f"{field}[0] == '1' || {field}[2] == '2'",
+                       f"{field}[0] == '1' or {field}[2] == '2'",
+                       f"{field}[1] >= '1' || {field}[2] <= '2'",
+                       f"{field}[1] >= '1' or {field}[2] <= '2'",
+                       f"{field}[0] in ['0']", f"{field}[1] in ['1', '2']",
+                       f"{field} is null", f"{field} IS NULL", f"{field} is not null", f"{field} IS NOT NULL"
+                       ]
+    else:
+        raise Exception("Invalid field name")
+
+    return expressions
+
+def concatenate_uneven_arrays(arr1, arr2):
+    """
+    concatenate the element in two arrays with different length
+    """
+    max_len = max(len(arr1), len(arr2))
+    result = []
+    op_list = ["and", "or", "&&", "||"]
+    for i in range(max_len):
+        a = arr1[i] if i < len(arr1) else ""
+        b = arr2[i] if i < len(arr2) else ""
+        if a == "" or b == "":
+            result.append(a + b)
+        else:
+            random_op = op_list[random.randint(0, len(op_list)-1)]
+            result.append( a + " " + random_op + " " + b)
+
+    return result
+
+def gen_multiple_field_expressions(field_name_list=[], random_field_number=0, expr_number=1):
+    """
+    Gen an expression including multiple fields
+    parameters:
+       field_name_list: the field names to be filtered. And the names should be in the following field name list if this
+                        parameter is specified: (both repeated or non-repeated field name are supported)
+                        all_fields = [ct.default_int8_field_name, ct.default_int16_field_name,
+                                          ct.default_int32_field_name, ct.default_int64_field_name,
+                                          ct.default_float_field_name, ct.default_double_field_name,
+                                          ct.default_string_field_name, ct.default_bool_field_name,
+                                          ct.default_int8_array_field_name, ct.default_int16_array_field_name,
+                                          ct.default_int32_array_field_name,ct.default_int64_array_field_name,
+                                          ct.default_bool_array_field_name, ct.default_float_array_field_name,
+                                          ct.default_double_array_field_name, ct.default_string_array_field_name]
+       random_field_number: the random field numbers to be filtered. The filtered fields will be randomly selected in
+                            the above field name list (all_fields) if this parameter is specified.
+                            And if random_field_number <= len(all_fields), the fields will be randomly selected without
+                            repeat. If random_field_number > len(all_fields), there will be repeated fields
+                            for (random_field_number - len(all_fields)) part.
+       expr_number: the number of expressions for each field
+    return:
+       expressions_fields: all the expressions for multiple fields
+       field_name_list: the field name list used for the filtered expressions
+    """
+    if not isinstance(field_name_list, list):
+        raise Exception("parameter field_name_list should be a list of all the fields to be filtered")
+    if random_field_number < 0:
+        raise Exception(f"random_field_number should be greater than or equal with 0]")
+    if not isinstance(expr_number, int):
+        raise Exception("parameter parameter should be an interger")
+    log.info(field_name_list)
+    log.info(random_field_number)
+    if len(field_name_list) != 0 and random_field_number != 0:
+        raise Exception("Not support both field_name_list and random_field_number are specified")
+
+    field_name_list_cp = field_name_list.copy()
+
+    all_fields = [ct.default_int8_field_name, ct.default_int16_field_name,
+                  ct.default_int32_field_name, ct.default_int64_field_name,
+                  ct.default_float_field_name, ct.default_double_field_name,
+                  ct.default_string_field_name, ct.default_bool_field_name,
+                  ct.default_int8_array_field_name, ct.default_int16_array_field_name,
+                  ct.default_int32_array_field_name,ct.default_int64_array_field_name,
+                  ct.default_bool_array_field_name, ct.default_float_array_field_name,
+                  ct.default_double_array_field_name, ct.default_string_array_field_name]
+
+    if len(field_name_list) == 0 and random_field_number != 0:
+        if random_field_number <= len(all_fields):
+            random_array = random.sample(range(len(all_fields)), random_field_number)
+        else:
+            random_array = random.sample(range(len(all_fields)), len(all_fields))
+            for _ in range(random_field_number - len(all_fields)):
+                random_array.append(random.randint(0, len(all_fields)-1))
+        for i in random_array:
+            field_name_list_cp.append(all_fields[i])
+    if len(field_name_list) == 0 and random_field_number == 0:
+        field_name_list_cp = all_fields
+    expressions_fields = gen_field_expressions_all_single_operator_each_field(field_name_list_cp[0])
+    if len(field_name_list_cp) > 1:
+        for field in field_name_list[1:]:
+            expressions = gen_field_expressions_all_single_operator_each_field(field)
+            expressions_fields = concatenate_uneven_arrays(expressions_fields, expressions)
+
+    return expressions_fields, field_name_list_cp
 
 
 def gen_array_field_expressions_and_templates():

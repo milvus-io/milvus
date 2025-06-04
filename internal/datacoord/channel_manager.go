@@ -156,14 +156,14 @@ func (m *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes 
 	m.mu.Lock()
 	nodeChannels := m.store.GetNodeChannelsBy(
 		WithAllNodes(),
-		func(ch *StateChannel) bool {
+		func(ch *StateChannel) bool { // Channel with drop-mark
 			return m.h.CheckShouldDropChannel(ch.GetName())
 		})
-	m.mu.Unlock()
 
 	for _, info := range nodeChannels {
 		m.finishRemoveChannel(info.NodeID, lo.Values(info.Channels)...)
 	}
+	m.mu.Unlock()
 
 	if m.balanceCheckLoop != nil {
 		log.Ctx(ctx).Info("starting channel balance loop")
@@ -238,6 +238,7 @@ func (m *ChannelManagerImpl) Watch(ctx context.Context, ch RWChannel) error {
 			zap.Array("updates", updates), zap.Error(err))
 	}
 
+	// Speed up channel assignment
 	// channel already written into meta, try to assign it to the cluster
 	// not error is returned if failed, the assignment will retry later
 	updates = m.assignPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
@@ -286,11 +287,8 @@ func (m *ChannelManagerImpl) DeleteNode(nodeID UniqueID) error {
 	return nil
 }
 
-// reassign reassigns a channel to another DataNode.
+// inner method, lock before using it, reassign reassigns a channel to another DataNode.
 func (m *ChannelManagerImpl) reassign(original *NodeChannelInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	updates := m.assignPolicy(m.store.GetNodesChannels(), original, m.legacyNodes.Collect())
 	if updates != nil {
 		return m.execute(updates)
@@ -436,15 +434,16 @@ func (m *ChannelManagerImpl) CheckLoop(ctx context.Context) {
 }
 
 func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
-	m.mu.RLock()
+	m.mu.Lock()
 	standbys := m.store.GetNodeChannelsBy(WithAllNodes(), WithChannelStates(Standby))
 	toNotifies := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(ToWatch, ToRelease))
 	toChecks := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(Watching, Releasing))
-	m.mu.RUnlock()
 
-	// Processing standby channels
-	updatedStandbys := false
-	updatedStandbys = m.advanceStandbys(ctx, standbys)
+	// Reassigning standby channels in locks to avoid concurrent assignment with Watch, Remove, AddNode, DeleteNode
+	updatedStandbys := m.advanceStandbys(ctx, standbys)
+	m.mu.Unlock()
+
+	// RPCs stays out of locks
 	updatedToCheckes := m.advanceToChecks(ctx, toChecks)
 	updatedToNotifies := m.advanceToNotifies(ctx, toNotifies)
 
@@ -453,9 +452,8 @@ func (m *ChannelManagerImpl) AdvanceChannelState(ctx context.Context) {
 	}
 }
 
+// inner method need lock
 func (m *ChannelManagerImpl) finishRemoveChannel(nodeID int64, channels ...RWChannel) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	for _, ch := range channels {
 		if err := m.removeChannel(nodeID, ch); err != nil {
 			log.Warn("Failed to remove channel", zap.Any("channel", ch), zap.Error(err))
@@ -469,6 +467,7 @@ func (m *ChannelManagerImpl) finishRemoveChannel(nodeID int64, channels ...RWCha
 	}
 }
 
+// inner method need locks
 func (m *ChannelManagerImpl) advanceStandbys(ctx context.Context, standbys []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range standbys {
@@ -576,7 +575,7 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 			}
 
 			m.mu.Lock()
-			m.store.UpdateState(err == nil, nodeID, res.ch, res.opID)
+			m.store.UpdateState(err, nodeID, res.ch, res.opID)
 			m.mu.Unlock()
 		}
 
@@ -592,9 +591,9 @@ func (m *ChannelManagerImpl) advanceToNotifies(ctx context.Context, toNotifies [
 }
 
 type poolResult struct {
-	successful bool
-	ch         RWChannel
-	opID       int64
+	err  error
+	ch   RWChannel
+	opID int64
 }
 
 func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
@@ -620,10 +619,14 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 			future := getOrCreateIOPool().Submit(func() (any, error) {
 				successful, got := m.Check(ctx, nodeID, tmpWatchInfo)
 				if got {
+					var err error
+					if !successful {
+						err = errors.New("operation in progress")
+					}
 					return poolResult{
-						successful: successful,
-						ch:         innerCh,
-						opID:       tmpWatchInfo.GetOpID(),
+						err:  err,
+						ch:   innerCh,
+						opID: tmpWatchInfo.GetOpID(),
 					}, nil
 				}
 				return nil, errors.New("Got results with no progress")
@@ -636,7 +639,7 @@ func (m *ChannelManagerImpl) advanceToChecks(ctx context.Context, toChecks []*No
 			if err == nil {
 				m.mu.Lock()
 				result := got.(poolResult)
-				m.store.UpdateState(result.successful, nodeID, result.ch, result.opID)
+				m.store.UpdateState(result.err, nodeID, result.ch, result.opID)
 				m.mu.Unlock()
 
 				advanced = true
@@ -712,6 +715,7 @@ func (m *ChannelManagerImpl) Check(ctx context.Context, nodeID int64, info *data
 	return false, false
 }
 
+// inner method need lock
 func (m *ChannelManagerImpl) execute(updates *ChannelOpSet) error {
 	for _, op := range updates.ops {
 		if op.Type != Delete {

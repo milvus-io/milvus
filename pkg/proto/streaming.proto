@@ -62,6 +62,13 @@ message PChannelMeta {
         4;  // keep the meta info assignment log that used to be assigned to.
 }
 
+// StreamingVersion is the version of the streaming service.
+message StreamingVersion {
+    int64 version = 1; // version of the streaming,
+    // null if there's no streaming service running, the cluster is upgrading from 2.5.x or cluster startup.
+    // 1 means the first version of streaming service is already running.
+}
+
 // VersionPair is the version pair of global and local.
 message VersionPair {
     int64 global = 1;

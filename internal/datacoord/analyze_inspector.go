@@ -51,8 +51,9 @@ func (ai *analyzeInspector) Stop() {
 func (ai *analyzeInspector) reloadFromMeta() {
 	analyzeTasks := ai.mt.analyzeMeta.GetAllTasks()
 	for _, t := range analyzeTasks {
-		if t.GetState() == indexpb.JobState_JobStateFinished ||
-			t.GetState() == indexpb.JobState_JobStateFailed {
+		if t.GetState() != indexpb.JobState_JobStateInit &&
+			t.GetState() != indexpb.JobState_JobStateRetry &&
+			t.GetState() != indexpb.JobState_JobStateInProgress {
 			continue
 		}
 		ai.scheduler.Enqueue(newAnalyzeTask(

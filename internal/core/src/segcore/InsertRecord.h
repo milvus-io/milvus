@@ -282,7 +282,7 @@ struct InsertRecord {
         const int64_t size_per_chunk,
         const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
         bool called_from_subclass = false)
-        : timestamps_(size_per_chunk), mmap_descriptor_(mmap_descriptor) {
+        : timestamps_(size_per_chunk) {
         if (called_from_subclass) {
             return;
         }
@@ -415,6 +415,7 @@ struct InsertRecord {
 
  protected:
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> data_{};
     mutable std::shared_mutex shared_mutex_{};
 };
 
@@ -451,7 +452,8 @@ struct InsertRecord<false> : public InsertRecord<true> {
                     }
                 }
             }
-            append_field_meta(field_id, field_meta, size_per_chunk);
+            append_field_meta(
+                field_id, field_meta, size_per_chunk, mmap_descriptor);
         }
     }
 
@@ -489,37 +491,77 @@ struct InsertRecord<false> : public InsertRecord<true> {
     }
 
     void
-    append_field_meta(FieldId field_id,
-                      const FieldMeta& field_meta,
-                      int64_t size_per_chunk) {
+    append_field_meta(
+        FieldId field_id,
+        const FieldMeta& field_meta,
+        int64_t size_per_chunk,
+        const storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr) {
         if (field_meta.is_nullable()) {
             this->append_valid_data(field_id);
         }
+        const milvus::storage::MmapConfig mmap_config =
+            storage::MmapManager::GetInstance().GetMmapConfig();
+        // todo: @cqy123456, scalar and vector mmap should be depend on GetScalarFieldEnableMmap()/ GetVectorFieldEnableMmap()
+        storage::MmapChunkDescriptorPtr scalar_mmap_descriptor =
+            mmap_config.GetEnableGrowingMmap() ? mmap_descriptor : nullptr;
+        storage::MmapChunkDescriptorPtr vec_mmap_descriptor =
+            mmap_config.GetEnableGrowingMmap() ? mmap_descriptor : nullptr;
+        storage::MmapChunkDescriptorPtr dense_vec_mmap_descriptor = nullptr;
+        // todo: @cqy123456, remove all condition and select of dense_vec_mmap_descriptor later
+        {
+            const auto& segcore_config =
+                milvus::segcore::SegcoreConfig::default_config();
+            auto enable_intermin_index =
+                segcore_config.get_enable_interim_segment_index();
+            auto dense_vec_intermin_index_type =
+                segcore_config.get_dense_vector_intermin_index_type();
+            auto enable_mmap_field_mmap =
+                mmap_config.GetVectorFieldEnableMmap();
+            bool enable_dense_vec_mmap =
+                enable_intermin_index && enable_mmap_field_mmap &&
+                (dense_vec_intermin_index_type ==
+                 knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR);
+            dense_vec_mmap_descriptor =
+                enable_dense_vec_mmap || mmap_config.GetEnableGrowingMmap()
+                    ? mmap_descriptor
+                    : nullptr;
+        }
         if (field_meta.is_vector()) {
             if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                this->append_data<FloatVector>(
-                    field_id, field_meta.get_dim(), size_per_chunk);
+                this->append_data<FloatVector>(field_id,
+                                               field_meta.get_dim(),
+                                               size_per_chunk,
+                                               dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-                this->append_data<BinaryVector>(
-                    field_id, field_meta.get_dim(), size_per_chunk);
+                this->append_data<BinaryVector>(field_id,
+                                                field_meta.get_dim(),
+                                                size_per_chunk,
+                                                dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-                this->append_data<Float16Vector>(
-                    field_id, field_meta.get_dim(), size_per_chunk);
+                this->append_data<Float16Vector>(field_id,
+                                                 field_meta.get_dim(),
+                                                 size_per_chunk,
+                                                 dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_BFLOAT16) {
-                this->append_data<BFloat16Vector>(
-                    field_id, field_meta.get_dim(), size_per_chunk);
+                this->append_data<BFloat16Vector>(field_id,
+                                                  field_meta.get_dim(),
+                                                  size_per_chunk,
+                                                  dense_vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() ==
                        DataType::VECTOR_SPARSE_FLOAT) {
-                this->append_data<SparseFloatVector>(field_id, size_per_chunk);
+                this->append_data<SparseFloatVector>(
+                    field_id, size_per_chunk, vec_mmap_descriptor);
                 return;
             } else if (field_meta.get_data_type() == DataType::VECTOR_INT8) {
-                this->append_data<Int8Vector>(
-                    field_id, field_meta.get_dim(), size_per_chunk);
+                this->append_data<Int8Vector>(field_id,
+                                              field_meta.get_dim(),
+                                              size_per_chunk,
+                                              dense_vec_mmap_descriptor);
                 return;
             } else {
                 PanicInfo(DataTypeInvalid,
@@ -529,44 +571,54 @@ struct InsertRecord<false> : public InsertRecord<true> {
         }
         switch (field_meta.get_data_type()) {
             case DataType::BOOL: {
-                this->append_data<bool>(field_id, size_per_chunk);
+                this->append_data<bool>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT8: {
-                this->append_data<int8_t>(field_id, size_per_chunk);
+                this->append_data<int8_t>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT16: {
-                this->append_data<int16_t>(field_id, size_per_chunk);
+                this->append_data<int16_t>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT32: {
-                this->append_data<int32_t>(field_id, size_per_chunk);
+                this->append_data<int32_t>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::INT64: {
-                this->append_data<int64_t>(field_id, size_per_chunk);
+                this->append_data<int64_t>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::FLOAT: {
-                this->append_data<float>(field_id, size_per_chunk);
+                this->append_data<float>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::DOUBLE: {
-                this->append_data<double>(field_id, size_per_chunk);
+                this->append_data<double>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::VARCHAR:
             case DataType::TEXT: {
-                this->append_data<std::string>(field_id, size_per_chunk);
+                this->append_data<std::string>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::JSON: {
-                this->append_data<Json>(field_id, size_per_chunk);
+                this->append_data<Json>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             case DataType::ARRAY: {
-                this->append_data<Array>(field_id, size_per_chunk);
+                this->append_data<Array>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }
             default: {
@@ -659,23 +711,28 @@ struct InsertRecord<false> : public InsertRecord<true> {
     // vector not support nullable, not pass valid data ptr
     template <typename VectorType>
     void
-    append_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
+    append_data(FieldId field_id,
+                int64_t dim,
+                int64_t size_per_chunk,
+                const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
         data_.emplace(field_id,
                       std::make_unique<ConcurrentVector<VectorType>>(
-                          dim, size_per_chunk, mmap_descriptor_));
+                          dim, size_per_chunk, mmap_descriptor));
     }
 
     // append a column of scalar or sparse float vector type
     template <typename Type>
     void
-    append_data(FieldId field_id, int64_t size_per_chunk) {
+    append_data(FieldId field_id,
+                int64_t size_per_chunk,
+                const storage::MmapChunkDescriptorPtr mmap_descriptor) {
         static_assert(IsScalar<Type> || IsSparse<Type>);
         data_.emplace(
             field_id,
             std::make_unique<ConcurrentVector<Type>>(
                 size_per_chunk,
-                mmap_descriptor_,
+                mmap_descriptor,
                 is_valid_data_exist(field_id) ? get_valid_data(field_id)
                                               : nullptr));
     }

@@ -333,9 +333,9 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id_int64", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field("int8embeddings_1", DataType.INT8_VECTOR, dim=dim * 2)
-        schema.add_field("int8embeddings_2", DataType.FLOAT16_VECTOR, dim=int(dim / 2))
-        schema.add_field("int8embeddings_3", DataType.BFLOAT16_VECTOR, dim=int(dim / 2))
+        schema.add_field("embeddings_1", DataType.INT8_VECTOR, dim=dim * 2)
+        schema.add_field("embeddings_2", DataType.FLOAT16_VECTOR, dim=int(dim / 2))
+        schema.add_field("embeddings_3", DataType.BFLOAT16_VECTOR, dim=int(dim / 2))
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index("embeddings", metric_type="COSINE")
         index_params.add_index("embeddings_1", metric_type="IP")
@@ -346,7 +346,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         check_items = {"collection_name": collection_name,
-                       "dim": [dim, dim * 2, dim / 2, dim / 2],
+                       "dim": [dim, dim * 2, int(dim / 2), int(dim / 2)],
                        "consistency_level": 0,
                        "enable_dynamic_field": False,
                        "id_name": "id_int64",

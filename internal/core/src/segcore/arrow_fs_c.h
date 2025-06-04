@@ -26,13 +26,10 @@ CStatus
 InitLocalArrowFileSystemSingleton(const char* c_path);
 
 void
-CleanLocalArrowFileSystemSingleton();
+CleanArrowFileSystemSingleton();
 
 CStatus
 InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config);
-
-void
-CleanRemoteArrowFileSystemSingleton();
 
 #ifdef __cplusplus
 }

@@ -58,6 +58,16 @@ func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel
 	return serverID, nil
 }
 
+// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
+func (s *StreamingNodeManager) RegisterStreamingEnabledListener(ctx context.Context, notifier *syncutil.AsyncTaskNotifier[struct{}]) error {
+	balancer, err := s.balancer.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	balancer.RegisterStreamingEnabledNotifier(notifier)
+	return nil
+}
+
 // GetWALLocated returns the server id of the node that the wal of the vChannel is located.
 func (s *StreamingNodeManager) GetWALLocated(vChannel string) int64 {
 	pchannel := funcutil.ToPhysicalChannel(vChannel)

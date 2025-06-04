@@ -187,21 +187,23 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2GB # Maximum entries count of a segment, default is 2GB
+      maxSize: 128M # Maximum entries count of a segment, default is 128M
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
     logFileSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
-      maxBytes: 64M # Maximum size of write buffer in bytes.
-      maxEntries: 100000 # Maximum entries number of write buffer.
+      maxBytes: 32M # Maximum size of write buffer in bytes.
+      maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
       maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
       maxFlushThreads: 4 # Maximum number of threads to flush data
+    logFileCompactionPolicy:
+      maxSize: 8M # The maximum size of the merged files, default is 8M.
     fragmentManager:
-      maxBytes: 512M # Maximum size of fragment cached data in bytes.
+      maxBytes: 128M # Maximum size of fragment cached data in bytes.
       maxInterval: 1s # Maximum interval between two fragment evicts. default is 1 second
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
@@ -329,6 +331,7 @@ proxy:
   slowQuerySpanInSeconds: 5 # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
   queryNodePooling:
     size: 10 # the size for shardleader(querynode) client pool
+  partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
@@ -424,17 +427,21 @@ queryNode:
       # Milvus will eventually seals and indexes all segments, but enabling this optimizes search performance for immediate queries following data insertion.
       # This defaults to true, indicating that Milvus creates temporary index for growing segments and the sealed segments that are not indexed upon searches.
       enableIndex: true
-      nlist: 128 # temp index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
+      nlist: 128 # interim index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
+      subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
+      refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
+      refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
+      refineWithQuant: true # whether to use refineQuantType to refine for fatser but loss a little precision
+      denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
     multipleChunkedEnable: true # Deprecated. Enable multiple chunked search
     tieredStorage:
       warmup:
-        # options: sync, async, disable.
+        # options: sync, disable.
         # Specifies the timing for warming up the Tiered Storage cache.
         # - "sync": data will be loaded into the cache before a segment is considered loaded.
-        # - "async": data will be loaded asynchronously into the cache after a segment is loaded.
         # - "disable": data will not be proactively loaded into the cache, and loaded only if needed by search/query tasks.
         # Defaults to "sync", except for vector field which defaults to "disable".
         scalarField: sync
@@ -453,7 +460,7 @@ queryNode:
       diskHighWatermarkRatio: 0.8
       diskMaxRatio: 0.9
       # Enable eviction for Tiered Storage. Defaults to false.
-      # Note that if eviction is enabled, cache data loaded during sync/async warmup is also subject to eviction.
+      # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
@@ -521,6 +528,10 @@ queryNode:
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   workerPooling:
     size: 10 # the size for worker querynode client pool
+  idfOracle:
+    enableDisk: true
+    localPath: /var/lib/milvus/bm25_logs
+    writeConcurrency: 4
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -620,6 +631,8 @@ dataCoord:
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
+    expiry:
+      tolerance: -1 # tolerant duration in hours for expiry data, negative value means no toleration and equivalent to zero
     single:
       ratio:
         threshold: 0.2 # The ratio threshold of a segment to trigger a single compaction, default as 0.2
@@ -692,7 +705,7 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncMgrTasks: 256 # The max concurrent sync task number of datanode sync mgr globally
+    maxParallelSyncMgrTasks: 64 # The max concurrent sync task number of datanode sync mgr globally
     skipMode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
@@ -907,7 +920,7 @@ common:
     internaltlsEnabled: false
     tlsMode: 0
   session:
-    ttl: 30 # ttl value when session granting a lease to register service
+    ttl: 10 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
   locks:
     metrics:
@@ -1214,6 +1227,11 @@ streaming:
   walWriteAheadBuffer:
     capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
     keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+  walReadAheadBuffer:
+    # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
+    # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
+    # Use the underlying wal default value if 0 is given.
+    length: 128
   logging:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
@@ -1225,12 +1243,12 @@ streaming:
     memoryThreshold: 0.6
     # The high watermark of total growing segment bytes for one streaming node,
     # If the total bytes of growing segment is greater than this threshold,
-    # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.4 by default
-    growingSegmentBytesHwmThreshold: 0.4
+    # a flush process will be triggered to decrease total bytes of growing segment until growingSegmentBytesLwmThreshold, 0.2 by default
+    growingSegmentBytesHwmThreshold: 0.2
     # The lower watermark of total growing segment bytes for one streaming node,
     # growing segment flush process will try to flush some growing segment into sealed 
-    # until the total bytes of growing segment is less than this threshold, 0.2 by default.
-    growingSegmentBytesLwmThreshold: 0.2
+    # until the total bytes of growing segment is less than this threshold, 0.1 by default.
+    growingSegmentBytesLwmThreshold: 0.1
   walRecovery:
     # The interval of persist recovery info, 10s by default. 
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.
@@ -1316,3 +1334,10 @@ function:
       voyageai:
         credential:  # The name in the crendential configuration item
         url:  # Your voyageai embedding url, Default is the official embedding url
+  rerank:
+    model:
+      providers:
+        tei:
+          enable: true # Whether to enable TEI rerank service
+        vllm:
+          enable: true # Whether to enable vllm rerank service

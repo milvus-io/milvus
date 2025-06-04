@@ -133,6 +133,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
+	redundancies = c.filterOutSegmentInUse(ctx, replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
@@ -140,7 +141,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedSealedSegments(ctx, replica.GetID())
-	redundancies = c.filterInUsedByDelegator(replica, redundancies)
+	redundancies = c.filterOutExistedOnLeader(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
 	// set deduplicate task priority to low, to avoid deduplicate task cancel balance task
@@ -294,34 +295,68 @@ func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replica
 	return segments
 }
 
-func (c *SegmentChecker) filterInUsedByDelegator(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
-	filtered := make([]*meta.Segment, 0, len(segments))
+// for duplicated segment, we should release the one which is not serving on leader
+func (c *SegmentChecker) filterOutExistedOnLeader(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+	notServing := make([]*meta.Segment, 0, len(segments))
 	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
 	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
 		return d.View.Channel
 	})
-
 	for _, s := range segments {
 		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
 		if len(delegatorList) == 0 {
-			// skip deduplication if delegator is not found
 			continue
 		}
 
-		usedByDelegator := false
+		servingOnLeader := false
 		for _, delegator := range delegatorList {
-			seg, ok := delegator.View.Segments[s.GetID()]
-			if ok && seg.NodeID == s.Node {
-				// if this segment is serving on leader, do not remove it for search available
-				usedByDelegator = true
+			segInView, ok := delegator.View.Segments[s.GetID()]
+			if ok && segInView.NodeID == s.Node {
+				servingOnLeader = true
 				break
 			}
 		}
-		if !usedByDelegator {
-			filtered = append(filtered, s)
+
+		if !servingOnLeader {
+			notServing = append(notServing, s)
 		}
 	}
-	return filtered
+	return notServing
+}
+
+// for sealed segment which doesn't exist in target, we should release it after delegator has updated to latest readable version
+func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+	notUsed := make([]*meta.Segment, 0, len(segments))
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+		return d.View.Channel
+	})
+	for _, s := range segments {
+		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
+		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
+
+		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
+		if len(delegatorList) == 0 {
+			continue
+		}
+
+		stillInUseByDelegator := false
+		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
+		for _, delegator := range delegatorList {
+			// Notice: if syncTargetVersion stuck, segment on delegator won't be released
+			readableVersionNotUpdate := delegator.View.TargetVersion != initialTargetVersion && delegator.View.TargetVersion < currentTargetVersion
+			if partition != nil && readableVersionNotUpdate {
+				// leader view version hasn't been updated, segment maybe still in use
+				stillInUseByDelegator = true
+				break
+			}
+		}
+
+		if !stillInUseByDelegator {
+			notUsed = append(notUsed, s)
+		}
+	}
+	return notUsed
 }
 
 func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []task.Task {

@@ -189,7 +189,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 			var err error
 			it.req.Dim, err = strconv.ParseInt(dimStr, 10, 64)
 			if err != nil {
-				log.Ctx(ctx).Error("parse dimesion failed", zap.Error(err))
+				log.Ctx(ctx).Error("parse dimension failed", zap.Error(err))
 				// ignore error
 			}
 		}

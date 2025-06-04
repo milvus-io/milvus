@@ -203,6 +203,12 @@ type QueryCoordCatalog interface {
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
+	// GetVersion get the streaming version from metastore.
+	GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
+
+	// SaveVersion save the streaming version to metastore.
+	SaveVersion(ctx context.Context, version *streamingpb.StreamingVersion) error
+
 	// physical channel watch related
 
 	// ListPChannel list all pchannels on milvus.

@@ -589,7 +589,29 @@ func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 	})
 }
 
-func (s *ClusteringCompactionTaskSuite) TestProcessExecutingState() {
+func (s *ClusteringCompactionTaskSuite) TestProcess() {
+	s.Run("test process states", func() {
+		testCases := []struct {
+			state         datapb.CompactionTaskState
+			processResult bool
+		}{
+			{state: datapb.CompactionTaskState_unknown, processResult: false},
+			{state: datapb.CompactionTaskState_pipelining, processResult: false},
+			{state: datapb.CompactionTaskState_executing, processResult: false},
+			{state: datapb.CompactionTaskState_failed, processResult: true},
+			{state: datapb.CompactionTaskState_timeout, processResult: true},
+		}
+
+		for _, tc := range testCases {
+			task := s.generateBasicTask(false)
+			task.updateAndSaveTaskMeta(setState(tc.state))
+			res := task.Process()
+			s.Equal(tc.processResult, res)
+		}
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	task := s.generateBasicTask(false)
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{

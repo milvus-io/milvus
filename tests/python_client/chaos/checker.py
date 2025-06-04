@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
@@ -38,7 +38,7 @@ def get_chaos_info():
         with open(constants.CHAOS_INFO_SAVE_PATH, 'r') as f:
             chaos_info = json.load(f)
     except Exception as e:
-        log.warn(f"get_chaos_info error: {e}")
+        log.warning(f"get_chaos_info error: {e}")
         return None
     return chaos_info
 
@@ -314,7 +314,7 @@ def exception_handler():
                     log_message = f"Error in {class_name}.{function_name}: {log_e}"
                 else:
                     log_message = f"Error in {function_name}: {log_e}"
-                log.error(log_message)
+                log.exception(log_message)
                 log.error(log_e)
                 return Error(e), False
 
@@ -380,6 +380,7 @@ class Checker:
         self.json_field_names = cf.get_json_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
+        self.int8_vector_field_names = cf.get_int8_vec_field_name_list(schema=schema)
         self.bm25_sparse_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
         # get index of collection
         indexes = [index.to_dict() for index in self.c_wrap.indexes]
@@ -421,6 +422,15 @@ class Checker:
                 continue
             self.c_wrap.create_index(f,
                                      constants.DEFAULT_INDEX_PARAM,
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
+        # create index for int8 vector fields
+        for f in self.int8_vector_field_names:
+            if f in indexed_fields:
+                continue
+            self.c_wrap.create_index(f,
+                                     constants.DEFAULT_INT8_INDEX_PARAM,
                                      timeout=timeout,
                                      enable_traceback=enable_traceback,
                                      check_task=CheckTasks.check_nothing)
@@ -678,18 +688,22 @@ class PartitionReleaseChecker(Checker):
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("SearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self.insert_data()
+        self.dense_anns_field_name_list = cf.get_dense_anns_field_name_list(self.schema)
+        self.data = None
+        self.anns_field_name = None
+        self.search_param = None
 
     @trace()
     def search(self):
         res, result = self.c_wrap.search(
-            data=cf.gen_vectors(5, self.dim),
-            anns_field=self.float_vector_field_name,
-            param=constants.DEFAULT_SEARCH_PARAM,
+            data=self.data,
+            anns_field=self.anns_field_name,
+            param=self.search_param,
             limit=1,
             partition_names=self.p_names,
             timeout=search_timeout,
@@ -699,6 +713,15 @@ class SearchChecker(Checker):
 
     @exception_handler()
     def run_task(self):
+        anns_field_item = random.choice(self.dense_anns_field_name_list)
+        self.anns_field_name = anns_field_item["name"]
+        dim = anns_field_item["dim"]
+        self.data = cf.gen_vectors(5, dim, vector_data_type=anns_field_item["dtype"])
+        if anns_field_item["dtype"] in [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]:
+            self.search_param = constants.DEFAULT_SEARCH_PARAM
+        elif anns_field_item["dtype"] == DataType.INT8_VECTOR:
+            self.search_param = constants.DEFAULT_INT8_SEARCH_PARAM
+
         res, result = self.search()
         return res, result
 

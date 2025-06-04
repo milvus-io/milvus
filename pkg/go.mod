@@ -20,7 +20,7 @@ require (
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.17.9
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250514091016-4080770055ad
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250527033021-e6b398e94ee6
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/prometheus/client_golang v1.14.0
@@ -39,7 +39,7 @@ require (
 	github.com/tikv/client-go/v2 v2.0.4
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.0.0-20250522011808-4059b68a0e03
+	github.com/zilliztech/woodpecker v0.0.0-20250602050237-2822b5a11b22
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5

@@ -17,6 +17,7 @@ var (
 	extraAppendResultValue walCtxKey = 1
 	notPersistedValue      walCtxKey = 2
 	metricsValue           walCtxKey = 3
+	flushFromOldArchValue  walCtxKey = 4
 )
 
 // ExtraAppendResult is the extra append result.
@@ -85,4 +86,15 @@ func WithAppendMetricsContext(ctx context.Context, m *metricsutil.AppendMetrics)
 // MustGetAppendMetrics get append metrics from context
 func MustGetAppendMetrics(ctx context.Context) *metricsutil.AppendMetrics {
 	return ctx.Value(metricsValue).(*metricsutil.AppendMetrics)
+}
+
+// WithFlushFromOldArch set flush from old arch to context
+func WithFlushFromOldArch(ctx context.Context) context.Context {
+	return context.WithValue(ctx, flushFromOldArchValue, struct{}{})
+}
+
+// GetFlushFromOldArch get flush from old arch from context
+func GetFlushFromOldArch(ctx context.Context) bool {
+	result := ctx.Value(flushFromOldArchValue)
+	return result != nil
 }

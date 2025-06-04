@@ -141,17 +141,9 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 		return field.GetFieldID()
 	})
 
-	var field int64
-	var rows int
+	rows, field := GetInsertDataRowCount(data, schema)
 	for fieldID, d := range data.Data {
-		if idToField[fieldID].GetIsPrimaryKey() && idToField[fieldID].GetAutoID() {
-			continue
-		}
-		field, rows = fieldID, d.RowNum()
-		break
-	}
-	for fieldID, d := range data.Data {
-		if idToField[fieldID].GetIsPrimaryKey() && idToField[fieldID].GetAutoID() {
+		if d.RowNum() == 0 && (CanBeZeroRowField(idToField[fieldID])) {
 			continue
 		}
 		if d.RowNum() != rows {
@@ -198,6 +190,155 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 		}
 		data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
 	}
+	return nil
+}
+
+type nullDefaultAppender[T any] struct{}
+
+func (h *nullDefaultAppender[T]) AppendDefault(fieldData storage.FieldData, defaultVal T, rowNum int) error {
+	values := make([]T, rowNum)
+	if fieldData.GetNullable() {
+		validData := make([]bool, rowNum)
+		for i := 0; i < rowNum; i++ {
+			validData[i] = true    // all true
+			values[i] = defaultVal // fill with default value
+		}
+		return fieldData.AppendRows(values, validData)
+	} else {
+		for i := 0; i < rowNum; i++ {
+			values[i] = defaultVal // fill with default value
+		}
+		return fieldData.AppendDataRows(values)
+	}
+	return nil
+}
+
+func (h *nullDefaultAppender[T]) AppendNull(fieldData storage.FieldData, rowNum int) error {
+	if fieldData.GetNullable() {
+		values := make([]T, rowNum)
+		validData := make([]bool, rowNum)
+		for i := 0; i < rowNum; i++ {
+			validData[i] = false
+		}
+		return fieldData.AppendRows(values, validData)
+	}
+	return nil
+}
+
+func IsFillableField(field *schemapb.FieldSchema) bool {
+	nullable := field.GetNullable()
+	defaultVal := field.GetDefaultValue()
+	return nullable || defaultVal != nil
+}
+
+func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int) error {
+	for _, field := range schema.GetFields() {
+		if !IsFillableField(field) {
+			continue
+		}
+		if tempData, ok := data.Data[field.GetFieldID()]; ok {
+			if tempData.RowNum() > 0 {
+				continue // values have been read from data file
+			}
+		}
+
+		// add a new column and fill with null or default
+		dataType := field.GetDataType()
+		fieldData, err := storage.NewFieldData(dataType, field, rowNum)
+		if err != nil {
+			return err
+		}
+		data.Data[field.GetFieldID()] = fieldData
+
+		nullable := field.GetNullable()
+		defaultVal := field.GetDefaultValue()
+
+		// bool/int8/int16/int32/int64/float/double/varchar/json/array can be null value
+		// bool/int8/int16/int32/int64/float/double/varchar can be default value
+		switch dataType {
+		case schemapb.DataType_Bool:
+			appender := &nullDefaultAppender[bool]{}
+			if defaultVal != nil {
+				v := defaultVal.GetBoolData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int8:
+			appender := &nullDefaultAppender[int8]{}
+			if defaultVal != nil {
+				v := defaultVal.GetIntData()
+				err = appender.AppendDefault(fieldData, int8(v), rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int16:
+			appender := &nullDefaultAppender[int16]{}
+			if defaultVal != nil {
+				v := defaultVal.GetIntData()
+				err = appender.AppendDefault(fieldData, int16(v), rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int32:
+			appender := &nullDefaultAppender[int32]{}
+			if defaultVal != nil {
+				v := defaultVal.GetIntData()
+				err = appender.AppendDefault(fieldData, int32(v), rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int64:
+			appender := &nullDefaultAppender[int64]{}
+			if defaultVal != nil {
+				v := defaultVal.GetLongData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Float:
+			appender := &nullDefaultAppender[float32]{}
+			if defaultVal != nil {
+				v := defaultVal.GetFloatData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Double:
+			appender := &nullDefaultAppender[float64]{}
+			if defaultVal != nil {
+				v := defaultVal.GetDoubleData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_VarChar:
+			appender := &nullDefaultAppender[string]{}
+			if defaultVal != nil {
+				v := defaultVal.GetStringData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_JSON:
+			if nullable {
+				appender := &nullDefaultAppender[[]byte]{}
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Array:
+			if nullable {
+				appender := &nullDefaultAppender[*schemapb.ScalarField]{}
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		default:
+			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -275,19 +416,34 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 	return nil
 }
 
-func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
+func CanBeZeroRowField(field *schemapb.FieldSchema) bool {
+	if field.GetIsPrimaryKey() && field.GetAutoID() {
+		return true // auto-generated primary key, the row count must be 0
+	}
+	if field.GetIsDynamic() {
+		return true // dyanmic field, row count could be 0
+	}
+	if IsFillableField(field) {
+		return true // nullable/default_value field can be automatically filled if the file doesn't contain this column
+	}
+	return false
+}
+
+func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.CollectionSchema) (int, int64) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
 	for fieldID, fd := range data.Data {
-		if fields[fieldID].GetIsDynamic() {
+		if fd.RowNum() == 0 && CanBeZeroRowField(fields[fieldID]) {
 			continue
 		}
+
+		// each collection must contains at least one vector field, there must be one field that row number is not 0
 		if fd.RowNum() != 0 {
-			return fd.RowNum()
+			return fd.RowNum(), fieldID
 		}
 	}
-	return 0
+	return 0, 0
 }
 
 func LogStats(manager TaskManager) {
