@@ -481,6 +481,7 @@ func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceRep
 	var roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
 		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+		roNodes = append(roNodes, replica.GetRONodes()...)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
