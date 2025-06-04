@@ -213,7 +213,7 @@ TEST(JsonIndexTest, TestJsonCast) {
         JsonCastType::FromString("DOUBLE"),
         json_path,
         file_manager_ctx,
-        "DOUBLE");
+        "STRING_TO_DOUBLE");
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
