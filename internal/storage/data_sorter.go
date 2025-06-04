@@ -53,7 +53,7 @@ func (ds *DataSorter) Len() int {
 func (ds *DataSorter) Swap(i, j int) {
 	if ds.AllFields == nil {
 		allFields := ds.InsertCodec.Schema.Schema.Fields
-		for _, field := range ds.InsertCodec.Schema.Schema.StructFields {
+		for _, field := range ds.InsertCodec.Schema.Schema.StructArrayFields {
 			allFields = append(allFields, field.Fields...)
 		}
 		ds.AllFields = allFields

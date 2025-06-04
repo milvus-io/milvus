@@ -216,7 +216,7 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema()); err != nil {
 			return nil, err
 		}
 	}

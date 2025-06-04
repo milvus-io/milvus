@@ -97,7 +97,7 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 			return nil, err
 		}
 	}
-	for _, structField := range schema.StructFields {
+	for _, structField := range schema.StructArrayFields {
 		for _, field := range structField.GetFields() {
 			if err := appendField(field); err != nil {
 				return nil, err

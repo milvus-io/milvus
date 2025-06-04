@@ -12,7 +12,7 @@ import (
 
 func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
 	fieldCount := len(schema.GetFields())
-	for _, structField := range schema.GetStructFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		fieldCount += len(structField.GetFields())
 	}
 	arrowFields := make([]arrow.Field, 0, fieldCount)
@@ -41,7 +41,7 @@ func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, err
 		}
 	}
 
-	for _, structField := range schema.GetStructFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
 			if err := appendArrowField(field); err != nil {
 				return nil, err

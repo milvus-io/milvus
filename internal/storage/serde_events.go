@@ -79,7 +79,7 @@ func (crr *CompositeBinlogRecordReader) iterateNextBatch() error {
 	}
 
 	fieldNum := len(crr.schema.Fields)
-	for _, f := range crr.schema.StructFields {
+	for _, f := range crr.schema.StructArrayFields {
 		fieldNum += len(f.Fields)
 	}
 
@@ -116,7 +116,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 
 	composeRecord := func() (Record, error) {
 		fieldNum := len(crr.schema.Fields)
-		for _, f := range crr.schema.StructFields {
+		for _, f := range crr.schema.StructArrayFields {
 			fieldNum += len(f.Fields)
 		}
 		recs := make([]arrow.Array, fieldNum)
@@ -149,7 +149,7 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 				return nil, err
 			}
 		}
-		for _, f := range crr.schema.StructFields {
+		for _, f := range crr.schema.StructArrayFields {
 			for _, sf := range f.Fields {
 				if err := appendFieldRecord(sf); err != nil {
 					return nil, err
@@ -244,7 +244,7 @@ func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsRead
 		index[f.FieldID] = int16(idx)
 		idx++
 	}
-	for _, f := range schema.StructFields {
+	for _, f := range schema.StructArrayFields {
 		for _, sf := range f.Fields {
 			index[sf.FieldID] = int16(idx)
 			idx++
@@ -271,7 +271,7 @@ func ValueDeserializer(r Record, v []*Value, schema *schemapb.CollectionSchema) 
 	}
 
 	allFields := schema.Fields
-	for _, structField := range schema.StructFields {
+	for _, structField := range schema.StructArrayFields {
 		allFields = append(allFields, structField.Fields...)
 	}
 
@@ -456,7 +456,7 @@ func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 		bws[f.FieldID] = newBinlogWriter(collectionID, partitionID, segmentID, f)
 	}
 
-	for _, structField := range schema.StructFields {
+	for _, structField := range schema.StructArrayFields {
 		for _, subField := range structField.Fields {
 			bws[subField.FieldID] = newBinlogWriter(collectionID, partitionID, segmentID, subField)
 		}
@@ -467,7 +467,7 @@ func NewBinlogStreamWriters(collectionID, partitionID, segmentID UniqueID,
 
 func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, error) {
 	allFieldsSchema := schema.Fields
-	for _, structField := range schema.StructFields {
+	for _, structField := range schema.StructArrayFields {
 		allFieldsSchema = append(allFieldsSchema, structField.Fields...)
 	}
 

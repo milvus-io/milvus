@@ -262,7 +262,7 @@ func (b *RecordBuilder) Build() Record {
 func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 	fields := make([]*schemapb.FieldSchema, 0, len(schema.Fields)*2)
 	fields = append(fields, schema.Fields...)
-	for _, sf := range schema.StructFields {
+	for _, sf := range schema.StructArrayFields {
 		fields = append(fields, sf.Fields...)
 	}
 

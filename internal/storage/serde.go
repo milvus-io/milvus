@@ -899,7 +899,7 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.Coll
 			return err
 		}
 	}
-	for _, structField := range schema.GetStructFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
 			if err := serializeField(field); err != nil {
 				return err

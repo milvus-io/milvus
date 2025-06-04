@@ -321,7 +321,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 	}
 
-	for _, structField := range insertCodec.Schema.Schema.StructFields {
+	for _, structField := range insertCodec.Schema.Schema.StructArrayFields {
 		for _, field := range structField.Fields {
 			if err := serializeField(field); err != nil {
 				return nil, err
