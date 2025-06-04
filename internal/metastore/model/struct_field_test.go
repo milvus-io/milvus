@@ -62,7 +62,6 @@ var (
 		Name:        fieldName,
 		Description: "none",
 		Fields:      []*schemapb.FieldSchema{subVarcharArrayField, subVectorArrayField},
-		TypeParams:  typeParams,
 	}
 
 	structFieldModel = &StructArrayField{
@@ -70,7 +69,6 @@ var (
 		Name:        fieldName,
 		Description: "none",
 		Fields:      []*Field{subVarcharArrayFieldModel, subVectorArrayFieldModel},
-		TypeParams:  typeParams,
 	}
 )
 
@@ -158,22 +156,14 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1, field2},
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "param", Value: "value"},
-					},
-					Functions:          []*Function{function1},
-					EnableDynamicField: true,
+					Functions:   []*Function{function1},
 				},
 				structArrayFieldB: StructArrayField{
 					FieldID:     1,
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1, field2},
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "param", Value: "value"},
-					},
-					Functions:          []*Function{function1},
-					EnableDynamicField: true,
+					Functions:   []*Function{function1},
 				},
 			},
 			want: true,
@@ -186,7 +176,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
@@ -194,7 +183,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
 				},
 			},
@@ -208,7 +196,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field_1",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
@@ -216,7 +203,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field_2",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
 				},
 			},
@@ -230,7 +216,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field 1",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
@@ -238,34 +223,7 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field 2",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "different TypeParams",
-			args: args{
-				structArrayFieldA: StructArrayField{
-					FieldID:     1,
-					Name:        "struct_field",
-					Description: "test struct field",
-					Fields:      []*Field{field1},
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "param1", Value: "value1"},
-					},
-					Functions: []*Function{},
-				},
-				structArrayFieldB: StructArrayField{
-					FieldID:     1,
-					Name:        "struct_field",
-					Description: "test struct field",
-					Fields:      []*Field{field1},
-					TypeParams: []*commonpb.KeyValuePair{
-						{Key: "param1", Value: "value2"},
-					},
-					Functions: []*Function{},
 				},
 			},
 			want: false,
@@ -278,7 +236,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
@@ -286,32 +243,7 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field2},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "different EnableDynamicField",
-			args: args{
-				structArrayFieldA: StructArrayField{
-					FieldID:            1,
-					Name:               "struct_field",
-					Description:        "test struct field",
-					Fields:             []*Field{field1},
-					TypeParams:         []*commonpb.KeyValuePair{},
-					Functions:          []*Function{},
-					EnableDynamicField: true,
-				},
-				structArrayFieldB: StructArrayField{
-					FieldID:            1,
-					Name:               "struct_field",
-					Description:        "test struct field",
-					Fields:             []*Field{field1},
-					TypeParams:         []*commonpb.KeyValuePair{},
-					Functions:          []*Function{},
-					EnableDynamicField: false,
 				},
 			},
 			want: false,
@@ -324,7 +256,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{function1},
 				},
 				structArrayFieldB: StructArrayField{
@@ -332,7 +263,6 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					TypeParams:  []*commonpb.KeyValuePair{},
 					Functions:   []*Function{function2},
 				},
 			},

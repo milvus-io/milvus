@@ -427,7 +427,6 @@ func TestCollection_Equal(t *testing.T) {
 							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
 								{Key: "dim", Value: "128"},
 							}}},
-							TypeParams: typeParams,
 						},
 					},
 				},
@@ -443,7 +442,6 @@ func TestCollection_Equal(t *testing.T) {
 							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
 								{Key: "dim", Value: "128"},
 							}}},
-							TypeParams: typeParams,
 						},
 					},
 				},
@@ -464,7 +462,6 @@ func TestCollection_Equal(t *testing.T) {
 							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
 								{Key: "dim", Value: "128"},
 							}}},
-							TypeParams: typeParams,
 						},
 					},
 				},
@@ -480,7 +477,6 @@ func TestCollection_Equal(t *testing.T) {
 							Fields: []*Field{{Name: "f3", TypeParams: []*commonpb.KeyValuePair{
 								{Key: "dim", Value: "128"},
 							}}},
-							TypeParams: typeParams,
 						},
 					},
 				},
@@ -569,7 +565,6 @@ func TestClone(t *testing.T) {
 				Fields: []*Field{{FieldID: 27, Name: "28", TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "128"},
 				}}},
-				TypeParams: typeParams,
 			},
 		},
 		Functions: []*Function{

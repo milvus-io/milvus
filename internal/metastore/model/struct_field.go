@@ -1,30 +1,24 @@
 package model
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 )
 
 type StructArrayField struct {
-	FieldID            int64
-	Name               string
-	Description        string
-	Fields             []*Field
-	TypeParams         []*commonpb.KeyValuePair
-	Functions          []*Function
-	EnableDynamicField bool
+	FieldID     int64
+	Name        string
+	Description string
+	Fields      []*Field
+	Functions   []*Function
 }
 
 func (s *StructArrayField) Clone() *StructArrayField {
 	return &StructArrayField{
-		FieldID:            s.FieldID,
-		Name:               s.Name,
-		Description:        s.Description,
-		Fields:             CloneFields(s.Fields),
-		TypeParams:         common.CloneKeyValuePairs(s.TypeParams),
-		Functions:          CloneFunctions(s.Functions),
-		EnableDynamicField: s.EnableDynamicField,
+		FieldID:     s.FieldID,
+		Name:        s.Name,
+		Description: s.Description,
+		Fields:      CloneFields(s.Fields),
+		Functions:   CloneFunctions(s.Functions),
 	}
 }
 
@@ -53,9 +47,7 @@ func (s *StructArrayField) Equal(other StructArrayField) bool {
 	return s.FieldID == other.FieldID &&
 		s.Name == other.Name &&
 		s.Description == other.Description &&
-		checkParamsEqual(s.TypeParams, other.TypeParams) &&
 		CheckFieldsEqual(s.Fields, other.Fields) &&
-		s.EnableDynamicField == other.EnableDynamicField &&
 		checkFunctionEqual(s.Functions, other.Functions)
 }
 
@@ -83,13 +75,11 @@ func MarshalStructArrayFieldModel(structArrayField *StructArrayField) *schemapb.
 	}
 
 	return &schemapb.StructArrayFieldSchema{
-		FieldID:            structArrayField.FieldID,
-		Name:               structArrayField.Name,
-		Description:        structArrayField.Description,
-		Fields:             MarshalFieldModels(structArrayField.Fields),
-		TypeParams:         structArrayField.TypeParams,
-		Functions:          MarshalFunctionModels(structArrayField.Functions),
-		EnableDynamicField: structArrayField.EnableDynamicField,
+		FieldID:     structArrayField.FieldID,
+		Name:        structArrayField.Name,
+		Description: structArrayField.Description,
+		Fields:      MarshalFieldModels(structArrayField.Fields),
+		Functions:   MarshalFunctionModels(structArrayField.Functions),
 	}
 }
 
@@ -111,13 +101,11 @@ func UnmarshalStructArrayFieldModel(fieldSchema *schemapb.StructArrayFieldSchema
 	}
 
 	return &StructArrayField{
-		FieldID:            fieldSchema.FieldID,
-		Name:               fieldSchema.Name,
-		Description:        fieldSchema.Description,
-		Fields:             UnmarshalFieldModels(fieldSchema.Fields),
-		TypeParams:         fieldSchema.TypeParams,
-		Functions:          UnmarshalFunctionModels(fieldSchema.Functions),
-		EnableDynamicField: fieldSchema.EnableDynamicField,
+		FieldID:     fieldSchema.FieldID,
+		Name:        fieldSchema.Name,
+		Description: fieldSchema.Description,
+		Fields:      UnmarshalFieldModels(fieldSchema.Fields),
+		Functions:   UnmarshalFunctionModels(fieldSchema.Functions),
 	}
 }
 
