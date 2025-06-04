@@ -3,7 +3,6 @@ package model
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/assert"
 )
@@ -97,34 +96,6 @@ func TestUnmarshalStructArrayFieldModels(t *testing.T) {
 }
 
 func TestStructArrayField_Equal(t *testing.T) {
-	function1 := &Function{
-		Name:             "func1",
-		ID:               1,
-		Description:      "test function 1",
-		Type:             schemapb.FunctionType_BM25,
-		InputFieldIDs:    []int64{1, 2},
-		InputFieldNames:  []string{"input1", "input2"},
-		OutputFieldIDs:   []int64{3},
-		OutputFieldNames: []string{"output1"},
-		Params: []*commonpb.KeyValuePair{
-			{Key: "param1", Value: "value1"},
-		},
-	}
-
-	function2 := &Function{
-		Name:             "func2",
-		ID:               2,
-		Description:      "test function 2",
-		Type:             schemapb.FunctionType_TextEmbedding,
-		InputFieldIDs:    []int64{4, 5},
-		InputFieldNames:  []string{"input3", "input4"},
-		OutputFieldIDs:   []int64{6},
-		OutputFieldNames: []string{"output2"},
-		Params: []*commonpb.KeyValuePair{
-			{Key: "param2", Value: "value2"},
-		},
-	}
-
 	field1 := &Field{
 		FieldID:     1,
 		Name:        "field1",
@@ -156,14 +127,12 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1, field2},
-					Functions:   []*Function{function1},
 				},
 				structArrayFieldB: StructArrayField{
 					FieldID:     1,
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1, field2},
-					Functions:   []*Function{function1},
 				},
 			},
 			want: true,
@@ -176,14 +145,12 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
 					FieldID:     2,
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 			},
 			want: false,
@@ -196,14 +163,12 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field_1",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
 					FieldID:     1,
 					Name:        "struct_field_2",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 			},
 			want: false,
@@ -216,14 +181,12 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field 1",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
 					FieldID:     1,
 					Name:        "struct_field",
 					Description: "test struct field 2",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 			},
 			want: false,
@@ -236,34 +199,12 @@ func TestStructArrayField_Equal(t *testing.T) {
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field1},
-					Functions:   []*Function{},
 				},
 				structArrayFieldB: StructArrayField{
 					FieldID:     1,
 					Name:        "struct_field",
 					Description: "test struct field",
 					Fields:      []*Field{field2},
-					Functions:   []*Function{},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "different Functions",
-			args: args{
-				structArrayFieldA: StructArrayField{
-					FieldID:     1,
-					Name:        "struct_field",
-					Description: "test struct field",
-					Fields:      []*Field{field1},
-					Functions:   []*Function{function1},
-				},
-				structArrayFieldB: StructArrayField{
-					FieldID:     1,
-					Name:        "struct_field",
-					Description: "test struct field",
-					Fields:      []*Field{field1},
-					Functions:   []*Function{function2},
 				},
 			},
 			want: false,
