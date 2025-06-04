@@ -69,6 +69,9 @@ type searchTask struct {
 	isTopkReduce           bool
 	isRecallEvaluation     bool
 
+	// cached partition key values, used for requery
+	partitionKeyValues []*planpb.GenericValue
+
 	translatedOutputFields []string
 	userOutputFields       []string
 	userDynamicFields      []string
@@ -587,6 +590,7 @@ func (t *searchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int6
 		return nil, err
 	}
 	partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
+	t.partitionKeyValues = partitionKeys
 	hashedPartitionNames, err := assignPartitionKeys(t.ctx, t.request.GetDbName(), t.collectionName, partitionKeys)
 	if err != nil {
 		log.Ctx(t.ctx).Warn("failed to assign partition keys", zap.Error(err))
@@ -944,7 +948,17 @@ func (t *searchTask) Requery(span trace.Span) error {
 		return err
 	}
 	ids := t.result.GetResults().GetIds()
-	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+
+	var plan *planpb.PlanNode
+	if t.partitionKeyMode && len(t.partitionKeyValues) != 0 {
+		partKeyField, err := typeutil.GetPartitionKeyFieldSchema(t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
+		plan = planparserv2.CreateRequeryPlanWithPartitionKeys(pkField, ids, partKeyField, t.partitionKeyValues)
+	} else {
+		plan = planparserv2.CreateRequeryPlan(pkField, ids)
+	}
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range t.queryChannelsTs {
 		channelsMvcc[k] = v
