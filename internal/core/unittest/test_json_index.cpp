@@ -212,7 +212,7 @@ TEST(JsonIndexTest, TestJsonCast) {
         JsonCastType::FromString("DOUBLE"),
         json_path,
         file_manager_ctx,
-        "DOUBLE");
+        "STRING_TO_DOUBLE");
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
@@ -236,11 +236,10 @@ TEST(JsonIndexTest, TestJsonCast) {
     load_index_info.index_params = {{JSON_PATH, json_path}};
     segment->LoadIndex(load_index_info);
 
-    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
-                  .GetRemoteChunkManager();
-    auto load_info = PrepareSingleFieldInsertBinlog(
-        0, 0, 0, json_fid.get(), {json_field}, cm);
-    segment->LoadFieldData(load_info);
+    auto field_data_info = FieldDataInfo{json_fid.get(),
+                                         json_raw_data.size(),
+                                         std::vector<FieldDataPtr>{json_field}};
+    segment->LoadFieldData(json_fid, field_data_info);
 
     std::vector<std::tuple<proto::plan::GenericValue, std::vector<int64_t>>>
         test_cases;
