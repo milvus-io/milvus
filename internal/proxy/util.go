@@ -501,7 +501,8 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, structArrayField := range schema.StructArrayFields {
 		for _, field := range structArrayField.Fields {
 			if field.GetDataType() != schemapb.DataType_Array || field.GetElementType() != schemapb.DataType_ArrayOfVector {
-
+				return errors.Newf("fields in StructArrayField must be Array or ArrayOfVector, field name = %s, field type = %s",
+					field.GetName(), field.GetDataType().String())
 			}
 		}
 	}

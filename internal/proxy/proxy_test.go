@@ -5070,10 +5070,9 @@ func TestProxy_StructArrayField(t *testing.T) {
 			AutoID:      false,
 		}
 		structF := &schemapb.StructArrayFieldSchema{
-			FieldID:            105,
-			Name:               structField,
-			EnableDynamicField: false,
-			Fields:             []*schemapb.FieldSchema{sId, sVec},
+			FieldID: 105,
+			Name:    structField,
+			Fields:  []*schemapb.FieldSchema{sId, sVec},
 		}
 		return &schemapb.CollectionSchema{
 			Name:        collectionName,
