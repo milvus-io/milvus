@@ -221,7 +221,7 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 				logger.Warn("fail to append flush message for segments that not created by streaming service into wal", zap.Error(err))
 				return err
 			}
-			impl.logger.Info("append flush message for segments that not created by streaming service into wal", zap.Stringer("msgID", appendResult.MessageID), zap.Uint64("timeTick", appendResult.TimeTick))
+			logger.Info("append flush message for segments that not created by streaming service into wal", zap.Stringer("msgID", appendResult.MessageID), zap.Uint64("timeTick", appendResult.TimeTick))
 			return nil
 		}, retry.AttemptAlways()); err != nil {
 			return nil, err
