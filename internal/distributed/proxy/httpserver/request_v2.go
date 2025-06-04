@@ -692,3 +692,5 @@ func (req *GetSegmentsInfoReq) GetCollectionID() int64 {
 func (req *GetSegmentsInfoReq) GetSegmentIDs() []int64 {
 	return req.SegmentIDs
 }
+
+type GetQuotaMetricsReq struct{}

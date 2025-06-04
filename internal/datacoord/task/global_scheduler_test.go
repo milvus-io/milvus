@@ -210,8 +210,8 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		scheduler.Enqueue(task)
 		assert.Eventually(t, func() bool {
 			s := scheduler.(*globalTaskScheduler)
-			s.mu.RLock(task.GetTaskID())
-			defer s.mu.RUnlock(task.GetTaskID())
+			s.mu.RLock(1)
+			defer s.mu.RUnlock(1)
 			return task.GetTaskState() == taskcommon.Retry &&
 				s.runningTasks.Len() == 0 && len(s.pendingTasks.TaskIDs()) == 1
 		}, 10*time.Second, 10*time.Millisecond)

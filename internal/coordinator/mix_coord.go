@@ -1059,3 +1059,7 @@ func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, 
 func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
 }
+
+func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return s.rootcoordServer.GetQuotaMetrics(ctx, req)
+}

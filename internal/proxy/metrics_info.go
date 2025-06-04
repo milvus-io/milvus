@@ -38,7 +38,7 @@ type (
 )
 
 // getQuotaMetrics returns ProxyQuotaMetrics.
-func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
+func getQuotaMetrics(node *Proxy) (*metricsinfo.ProxyQuotaMetrics, error) {
 	var err error
 	rms := make([]metricsinfo.RateMetric, 0)
 	getRateMetric := func(label string) {
@@ -77,14 +77,15 @@ func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
 		return nil, err
 	}
 	return &metricsinfo.ProxyQuotaMetrics{
-		Hms: metricsinfo.HardwareMetrics{},
-		Rms: rms,
+		Hms:          metricsinfo.HardwareMetrics{},
+		Rms:          rms,
+		QueueMetrics: node.sched.getMetrics(),
 	}, nil
 }
 
 // getProxyMetrics get metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func getProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, node *Proxy) (*milvuspb.GetMetricsResponse, error) {
-	quotaMetrics, err := getQuotaMetrics()
+	quotaMetrics, err := getQuotaMetrics(node)
 	if err != nil {
 		return nil, err
 	}

@@ -36,6 +36,7 @@ const (
 	CollectionFieldCategory = "/collections/fields/"
 	ResourceGroupCategory   = "/resource_groups/"
 	SegmentCategory         = "/segments/"
+	QuotaCenterCategory     = "/quotacenter/"
 
 	ListAction           = "list"
 	HasAction            = "has"

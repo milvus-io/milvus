@@ -2724,3 +2724,32 @@ func TestSearchV2(t *testing.T) {
 	})
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
+
+func TestGetQuotaMetrics(t *testing.T) {
+	paramtable.Init()
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().GetQuotaMetrics(mock.Anything, mock.Anything).Return(&internalpb.GetQuotaMetricsResponse{
+		Status:      &StatusSuccess,
+		MetricsInfo: `{"proxy1": "1000", "proxy2": "2000"}`,
+	}, nil)
+	testEngine := initHTTPServerV2(mp, false)
+	testcase := requestBodyTestCase{
+		path:        DescribeAction,
+		requestBody: []byte(`{}`),
+	}
+
+	bodyReader := bytes.NewReader(testcase.requestBody)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(QuotaCenterCategory, testcase.path), bodyReader)
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "case %d: ", string(testcase.requestBody))
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.Nil(t, err)
+	assert.Equal(t, testcase.errCode, returnBody.Code, "case: %d, request body: %s ", string(testcase.requestBody))
+	if testcase.errCode != 0 {
+		assert.Contains(t, returnBody.Message, testcase.errMsg, "case: %d, request body: %s", string(testcase.requestBody))
+	}
+	fmt.Println(w.Body.String())
+}
