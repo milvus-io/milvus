@@ -302,7 +302,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
 
 	// seg l0 segment exist on a non delegator node
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
@@ -859,6 +859,385 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 	checker.meta.CollectionManager.RemovePartition(ctx, partitionID)
 	result = checker.filterOutSegmentInUse(ctx, replica, []*meta.Segment{segments[0]})
 	suite.Len(result, 0, "Should release all segments when partition is nil")
+}
+
+func (suite *SegmentCheckerTestSuite) TestgetSealedSegmentDiff() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Setup meta
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	checker.meta.ReplicaManager.Put(ctx, replica)
+
+	// Setup nodes
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	// Test case 1: L0 segments have priority
+	l0Segments := []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+			Level:         datapb.SegmentLevel_L0,
+		},
+	}
+	normalSegments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+			Level:         datapb.SegmentLevel_L1,
+		},
+	}
+
+	// Mock broker to return both L0 and normal segments
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		[]*datapb.VchannelInfo{{CollectionID: 1, ChannelName: "test-channel"}},
+		append(l0Segments, normalSegments...), nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	// Setup distribution - L0 segment missing
+	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-channel"))
+	checker.dist.LeaderViewManager.Update(1, utils.CreateTestLeaderView(1, 1, "test-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+
+	toLoad, toRelease := checker.getSealedSegmentDiff(ctx, 1, 1)
+
+	// Should prioritize L0 segments
+	suite.Len(toLoad, 1)
+	suite.EqualValues(100, toLoad[0].ID)
+	suite.Equal(datapb.SegmentLevel_L0, toLoad[0].Level)
+	suite.Len(toRelease, 0)
+
+	// Test case 2: No L0 segments, process normal segments
+	// Setup with normal segments only
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		[]*datapb.VchannelInfo{{CollectionID: 1, ChannelName: "test-channel"}},
+		normalSegments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	toLoad, _ = checker.getSealedSegmentDiff(ctx, 1, 1)
+
+	// Should process normal segments when no L0 segments
+	suite.Len(toLoad, 1)
+	suite.EqualValues(1, toLoad[0].ID)
+	suite.Equal(datapb.SegmentLevel_L1, toLoad[0].Level)
+
+	// Test case 3: Segment exists in dist but not in target - should be released
+	segmentInDist := utils.CreateTestSegment(1, 1, 999, 1, 1, "test-channel")
+	segmentInDist.Level = datapb.SegmentLevel_L1
+	checker.dist.SegmentDistManager.Update(1, segmentInDist)
+
+	_, toRelease = checker.getSealedSegmentDiff(ctx, 1, 1)
+
+	// Should release segment that exists in dist but not in target
+	suite.Len(toRelease, 1)
+	suite.EqualValues(999, toRelease[0].GetID())
+
+	// Test case 4: Non-existent replica
+	toLoad, toRelease = checker.getSealedSegmentDiff(ctx, 1, 999)
+	suite.Len(toLoad, 0)
+	suite.Len(toRelease, 0)
+}
+
+func (suite *SegmentCheckerTestSuite) TestSegmentDiffEdgeCases() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Setup meta
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	checker.meta.ReplicaManager.Put(ctx, replica)
+
+	// Setup nodes
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	// Test edge case: getSealedSegmentDiff with segments in both current and next target
+	normalSegment := &datapb.SegmentInfo{
+		ID:            1000,
+		PartitionID:   1,
+		InsertChannel: "test-channel",
+		Level:         datapb.SegmentLevel_L1,
+	}
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-channel",
+		},
+	}
+
+	// Setup current target
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, []*datapb.SegmentInfo{normalSegment}, nil)
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
+
+	// Setup next target with same segment
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, []*datapb.SegmentInfo{normalSegment}, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	// Setup channel distribution
+	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-channel"))
+
+	toLoad, toRelease := checker.getSealedSegmentDiff(ctx, 1, 1)
+
+	// Should load segment that exists in next target but not in dist
+	suite.Len(toLoad, 1)
+	suite.EqualValues(1000, toLoad[0].ID)
+	suite.Len(toRelease, 0)
+}
+
+func (suite *SegmentCheckerTestSuite) TestGetL0SegmentDiff() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Setup meta
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	checker.meta.ReplicaManager.Put(ctx, replica)
+
+	// Setup nodes
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	// Test case 1: L0 segment in target but not on delegator
+	l0Segment := &datapb.SegmentInfo{
+		ID:            100,
+		PartitionID:   1,
+		InsertChannel: "test-channel",
+		Level:         datapb.SegmentLevel_L0,
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		[]*datapb.VchannelInfo{{CollectionID: 1, ChannelName: "test-channel"}},
+		[]*datapb.SegmentInfo{l0Segment}, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	// Setup channel distribution
+	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-channel"))
+
+	// Setup leader view without the L0 segment
+	checker.dist.LeaderViewManager.Update(1, utils.CreateTestLeaderView(1, 1, "test-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+
+	toLoad, toRelease := checker.getL0SegmentDiff(ctx, 1, 1)
+
+	// Should load L0 segment that's missing from delegator
+	suite.Len(toLoad, 1)
+	suite.EqualValues(100, toLoad[0].ID)
+	suite.Equal(datapb.SegmentLevel_L0, toLoad[0].Level)
+	suite.Len(toRelease, 0)
+
+	// Test case 2: L0 segment exists on delegator
+	// Setup leader view with the L0 segment
+	segmentOnLeader := utils.CreateTestSegment(1, 1, 100, 1, 1, "test-channel")
+	segmentOnLeader.Level = datapb.SegmentLevel_L0
+	checker.dist.LeaderViewManager.Update(1, utils.CreateTestLeaderView(1, 1, "test-channel", map[int64]int64{100: 1}, map[int64]*meta.Segment{100: segmentOnLeader}))
+
+	toLoad, toRelease = checker.getL0SegmentDiff(ctx, 1, 1)
+
+	// Should not load segment that already exists on delegator
+	suite.Len(toLoad, 0)
+	suite.Len(toRelease, 0)
+
+	// Test case 3: L0 segment in dist but not on delegator - should be released
+	l0SegmentInDist := utils.CreateTestSegment(1, 1, 200, 2, 1, "test-channel")
+	l0SegmentInDist.Level = datapb.SegmentLevel_L0
+	checker.dist.SegmentDistManager.Update(2, l0SegmentInDist)
+
+	_, toRelease = checker.getL0SegmentDiff(ctx, 1, 1)
+
+	// Should release L0 segment that's not on delegator
+	suite.Len(toRelease, 1)
+	suite.EqualValues(200, toRelease[0].GetID())
+
+	// Test case 4: L0 segment exists in dist but not in target
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, 1)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+
+	l0SegmentOrphan := utils.CreateTestSegment(1, 1, 300, 1, 1, "test-channel")
+	l0SegmentOrphan.Level = datapb.SegmentLevel_L0
+	checker.dist.SegmentDistManager.Update(1, l0SegmentOrphan)
+
+	_, toRelease = checker.getL0SegmentDiff(ctx, 1, 1)
+
+	// Should release orphan L0 segment
+	suite.Len(toRelease, 2) // Both segment 200 and 300 should be released
+	segmentIDs := []int64{toRelease[0].GetID(), toRelease[1].GetID()}
+	suite.Contains(segmentIDs, int64(200))
+	suite.Contains(segmentIDs, int64(300))
+
+	// Test case 5: Non-existent replica
+	toLoad, toRelease = checker.getL0SegmentDiff(ctx, 1, 999)
+	suite.Len(toLoad, 0)
+	suite.Len(toRelease, 0)
+}
+
+func (suite *SegmentCheckerTestSuite) TestReadyToCheck() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Test case 1: Collection exists and ready
+	suite.broker.ExpectedCalls = nil
+	l0SegmentInfo := &datapb.SegmentInfo{
+		ID:            200,
+		PartitionID:   1,
+		InsertChannel: "test-channel",
+		Level:         datapb.SegmentLevel_L0,
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, []*datapb.SegmentInfo{l0SegmentInfo}, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	ready := checker.readyToCheck(ctx, 1)
+	suite.True(ready)
+
+	// Test case 2: Collection doesn't exist
+	ready = checker.readyToCheck(ctx, 999)
+	suite.False(ready)
+}
+
+func (suite *SegmentCheckerTestSuite) TestFindRepeatedSealedSegments() {
+	ctx := context.Background()
+	checker := suite.checker
+
+	// Setup meta
+	checker.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	checker.meta.ReplicaManager.Put(ctx, replica)
+
+	// Setup nodes
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 1)
+	checker.meta.ResourceManager.HandleNodeUp(ctx, 2)
+
+	// Test case 1: Non-existent replica
+	repeatedSegments := checker.findRepeatedSealedSegments(ctx, 999)
+	suite.Len(repeatedSegments, 0)
+
+	// Test case 2: No repeated segments
+	segment1 := utils.CreateTestSegment(1, 1, 100, 1, 1, "test-channel")
+	segment1.Level = datapb.SegmentLevel_L1
+	segment1.Version = 1
+	checker.dist.SegmentDistManager.Update(1, segment1)
+
+	// Setup target
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+			Level:         datapb.SegmentLevel_L1,
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, segments, nil)
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
+
+	repeatedSegments = checker.findRepeatedSealedSegments(ctx, 1)
+	suite.Len(repeatedSegments, 0)
+
+	// Test case 3: Has repeated segments with different versions
+	segment2 := utils.CreateTestSegment(1, 1, 100, 2, 1, "test-channel")
+	segment2.Level = datapb.SegmentLevel_L1
+	segment2.Version = 2 // Higher version
+	checker.dist.SegmentDistManager.Update(2, segment2)
+
+	repeatedSegments = checker.findRepeatedSealedSegments(ctx, 1)
+	suite.Len(repeatedSegments, 1)
+	suite.EqualValues(100, repeatedSegments[0].GetID())
+	suite.EqualValues(1, repeatedSegments[0].Version) // Lower version should be returned
+
+	// Test case 4: L0 segments should be skipped
+	l0Segment := utils.CreateTestSegment(1, 1, 200, 1, 1, "test-channel")
+	l0Segment.Level = datapb.SegmentLevel_L0
+	l0Segment.Version = 1
+	checker.dist.SegmentDistManager.Update(1, l0Segment)
+
+	l0Segment2 := utils.CreateTestSegment(1, 1, 200, 2, 1, "test-channel")
+	l0Segment2.Level = datapb.SegmentLevel_L0
+	l0Segment2.Version = 2
+	checker.dist.SegmentDistManager.Update(2, l0Segment2)
+
+	// Setup L0 segment in target
+	l0SegmentInfo := &datapb.SegmentInfo{
+		ID:            200,
+		PartitionID:   1,
+		InsertChannel: "test-channel",
+		Level:         datapb.SegmentLevel_L0,
+	}
+	channels = []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-channel",
+		},
+	}
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(channels, []*datapb.SegmentInfo{l0SegmentInfo}, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
+
+	repeatedSegments = checker.findRepeatedSealedSegments(ctx, 1)
+	// L0 segments should not be included in repeated segments
+	for _, seg := range repeatedSegments {
+		suite.NotEqual(int64(200), seg.GetID())
+	}
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {

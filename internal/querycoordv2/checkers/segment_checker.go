@@ -18,10 +18,8 @@ package checkers
 
 import (
 	"context"
-	"sort"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -231,51 +229,26 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	collectionID int64,
 	replicaID int64,
 ) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+	// deal with l0 segment first
+	l0ToLoad, l0ToRelease := c.getL0SegmentDiff(ctx, collectionID, replicaID)
+	if len(l0ToLoad) > 0 || len(l0ToRelease) > 0 {
+		return l0ToLoad, l0ToRelease
+	}
+
+	// deal with other segments
 	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
 		return
 	}
-	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
-	sort.Slice(dist, func(i, j int) bool {
-		return dist[i].Version < dist[j].Version
-	})
-	distMap := make(map[int64]int64)
-	for _, s := range dist {
-		distMap[s.GetID()] = s.Node
-	}
 
-	versionRangeFilter := semver.MustParseRange(">2.3.x")
-	checkLeaderVersion := func(leader *meta.LeaderView, segmentID int64) bool {
-		// if current shard leader's node version < 2.4, skip load L0 segment
-		info := c.nodeMgr.Get(leader.ID)
-		if info != nil && !versionRangeFilter(info.Version()) {
-			log.Warn("l0 segment is not supported in current node version, skip it",
-				zap.Int64("collection", replica.GetCollectionID()),
-				zap.Int64("segmentID", segmentID),
-				zap.String("channel", leader.Channel),
-				zap.Int64("leaderID", leader.ID),
-				zap.String("nodeVersion", info.Version().String()))
-			return false
-		}
-		return true
-	}
+	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica), meta.WithoutLevel(datapb.SegmentLevel_L0))
+	distMap := lo.GroupBy(dist, func(s *meta.Segment) int64 {
+		return s.GetID()
+	})
 
 	isSegmentLack := func(segment *datapb.SegmentInfo) bool {
-		node, existInDist := distMap[segment.ID]
-
-		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
-
-			// if the leader node's version doesn't match load l0 segment's requirement, skip it
-			if leader != nil && checkLeaderVersion(leader, segment.ID) {
-				l0WithWrongLocation := node != leader.ID
-				return !existInDist || l0WithWrongLocation
-			}
-			return false
-		}
-
+		_, existInDist := distMap[segment.ID]
 		return !existInDist
 	}
 
@@ -285,6 +258,9 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
 		if isSegmentLack(segment) {
 			toLoad = append(toLoad, segment)
 		}
@@ -297,6 +273,10 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 			continue
 		}
 
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+
 		if isSegmentLack(segment) {
 			toLoad = append(toLoad, segment)
 		}
@@ -306,24 +286,91 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	for _, segment := range dist {
 		_, existOnCurrent := currentTargetMap[segment.GetID()]
 		_, existOnNext := nextTargetMap[segment.GetID()]
-
-		// l0 segment should be release with channel together
 		if !existOnNext && nextTargetExist && !existOnCurrent {
 			toRelease = append(toRelease, segment)
 		}
 	}
 
-	level0Segments := lo.Filter(toLoad, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetLevel() == datapb.SegmentLevel_L0
-	})
-	// L0 segment found,
-	// QueryCoord loads the L0 segments first,
-	// to make sure all L0 delta logs will be delivered to the other segments.
-	if len(level0Segments) > 0 {
-		toLoad = level0Segments
+	return
+}
+
+func (c *SegmentChecker) getL0SegmentDiff(ctx context.Context, collectionID int64, replicaID int64) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+	replica := c.meta.Get(ctx, replicaID)
+	if replica == nil {
+		log.Info("replica does not exist, skip it")
+		return
 	}
 
-	return
+	// make sure that l0 segment is loaded on latest delegator node, if not, add it to toLoad
+	isL0SegmentLack := func(segment *datapb.SegmentInfo) bool {
+		leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
+		if leader != nil && leader.Segments[segment.ID] == nil {
+			return true
+		}
+		return false
+	}
+
+	// make sure that l0 segment is loaded on delegator node, if not, add it to toRelease
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithReplica2Channel(replica))
+	delegatorMap := lo.GroupBy(delegatorList, func(c *meta.DmChannel) string {
+		return c.GetChannelName()
+	})
+	checkL0ExistOnDelegator := func(segment *meta.Segment) bool {
+		delegatorList := delegatorMap[segment.GetInsertChannel()]
+		for _, delegator := range delegatorList {
+			if delegator.Node == segment.Node {
+				return true
+			}
+		}
+		return false
+	}
+
+	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
+	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+
+	l0Dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica), meta.WithLevel(datapb.SegmentLevel_L0))
+
+	// l0 segment which exist on next target, but not on delegator
+	for _, segment := range nextTargetMap {
+		if segment.GetLevel() != datapb.SegmentLevel_L0 {
+			continue
+		}
+		if isL0SegmentLack(segment) {
+			toLoad = append(toLoad, segment)
+		}
+	}
+
+	// l0 Segment which exist on current target, but not on delegator
+	for _, segment := range currentTargetMap {
+		// to avoid generate duplicate segment task
+		if nextTargetMap[segment.ID] != nil {
+			continue
+		}
+
+		if segment.GetLevel() != datapb.SegmentLevel_L0 {
+			continue
+		}
+
+		if isL0SegmentLack(segment) {
+			toLoad = append(toLoad, segment)
+		}
+	}
+
+	for _, segment := range l0Dist {
+		if !checkL0ExistOnDelegator(segment) {
+			toRelease = append(toRelease, segment)
+			continue
+		}
+
+		_, existOnCurrent := currentTargetMap[segment.GetID()]
+		_, existOnNext := nextTargetMap[segment.GetID()]
+		if !existOnNext && nextTargetExist && !existOnCurrent {
+			toRelease = append(toRelease, segment)
+		}
+	}
+
+	return toLoad, toRelease
 }
 
 func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replicaID int64) []*meta.Segment {
