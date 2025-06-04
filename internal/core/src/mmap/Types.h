@@ -31,10 +31,12 @@ struct FieldDataInfo {
 
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
-                  std::string mmap_dir_path = "")
+                  std::string mmap_dir_path = "",
+                  bool in_list = false)
         : field_id(field_id),
           row_count(row_count),
-          mmap_dir_path(std::move(mmap_dir_path)) {
+          mmap_dir_path(std::move(mmap_dir_path)),
+          in_load_list(in_list) {
         arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
     }
 
@@ -42,5 +44,6 @@ struct FieldDataInfo {
     size_t row_count;
     std::string mmap_dir_path;
     std::shared_ptr<ArrowReaderChannel> arrow_reader_channel;
+    bool in_load_list = false;
 };
 }  // namespace milvus
