@@ -544,7 +544,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
 			return isSegmentHealthy(segment) &&
-				isFlush(segment) &&
+				isFlushed(segment) &&
 				!segment.isCompacting && // not compacting now
 				!segment.GetIsImporting() && // not importing now
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
