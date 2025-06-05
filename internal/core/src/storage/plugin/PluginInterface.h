@@ -9,6 +9,8 @@
 using ByteArray = std::shared_ptr<uint8_t[]>;
 
 namespace milvus::storage{
+namespace plugin{
+
 
 class IEncryptor;
 class IDecryptor;
@@ -48,4 +50,5 @@ public:
 };
 
 
+} // namspace plugin
 } // namespace milvus::storage
