@@ -251,8 +251,7 @@ TEST(JsonIndexTest, TestJsonCast) {
         auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
             expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
             proto::plan::OpType::Equal,
-            value,
-            std::vector<proto::plan::GenericValue>{});
+            value);
 
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
