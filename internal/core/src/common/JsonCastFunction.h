@@ -17,7 +17,9 @@
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
+
 namespace milvus {
+
 class JsonCastFunction {
  public:
     enum class Type {
