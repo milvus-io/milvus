@@ -812,9 +812,14 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		if err != nil {
 			return merr.Status(err), nil
 		}
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
 		return node.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
-			TaskIDs: []int64{taskID},
-			JobType: jobType,
+			ClusterID: clusterID,
+			TaskIDs:   []int64{taskID},
+			JobType:   jobType,
 		})
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
