@@ -2,7 +2,7 @@
 
 #include <dlfcn.h>
 #include <memory>
-#include "storage/PluginInterface.h"
+#include "storage/plugin/PluginInterface.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
 
@@ -33,7 +33,7 @@ public:
         // Rest error flags
         dlerror();
 
-        auto createPlugin = reinterpret_cast<std::unique_ptr<IPlugin> (*)()>(dlsym(handle, "CreatePlugin"));
+        auto createPlugin = reinterpret_cast<std::unique_ptr<milvus::storage::plugin::IPlugin> (*)()>(dlsym(handle, "CreatePlugin"));
         const char* error =dlerror();
         if (error) {
             dlclose(handle);
@@ -72,16 +72,16 @@ public:
         handles_.clear();
     }
 
-    std::shared_ptr<ICipherPlugin>
+    std::shared_ptr<milvus::storage::plugin::ICipherPlugin>
     getCipherPlugin(){
         auto p = getPlugin("cipher");
         if (!p) {
             return nullptr;
         }
-        return std::dynamic_pointer_cast<ICipherPlugin>(p);
+        return std::dynamic_pointer_cast<milvus::storage::plugin::ICipherPlugin>(p);
     }
 
-    std::shared_ptr<IPlugin>
+    std::shared_ptr<milvus::storage::plugin::IPlugin>
     getPlugin(const std::string& name) {
         auto it = plugins_.find(name);
         return it != plugins_.end() ? it->second : nullptr;
@@ -114,7 +114,7 @@ private:
     PluginLoader() {}
 
     std::map<std::string, void*> handles_;
-    std::map<std::string, std::shared_ptr<IPlugin>> plugins_;
+    std::map<std::string, std::shared_ptr<milvus::storage::plugin::IPlugin>> plugins_;
 };
 
 } // namespace milvus::storage
