@@ -20,9 +20,7 @@ namespace milvus {
 
 std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
-std::map<ThreadPoolPriority, std::string> ThreadPools::name_map;
 std::shared_mutex ThreadPools::mutex_;
-std::once_flag ThreadPools::init_flag;
 
 void
 ThreadPools::ShutDown() {
@@ -35,7 +33,6 @@ ThreadPools::ShutDown() {
 
 ThreadPool&
 ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
-    std::call_once(ThreadPools::init_flag, &ThreadPools::initNameMap);
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto iter = thread_pool_map.find(priority);
     if (iter != thread_pool_map.end()) {
@@ -53,7 +50,7 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
                 coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
                 break;
         }
-        std::string name = name_map[priority];
+        std::string name = name_map()[priority];
         auto result = thread_pool_map.emplace(
             priority, std::make_unique<ThreadPool>(coefficient, name));
         return *(result.first->second);
