@@ -194,10 +194,6 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 	preimports := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
 	lacks := make(map[int64]*datapb.ImportFileStats, 0)
 	for _, t := range preimports {
-		if t.GetState() != datapb.ImportTaskStateV2_Completed {
-			// Preimport tasks are not fully completed, thus generating imports should not be triggered.
-			return nil
-		}
 		for _, stat := range t.GetFileStats() {
 			lacks[stat.GetImportFile().GetId()] = stat
 		}
@@ -245,6 +241,37 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
+
+	preimports := c.importMeta.GetTaskBy(c.ctx, WithType(PreImportTaskType), WithJob(job.GetJobID()))
+	totalRows := int64(0)
+	for _, t := range preimports {
+		if t.GetState() != datapb.ImportTaskStateV2_Completed {
+			// Preimport tasks are not fully completed, thus generating imports should not be triggered.
+			return
+		}
+		totalRows += lo.SumBy(t.GetFileStats(), func(stat *datapb.ImportFileStats) int64 {
+			return stat.GetTotalRows()
+		})
+	}
+
+	updateJobState := func(state internalpb.ImportJobState, actions ...UpdateJobAction) {
+		actions = append(actions, UpdateJobState(state))
+		err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), actions...)
+		if err != nil {
+			log.Warn("failed to update job state to Importing", zap.Error(err))
+			return
+		}
+		preImportDuration := job.GetTR().RecordSpan()
+		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
+		log.Info("import job preimport done", zap.String("state", state.String()), zap.Duration("jobTimeCost/preimport", preImportDuration))
+	}
+
+	if totalRows == 0 {
+		log.Info("no data to import, skip the subsequent stages, just update job state to Completed")
+		updateJobState(internalpb.ImportJobState_Completed)
+		return
+	}
+
 	lacks := c.getLackFilesForImports(job)
 	if len(lacks) == 0 {
 		return
@@ -253,10 +280,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	requestSize, err := CheckDiskQuota(c.ctx, job, c.meta, c.importMeta)
 	if err != nil {
 		log.Warn("import failed, disk quota exceeded", zap.Error(err))
-		err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
-		if err != nil {
-			log.Warn("failed to update job state to Failed", zap.Error(err))
-		}
+		updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
 		return
 	}
 
@@ -271,23 +295,13 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		err = c.importMeta.AddTask(c.ctx, t)
 		if err != nil {
 			log.Warn("add new import task failed", WrapTaskLog(t, zap.Error(err))...)
-			updateErr := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error()))
-			if updateErr != nil {
-				log.Warn("failed to update job state to Failed", zap.Error(updateErr))
-			}
+			updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
 			return
 		}
 		log.Info("add new import task", WrapTaskLog(t)...)
 	}
 
-	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing), UpdateRequestedDiskSize(requestSize))
-	if err != nil {
-		log.Warn("failed to update job state to Importing", zap.Error(err))
-		return
-	}
-	preImportDuration := job.GetTR().RecordSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
-	log.Info("import job preimport done", zap.Duration("jobTimeCost/preimport", preImportDuration))
+	updateJobState(internalpb.ImportJobState_Importing, UpdateRequestedDiskSize(requestSize))
 }
 
 func (c *importChecker) checkImportingJob(job ImportJob) {
@@ -318,7 +332,7 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 		}
 		statsDuration := job.GetTR().RecordSpan()
 		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageStats).Observe(float64(statsDuration.Milliseconds()))
-		log.Info("import job stats done", zap.Duration("jobTimeCost/stats", statsDuration))
+		log.Info("import job stats done", zap.String("state", state.String()), zap.Duration("jobTimeCost/stats", statsDuration))
 	}
 
 	// Skip stats stage if not enable stats or is l0 import.
