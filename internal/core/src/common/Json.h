@@ -221,6 +221,18 @@ class Json {
         return pointer;
     }
 
+    auto
+    type(const std::string& pointer) const {
+        return pointer.empty() ? doc().type()
+                               : doc().at_pointer(pointer).type();
+    }
+
+    auto
+    get_number_type(const std::string& pointer) const {
+        return pointer.empty() ? doc().get_number_type()
+                               : doc().at_pointer(pointer).get_number_type();
+    }
+
     template <typename T>
     value_result<T>
     at(std::string_view pointer) const {
