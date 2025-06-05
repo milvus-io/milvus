@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -46,7 +47,8 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return nil
+
+	return hookutil.TidyDBCipherProperties(t.Req.Properties)
 }
 
 func (t *createDatabaseTask) Execute(ctx context.Context) error {

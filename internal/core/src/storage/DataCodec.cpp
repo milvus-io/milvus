@@ -20,6 +20,7 @@
 #include "storage/InsertData.h"
 #include "storage/IndexData.h"
 #include "storage/BinlogReader.h"
+#include "storage/PluginLoader.h"
 #include "common/EasyAssert.h"
 #include "common/Consts.h"
 
@@ -41,10 +42,29 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
                             descriptor_fix_part.segment_id,
                             descriptor_fix_part.field_id};
     EventHeader header(reader);
+    auto event_data_length = header.event_length_ - GetEventHeaderSize(header);
+
+    // get edek string from extras
+    auto edekStr = (extras.find(EDEK) != extras.end())
+                   ? std::any_cast<std::string>(extras[EDEK])
+                   : "";
+    if (edekStr.length() > 0) {
+        auto cipherPlugin = PluginLoader::GetInstance().getCipherPlugin();
+
+        int64_t ez_id = 0; // TODO GOOSE: get EZ_id
+        auto decryptor = cipherPlugin->GetDecryptor(ez_id, descriptor_fix_part.collection_id, edekStr);
+
+        auto out = reader->Read(event_data_length);
+        AssertInfo(out.first.ok(), "read binlog failed");
+
+        auto decrypted = decryptor->Decrypt(out.second);
+
+        reader = std::make_shared<BinlogReader>(decrypted.first, decrypted.second);
+        event_data_length = decrypted.second;
+    }
+
     switch (header.event_type_) {
         case EventType::InsertEvent: {
-            auto event_data_length =
-                header.event_length_ - GetEventHeaderSize(header);
             auto insert_event_data = InsertEventData(
                 reader, event_data_length, data_type, nullable, is_field_data);
 
@@ -57,8 +77,6 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
             return insert_data;
         }
         case EventType::IndexFileEvent: {
-            auto event_data_length =
-                header.event_length_ - GetEventHeaderSize(header);
             auto index_event_data =
                 IndexEventData(reader, event_data_length, data_type, nullable);
 

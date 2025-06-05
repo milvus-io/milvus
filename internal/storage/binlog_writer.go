@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
@@ -56,6 +57,7 @@ type baseBinlogWriter struct {
 	eventWriters []EventWriter
 	buffer       *bytes.Buffer
 	length       int32
+	encryptor    hook.Encryptor
 }
 
 func (writer *baseBinlogWriter) isClosed() bool {
@@ -117,13 +119,17 @@ func (writer *baseBinlogWriter) Finish() error {
 	}
 	offset += writer.descriptorEvent.GetMemoryUsageInBytes()
 
+	eventBuffer := writer.buffer
+	if writer.encryptor != nil {
+		eventBuffer = new(bytes.Buffer)
+	}
 	writer.length = 0
 	for _, w := range writer.eventWriters {
 		w.SetOffset(offset)
 		if err := w.Finish(); err != nil {
 			return err
 		}
-		if err := w.Write(writer.buffer); err != nil {
+		if err := w.Write(eventBuffer); err != nil {
 			return err
 		}
 		length, err := w.GetMemoryUsageInBytes()
@@ -136,6 +142,16 @@ func (writer *baseBinlogWriter) Finish() error {
 			return err
 		}
 		writer.length += int32(rows)
+	}
+
+	if writer.encryptor != nil {
+		encrypted, err := writer.encryptor.Encrypt(eventBuffer.Bytes())
+		if err != nil {
+			return err
+		}
+		if err := binary.Write(writer.buffer, common.Endian, encrypted); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -203,7 +219,10 @@ func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEvent
 }
 
 // NewInsertBinlogWriter creates InsertBinlogWriter to write binlog file.
-func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64, nullable bool) *InsertBinlogWriter {
+func NewInsertBinlogWriter(
+	dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64, nullable bool,
+	opts ...BinlogWriterOptions,
+) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
@@ -213,34 +232,57 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	// store nullable in extra for compatible
 	descriptorEvent.AddExtra(nullableKey, nullable)
 
-	w := &InsertBinlogWriter{
-		baseBinlogWriter: baseBinlogWriter{
-			descriptorEvent: *descriptorEvent,
-			magicNumber:     MagicNumber,
-			binlogType:      InsertBinlog,
-			eventWriters:    make([]EventWriter, 0),
-			buffer:          nil,
-		},
+	baseWriter := baseBinlogWriter{
+		descriptorEvent: *descriptorEvent,
+		magicNumber:     MagicNumber,
+		binlogType:      InsertBinlog,
+		eventWriters:    make([]EventWriter, 0),
+		buffer:          nil,
 	}
 
+	for _, opt := range opts {
+		opt(&baseWriter)
+	}
+
+	w := &InsertBinlogWriter{
+		baseBinlogWriter: baseWriter,
+	}
 	return w
 }
 
 // NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
-func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID int64) *DeleteBinlogWriter {
+func NewDeleteBinlogWriter(
+	dataType schemapb.DataType, collectionID, partitionID, segmentID int64,
+	opts ...BinlogWriterOptions,
+) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
+
+	baseWriter := baseBinlogWriter{
+		descriptorEvent: *descriptorEvent,
+		magicNumber:     MagicNumber,
+		binlogType:      InsertBinlog,
+		eventWriters:    make([]EventWriter, 0),
+		buffer:          nil,
+	}
+
+	for _, opt := range opts {
+		opt(&baseWriter)
+	}
 	w := &DeleteBinlogWriter{
-		baseBinlogWriter: baseBinlogWriter{
-			descriptorEvent: *descriptorEvent,
-			magicNumber:     MagicNumber,
-			binlogType:      DeleteBinlog,
-			eventWriters:    make([]EventWriter, 0),
-			buffer:          nil,
-		},
+		baseBinlogWriter: baseWriter,
 	}
 	return w
+}
+
+type BinlogWriterOptions func(base *baseBinlogWriter)
+
+func WithWriterEncryptionContext(encryptor hook.Encryptor, safeKey []byte) BinlogWriterOptions {
+	return func(base *baseBinlogWriter) {
+		base.descriptorEvent.AddExtra(edekKey, string(safeKey))
+		base.encryptor = encryptor
+	}
 }

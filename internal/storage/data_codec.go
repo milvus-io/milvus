@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -253,9 +254,20 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 	}
 
+	opts := []BinlogWriterOptions{}
+	if hookutil.IsClusterEncyptionEnabled() {
+		if ez := hookutil.GetEzByCollProperties(insertCodec.Schema.GetSchema().GetProperties(), insertCodec.Schema.ID); ez != nil {
+			encryptor, safeKey, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
+			if err != nil {
+				return nil, err
+			}
+			opts = append(opts, WithWriterEncryptionContext(encryptor, safeKey))
+		}
+	}
+
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		// encode fields
-		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable())
+		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable(), opts...)
 
 		// get payload writing configs, including nullable and fallback encoding method
 		opts := []PayloadWriterOptions{WithNullable(field.GetNullable()), WithWriterProps(getFieldWriterProps(field))}

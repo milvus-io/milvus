@@ -27,11 +27,13 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -42,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -294,6 +297,20 @@ func (mt *MetaTable) createDefaultDb() error {
 	defaultProperties, err := funcutil.String2KeyValuePair(s)
 	if err != nil {
 		return err
+	}
+
+	if hookutil.IsClusterEncyptionEnabled() {
+		cipherPrors := []*commonpb.KeyValuePair{
+			{
+				Key:   hookutil.EncryptionEnabledKey,
+				Value: "true",
+			},
+			{
+				Key:   hookutil.EncryptionRootKeyKey,
+				Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
+			},
+		}
+		defaultProperties = append(defaultProperties, cipherPrors...)
 	}
 
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
