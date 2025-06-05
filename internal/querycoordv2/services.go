@@ -128,6 +128,10 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	return resp, nil
 }
 
+func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	return s.ShowCollections(ctx, req)
+}
+
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -192,6 +196,10 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		InMemoryPercentages: percentages,
 		RefreshProgress:     refreshProgresses,
 	}, nil
+}
+
+func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+	return s.ShowPartitions(ctx, req)
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {

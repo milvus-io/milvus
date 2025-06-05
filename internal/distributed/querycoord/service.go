@@ -332,6 +332,10 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	return s.queryCoord.ShowCollections(ctx, req)
 }
 
+func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	return s.queryCoord.ShowLoadCollections(ctx, req)
+}
+
 // LoadCollection loads the data of the specified collection in QueryCoord.
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	return s.queryCoord.LoadCollection(ctx, req)
@@ -345,6 +349,10 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 // ShowPartitions shows the partitions in the QueryCoord.
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	return s.queryCoord.ShowPartitions(ctx, req)
+}
+
+func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+	return s.queryCoord.ShowLoadPartitions(ctx, req)
 }
 
 // GetPartitionStates gets the states of the specified partition.
