@@ -173,7 +173,7 @@ mq:
   pursuitBufferTime: 60 # pursuit mode buffer time in seconds
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
-    mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
+    mergeCheckInterval: 0.1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
