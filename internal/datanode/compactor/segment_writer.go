@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -68,6 +67,7 @@ type MultiSegmentWriter struct {
 	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 
 	storageVersion int64
+	params         compaction.Params
 	rwOption       []storage.RwOption
 }
 
@@ -115,6 +115,7 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 		binLogMaxSize:  params.BinLogMaxSize,
 		res:            make([]*datapb.CompactionSegment, 0),
 		storageVersion: storageVersion,
+		params:         params,
 		rwOption:       rwOpts,
 	}, nil
 }
@@ -162,7 +163,7 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	w.currentSegmentID = newSegmentID
 
 	chunkSize := w.binLogMaxSize
-	rootPath := binlog.GetRootPath()
+	rootPath := w.params.StorageConfig.GetRootPath()
 
 	w.rwOption = append(w.rwOption,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
@@ -171,7 +172,7 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 		storage.WithVersion(w.storageVersion),
 	)
 	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+	bucketName := w.params.StorageConfig.GetBucketName()
 	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
 		w.schema, w.allocator.logIDAlloc, chunkSize, bucketName, rootPath, w.maxRows, w.rwOption...,
 	)

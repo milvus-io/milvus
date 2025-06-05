@@ -264,7 +264,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	defer t.cleanUp(ctx)
 
 	// 1, decompose binlogs as preparation for later mapping
-	if err := binlog.DecompressCompactionBinlogs(t.plan.SegmentBinlogs); err != nil {
+	if err := binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), t.plan.SegmentBinlogs); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, err
 	}
