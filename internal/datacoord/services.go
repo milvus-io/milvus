@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -44,9 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1796,59 +1793,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
 	if isBackup {
-		files = make([]*internalpb.ImportFile, 0)
-		pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
-		defer pool.Release()
-		futures := make([]*conc.Future[struct{}], 0, len(in.GetFiles()))
-		mu := &sync.Mutex{}
-		for _, importFile := range in.GetFiles() {
-			importFile := importFile
-			futures = append(futures, pool.Submit(func() (struct{}, error) {
-				segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
-				if err != nil {
-					return struct{}{}, err
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				files = append(files, segmentPrefixes...)
-				return struct{}{}, nil
-			}))
-		}
-		err = conc.AwaitAll(futures...)
+		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err)))
+			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-
-		files = lo.Filter(files, func(file *internalpb.ImportFile, _ int) bool {
-			return len(file.GetPaths()) > 0
-		})
-		if len(files) == 0 {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
-			return resp, nil
-		}
-		if len(files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-				paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(files))))
-			return resp, nil
-		}
-		log.Info("list binlogs prefixes for import", zap.Int("num", len(files)), zap.Any("binlog_prefixes", files))
 	}
-
-	// The import task does not need to be controlled for the time being, and additional development is required later.
-	// Here is a comment, because the current importv2 communicates through messages and needs to ensure idempotence.
-	// Adding this part of the logic will cause importv2 to retry infinitely until the previous import task is completed.
-
-	// Check if the number of jobs exceeds the limit.
-	// maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
-	// executingNum := s.importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
-	// if executingNum >= maxNum {
-	// 	resp.Status = merr.Status(merr.WrapErrImportFailed(
-	// 		fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
-	// 			"If your request is set to only import a single file, " +
-	// 			"please consider importing multiple files in one request for better efficiency.")))
-	// 	return resp, nil
-	// }
 
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
