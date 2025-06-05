@@ -11,9 +11,9 @@ const std::unordered_map<std::string, JsonCastFunction>
 
 JsonCastFunction
 JsonCastFunction::FromString(const std::string& str) {
-    if (predefined_cast_functions_.find(str) !=
-        predefined_cast_functions_.end()) {
-        return predefined_cast_functions_.at(str);
+    auto it = predefined_cast_functions_.find(str);
+    if (it != predefined_cast_functions_.end()) {
+        return it->second;
     }
     return JsonCastFunction(Type::kUnknown);
 }
