@@ -204,6 +204,55 @@ func (s *RestfulAccessInfoSuite) TestClusterPrefix() {
 	s.Equal(cluster, result[0])
 }
 
+func (s *RestfulAccessInfoSuite) TestNQ() {
+	nq := int64(10)
+	s.Equal(Unknown, Get(s.info, "$nq")[0])
+
+	s.info.req = &milvuspb.SearchRequest{
+		Nq: nq,
+	}
+	s.Equal(fmt.Sprintf("%d", nq), Get(s.info, "$nq")[0])
+
+	s.info.req = &milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{{
+			Nq: nq,
+		}, {
+			Nq: nq,
+		}},
+	}
+	s.Equal("[\"10\", \"10\"]", Get(s.info, "$nq")[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestSearchParams() {
+	params := []*commonpb.KeyValuePair{{Key: "test_key", Value: "test_value"}}
+
+	s.Equal(Unknown, Get(s.info, "$search_params")[0])
+
+	s.info.req = &milvuspb.SearchRequest{
+		SearchParams: params,
+	}
+
+	s.Equal(kvsToString(params), Get(s.info, "$search_params")[0])
+
+	s.info.req = &milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{{SearchParams: params}, {SearchParams: params}},
+	}
+
+	s.Equal(listToString([]string{kvsToString(params), kvsToString(params)}), Get(s.info, "$search_params")[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestQueryParams() {
+	params := []*commonpb.KeyValuePair{{Key: "test_key", Value: "test_value"}}
+
+	s.Equal(Unknown, Get(s.info, "$query_params")[0])
+
+	s.info.req = &milvuspb.QueryRequest{
+		QueryParams: params,
+	}
+
+	s.Equal(kvsToString(params), Get(s.info, "$query_params")[0])
+}
+
 func TestRestfulAccessInfo(t *testing.T) {
 	suite.Run(t, new(RestfulAccessInfoSuite))
 }
