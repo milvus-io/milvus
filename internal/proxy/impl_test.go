@@ -2217,8 +2217,8 @@ func TestRunAnalyzer(t *testing.T) {
 
 		fieldMap := &typeutil.ConcurrentMap[string, int64]{}
 		fieldMap.Insert("test_text", 100)
-		mockCache.EXPECT().GetCollectionID(mock.Anything, "default", "test_collection").Return(1, nil)
-		mockCache.EXPECT().GetCollectionSchema(mock.Anything, "default", "test_collection").Return(&schemaInfo{
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "test_collection").Return(1, nil)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "test_collection").Return(&schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{{
 					FieldID: 100,
