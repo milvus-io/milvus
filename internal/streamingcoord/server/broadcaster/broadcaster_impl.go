@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -68,6 +69,14 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 			return
 		}
 	}()
+
+	// We need to check if the message is valid before adding it to the broadcaster.
+	// TODO: add resource key lock here to avoid state race condition.
+	// TODO: add all ddl to check operation here after ddl framework is ready.
+	if err := registry.CallMessageCheckCallback(ctx, msg); err != nil {
+		b.Logger().Warn("check message ack callback failed", zap.Error(err))
+		return nil, err
+	}
 
 	t, err := b.manager.AddTask(ctx, msg)
 	if err != nil {

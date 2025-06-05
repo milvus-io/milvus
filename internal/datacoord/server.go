@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -331,16 +332,34 @@ func (s *Server) initDataCoord() error {
 
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
 
-	s.initMessageAckCallback()
+	s.initMessageCallback()
 	return nil
 }
 
-// initMessageAckCallback initializes the message ack callback.
+// initMessageCallback initializes the message callback.
 // TODO: we should build a ddl framework to handle the message ack callback for ddl messages
-func (s *Server) initMessageAckCallback() {
+func (s *Server) initMessageCallback() {
 	registry.RegisterMessageAckCallback(message.MessageTypeDropPartition, func(ctx context.Context, msg message.MutableMessage) error {
 		dropPartitionMsg := message.MustAsMutableDropPartitionMessageV1(msg)
 		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{dropPartitionMsg.Header().PartitionId})
+	})
+
+	registry.RegisterMessageCheckCallback(message.MessageTypeImport, func(ctx context.Context, msg message.BroadcastMutableMessage) error {
+		importMsg := message.MustAsMutableImportMessageV1(msg)
+		b, err := importMsg.Body()
+		if err != nil {
+			return err
+		}
+		options := funcutil.Map2KeyValuePair(b.GetOptions())
+		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, b.GetFiles(), options)
+		if err != nil {
+			return err
+		}
+		err = ValidateMaxImportJobExceed(ctx, s.importMeta, b.GetJobID())
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
