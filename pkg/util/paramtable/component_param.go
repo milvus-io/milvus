@@ -4749,7 +4749,8 @@ type dataNodeConfig struct {
 	// import
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
+	ImportInsertBufferSize     ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5049,15 +5050,25 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxImportFileSizeInGB.Init(base.mgr)
 
-	p.ReadBufferSizeInMB = ParamItem{
+	p.ImportInsertBufferSize = ParamItem{
 		Key:          "dataNode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
-		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
+		Doc:          "The insert buffer size (in MB) during import.",
+		DefaultValue: "64",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportInsertBufferSize.Init(base.mgr)
+
+	p.ImportDeleteBufferSize = ParamItem{
+		Key:          "dataNode.import.readDeleteBufferSizeInMB",
+		Version:      "2.5.14",
+		Doc:          "The delete buffer size (in MB) during import.",
 		DefaultValue: "16",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ReadBufferSizeInMB.Init(base.mgr)
+	p.ImportDeleteBufferSize.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
