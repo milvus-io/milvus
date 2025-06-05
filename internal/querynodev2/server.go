@@ -562,6 +562,9 @@ func (node *QueryNode) Stop() error {
 				if node.pipelineManager != nil {
 					channelNum = node.pipelineManager.Num()
 				}
+				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
+					break outer
+				}
 
 				select {
 				case <-timeoutCh:
