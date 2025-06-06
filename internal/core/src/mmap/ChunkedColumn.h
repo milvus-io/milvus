@@ -332,24 +332,37 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
         }
     }
 
-    Json
-    RawJsonAt(size_t i) const override {
+    void
+    BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
+                  const int64_t* offsets,
+                  int64_t count) const override {
         if constexpr (!std::is_same_v<T, Json>) {
             PanicInfo(
                 ErrorCode::Unsupported,
                 "RawJsonAt only supported for ChunkedVariableColumn<Json>");
         }
-        if (i < 0 || i >= num_rows_) {
-            PanicInfo(ErrorCode::OutOfRange, "index out of range");
+        if (offsets == nullptr) {
+            auto ca = SemiInlineGet(slot_->PinAllCells());
+            for (int64_t i = 0; i < num_rows_; i++) {
+                auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
+                auto chunk = ca->get_cell_of(chunk_id);
+                auto valid = nullable_ ? chunk->isValid(offset_in_chunk) : true;
+                auto str_view = static_cast<StringChunk*>(chunk)->operator[](
+                    offset_in_chunk);
+                fn(Json(str_view.data(), str_view.size()), i, valid);
+            }
+        } else {
+            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+            auto ca = SemiInlineGet(slot_->PinCells(cids));
+            for (int64_t i = 0; i < count; i++) {
+                auto chunk = ca->get_cell_of(cids[i]);
+                auto valid =
+                    nullable_ ? chunk->isValid(offsets_in_chunk[i]) : true;
+                auto str_view = static_cast<StringChunk*>(chunk)->operator[](
+                    offsets_in_chunk[i]);
+                fn(Json(str_view.data(), str_view.size()), i, valid);
+            }
         }
-
-        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        auto ca =
-            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
-        auto chunk = ca->get_cell_of(chunk_id);
-        std::string_view str_view =
-            static_cast<StringChunk*>(chunk)->operator[](offset_in_chunk);
-        return Json(str_view.data(), str_view.size());
     }
 };
 
