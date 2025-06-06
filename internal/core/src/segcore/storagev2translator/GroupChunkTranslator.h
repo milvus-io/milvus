@@ -72,17 +72,9 @@ class GroupChunkTranslator
     }
 
  private:
-    void
-    load_column_group_in_memory();
-
-    void
-    load_column_group_in_mmap();
-
-    void
-    process_batch(const std::shared_ptr<arrow::Table>& table,
-                  const std::vector<std::string>& files,
-                  std::vector<size_t>& file_offsets,
-                  std::vector<size_t>& row_counts);
+    std::unique_ptr<milvus::GroupChunk>
+    load_group_chunk(const std::shared_ptr<arrow::Table>& table,
+                     const milvus::cachinglayer::cid_t cid);
 
     int64_t segment_id_;
     std::string key_;
@@ -96,7 +88,6 @@ class GroupChunkTranslator
     ChunkedSegmentSealedImpl* chunked_segment_;
     std::unique_ptr<milvus::segcore::InsertRecord<true>> ir_;
     GroupCTMeta meta_;
-    std::vector<milvus::GroupChunk*> group_chunks_;
     int64_t timestamp_offet_;
     bool use_mmap_;
 };
