@@ -15,9 +15,11 @@
 // limitations under the License.
 
 #include "common/FieldData.h"
+#include <cstdint>
 
 #include "arrow/array/array_binary.h"
 #include "arrow/chunked_array.h"
+#include "bitset/detail/element_wise.h"
 #include "common/Array.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -67,13 +69,11 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 element_count * dim_,
                 data_.data() + length_ * dim_);
 
-    ssize_t byte_count = (element_count + 7) / 8;
     // Note: if 'nullable == true` and valid_data is nullptr
     // means null_count == 0, will fill it with 0xFF
-    if (valid_data == nullptr) {
-        valid_data_.assign(byte_count, 0xFF);
-    } else {
-        std::copy_n(valid_data, byte_count, valid_data_.data());
+    if (valid_data != nullptr) {
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+            valid_data, 0, valid_data_.data(), length_, element_count);
     }
 
     length_ += element_count;
