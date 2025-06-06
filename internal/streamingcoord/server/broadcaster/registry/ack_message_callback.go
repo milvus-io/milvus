@@ -13,23 +13,24 @@ import (
 // init the message ack callbacks
 func init() {
 	resetMessageAckCallbacks()
+	resetMessageCheckCallbacks()
 }
 
 // resetMessageAckCallbacks resets the message ack callbacks.
 func resetMessageAckCallbacks() {
-	messageAckCallbacks = map[message.MessageType]*syncutil.Future[MessageCallback]{
-		message.MessageTypeDropPartition: syncutil.NewFuture[MessageCallback](),
+	messageAckCallbacks = map[message.MessageType]*syncutil.Future[MessageAckCallback]{
+		message.MessageTypeDropPartition: syncutil.NewFuture[MessageAckCallback](),
 	}
 }
 
-// MessageCallback is the callback function for the message type.
-type MessageCallback = func(ctx context.Context, msg message.MutableMessage) error
+// MessageAckCallback is the callback function for the message type.
+type MessageAckCallback = func(ctx context.Context, msg message.MutableMessage) error
 
 // messageAckCallbacks is the map of message type to the callback function.
-var messageAckCallbacks map[message.MessageType]*syncutil.Future[MessageCallback]
+var messageAckCallbacks map[message.MessageType]*syncutil.Future[MessageAckCallback]
 
 // RegisterMessageAckCallback registers the callback function for the message type.
-func RegisterMessageAckCallback(typ message.MessageType, callback MessageCallback) {
+func RegisterMessageAckCallback(typ message.MessageType, callback MessageAckCallback) {
 	future, ok := messageAckCallbacks[typ]
 	if !ok {
 		panic(fmt.Sprintf("the future of message callback for type %s is not registered", typ))

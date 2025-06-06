@@ -74,6 +74,8 @@ func TestBroadcast(t *testing.T) {
 	assert.Equal(t, uint64(1), msgs[1].BroadcastHeader().BroadcastID)
 	assert.Len(t, msgs[0].BroadcastHeader().ResourceKeys, 2)
 	assert.ElementsMatch(t, []string{"v1", "v2"}, []string{msgs[0].VChannel(), msgs[1].VChannel()})
+
+	MustAsMutableCreateCollectionMessageV1(msg)
 }
 
 func TestCiper(t *testing.T) {
