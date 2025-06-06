@@ -74,11 +74,6 @@ class IndexBase {
         return index_type_;
     }
 
-    virtual bool
-    IsDataTypeSupported(DataType data_type) const {
-        return true;
-    };
-
     virtual JsonCastType
     GetCastType() const {
         return JsonCastType::UNKNOWN;

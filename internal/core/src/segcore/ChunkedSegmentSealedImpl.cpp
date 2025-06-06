@@ -35,6 +35,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/SystemProperty.h"
@@ -166,8 +167,12 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         JSONIndexKey key;
         key.nested_path = path;
         key.field_id = field_id;
-        json_indexings_[key] =
-            std::move(const_cast<LoadIndexInfo&>(info).index);
+        auto json_cast_type =
+            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+        JsonIndexValue value{
+            json_cast_type,
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index)};
+        json_indexings_[key] = std::move(value);
         return;
     }
 

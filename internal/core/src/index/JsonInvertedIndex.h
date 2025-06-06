@@ -21,6 +21,14 @@
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+namespace json {
+static bool
+IsDataTypeSupported(JsonCastType cast_type, DataType data_type) {
+    auto type = cast_type.ToMilvusDataType();
+    return type == data_type ||
+           (data_type == DataType::INT64 && type == DataType::DOUBLE);
+}
+}  // namespace json
 class JsonInvertedIndexParseErrorRecorder {
  public:
     struct ErrorInstance {
@@ -114,9 +122,6 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     create_reader() {
         this->wrapper_->create_reader();
     }
-
-    bool
-    IsDataTypeSupported(DataType data_type) const override;
 
     JsonInvertedIndexParseErrorRecorder&
     GetErrorRecorder() {
