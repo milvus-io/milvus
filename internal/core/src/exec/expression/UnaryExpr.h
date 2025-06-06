@@ -86,13 +86,8 @@ struct UnaryElementFunc {
 
         // This is the original code, which is kept for the documentation purposes
         // also, for iterative filter
-        if constexpr (filter_type == FilterType::random ||
-                      std::is_same_v<T, std::string_view> ||
-                      std::is_same_v<T, std::string>) {
+        if constexpr (filter_type == FilterType::random) {
             for (int i = 0; i < size; ++i) {
-                if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
-                    continue;
-                }
                 auto offset = (offsets != nullptr) ? offsets[i] : i;
                 if constexpr (op == proto::plan::OpType::Equal) {
                     res[i] = src[offset] == val;
@@ -111,11 +106,57 @@ struct UnaryElementFunc {
                                      op == proto::plan::OpType::InnerMatch) {
                     res[i] = milvus::query::Match(src[offset], val, op);
                 } else {
-                    PanicInfo(
-                        OpTypeInvalid,
-                        fmt::format(
-                            "unsupported op_type:{} for UnaryElementFunc", op));
+                    PanicInfo(OpTypeInvalid,
+                              "unsupported op_type:{} for UnaryElementFunc",
+                              op);
                 }
+            }
+            return;
+        }
+
+        if (has_bitmap_input) {
+            if constexpr (std::is_same_v<T, std::string_view> ||
+                          std::is_same_v<T, std::string>) {
+                for (int i = 0; i < size; ++i) {
+                    if (!bitmap_input[i + start_cursor]) {
+                        continue;
+                    }
+                    if constexpr (op == proto::plan::OpType::Equal) {
+                        res[i] = src[i] == val;
+                    } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                        res[i] = src[i] != val;
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterThan) {
+                        res[i] = src[i] > val;
+                    } else if constexpr (op == proto::plan::OpType::LessThan) {
+                        res[i] = src[i] < val;
+                    } else if constexpr (op ==
+                                         proto::plan::OpType::GreaterEqual) {
+                        res[i] = src[i] >= val;
+                    } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                        res[i] = src[i] <= val;
+                    } else if constexpr (op ==
+                                             proto::plan::OpType::PrefixMatch ||
+                                         op == proto::plan::OpType::
+                                                   PostfixMatch ||
+                                         op ==
+                                             proto::plan::OpType::InnerMatch) {
+                        res[i] = milvus::query::Match(src[i], val, op);
+                    } else {
+                        PanicInfo(OpTypeInvalid,
+                                  "unsupported op_type:{} for UnaryElementFunc",
+                                  op);
+                    }
+                }
+                return;
+            }
+        }
+
+        if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                      op == proto::plan::OpType::PostfixMatch ||
+                      op == proto::plan::OpType::InnerMatch) {
+            for (int i = 0; i < size; ++i) {
+                res[i] = milvus::query::Match(src[i], val, op);
             }
             return;
         }
@@ -139,9 +180,9 @@ struct UnaryElementFunc {
             res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
                 src, size, val);
         } else {
-            PanicInfo(
-                OpTypeInvalid,
-                fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
+            PanicInfo(OpTypeInvalid,
+                      "unsupported op_type:{} for UnaryElementFunc",
+                      op);
         }
     }
 };
