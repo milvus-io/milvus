@@ -234,7 +234,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             std::vector<Array> values(element_count);
             int null_number = 0;
             for (size_t index = 0; index < element_count; ++index) {
-                ScalarArray field_data;
+                ScalarFieldProto field_data;
                 if (array_array->GetString(index) == "") {
                     null_number++;
                     continue;
@@ -271,6 +271,22 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 auto view = arr->GetString(index);
                 values.push_back(
                     CopyAndWrapSparseRow(view.data(), view.size()));
+            }
+            return FillFieldData(values.data(), element_count);
+        }
+        case DataType::VECTOR_ARRAY: {
+            auto array_array =
+                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            std::vector<VectorArray> values(element_count);
+            for (size_t index = 0; index < element_count; ++index) {
+                VectorFieldProto field_data;
+                if (array_array->GetString(index) == "") {
+                    PanicInfo(DataTypeInvalid, "empty vector array");
+                }
+                auto success =
+                    field_data.ParseFromString(array_array->GetString(index));
+                AssertInfo(success, "parse from string failed");
+                values[index] = VectorArray(field_data);
             }
             return FillFieldData(values.data(), element_count);
         }
@@ -423,6 +439,7 @@ template class FieldDataImpl<float, false>;
 template class FieldDataImpl<float16, false>;
 template class FieldDataImpl<bfloat16, false>;
 template class FieldDataImpl<knowhere::sparse::SparseRow<float>, true>;
+template class FieldDataImpl<VectorArray, true>;
 
 FieldDataPtr
 InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {

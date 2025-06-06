@@ -200,7 +200,9 @@ class ConcurrentVectorImpl : public VectorBase {
 
     SpanBase
     get_span_base(int64_t chunk_id) const override {
-        if constexpr (is_type_entire_row) {
+        if constexpr (std::is_same_v<Type, VectorArray>) {
+            PanicInfo(NotImplemented, "unimplemented");
+        } else if constexpr (is_type_entire_row) {
             return chunks_ptr_->get_span(chunk_id);
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
@@ -272,7 +274,9 @@ class ConcurrentVectorImpl : public VectorBase {
 
     int64_t
     get_element_size() const override {
-        if constexpr (is_type_entire_row) {
+        if constexpr (std::is_same_v<Type, VectorArray>) {
+            PanicInfo(NotImplemented, "unimplemented");
+        } else if constexpr (is_type_entire_row) {
             return chunks_ptr_->get_element_size();
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
@@ -481,6 +485,20 @@ class ConcurrentVector<Array> : public ConcurrentVectorImpl<Array, true> {
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         return chunks_ptr_->view_element(chunk_id, chunk_offset);
+    }
+};
+
+template <>
+class ConcurrentVector<VectorArray>
+    : public ConcurrentVectorImpl<VectorArray, true> {
+ public:
+    explicit ConcurrentVector(
+        int64_t dim /* not use it*/,
+        int64_t size_per_chunk,
+        storage::MmapChunkDescriptorPtr mmap_descriptor = nullptr,
+        ThreadSafeValidDataPtr valid_data_ptr = nullptr)
+        : ConcurrentVectorImpl<VectorArray, true>::ConcurrentVectorImpl(
+              1, size_per_chunk, std::move(mmap_descriptor), valid_data_ptr) {
     }
 };
 

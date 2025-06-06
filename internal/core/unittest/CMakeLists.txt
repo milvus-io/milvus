@@ -104,6 +104,7 @@ set(MILVUS_TEST_FILES
         test_group_chunk_translator.cpp
         test_chunked_segment_storage_v2.cpp
         test_thread_pool.cpp
+        test_vector_array.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

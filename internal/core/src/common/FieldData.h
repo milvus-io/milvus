@@ -81,6 +81,20 @@ class FieldData<Array> : public FieldDataArrayImpl {
 };
 
 template <>
+class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
+ public:
+    explicit FieldData(DataType data_type, int64_t buffered_num_rows = 0)
+        : FieldDataVectorArrayImpl(data_type, buffered_num_rows) {
+    }
+
+    int64_t
+    get_dim() const override {
+        PanicInfo(Unsupported,
+                  "Call get_dim on FieldData<VectorArray> is not supported");
+    }
+};
+
+template <>
 class FieldData<FloatVector> : public FieldDataImpl<float, false> {
  public:
     explicit FieldData(int64_t dim,

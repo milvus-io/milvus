@@ -563,6 +563,12 @@ struct InsertRecord<false> : public InsertRecord<true> {
                                               size_per_chunk,
                                               dense_vec_mmap_descriptor);
                 return;
+            } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+                this->append_data<VectorArray>(field_id,
+                                               field_meta.get_dim(),
+                                               size_per_chunk,
+                                               dense_vec_mmap_descriptor);
+                return;
             } else {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported vector type",

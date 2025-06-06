@@ -214,6 +214,7 @@ SegmentInternalInterface::FillTargetEntry(
         } else {
             col = bulk_subscript(field_id, offsets, size);
         }
+        // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
@@ -435,7 +436,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                   fmt::format("unsupported added field type {}",
                               field_meta.get_data_type()));
     }
-    auto result = CreateScalarDataArray(count, field_meta);
+    auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         auto res = result->mutable_valid_data()->mutable_data();
         for (int64_t i = 0; i < count; ++i) {

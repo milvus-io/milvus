@@ -92,6 +92,7 @@ enum class DataType {
     VECTOR_BFLOAT16 = 103,
     VECTOR_SPARSE_FLOAT = 104,
     VECTOR_INT8 = 105,
+    VECTOR_ARRAY = 106,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -100,9 +101,9 @@ constexpr auto MAX_ROW_COUNT = std::numeric_limits<idx_t>::max();
 
 using OpType = proto::plan::OpType;
 using ArithOpType = proto::plan::ArithOpType;
-using ScalarArray = proto::schema::ScalarField;
+using ScalarFieldProto = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
-using VectorArray = proto::schema::VectorField;
+using VectorFieldProto = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
@@ -246,6 +247,8 @@ GetDataTypeName(DataType data_type) {
             return "vector_sparse_float";
         case DataType::VECTOR_INT8:
             return "vector_int8";
+        case DataType::VECTOR_ARRAY:
+            return "vector_array";
         default:
             PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
     }
@@ -327,7 +330,7 @@ IsJsonDataType(DataType data_type) {
 
 inline bool
 IsArrayDataType(DataType data_type) {
-    return data_type == DataType::ARRAY;
+    return data_type == DataType::ARRAY || data_type == DataType::VECTOR_ARRAY;
 }
 
 inline bool
@@ -397,9 +400,15 @@ IsFloatVectorDataType(DataType data_type) {
 }
 
 inline bool
+IsVectorArrayDataType(DataType data_type) {
+    return data_type == DataType::VECTOR_ARRAY;
+}
+
+inline bool
 IsVectorDataType(DataType data_type) {
     return IsBinaryVectorDataType(data_type) ||
-           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type);
+           IsFloatVectorDataType(data_type) || IsIntVectorDataType(data_type) ||
+           IsVectorArrayDataType(data_type);
 }
 
 inline bool
@@ -650,6 +659,15 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
 
+template <>
+struct TypeTraits<DataType::VECTOR_ARRAY> {
+    using NativeType = void;
+    static constexpr DataType TypeKind = DataType::VECTOR_ARRAY;
+    static constexpr bool IsPrimitiveType = false;
+    static constexpr bool IsFixedWidth = false;
+    static constexpr const char* Name = "VECTOR_ARRAY";
+};
+
 inline DataType
 FromValCase(milvus::proto::plan::GenericValue::ValCase val_case) {
     switch (val_case) {
@@ -733,6 +751,9 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_INT8:
                 name = "VECTOR_INT8";
+                break;
+            case milvus::DataType::VECTOR_ARRAY:
+                name = "VECTOR_ARRAY";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

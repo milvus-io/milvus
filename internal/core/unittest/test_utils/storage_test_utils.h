@@ -184,7 +184,7 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
 
 inline void
 LoadGeneratedDataIntoSegment(const GeneratedData& dataset,
-                             milvus::segcore::SegmentSealed* segment,
+                             milvus::segcore::SegmentInternalInterface* segment,
                              bool with_mmap = false,
                              std::vector<int64_t> excluded_field_ids = {}) {
     std::string mmap_dir_path = with_mmap ? "./data/mmap-test" : "";
@@ -213,6 +213,19 @@ CreateSealedWithFieldDataLoaded(milvus::SchemaPtr schema,
     LoadGeneratedDataIntoSegment(
         dataset, segment.get(), with_mmap, excluded_field_ids);
     return segment;
+}
+
+inline std::unique_ptr<milvus::segcore::SegmentGrowing>
+CreateGrowingWithFieldDataLoaded(milvus::SchemaPtr schema,
+                                 milvus::IndexMetaPtr indexMeta,
+                                 const milvus::segcore::SegcoreConfig& config,
+                                 const GeneratedData& dataset,
+                                 bool with_mmap = false,
+                                 std::vector<int64_t> excluded_field_ids = {}) {
+    auto segment_growing = CreateGrowingSegment(schema, indexMeta, 1, config);
+    LoadGeneratedDataIntoSegment(
+        dataset, segment_growing.get(), with_mmap, excluded_field_ids);
+    return segment_growing;
 }
 
 inline std::vector<int64_t>
