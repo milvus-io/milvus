@@ -729,7 +729,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					Name:     field1,
-					DataType: 200,
+					DataType: 300,
 				},
 			},
 		}

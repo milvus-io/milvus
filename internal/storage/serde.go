@@ -388,6 +388,12 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 						return true
 					}
 				}
+				if vv, ok := v.(*schemapb.VectorField); ok {
+					if bytes, err := proto.Marshal(vv); err == nil {
+						builder.Append(bytes)
+						return true
+					}
+				}
 			}
 			return false
 		},
@@ -395,6 +401,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 
 	m[schemapb.DataType_Array] = eagerArrayEntry
 	m[schemapb.DataType_JSON] = byteEntry
+	m[schemapb.DataType_ArrayOfVector] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
 		if a.IsNull(i) {
@@ -867,12 +874,14 @@ func NewSimpleArrowRecord(r arrow.Record, field2Col map[FieldID]int) *simpleArro
 	}
 }
 
-func BuildRecord(b *array.RecordBuilder, data *InsertData, fields []*schemapb.FieldSchema) error {
+func BuildRecord(b *array.RecordBuilder, data *InsertData, schema *schemapb.CollectionSchema) error {
 	if data == nil {
 		return nil
 	}
-	for i, field := range fields {
-		fBuilder := b.Field(i)
+	idx := 0
+	serializeField := func(field *schemapb.FieldSchema) error {
+		fBuilder := b.Field(idx)
+		idx++
 		typeEntry, ok := serdeMap[field.DataType]
 		if !ok {
 			panic("unknown type")
@@ -881,6 +890,19 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, fields []*schemapb.Fi
 			ok = typeEntry.serialize(fBuilder, data.Data[field.FieldID].GetRow(j))
 			if !ok {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
+			}
+		}
+		return nil
+	}
+	for _, field := range schema.GetFields() {
+		if err := serializeField(field); err != nil {
+			return err
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			if err := serializeField(field); err != nil {
+				return err
 			}
 		}
 	}

@@ -208,7 +208,7 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	if len(pack.insertData) == 0 {
 		return nil, nil
 	}
-	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema.Fields)
+	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema()); err != nil {
 			return nil, err
 		}
 	}

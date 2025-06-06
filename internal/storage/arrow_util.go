@@ -294,13 +294,20 @@ func (b *RecordBuilder) Build() Record {
 }
 
 func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
-	builders := make([]array.Builder, len(schema.Fields))
-	for i, field := range schema.Fields {
+	fields := make([]*schemapb.FieldSchema, 0, len(schema.Fields)*2)
+	fields = append(fields, schema.Fields...)
+	for _, sf := range schema.StructArrayFields {
+		fields = append(fields, sf.Fields...)
+	}
+
+	builders := make([]array.Builder, len(fields))
+	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
 		builders[i] = array.NewBuilder(memory.DefaultAllocator, serdeMap[field.DataType].arrowType(int(dim)))
 	}
+
 	return &RecordBuilder{
-		fields:   schema.Fields,
+		fields:   fields,
 		builders: builders,
 	}
 }
