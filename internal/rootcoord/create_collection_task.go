@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -420,6 +421,19 @@ func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Conte
 }
 
 func (t *createCollectionTask) broadcastCreateCollectionMsgIntoStreamingService(ctx context.Context, ts uint64) (map[string][]byte, error) {
+	notifier := snmanager.NewStreamingReadyNotifier()
+	if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(ctx, notifier); err != nil {
+		return nil, err
+	}
+	if !notifier.IsReady() {
+		// streaming service is not ready, so we send it into msgstream.
+		defer notifier.Release()
+		msg := t.genCreateCollectionMsg(ctx, ts)
+		return t.core.chanTimeTick.broadcastMarkDmlChannels(t.channels.physicalChannels, msg)
+	}
+	// streaming service is ready, so we release the ready notifier and send it into streaming service.
+	notifier.Release()
+
 	req := t.genCreateCollectionRequest()
 	// dispatch the createCollectionMsg into all vchannel.
 	msgs := make([]message.MutableMessage, 0, len(req.VirtualChannelNames))

@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -168,7 +169,17 @@ func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *mode
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
 	if streamingutil.IsStreamingServiceEnabled() {
-		return c.notifyCollectionGcByStreamingService(ctx, coll)
+		notifier := snmanager.NewStreamingReadyNotifier()
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(ctx, notifier); err != nil {
+			return 0, err
+		}
+		if notifier.IsReady() {
+			// streaming service is ready, so we release the ready notifier and send it into streaming service.
+			notifier.Release()
+			return c.notifyCollectionGcByStreamingService(ctx, coll)
+		}
+		// streaming service is not ready, so we send it into msgstream.
+		defer notifier.Release()
 	}
 
 	ts, err := c.s.tsoAllocator.GenerateTSO(1)
@@ -317,7 +328,19 @@ func (c *bgGarbageCollector) GcPartitionData(ctx context.Context, pChannels, vch
 	defer c.s.ddlTsLockManager.Unlock()
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		ddlTs, err = c.notifyPartitionGcByStreamingService(ctx, vchannels, partition)
+		notifier := snmanager.NewStreamingReadyNotifier()
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(ctx, notifier); err != nil {
+			return 0, err
+		}
+		if notifier.IsReady() {
+			// streaming service is ready, so we release the ready notifier and send it into streaming service.
+			notifier.Release()
+			ddlTs, err = c.notifyPartitionGcByStreamingService(ctx, vchannels, partition)
+		} else {
+			// streaming service is not ready, so we send it into msgstream with the notifier holding.
+			defer notifier.Release()
+			ddlTs, err = c.notifyPartitionGc(ctx, pChannels, partition)
+		}
 	} else {
 		ddlTs, err = c.notifyPartitionGc(ctx, pChannels, partition)
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -62,5 +61,15 @@ func TestStreamingNodeManager(t *testing.T) {
 	streamingNodes = m.GetStreamingQueryNodeIDs()
 	assert.Equal(t, len(streamingNodes), 1)
 
-	assert.NoError(t, m.RegisterStreamingEnabledListener(context.Background(), syncutil.NewAsyncTaskNotifier[struct{}]()))
+	assert.NoError(t, m.RegisterStreamingEnabledListener(context.Background(), NewStreamingReadyNotifier()))
+}
+
+func TestStreamingReadyNotifier(t *testing.T) {
+	n := NewStreamingReadyNotifier()
+	assert.False(t, n.IsReady())
+	n.inner.Cancel()
+	<-n.Ready()
+	assert.True(t, n.IsReady())
+	n.Release()
+	assert.True(t, n.IsReady())
 }

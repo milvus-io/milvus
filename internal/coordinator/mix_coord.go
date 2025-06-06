@@ -165,6 +165,11 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 
+	if err := s.streamingCoord.Start(s.ctx); err != nil {
+		log.Error("streamCoord start failed", zap.Error(err))
+		return err
+	}
+
 	if err := s.rootcoordServer.Init(); err != nil {
 		log.Error("rootCoord init failed", zap.Error(err))
 		return err
@@ -172,11 +177,6 @@ func (s *mixCoordImpl) initInternal() error {
 
 	if err := s.rootcoordServer.Start(); err != nil {
 		log.Error("rootCoord start failed", zap.Error(err))
-		return err
-	}
-
-	if err := s.streamingCoord.Start(s.ctx); err != nil {
-		log.Error("streamCoord start failed", zap.Error(err))
 		return err
 	}
 

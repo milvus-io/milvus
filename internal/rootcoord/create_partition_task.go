@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -120,12 +121,14 @@ func executeCreatePartitionTaskSteps(ctx context.Context,
 	})
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		undoTask.AddStep(&broadcastCreatePartitionMsgStep{
-			baseStep:  baseStep{core: core},
-			vchannels: col.VirtualChannelNames,
-			partition: partition,
-			ts:        ts,
-		}, &nullStep{})
+		if err := snmanager.StaticStreamingNodeManager.CheckIfStreamingServiceReady(ctx); err == nil {
+			undoTask.AddStep(&broadcastCreatePartitionMsgStep{
+				baseStep:  baseStep{core: core},
+				vchannels: col.VirtualChannelNames,
+				partition: partition,
+				ts:        ts,
+			}, &nullStep{})
+		}
 	}
 
 	undoTask.AddStep(&nullStep{}, &releasePartitionsStep{
