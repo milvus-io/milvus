@@ -139,7 +139,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		log.Warn("compact wrong, not target sealed segments")
 		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
-	err = binlog.DecompressCompactionBinlogs(l0Segments)
+	err = binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), l0Segments)
 	if err != nil {
 		log.Warn("DecompressCompactionBinlogs failed", zap.Error(err))
 		return nil, err

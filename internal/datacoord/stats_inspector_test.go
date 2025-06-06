@@ -291,26 +291,6 @@ func (s *statsInspectorSuite) TestDropStatsTask() {
 	s.NoError(err) // Non-existent tasks should return success
 }
 
-func (s *statsInspectorSuite) TestTriggerSortStatsTask() {
-	// Test triggering sort stats task
-	s.inspector.triggerSortStatsTask()
-
-	// Verify AllocID was called
-	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
-	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(30, indexpb.StatsSubJob_Sort))
-}
-
-func (s *statsInspectorSuite) TestCreateSortStatsTaskForSegment() {
-	// Get a test segment
-	segment := s.mt.segments.segments[10]
-
-	// Test creating sort stats task for segment
-	s.inspector.createSortStatsTaskForSegment(segment)
-
-	// Verify AllocID was called
-	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
-}
-
 func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
 	// Set up a sorted segment without text index
 	segment := s.mt.segments.segments[20]
