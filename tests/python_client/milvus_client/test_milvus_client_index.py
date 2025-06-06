@@ -395,7 +395,8 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_index_auto_index(self, numeric_index, varchar_index, metric_type):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_index_auto_index(self, numeric_index, varchar_index, metric_type, add_field):
         """
         target: test index with autoindex on both scalar and vector field
         method: create connection, collection, insert and search
@@ -415,6 +416,11 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_bool_field_name, DataType.BOOL)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        if add_field:
+            self.add_collection_field(client, collection_name, field_name="field_int", data_type=DataType.INT32,
+                                      nullable=True)
+            self.add_collection_field(client, collection_name, field_name="field_varchar", data_type=DataType.VARCHAR,
+                                      nullable=True, max_length=64)
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, "vector")
         res = self.list_indexes(client, collection_name)[0]
@@ -431,6 +437,9 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_bool_field_name, index_type="", metric_type=metric_type)
         index_params.add_index(field_name=default_string_field_name, index_type=varchar_index, metric_type=metric_type)
         index_params.add_index(field_name=default_primary_key_field_name, index_type=numeric_index, metric_type=metric_type)
+        if add_field:
+            index_params.add_index(field_name="field_int", index_type=numeric_index, metric_type=metric_type)
+            index_params.add_index(field_name="field_varchar", index_type=varchar_index, metric_type=metric_type)
         # 3. create index
         self.create_index(client, collection_name, index_params)
         # 4. drop index
@@ -443,6 +452,9 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_index(client, collection_name, ct.default_bool_field_name)
         self.drop_index(client, collection_name, default_string_field_name)
         self.drop_index(client, collection_name, default_primary_key_field_name)
+        if add_field:
+            self.drop_index(client, collection_name, "field_int")
+            self.drop_index(client, collection_name, "field_varchar")
         # 5. create index
         self.create_index(client, collection_name, index_params)
         # 6. insert
@@ -451,7 +463,10 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
                  ct.default_int32_field_name: np.int32(i), ct.default_int16_field_name: np.int16(i),
                  ct.default_int8_field_name: np.int8(i), default_float_field_name: i * 1.0,
                  ct.default_double_field_name: np.double(i), ct.default_bool_field_name: np.bool_(i),
-                 default_string_field_name: str(i)} for i in range(default_nb)]
+                 default_string_field_name: str(i),
+                 **({"field_int": 10} if add_field else {}),
+                 **({"field_varchar": "default"} if add_field else {})
+                 } for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 7. load collection
         self.load_collection(client, collection_name)
