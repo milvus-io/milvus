@@ -68,7 +68,8 @@ ChunkTranslator::load_chunk(milvus::cachinglayer::cid_t cid) {
     auto channel = std::make_shared<ArrowReaderChannel>();
     pool.Submit(LoadArrowReaderFromRemote,
                 std::vector<std::string>{files_and_rows_[cid].first},
-                channel);
+                channel,
+                load_priority);
     LOG_INFO("segment {} submits load field {} chunk {} task to thread pool",
              segment_id_,
              field_id_,

@@ -71,6 +71,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     CTMeta meta_;
     FieldMeta field_meta_;
     std::string mmap_dir_path_;
+    milvus::proto::common::LoadPriority load_priority{
+        milvus::proto::common::LoadPriority::HIGH};
 };
 
 }  // namespace milvus::segcore::storagev1translator

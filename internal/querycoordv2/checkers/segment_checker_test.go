@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -627,6 +628,96 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDroppedSegments() {
 	suite.EqualValues(1, action.GetSegmentID())
 	suite.EqualValues(1, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
+	ctx := context.Background()
+	collectionID := int64(1)
+	replicaID := int64(1)
+
+	// prepare replica
+	replica := meta.NewReplicaWithPriority(&querypb.Replica{
+		ID:           replicaID,
+		CollectionID: collectionID,
+		Nodes:        []int64{1, 2},
+	}, commonpb.LoadPriority_LOW)
+	suite.meta.ReplicaManager.Put(ctx, replica)
+
+	// prepare segments
+	segment1 := &datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel1",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+	segment2 := &datapb.SegmentInfo{
+		ID:            2,
+		CollectionID:  collectionID,
+		PartitionID:   -1,
+		InsertChannel: "channel1",
+		State:         commonpb.SegmentState_Sealed,
+		NumOfRows:     100,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		DmlPosition:   &msgpb.MsgPosition{Timestamp: 200},
+	}
+
+	// set up current target
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel1",
+			},
+		},
+		[]*datapb.SegmentInfo{segment1},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	// set up next target with segment1 and segment2
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
+		[]*datapb.VchannelInfo{
+			{
+				CollectionID: collectionID,
+				ChannelName:  "channel1",
+			},
+		},
+		[]*datapb.SegmentInfo{segment1, segment2},
+		nil,
+	).Once()
+	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
+
+	// test getSealedSegmentDiff
+	toLoad, loadPriorities, toRelease := suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+
+	// verify results
+	suite.Equal(2, len(toLoad))
+	suite.Equal(2, len(loadPriorities))
+	suite.Equal(0, len(toRelease))
+
+	// segment2 not in current target, should use replica's priority
+	suite.True(segment2.GetID() == toLoad[0].GetID() || segment2.GetID() == toLoad[1].GetID())
+	suite.True(segment1.GetID() == toLoad[0].GetID() || segment1.GetID() == toLoad[1].GetID())
+	if segment2.GetID() == toLoad[0].GetID() {
+		suite.Equal(commonpb.LoadPriority_LOW, loadPriorities[0])
+		suite.Equal(commonpb.LoadPriority_HIGH, loadPriorities[1])
+	} else {
+		suite.Equal(commonpb.LoadPriority_HIGH, loadPriorities[0])
+		suite.Equal(commonpb.LoadPriority_LOW, loadPriorities[1])
+	}
+
+	// update current target to include segment2
+	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	// test again
+	toLoad, loadPriorities, toRelease = suite.checker.getSealedSegmentDiff(ctx, collectionID, replicaID)
+	// verify results
+	suite.Equal(0, len(toLoad))
+	suite.Equal(0, len(loadPriorities))
+	suite.Equal(0, len(toRelease))
 }
 
 func (suite *SegmentCheckerTestSuite) TestFilterOutExistedOnLeader() {

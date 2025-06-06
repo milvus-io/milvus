@@ -891,7 +891,8 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 
 	log.Info("start loading segment files",
 		zap.Int64("rowNum", loadInfo.GetNumOfRows()),
-		zap.String("segmentType", segment.Type().String()))
+		zap.String("segmentType", segment.Type().String()),
+		zap.Int32("priority", int32(loadInfo.GetPriority())))
 
 	collection := loader.manager.Collection.Get(segment.Collection())
 	if collection == nil {
@@ -1703,7 +1704,8 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	for _, loadInfo := range infos {
 		fieldIDs := typeutil.NewSet(lo.Map(loadInfo.GetIndexInfos(), func(info *querypb.FieldIndexInfo, _ int) int64 { return info.GetFieldID() })...)
-		fieldInfos := lo.SliceToMap(lo.Filter(loadInfo.GetBinlogPaths(), func(info *datapb.FieldBinlog, _ int) bool { return fieldIDs.Contain(info.GetFieldID()) }),
+		fieldInfos := lo.SliceToMap(lo.Filter(loadInfo.GetBinlogPaths(),
+			func(info *datapb.FieldBinlog, _ int) bool { return fieldIDs.Contain(info.GetFieldID()) }),
 			func(info *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) { return info.GetFieldID(), info })
 
 		for _, info := range loadInfo.GetIndexInfos() {
