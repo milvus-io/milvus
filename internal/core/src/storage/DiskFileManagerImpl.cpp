@@ -308,6 +308,13 @@ DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
         remote_files, [this]() { return GetLocalJsonKeyIndexPrefix(); });
 }
 
+void
+DiskFileManagerImpl::CacheNgramIndexToDisk(
+    const std::vector<std::string>& remote_files) {
+    return CacheIndexToDiskInternal(
+        remote_files, [this]() { return GetLocalNgramIndexPrefix(); });
+}
+
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
@@ -720,6 +727,14 @@ DiskFileManagerImpl::GetJsonKeyIndexIdentifier() {
 }
 
 std::string
+DiskFileManagerImpl::GetNgramIndexIdentifier() {
+    return GenNgramIndexPathIdentifier(index_meta_.build_id,
+                                       index_meta_.index_version,
+                                       field_meta_.segment_id,
+                                       field_meta_.field_id);
+}
+
+std::string
 DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -741,6 +756,17 @@ DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
                                      field_meta_.partition_id,
                                      field_meta_.segment_id,
                                      field_meta_.field_id);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id);
 }
 
 std::string

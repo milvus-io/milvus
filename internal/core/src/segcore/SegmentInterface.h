@@ -37,6 +37,7 @@
 #include "index/JsonKeyStatsInvertedIndex.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -143,6 +144,9 @@ class SegmentInterface {
 
     virtual std::pair<milvus::Json, bool>
     GetJsonData(FieldId field_id, size_t offset) const = 0;
+
+    virtual index::NgramInvertedIndex*
+    GetNgramIndex(FieldId field_id) const = 0;
 
     virtual void
     LazyCheckSchema(const Schema& sch) = 0;
@@ -342,6 +346,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override;
+
+    virtual index::NgramInvertedIndex*
+    GetNgramIndex(FieldId field_id) const override;
 
  public:
     virtual void
