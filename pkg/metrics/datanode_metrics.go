@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -336,8 +337,17 @@ var (
 		}, []string{nodeIDLabelName, "type"})
 )
 
+var registerDNOnce sync.Once
+
 // RegisterDataNode registers DataNode metrics
 func RegisterDataNode(registry *prometheus.Registry) {
+	registerDNOnce.Do(func() {
+		registerDataNodeOnce(registry)
+	})
+}
+
+// registerDataNodeOnce registers DataNode metrics
+func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeNumFlowGraphs)
 	// input related
 	registry.MustRegister(DataNodeConsumeMsgRowsCount)
