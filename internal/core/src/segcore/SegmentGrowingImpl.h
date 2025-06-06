@@ -306,7 +306,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     HasIndex(FieldId field_id,
              const std::string& nested_path,
              DataType data_type,
-             bool any_type = false) const override {
+             bool any_type = false,
+             bool is_array = false) const override {
         return false;
     };
 

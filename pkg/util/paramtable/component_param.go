@@ -3629,15 +3629,16 @@ type dataCoordConfig struct {
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 
 	// import
-	FilesPerPreImportTask    ParamItem `refreshable:"true"`
-	ImportTaskRetention      ParamItem `refreshable:"true"`
-	MaxSizeInMBPerImportTask ParamItem `refreshable:"true"`
-	ImportScheduleInterval   ParamItem `refreshable:"true"`
-	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
-	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
-	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
-	MaxImportJobNum          ParamItem `refreshable:"true"`
-	WaitForIndex             ParamItem `refreshable:"true"`
+	FilesPerPreImportTask           ParamItem `refreshable:"true"`
+	ImportTaskRetention             ParamItem `refreshable:"true"`
+	MaxSizeInMBPerImportTask        ParamItem `refreshable:"true"`
+	ImportScheduleInterval          ParamItem `refreshable:"true"`
+	ImportCheckIntervalHigh         ParamItem `refreshable:"true"`
+	ImportCheckIntervalLow          ParamItem `refreshable:"true"`
+	MaxFilesPerImportReq            ParamItem `refreshable:"true"`
+	MaxImportJobNum                 ParamItem `refreshable:"true"`
+	WaitForIndex                    ParamItem `refreshable:"true"`
+	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4540,6 +4541,14 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.WaitForIndex.Init(base.mgr)
 
+	p.ImportPreAllocIDExpansionFactor = ParamItem{
+		Key:          "dataCoord.import.preAllocateIDExpansionFactor",
+		Version:      "2.5.13",
+		DefaultValue: "10",
+		Doc:          `The expansion factor for pre-allocating IDs during import.`,
+	}
+	p.ImportPreAllocIDExpansionFactor.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -4740,7 +4749,8 @@ type dataNodeConfig struct {
 	// import
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
+	ImportInsertBufferSize     ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5040,15 +5050,25 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxImportFileSizeInGB.Init(base.mgr)
 
-	p.ReadBufferSizeInMB = ParamItem{
+	p.ImportInsertBufferSize = ParamItem{
 		Key:          "dataNode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
-		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
+		Doc:          "The insert buffer size (in MB) during import.",
+		DefaultValue: "64",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportInsertBufferSize.Init(base.mgr)
+
+	p.ImportDeleteBufferSize = ParamItem{
+		Key:          "dataNode.import.readDeleteBufferSizeInMB",
+		Version:      "2.5.14",
+		Doc:          "The delete buffer size (in MB) during import.",
 		DefaultValue: "16",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ReadBufferSizeInMB.Init(base.mgr)
+	p.ImportDeleteBufferSize.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
