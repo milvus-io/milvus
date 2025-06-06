@@ -97,7 +97,7 @@ public:
     }
 
     void
-    unloadAll(const std::string& name) {
+    unload(const std::string& name) {
         auto it = plugins_.find(name);
         if (it != plugins_.end()) {
             plugins_.erase(it);
