@@ -19,6 +19,20 @@
 namespace milvus::index {
 constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
     "/tmp/milvus/json-key-inverted-index-log/";
+constexpr size_t MEMORY_THRESHOLD = 128 * 1024 * 1024;
+constexpr size_t VECTOR_ELEMENT_SIZE = 8;
+constexpr size_t KEY_OVERHEAD = 2;
+size_t current_batch_size_ = 0;
+
+size_t
+calculateMemoryUsage(const std::map<std::string, std::vector<int64_t>>& mp) {
+    size_t total_memory = 0;
+    for (const auto& [key, vec] : mp) {
+        total_memory += (key.length());
+        total_memory += (vec.size() * VECTOR_ELEMENT_SIZE);
+    }
+    return total_memory * KEY_OVERHEAD;
+}
 
 void
 JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
@@ -50,6 +64,10 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
     }
 
     mp[key].push_back(combine_id);
+
+    if (calculateMemoryUsage(mp) >= MEMORY_THRESHOLD) {
+        AddInvertedRecord(mp);
+    }
 }
 
 void
@@ -70,6 +88,8 @@ JsonKeyStatsInvertedIndex::AddInvertedRecord(
                                                json_offsets.data(),
                                                json_offsets_lens.data(),
                                                keys.size());
+    mp.clear();
+    current_batch_size_ = 0;
 }
 
 void
