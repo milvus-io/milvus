@@ -24,13 +24,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
+	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type limiterMock struct {
@@ -358,6 +361,26 @@ func TestRateLimitInterceptor(t *testing.T) {
 		limiter.limit = true
 		interceptorFun := RateLimitInterceptor(&limiter)
 		rsp, err := interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
+		assert.NoError(t, err)
+	})
+
+	t.Run("test super user skip rate limit", func(t *testing.T) {
+		paramtable.Get().Save("common.security.superUsersSkipRateLimit", "root")
+		defer paramtable.Get().Reset("common.security.superUsersSkipRateLimit")
+
+		limiter := limiterMock{rate: 0}
+		interceptorFun := RateLimitInterceptor(&limiter)
+
+		md := metadata.Pairs(util.HeaderAuthorize, crypto.Base64Encode("root:root"))
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		serverInfo := &grpc.UnaryServerInfo{FullMethod: "MockFullMethod"}
+		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+			return &milvuspb.MutationResult{
+				Status: merr.Success(),
+			}, nil
+		}
+		rsp, err := interceptorFun(ctx, &milvuspb.InsertRequest{}, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
 	})
