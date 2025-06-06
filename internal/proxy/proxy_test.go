@@ -417,12 +417,7 @@ func TestProxy(t *testing.T) {
 	floatIndexName := "float_index"
 	binaryIndexName := "binary_index"
 	nlist := 10
-	// nprobe := 10
-	// topk := 10
-	// add a test parameter
-	// roundDecimal := 6
 	nq := 10
-	// expr := fmt.Sprintf("%s > 0", int64Field)
 	var segmentIDs []int64
 
 	// an int64 field (pk) & a float vector field
@@ -3772,6 +3767,196 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
 	})
+
+	wg.Add(1)
+	// todo: when struct array field is done, this will be merged with above logic
+	t.Run("test struct array field", func(t *testing.T) {
+		defer wg.Done()
+
+		structCollectionName := prefix + "struct_" + funcutil.GenRandomStr()
+		structId := "structI32Array"
+		structVec := "structFloatVecArray"
+		structField := "struct"
+
+		constructStructCollectionSchema := func() *schemapb.CollectionSchema {
+			pk := &schemapb.FieldSchema{
+				FieldID:      100,
+				Name:         int64Field,
+				IsPrimaryKey: true,
+				Description:  "",
+				DataType:     schemapb.DataType_Int64,
+				TypeParams:   nil,
+				IndexParams:  nil,
+				AutoID:       true,
+			}
+			fVec := &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         floatVecField,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(dim),
+					},
+				},
+				IndexParams: nil,
+				AutoID:      false,
+			}
+			// struct schema fields
+			sId := &schemapb.FieldSchema{
+				FieldID:      103,
+				Name:         structId,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Array,
+				ElementType:  schemapb.DataType_Int32,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "100",
+					},
+				},
+				IndexParams: nil,
+				AutoID:      false,
+			}
+			sVec := &schemapb.FieldSchema{
+				FieldID:      104,
+				Name:         structVec,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_ArrayOfVector,
+				ElementType:  schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(dim),
+					},
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "100",
+					},
+				},
+				IndexParams: nil,
+				AutoID:      false,
+			}
+			structF := &schemapb.StructArrayFieldSchema{
+				FieldID: 105,
+				Name:    structField,
+				Fields:  []*schemapb.FieldSchema{sId, sVec},
+			}
+			return &schemapb.CollectionSchema{
+				Name:        structCollectionName,
+				Description: "",
+				AutoID:      false,
+				Fields: []*schemapb.FieldSchema{
+					pk,
+					fVec,
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{structF},
+			}
+		}
+
+		structSchema := constructStructCollectionSchema()
+		constructStructCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
+			bs, err := proto.Marshal(structSchema)
+			assert.NoError(t, err)
+			return &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: structCollectionName,
+				Schema:         bs,
+				ShardsNum:      shardsNum,
+			}
+		}
+
+		createStructCollectionReq := constructStructCreateCollectionRequest()
+		resp, err := proxy.CreateCollection(ctx, createStructCollectionReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		reqInvalidField := constructStructCreateCollectionRequest()
+		invalidSchema := constructStructCollectionSchema()
+		invalidSchema.Fields = append(invalidSchema.Fields, &schemapb.FieldSchema{
+			Name:     "StringField",
+			DataType: schemapb.DataType_String,
+		})
+		bs, err := proto.Marshal(invalidSchema)
+		assert.NoError(t, err)
+		reqInvalidField.CollectionName = "invalid_field_coll"
+		reqInvalidField.Schema = bs
+
+		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		hasResp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: structCollectionName,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, hasResp.GetStatus().GetErrorCode())
+		assert.True(t, hasResp.Value)
+
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, structCollectionName)
+		assert.NoError(t, err)
+
+		descResp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: structCollectionName,
+			CollectionID:   collectionID,
+			TimeStamp:      0,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, descResp.GetStatus().GetErrorCode())
+		assert.Equal(t, collectionID, descResp.CollectionID)
+
+		fieldsMap := make(map[string]*schemapb.FieldSchema)
+		for _, field := range descResp.Schema.Fields {
+			fieldsMap[field.Name] = field
+		}
+		for _, structField := range descResp.Schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				fieldsMap[field.Name] = field
+			}
+		}
+		assert.Equal(t, len(fieldsMap), len(structSchema.Fields)+2)
+		for _, field := range structSchema.Fields {
+			fSchema, ok := fieldsMap[field.Name]
+			assert.True(t, ok)
+			assert.True(t, proto.Equal(field, fSchema))
+		}
+		for _, structField := range structSchema.StructArrayFields {
+			for _, field := range structField.Fields {
+				fSchema, ok := fieldsMap[field.Name]
+				assert.True(t, ok)
+				assert.True(t, proto.Equal(field, fSchema))
+			}
+		}
+
+		statsResp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: structCollectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, statsResp.GetStatus().GetErrorCode())
+
+		showResp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base:      nil,
+			DbName:    dbName,
+			TimeStamp: 0,
+			Type:      milvuspb.ShowType_All,
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(showResp.GetStatus()))
+		assert.Contains(t, showResp.CollectionNames, structCollectionName)
+	})
+
 	testServer.gracefulStop()
 	wg.Wait()
 	log.Info("case done")
