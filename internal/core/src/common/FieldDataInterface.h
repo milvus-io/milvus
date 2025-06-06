@@ -317,7 +317,7 @@ class FieldDataImpl : public FieldDataBase {
             if (IsVectorDataType(data_type)) {
                 PanicInfo(NotImplemented, "vector type not support null");
             }
-            valid_data_.resize((num_rows_ + 7) / 8);
+            valid_data_.resize((num_rows_ + 7) / 8, 0xFF);
         }
     }
 
@@ -447,7 +447,7 @@ class FieldDataImpl : public FieldDataBase {
             data_.resize(num_rows_ * dim_);
         }
         if (nullable_) {
-            valid_data_.resize((num_rows_ + 7) / 8);
+            valid_data_.resize((num_rows_ + 7) / 8, 0xFF);
         }
     }
 
@@ -465,7 +465,7 @@ class FieldDataImpl : public FieldDataBase {
             num_rows_ = num_rows;
             data_.resize(num_rows_ * dim_);
             if (nullable_) {
-                valid_data_.resize((num_rows + 7) / 8);
+                valid_data_.resize((num_rows + 7) / 8, 0xFF);
             }
         }
     }
@@ -563,10 +563,9 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
         }
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();
-            if (valid_data == nullptr) {
-                valid_data_.resize((n + 7) / 8, 0xFF);
-            } else {
-                std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
+            if (valid_data != nullptr) {
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                    valid_data, 0, valid_data_.data(), length_, n);
             }
         }
         length_ += n;
@@ -633,10 +632,9 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         }
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();
-            if (valid_data == nullptr) {
-                valid_data_.assign((n + 7) / 8, 0xFF);
-            } else {
-                std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
+            if (valid_data != nullptr) {
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                    valid_data, 0, valid_data_.data(), length_, n);
             }
         }
         length_ += n;
