@@ -3364,3 +3364,7 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 	}
 	return visibleCollections.Contain(collectionName)
 }
+
+func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return c.quotaCenter.getQuotaMetrics(), nil
+}

@@ -30,7 +30,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list, set to false to reduce memory usage */ false),
             /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);

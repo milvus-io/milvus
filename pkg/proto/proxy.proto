@@ -31,6 +31,7 @@ service Proxy {
   rpc InvalidateShardLeaderCache(InvalidateShardLeaderCacheRequest) returns (common.Status) {}
 
   rpc GetSegmentsInfo(internal.GetSegmentsInfoRequest) returns (internal.GetSegmentsInfoResponse) {}
+  rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
 }
 
 message InvalidateCollMetaCacheRequest {

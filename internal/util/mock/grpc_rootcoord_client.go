@@ -305,3 +305,7 @@ func (m *GrpcRootCoordClient) OperatePrivilegeGroup(ctx context.Context, in *mil
 func (m *GrpcRootCoordClient) Close() error {
 	return nil
 }
+
+func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+	return &internalpb.GetQuotaMetricsResponse{}, m.Err
+}

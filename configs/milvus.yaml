@@ -173,7 +173,7 @@ mq:
   pursuitBufferTime: 60 # pursuit mode buffer time in seconds
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
-    mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
+    mergeCheckInterval: 0.1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
@@ -304,6 +304,10 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
+  # maximum number of result entries, typically Nq * TopK * GroupSize. 
+  # It costs additional memory and time to process a large number of result entries. 
+  # If the number of result entries exceeds this limit, the search will be rejected.
+  maxResultEntries: 1000000
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -1200,6 +1204,9 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+    # The timeout of wal balancer operation, 10s by default.
+    # If the operation exceeds this timeout, it will be canceled.
+    operationTimeout: 10s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:

@@ -44,7 +44,8 @@ ChunkTranslator::ChunkTranslator(
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list*/ field_data_info.in_load_list),
             /* support_eviction */ false) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
                "ChunkTranslator not supported for system field");
@@ -68,10 +69,10 @@ ChunkTranslator::load_chunk(milvus::cachinglayer::cid_t cid) {
     pool.Submit(LoadArrowReaderFromRemote,
                 std::vector<std::string>{files_and_rows_[cid].first},
                 channel);
-    LOG_DEBUG("segment {} submits load field {} chunk {} task to thread pool",
-              segment_id_,
-              field_id_,
-              cid);
+    LOG_INFO("segment {} submits load field {} chunk {} task to thread pool",
+             segment_id_,
+             field_id_,
+             cid);
 
     auto data_type = field_meta_.get_data_type();
 

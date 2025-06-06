@@ -24,6 +24,8 @@ type Node interface {
 	Name() string
 	MaxQueueLength() int32
 	Operate(in Msg) Msg
+
+	Close()
 }
 
 type nodeCtx struct {
@@ -54,6 +56,9 @@ func (node *BaseNode) Name() string {
 // length of pipeline input chnnel
 func (node *BaseNode) MaxQueueLength() int32 {
 	return node.maxQueueLength
+}
+
+func (node *BaseNode) Close() {
 }
 
 func NewBaseNode(name string, maxQueryLength int32) *BaseNode {
