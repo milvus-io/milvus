@@ -35,6 +35,19 @@ func TestTokenizer(t *testing.T) {
 			fmt.Println(tokenStream.Token())
 		}
 	}
+	// grpc tokenizer.
+	{
+		m := "{\"tokenizer\": {\"type\":\"grpc\", \"endpoint\":\"http://localhost:50051\"}}"
+		tokenizer, err := NewTokenizer(m)
+		assert.NoError(t, err)
+		defer tokenizer.Destroy()
+
+		tokenStream := tokenizer.NewTokenStream("football, basketball, pingpang")
+		defer tokenStream.Destroy()
+		for tokenStream.Advance() {
+			fmt.Println(tokenStream.Token())
+		}
+	}
 }
 
 func TestValidateTokenizer(t *testing.T) {
