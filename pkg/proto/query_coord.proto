@@ -616,6 +616,7 @@ message GetDataDistributionResponse {
     repeated LeaderView leader_views = 5;
     int64 lastModifyTs = 6;
     double memCapacityInMB = 7;
+    int64 cpu_num = 8;
 }
 
 message LeaderView {

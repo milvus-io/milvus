@@ -176,6 +176,12 @@ func (n *NodeInfo) MemCapacity() float64 {
 	return n.stats.getMemCapacity()
 }
 
+func (n *NodeInfo) CPUNum() int64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.stats.getCPUNum()
+}
+
 func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
 	n.lastHeartbeat.Store(time.UnixNano())
 }
@@ -239,5 +245,11 @@ func WithChannelCnt(cnt int) StatsOption {
 func WithMemCapacity(capacity float64) StatsOption {
 	return func(n *NodeInfo) {
 		n.setMemCapacity(capacity)
+	}
+}
+
+func WithCPUNum(num int64) StatsOption {
+	return func(n *NodeInfo) {
+		n.setCPUNum(num)
 	}
 }
