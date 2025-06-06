@@ -276,6 +276,31 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
     return res_vec;
 }
 
+void
+PhyJsonContainsFilterExpr::ExecuteSharedArrayFilterWithExecutor(
+    const std::string& pointer,
+    const std::function<bool(milvus::BsonView, uint32_t)>& shared_executor) {
+    if (cached_index_chunk_id_ != 0 &&
+        segment_->type() == SegmentType::Sealed) {
+        auto* segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+        auto field_id = expr_->column_.field_id_;
+        auto* index = segment->GetJsonStats(field_id);
+        Assert(index != nullptr);
+
+        cached_index_chunk_res_.resize(active_count_, false);
+        TargetBitmap valid_res(active_count_, true);
+        TargetBitmapView res_view(cached_index_chunk_res_);
+        TargetBitmapView valid_res_view(valid_res);
+
+        // process shredding data
+        // array type is not supported for shredding
+
+        // process shared data
+        index->ExecuteForSharedData(pointer, res_view, shared_executor);
+        cached_index_chunk_id_ = 0;
+    }
+}
+
 template <typename ExprValueType>
 VectorPtr
 PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
@@ -287,7 +312,7 @@ PhyJsonContainsFilterExpr::ExecJsonContains(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(field_id) && !has_offset_input_) {
         return ExecJsonContainsByKeyIndex<ExprValueType>();
     }
 
@@ -404,59 +429,25 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    if (cached_index_chunk_id_ != 0) {
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
-        }
-        auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
-        Assert(index != nullptr);
-        auto filter_func = [this, segment, &field_id](bool valid,
-                                                      uint8_t type,
-                                                      uint32_t row_id,
-                                                      uint16_t offset,
-                                                      uint16_t size,
-                                                      int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
-                }
-                auto& json = json_pair.first;
-                auto array = json.array_at(offset, size);
 
-                if (array.error()) {
-                    return false;
-                }
-                for (auto&& it : array) {
-                    auto val = it.template get<GetType>();
-                    if (val.error()) {
-                        continue;
-                    }
-                    if (this->arg_set_->In(val.value())) {
-                        return true;
-                    }
-                }
-                return false;
+    // process shared data
+    auto shared_executor = [this](milvus::BsonView bson, uint32_t offset) {
+        auto val = bson.ParseAsArrayAtOffset(offset);
+
+        if (!val.has_value()) {
+            return false;
+        }
+
+        for (const auto& element : val.value()) {
+            auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
+                element.get_value());
+            if (value.has_value() && this->arg_set_->In(value.value())) {
+                return true;
             }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
-        cached_index_chunk_id_ = 0;
-    }
+        }
+        return false;
+    };
+    ExecuteSharedArrayFilterWithExecutor(pointer, shared_executor);
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -470,7 +461,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(field_id) && !has_offset_input_) {
         return ExecJsonContainsArrayByKeyIndex();
     }
     auto real_batch_size =
@@ -588,60 +579,32 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    if (cached_index_chunk_id_ != 0) {
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+
+    auto shared_executor = [&elements](milvus::BsonView bson, uint32_t offset) {
+        auto array = bson.ParseAsArrayAtOffset(offset);
+
+        if (!array.has_value()) {
+            return false;
         }
-        auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
-        Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
+
+        for (const auto& sub_value : array.value()) {
+            auto sub_array =
+                milvus::BsonView::GetValueFromBsonView<bsoncxx::array::view>(
+                    sub_value.get_value());
+
+            if (!sub_array.has_value())
+                continue;
+
+            for (const auto& element : elements) {
+                if (CompareTwoJsonArray(sub_array.value(), element)) {
+                    return true;
                 }
-                auto& json = json_pair.first;
-                auto array = json.array_at(offset, size);
-                if (array.error()) {
-                    return false;
-                }
-                for (auto&& it : array) {
-                    auto val = it.get_array();
-                    if (val.error()) {
-                        continue;
-                    }
-                    for (auto const& element : elements) {
-                        if (CompareTwoJsonArray(val, element)) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
             }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
-        cached_index_chunk_id_ = 0;
-    }
+        }
+        return false;
+    };
+    ExecuteSharedArrayFilterWithExecutor(pointer, shared_executor);
+
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -749,7 +712,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
 
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(field_id) && !has_offset_input_) {
         return ExecJsonContainsAllByKeyIndex<ExprValueType>();
     }
     auto real_batch_size =
@@ -866,60 +829,31 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    if (cached_index_chunk_id_ != 0) {
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+
+    // process shared data
+    auto shared_executor = [this, &elements](milvus::BsonView bson,
+                                             uint32_t offset) {
+        auto val = bson.ParseAsArrayAtOffset(offset);
+
+        if (!val.has_value()) {
+            return false;
         }
-        auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
-        Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
-                }
-                auto& json = json_pair.first;
-                auto array = json.array_at(offset, size);
-                if (array.error()) {
-                    return false;
-                }
-                std::set<GetType> tmp_elements(elements);
-                for (auto&& it : array) {
-                    auto val = it.template get<GetType>();
-                    if (val.error()) {
-                        continue;
-                    }
-                    tmp_elements.erase(val.value());
-                    if (tmp_elements.size() == 0) {
-                        return true;
-                    }
-                }
-                return tmp_elements.empty();
+
+        std::set<GetType> tmp_elements(elements);
+        for (const auto& element : val.value()) {
+            auto value = milvus::BsonView::GetValueFromBsonView<GetType>(
+                element.get_value());
+            if (!value.has_value()) {
+                continue;
             }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
-        cached_index_chunk_id_ = 0;
-    }
+            tmp_elements.erase(value.value());
+            if (tmp_elements.size() == 0) {
+                return true;
+            }
+        }
+        return tmp_elements.empty();
+    };
+    ExecuteSharedArrayFilterWithExecutor(pointer, shared_executor);
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -933,7 +867,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(field_id) && !has_offset_input_) {
         return ExecJsonContainsAllWithDiffTypeByKeyIndex();
     }
     auto real_batch_size =
@@ -1113,121 +1047,94 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    if (cached_index_chunk_id_ != 0) {
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+    auto shared_executor = [&elements, &elements_index](milvus::BsonView bson,
+                                                        uint32_t offset) {
+        std::set<int> tmp_elements_index(elements_index);
+        auto array = bson.ParseAsArrayAtOffset(offset);
+        if (!array.has_value()) {
+            return false;
         }
-        auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
-        Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &elements_index, &field_id](
-                               bool valid,
-                               uint8_t type,
-                               uint32_t row_id,
-                               uint16_t offset,
-                               uint16_t size,
-                               int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
-                }
-                auto& json = json_pair.first;
-                std::set<int> tmp_elements_index(elements_index);
-                auto array = json.array_at(offset, size);
-                if (array.error()) {
-                    return false;
-                }
-                for (auto&& it : array) {
-                    int i = -1;
-                    for (auto& element : elements) {
-                        i++;
-                        switch (element.val_case()) {
-                            case proto::plan::GenericValue::kBoolVal: {
-                                auto val = it.template get<bool>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.bool_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kInt64Val: {
-                                auto val = it.template get<int64_t>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.int64_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kFloatVal: {
-                                auto val = it.template get<double>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.float_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kStringVal: {
-                                auto val = it.template get<std::string_view>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.string_val()) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kArrayVal: {
-                                auto val = it.get_array();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (CompareTwoJsonArray(val,
-                                                        element.array_val())) {
-                                    tmp_elements_index.erase(i);
-                                }
-                                break;
-                            }
-                            default:
-                                PanicInfo(
-                                    DataTypeInvalid,
-                                    fmt::format("unsupported data type {}",
-                                                element.val_case()));
+
+        for (const auto& sub_value : array.value()) {
+            int i = -1;
+            for (auto& element : elements) {
+                i++;
+                switch (element.val_case()) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        auto val = milvus::BsonView::GetValueFromBsonView<bool>(
+                            sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
                         }
-                        if (tmp_elements_index.size() == 0) {
-                            return true;
+                        if (val.value() == element.bool_val()) {
+                            tmp_elements_index.erase(i);
                         }
+                        break;
                     }
-                    if (tmp_elements_index.size() == 0) {
-                        return true;
+                    case proto::plan::GenericValue::kInt64Val: {
+                        auto val =
+                            milvus::BsonView::GetValueFromBsonView<int64_t>(
+                                sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (val.value() == element.int64_val()) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
                     }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        auto val =
+                            milvus::BsonView::GetValueFromBsonView<double>(
+                                sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (val.value() == element.float_val()) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        auto val =
+                            milvus::BsonView::GetValueFromBsonView<std::string>(
+                                sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (val.value() == element.string_val()) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        auto val = milvus::BsonView::GetValueFromBsonView<
+                            bsoncxx::array::view>(sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (CompareTwoJsonArray(val.value(),
+                                                element.array_val())) {
+                            tmp_elements_index.erase(i);
+                        }
+                        break;
+                    }
+                    default:
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              element.val_case()));
                 }
-                return tmp_elements_index.size() == 0;
+                if (tmp_elements_index.size() == 0)
+                    return true;
             }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
-        cached_index_chunk_id_ = 0;
-    }
+            if (tmp_elements_index.size() == 0)
+                return true;
+        }
+        return tmp_elements_index.size() == 0;
+    };
+
+    ExecuteSharedArrayFilterWithExecutor(pointer, shared_executor);
+
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -1241,7 +1148,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArray(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(field_id) && !has_offset_input_) {
         return ExecJsonContainsAllArrayByKeyIndex();
     }
     auto real_batch_size =
@@ -1365,64 +1272,34 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    if (cached_index_chunk_id_ != 0) {
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+
+    auto shared_executor = [&elements](milvus::BsonView bson, uint32_t offset) {
+        auto array = bson.ParseAsArrayAtOffset(offset);
+        if (!array.has_value()) {
+            return false;
         }
-        auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
-        Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
+
+        std::set<int> exist_elements_index;
+        for (const auto& sub_value : array.value()) {
+            auto sub_array =
+                milvus::BsonView::GetValueFromBsonView<bsoncxx::array::view>(
+                    sub_value.get_value());
+
+            if (!sub_array.has_value())
+                continue;
+
+            for (int index = 0; index < elements.size(); ++index) {
+                if (CompareTwoJsonArray(sub_array.value(), elements[index])) {
+                    exist_elements_index.insert(index);
                 }
-                auto& json = json_pair.first;
-                auto array = json.array_at(offset, size);
-                if (array.error()) {
-                    return false;
-                }
-                std::set<int> exist_elements_index;
-                for (auto&& it : array) {
-                    auto json_array = it.get_array();
-                    if (json_array.error()) {
-                        continue;
-                    }
-                    for (int index = 0; index < elements.size(); ++index) {
-                        if (CompareTwoJsonArray(json_array, elements[index])) {
-                            exist_elements_index.insert(index);
-                        }
-                    }
-                    if (exist_elements_index.size() == elements.size()) {
-                        return true;
-                    }
-                }
-                return exist_elements_index.size() == elements.size();
             }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
-        cached_index_chunk_id_ = 0;
-    }
+            if (exist_elements_index.size() == elements.size()) {
+                return true;
+            }
+        }
+        return exist_elements_index.size() == elements.size();
+    };
+    ExecuteSharedArrayFilterWithExecutor(pointer, shared_executor);
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -1436,7 +1313,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
     FieldId field_id = expr_->column_.field_id_;
-    if (CanUseJsonKeyIndex(field_id) && !has_offset_input_) {
+    if (CanUseJsonStats(field_id) && !has_offset_input_) {
         return ExecJsonContainsWithDiffTypeByKeyIndex();
     }
     auto real_batch_size =
@@ -1600,112 +1477,85 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
             TargetBitmap(real_batch_size, false),
             TargetBitmap(real_batch_size, true));
     }
-    if (cached_index_chunk_id_ != 0) {
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
+    auto shared_executor = [&elements](milvus::BsonView bson, uint32_t offset) {
+        auto array = bson.ParseAsArrayAtOffset(offset);
+        if (!array.has_value()) {
+            return false;
         }
-        auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
-        Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
-                    return false;
-                }
-                auto& json = json_pair.first;
-                auto array = json.array_at(offset, size);
-                if (array.error()) {
-                    return false;
-                }
-                // Note: array can only be iterated once
-                for (auto&& it : array) {
-                    for (auto const& element : elements) {
-                        switch (element.val_case()) {
-                            case proto::plan::GenericValue::kBoolVal: {
-                                auto val = it.template get<bool>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.bool_val()) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kInt64Val: {
-                                auto val = it.template get<int64_t>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.int64_val()) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kFloatVal: {
-                                auto val = it.template get<double>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.float_val()) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kStringVal: {
-                                auto val = it.template get<std::string_view>();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (val.value() == element.string_val()) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            case proto::plan::GenericValue::kArrayVal: {
-                                auto val = it.get_array();
-                                if (val.error()) {
-                                    continue;
-                                }
-                                if (CompareTwoJsonArray(val,
-                                                        element.array_val())) {
-                                    return true;
-                                }
-                                break;
-                            }
-                            default:
-                                PanicInfo(
-                                    DataTypeInvalid,
-                                    fmt::format("unsupported data type {}",
-                                                element.val_case()));
+
+        for (const auto& sub_value : array.value()) {
+            for (auto const& element : elements) {
+                switch (element.val_case()) {
+                    case proto::plan::GenericValue::kBoolVal: {
+                        auto val = milvus::BsonView::GetValueFromBsonView<bool>(
+                            sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
                         }
+                        if (val.value() == element.bool_val()) {
+                            return true;
+                        }
+                        break;
                     }
+                    case proto::plan::GenericValue::kInt64Val: {
+                        auto val =
+                            milvus::BsonView::GetValueFromBsonView<int64_t>(
+                                sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (val.value() == element.int64_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kFloatVal: {
+                        auto val =
+                            milvus::BsonView::GetValueFromBsonView<double>(
+                                sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (val.value() == element.float_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kStringVal: {
+                        auto val =
+                            milvus::BsonView::GetValueFromBsonView<std::string>(
+                                sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (val.value() == element.string_val()) {
+                            return true;
+                        }
+                        break;
+                    }
+                    case proto::plan::GenericValue::kArrayVal: {
+                        auto val = milvus::BsonView::GetValueFromBsonView<
+                            bsoncxx::array::view>(sub_value.get_value());
+                        if (!val.has_value()) {
+                            continue;
+                        }
+                        if (CompareTwoJsonArray(val.value(),
+                                                element.array_val())) {
+                            return true;
+                        }
+                        break;
+                    }
+                    default:
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported data type {}",
+                                              element.val_case()));
                 }
-                return false;
             }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
-        cached_index_chunk_id_ = 0;
-    }
+        }
+        return false;
+    };
+    ExecuteSharedArrayFilterWithExecutor(pointer, shared_executor);
+
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
@@ -1801,6 +1651,5 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
                real_batch_size);
     return res;
 }
-
 }  //namespace exec
 }  // namespace milvus

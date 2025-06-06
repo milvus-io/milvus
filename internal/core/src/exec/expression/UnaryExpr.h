@@ -34,10 +34,69 @@
 namespace milvus {
 namespace exec {
 
-template <typename T, FilterType filter_type>
+template <typename T, typename U>
+bool
+UnaryCompare(const T& get_value, const U& val, proto::plan::OpType op_type) {
+    switch (op_type) {
+        case proto::plan::GreaterThan:
+            return get_value > val;
+        case proto::plan::GreaterEqual:
+            return get_value >= val;
+        case proto::plan::LessThan:
+            return get_value < val;
+        case proto::plan::LessEqual:
+            return get_value <= val;
+        case proto::plan::Equal:
+            return get_value == val;
+        case proto::plan::NotEqual:
+            return get_value != val;
+        case proto::plan::InnerMatch:
+        case proto::plan::PostfixMatch:
+        case proto::plan::PrefixMatch:
+            if constexpr (std::is_same_v<U, std::string> ||
+                          std::is_same_v<U, std::string_view>) {
+                return milvus::query::Match(get_value, val, op_type);
+            } else {
+                return false;
+            }
+        case proto::plan::Match:
+            if constexpr (std::is_same_v<U, std::string> ||
+                          std::is_same_v<U, std::string_view>) {
+                PatternMatchTranslator translator;
+                auto regex_pattern = translator(val);
+                RegexMatcher matcher(regex_pattern);
+                return matcher(get_value);
+            } else {
+                return false;
+            }
+        default:
+            return false;
+    }
+}
+
+template <typename T, FilterType filter_type = FilterType::sequential>
 struct UnaryElementFuncForMatch {
     using IndexInnerType =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
+    void
+    operator()(const T* src,
+               size_t size,
+               IndexInnerType val,
+               TargetBitmapView res) {
+        static_assert(
+            filter_type == FilterType::sequential,
+            "this override operator() of UnaryElementFuncForMatch does "
+            "not support FilterType::random");
+
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(val);
+        RegexMatcher matcher(regex_pattern);
+
+        for (int i = 0; i < size; ++i) {
+            res[i] = matcher(src[i]);
+        }
+    }
 
     void
     operator()(const T* src,
@@ -64,10 +123,81 @@ struct UnaryElementFuncForMatch {
     }
 };
 
-template <typename T, proto::plan::OpType op, FilterType filter_type>
+template <typename T,
+          proto::plan::OpType op,
+          FilterType filter_type = FilterType::sequential>
 struct UnaryElementFunc {
     using IndexInnerType =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
+
+    void
+    operator()(const T* src,
+               size_t size,
+               TargetBitmapView res,
+               IndexInnerType val) {
+        static_assert(filter_type == FilterType::sequential,
+                      "this override operator() of UnaryElementFunc does not "
+                      "support FilterType::random");
+        if constexpr (op == proto::plan::OpType::Match) {
+            UnaryElementFuncForMatch<T> func;
+            func(src, size, val, res);
+            return;
+        }
+
+        if constexpr (std::is_same_v<T, std::string_view> ||
+                      std::is_same_v<T, std::string>) {
+            for (int i = 0; i < size; ++i) {
+                if constexpr (op == proto::plan::OpType::Equal) {
+                    res[i] = src[i] == val;
+                } else if constexpr (op == proto::plan::OpType::NotEqual) {
+                    res[i] = src[i] != val;
+                } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+                    res[i] = src[i] > val;
+                } else if constexpr (op == proto::plan::OpType::LessThan) {
+                    res[i] = src[i] < val;
+                } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+                    res[i] = src[i] >= val;
+                } else if constexpr (op == proto::plan::OpType::LessEqual) {
+                    res[i] = src[i] <= val;
+                } else if constexpr (op == proto::plan::OpType::PrefixMatch ||
+                                     op == proto::plan::OpType::PostfixMatch ||
+                                     op == proto::plan::OpType::InnerMatch) {
+                    res[i] = milvus::query::Match(src[i], val, op);
+                } else {
+                    PanicInfo(
+                        OpTypeInvalid,
+                        fmt::format(
+                            "unsupported op_type:{} for UnaryElementFunc", op));
+                }
+            }
+            return;
+        }
+
+        if constexpr (op == proto::plan::OpType::Equal) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
+                src, size, val);
+            std::cout << "Equal" << size << " " << val << std::endl;
+        } else if constexpr (op == proto::plan::OpType::NotEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::LessThan) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::LessEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
+                src, size, val);
+        } else {
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
+        }
+    }
 
     void
     operator()(const T* src,
@@ -341,6 +471,113 @@ struct UnaryIndexFunc {
                 fmt::format("unsupported op_type:{} for UnaryIndexFunc", op));
         }
     }
+};
+
+template <typename GetType>
+class ShreddingExecutor {
+    using IndexInnerType =
+        std::conditional_t<std::is_same_v<GetType, std::string_view>,
+                           std::string,
+                           GetType>;
+
+ public:
+    ShreddingExecutor(proto::plan::OpType op_type,
+                      const std::string& pointer,
+                      IndexInnerType val)
+        : op_type_(op_type), val_(val), pointer_(pointer) {
+    }
+
+    void
+    operator()(const GetType* src,
+               const bool* valid,
+               size_t size,
+               TargetBitmapView res,
+               TargetBitmapView valid_res) {
+        if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
+            // shredding data does not support array
+            return;
+        } else {
+            ExecuteOperation(src, size, res);
+            HandleValidData(valid, size, res, valid_res);
+        }
+    }
+
+ private:
+    void
+    ExecuteOperation(const GetType* src, size_t size, TargetBitmapView res) {
+        switch (op_type_) {
+            case proto::plan::GreaterThan: {
+                UnaryElementFunc<GetType, proto::plan::GreaterThan> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::GreaterEqual: {
+                UnaryElementFunc<GetType, proto::plan::GreaterEqual> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::LessThan: {
+                UnaryElementFunc<GetType, proto::plan::LessThan> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::LessEqual: {
+                UnaryElementFunc<GetType, proto::plan::LessEqual> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::Equal: {
+                UnaryElementFunc<GetType, proto::plan::Equal> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::NotEqual: {
+                UnaryElementFunc<GetType, proto::plan::NotEqual> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::InnerMatch: {
+                UnaryElementFunc<GetType, proto::plan::InnerMatch> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::PostfixMatch: {
+                UnaryElementFunc<GetType, proto::plan::PostfixMatch> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::PrefixMatch: {
+                UnaryElementFunc<GetType, proto::plan::PrefixMatch> func;
+                func(src, size, res, val_);
+                break;
+            }
+            case proto::plan::Match: {
+                UnaryElementFunc<GetType, proto::plan::Match> func;
+                func(src, size, res, val_);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    void
+    HandleValidData(const bool* valid,
+                    size_t size,
+                    TargetBitmapView res,
+                    TargetBitmapView valid_res) {
+        if (valid != nullptr) {
+            for (int i = 0; i < size; ++i) {
+                if (!valid[i]) {
+                    res[i] = valid_res[i] = false;
+                }
+            }
+        }
+    }
+
+    proto::plan::OpType op_type_;
+    IndexInnerType val_;
+    std::string pointer_;
 };
 
 class PhyUnaryRangeFilterExpr : public SegmentExpr {

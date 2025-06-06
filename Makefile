@@ -263,7 +263,7 @@ generated-proto: download-milvus-proto build-3rdparty get-proto-deps
 	@echo "Generate proto ..."
 	@(env bash $(PWD)/scripts/generate_proto.sh ${INSTALL_PATH})
 
-build-cpp: generated-proto
+build-cpp: #generated-proto
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -o ${use_opendal} -f $(tantivy_features))
 

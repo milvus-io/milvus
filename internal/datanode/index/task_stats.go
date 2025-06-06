@@ -509,7 +509,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		zap.Any("statsJobType", st.req.GetSubJobType()),
 		zap.Int64("jsonKeyStatsDataFormat", jsonKeyStatsDataFormat),
 	)
-	if jsonKeyStatsDataFormat != 1 {
+	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
 		log.Info("create json key index failed dataformat invalid")
 		return nil
 	}

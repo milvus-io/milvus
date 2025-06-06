@@ -1115,7 +1115,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 }
 
 func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datapb.JsonKeyStats, schemaHelper *typeutil.SchemaHelper) error {
-	if jsonKeyStats.GetJsonKeyStatsDataFormat() == 0 {
+	if jsonKeyStats.GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
 		log.Ctx(ctx).Info("load json key index failed dataformat invalid", zap.Int64("dataformat", jsonKeyStats.GetJsonKeyStatsDataFormat()), zap.Int64("field id", jsonKeyStats.GetFieldID()), zap.Any("json key logs", jsonKeyStats))
 		return nil
 	}
@@ -1144,6 +1144,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		Schema:       f,
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
+		EnableMmap:   paramtable.Get().QueryNodeCfg.MmapJSONStats.GetAsBool(),
+		MmapDirPath:  paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
