@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -52,6 +53,7 @@ type rwOptions struct {
 	multiPartUploadSize int64
 	columnGroups        []storagecommon.ColumnGroup
 	bucketName          string
+	storageConfig       *indexpb.StorageConfig
 }
 
 type RwOption func(*rwOptions)
@@ -102,6 +104,12 @@ func WithUploader(uploader func(ctx context.Context, kvs map[string][]byte) erro
 func WithColumnGroups(columnGroups []storagecommon.ColumnGroup) RwOption {
 	return func(options *rwOptions) {
 		options.columnGroups = columnGroups
+	}
+}
+
+func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
+	return func(options *rwOptions) {
+		options.storageConfig = storageConfig
 	}
 }
 
@@ -212,7 +220,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		return newPackedRecordReader(paths, schema, rwOptions.bufferSize)
+		return newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 }
@@ -241,6 +249,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
 			blobsWriter, allocator, chunkSize, bucketName, rootPath, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
+			rwOptions.storageConfig,
 		)
 	}
 	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))

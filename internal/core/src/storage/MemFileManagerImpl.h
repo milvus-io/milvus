@@ -81,10 +81,10 @@ class MemFileManagerImpl : public FileManagerImpl {
     AddBinarySet(const BinarySet& binary_set, const std::string& prefix);
 
     std::vector<FieldDataPtr>
-    cache_row_data_to_memory_internal(const Config& config);
+    cache_raw_data_to_memory_internal(const Config& config);
 
     std::vector<FieldDataPtr>
-    cache_row_data_to_memory_storage_v2(const Config& config);
+    cache_raw_data_to_memory_storage_v2(const Config& config);
 
  private:
     // remote file path

@@ -187,7 +187,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 	}
 
 	status := C.InitRemoteArrowFileSystemSingleton(storageConfig)
-	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
+	return HandleCStatus(&status, "InitRemoteArrowFileSystemSingleton failed")
 }
 
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
