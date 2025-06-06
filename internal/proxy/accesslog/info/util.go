@@ -111,3 +111,11 @@ func listToString(strs []string) string {
 	}
 	return result + "]"
 }
+
+func kvsToString(kvs []*commonpb.KeyValuePair) string {
+	str := "{"
+	for _, kv := range kvs {
+		str += fmt.Sprintf("%s:%s,", kv.GetKey(), kv.GetValue())
+	}
+	return str + "}"
+}
