@@ -1000,7 +1000,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
 		enqueueTs := uint64(100000)
 		st.SetTs(enqueueTs)
-		assert.ErrorContains(t, st.PreExecute(ctx), "Current rerank does not support grouping search")
+		assert.NoError(t, st.PreExecute(ctx))
 	})
 }
 

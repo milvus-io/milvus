@@ -77,9 +77,6 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = indexparamcheck.IndexINVERTED
-
-	defaultRRFParamsValue = 60
-	maxRRFParamsValue     = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -427,7 +424,6 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 	if !exist {
 		return fmt.Errorf("type param(max_capacity) should be specified for array field %s of collection %s", field.GetName(), collectionName)
 	}
-
 	return nil
 }
 

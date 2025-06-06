@@ -1,3 +1,6 @@
+//go:build test
+// +build test
+
 /*
  * # Licensed to the LF AI & Data foundation under one
  * # or more contributor license agreements. See the NOTICE file
@@ -22,11 +25,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/models/ali"
 	"github.com/milvus-io/milvus/internal/util/function/models/cohere"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
@@ -34,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models/tei"
 	"github.com/milvus-io/milvus/internal/util/function/models/vertexai"
 	"github.com/milvus-io/milvus/internal/util/function/models/voyageai"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 )
 
 const TestModel string = "TestModel"
@@ -246,4 +252,57 @@ func (c *MockBedrockClient) InvokeModel(ctx context.Context, params *bedrockrunt
 	resp.InputTextTokenCount = 2
 	body, _ := json.Marshal(resp)
 	return &bedrockruntime.InvokeModelOutput{Body: body}, nil
+}
+
+func GenSearchResultData(nq int64, topk int64, dType schemapb.DataType, fieldName string, fieldId int64) *schemapb.SearchResultData {
+	tops := make([]int64, nq)
+	for i := 0; i < int(nq); i++ {
+		tops[i] = topk
+	}
+	fieldsData := []*schemapb.FieldData{}
+	if fieldName != "" {
+		fieldsData = []*schemapb.FieldData{testutils.GenerateScalarFieldData(dType, fieldName, int(nq*topk))}
+		fieldsData[0].FieldId = fieldId
+	}
+
+	data := &schemapb.SearchResultData{
+		NumQueries: nq,
+		TopK:       topk,
+		Scores:     testutils.GenerateFloat32Array(int(nq * topk)),
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: testutils.GenerateInt64Array(int(nq * topk)),
+				},
+			},
+		},
+		Topks:      tops,
+		FieldsData: fieldsData,
+	}
+	return data
+}
+
+func GenSearchResultDataWithGrouping(nq int64, topk int64, dType schemapb.DataType, fieldName string, fieldId int64, groupingName string, groupingId int64, groupSize int64) *schemapb.SearchResultData {
+	data := GenSearchResultData(nq, topk*groupSize, dType, fieldName, fieldId)
+	values := make([]int64, 0)
+	for i := int64(0); i < nq*topk*groupSize; i += groupSize {
+		for j := int64(0); j < groupSize; j++ {
+			values = append(values, i)
+		}
+	}
+	groupingField := testutils.GenerateScalarFieldDataWithValue(schemapb.DataType_Int64, groupingName, groupingId, values)
+	data.GroupByFieldValue = groupingField
+	return data
+}
+
+func FloatsAlmostEqual(a, b []float32, epsilon float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if float32(math.Abs(float64(a[i]-b[i]))) > epsilon {
+			return false
+		}
+	}
+	return true
 }
