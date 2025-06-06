@@ -185,7 +185,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-	}, typeutil.NewUniqueSet())
+	}, &typeutil.UniqueSet{})
 	s.NoError(err)
 	s.Equal(int64(5), targetNode.nodeID)
 
@@ -201,7 +201,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-	}, typeutil.NewUniqueSet())
+	}, &typeutil.UniqueSet{})
 	s.NoError(err)
 	s.Equal(int64(3), targetNode.nodeID)
 
@@ -216,10 +216,11 @@ func (s *LBPolicySuite) TestSelectNode() {
 		channel:        s.channels[0],
 		shardLeaders:   []nodeInfo{},
 		nq:             1,
-	}, typeutil.NewUniqueSet())
+	}, &typeutil.UniqueSet{})
 	s.ErrorIs(err, merr.ErrNodeNotAvailable)
 
-	// test all nodes has been excluded, expected failure
+	// test all nodes has been excluded, expected clear excludeNodes and try to select node again
+	excludeNodes := typeutil.NewUniqueSet(s.nodeIDs...)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
@@ -230,8 +231,8 @@ func (s *LBPolicySuite) TestSelectNode() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-	}, typeutil.NewUniqueSet(s.nodeIDs...))
-	s.ErrorIs(err, merr.ErrChannelNotAvailable)
+	}, &excludeNodes)
+	s.ErrorIs(err, merr.ErrNodeNotAvailable)
 
 	// test get shard leaders failed, retry to select node failed
 	s.lbBalancer.ExpectedCalls = nil
@@ -247,7 +248,7 @@ func (s *LBPolicySuite) TestSelectNode() {
 		channel:        s.channels[0],
 		shardLeaders:   s.nodes,
 		nq:             1,
-	}, typeutil.NewUniqueSet())
+	}, &typeutil.UniqueSet{})
 	s.ErrorIs(err, merr.ErrServiceUnavailable)
 }
 
@@ -533,6 +534,118 @@ func (s *LBPolicySuite) TestGetShardLeaders() {
 	log.Info("check err", zap.Error(err))
 	s.Error(err)
 	s.Equal(int64(1), counter.Load())
+}
+
+func (s *LBPolicySuite) TestSelectNodeEdgeCases() {
+	ctx := context.Background()
+
+	// Test case 1: Empty shard leaders after refresh, should fail gracefully
+	s.lbBalancer.ExpectedCalls = nil
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable).Times(1)
+
+	// Setup mock to return empty shard leaders
+	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return &querypb.GetShardLeadersResponse{
+			Status: &successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: s.channels[0],
+					NodeIds:     []int64{}, // Empty node list
+					NodeAddrs:   []string{},
+					Serviceable: []bool{},
+				},
+			},
+		}, nil
+	}
+
+	excludeNodes := typeutil.NewUniqueSet(s.nodeIDs...)
+	_, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, &ChannelWorkload{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   s.nodes,
+		nq:             1,
+	}, &excludeNodes)
+	s.Error(err)
+
+	log.Info("test case 1")
+	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
+	// Test case 2: Single replica scenario - exclude it, refresh shows same single replica, should clear and succeed
+	s.lbBalancer.ExpectedCalls = nil
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Times(1)
+
+	singleNodeList := []int64{1}
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return &querypb.GetShardLeadersResponse{
+			Status: &successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: s.channels[0],
+					NodeIds:     singleNodeList,
+					NodeAddrs:   []string{"localhost:9000"},
+					Serviceable: []bool{true},
+				},
+			},
+		}, nil
+	}
+
+	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Exclude the single node
+	targetNode, err := s.lbPolicy.selectNode(ctx, s.lbBalancer, &ChannelWorkload{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   []nodeInfo{{nodeID: 1, address: "localhost", serviceable: true}},
+		nq:             1,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(1), targetNode.nodeID)
+	s.Equal(0, excludeNodes.Len()) // Should be cleared
+
+	globalMetaCache.DeprecateShardCache(dbName, s.collectionName)
+	// Test case 3: Mixed serviceable nodes - some excluded, refresh shows same, behavior should be consistent
+	mixedNodes := []nodeInfo{
+		{nodeID: 1, address: "localhost", serviceable: true},
+		{nodeID: 2, address: "localhost", serviceable: false}, // Not serviceable
+		{nodeID: 3, address: "localhost", serviceable: true},
+	}
+	mixedNodeIDs := []int64{1, 2, 3}
+
+	s.lbBalancer.ExpectedCalls = nil
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable).Times(1)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(3, nil).Times(1)
+
+	s.qc.(*MixCoordMock).GetShardLeadersFunc = func(ctx context.Context, req *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+		return &querypb.GetShardLeadersResponse{
+			Status: &successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: s.channels[0],
+					NodeIds:     mixedNodeIDs,
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, false, true},
+				},
+			},
+		}, nil
+	}
+
+	excludeNodes = typeutil.NewUniqueSet(int64(1)) // Exclude node 1, node 3 should be available
+	targetNode, err = s.lbPolicy.selectNode(ctx, s.lbBalancer, &ChannelWorkload{
+		db:             dbName,
+		collectionName: s.collectionName,
+		collectionID:   s.collectionID,
+		channel:        s.channels[0],
+		shardLeaders:   mixedNodes,
+		nq:             1,
+	}, &excludeNodes)
+	s.NoError(err)
+	s.Equal(int64(3), targetNode.nodeID)
+	s.Equal(1, excludeNodes.Len()) // Should NOT be cleared as not all replicas were excluded
 }
 
 func TestLBPolicySuite(t *testing.T) {
