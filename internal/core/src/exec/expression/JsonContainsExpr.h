@@ -48,7 +48,9 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                           : FromValCase(expr->vals_[0].val_case()),
                       active_count,
                       batch_size,
-                      consistency_level),
+                      consistency_level,
+                      false,
+                      true),
           expr_(expr) {
     }
 

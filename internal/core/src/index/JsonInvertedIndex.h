@@ -116,7 +116,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     }
 
     bool
-    IsDataTypeSupported(DataType data_type) const override;
+    IsDataTypeSupported(DataType data_type, bool is_array) const override;
 
     JsonInvertedIndexParseErrorRecorder&
     GetErrorRecorder() {
