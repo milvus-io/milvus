@@ -48,8 +48,9 @@ func (p *pipeline) Add(nodes ...Node) {
 func (p *pipeline) addNode(node Node) {
 	nodeCtx := NewNodeCtx(node)
 	if p.enableTtChecker {
-		manager := timerecord.GetCheckerManger("fgNode", p.nodeTtInterval, func(list []string) {
-			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", p.nodeTtInterval))
+		nodeTtInterval := p.nodeTtInterval
+		manager := timerecord.GetCheckerManger("fgNode", nodeTtInterval, func(list []string) {
+			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeTtInterval))
 		})
 		name := fmt.Sprintf("nodeCtxTtChecker-%s", node.Name())
 		nodeCtx.Checker = timerecord.NewChecker(name, manager)
