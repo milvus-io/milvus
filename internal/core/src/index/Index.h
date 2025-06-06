@@ -74,7 +74,7 @@ class IndexBase {
     }
 
     virtual bool
-    IsDataTypeSupported(DataType data_type) const {
+    IsDataTypeSupported(DataType data_type, bool is_array) const {
         return true;
     };
 
