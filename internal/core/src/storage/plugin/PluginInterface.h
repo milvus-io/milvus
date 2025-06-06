@@ -6,11 +6,11 @@
 #include <memory>
 #include <string>
 
-using ByteArray = std::shared_ptr<uint8_t[]>;
 
 namespace milvus::storage{
 namespace plugin{
 
+using ByteArray = std::string;
 
 class IEncryptor;
 class IDecryptor;
@@ -40,13 +40,15 @@ public:
 class IEncryptor {
 public:
     virtual ~IEncryptor() = default;
-    virtual ByteArray Encrypt(const ByteArray& plaintext) = 0;
+    virtual ByteArray
+    Encrypt(const ByteArray& plaintext) = 0;
 };
 
 class IDecryptor {
 public:
     virtual ~IDecryptor() = default;
-    virtual std::pair<ByteArray, int64_t> Decrypt(const ByteArray& ciphertext) = 0;
+    virtual ByteArray
+    Decrypt(const ByteArray& ciphertext) = 0;
 };
 
 
