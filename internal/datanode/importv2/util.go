@@ -433,6 +433,12 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			fields[subField.GetFieldID()] = subField
+		}
+	}
+
 	for fieldID, fd := range data.Data {
 		if fd.RowNum() == 0 && CanBeZeroRowField(fields[fieldID]) {
 			continue

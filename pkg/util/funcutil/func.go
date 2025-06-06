@@ -307,6 +307,11 @@ func getNumRowsOfScalarField(datas interface{}) uint64 {
 	return uint64(realTypeDatas.Len())
 }
 
+func getNumRowsOfArrayVectorField(datas interface{}) uint64 {
+	realTypeDatas := reflect.ValueOf(datas)
+	return uint64(realTypeDatas.Len())
+}
+
 func GetNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
 	if dim <= 0 {
 		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
@@ -422,6 +427,8 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 		if err != nil {
 			return 0, err
 		}
+	case schemapb.DataType_ArrayOfVector:
+		fieldNumRows = getNumRowsOfArrayVectorField(fieldData.GetVectors().GetVectorArray().GetData())
 	default:
 		return 0, fmt.Errorf("%s is not supported now", fieldSchema.GetDataType())
 	}
@@ -491,6 +498,8 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			if err != nil {
 				return 0, err
 			}
+		case *schemapb.VectorField_VectorArray:
+			fieldNumRows = getNumRowsOfArrayVectorField(vectorField.GetVectorArray().Data)
 		default:
 			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
 		}

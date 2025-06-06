@@ -625,6 +625,7 @@ func (s *NumRowsWithSchemaSuite) SetupSuite() {
 			{FieldID: 113, Name: "bfloat16_vector", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 114, Name: "sparse_vector", DataType: schemapb.DataType_SparseFloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
 			{FieldID: 115, Name: "int8_vector", DataType: schemapb.DataType_Int8Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}}},
+			{FieldID: 116, Name: "array_vector_float16", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
 			{FieldID: 999, Name: "unknown", DataType: schemapb.DataType_None},
 		},
 	}
@@ -818,6 +819,28 @@ func (s *NumRowsWithSchemaSuite) TestNormalCases() {
 				},
 			},
 			expect: 7,
+		},
+		{
+			tag: "array_vector_float16",
+			input: &schemapb.FieldData{
+				FieldName: "array_vector_float16",
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 4,
+						Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Data: []*schemapb.VectorField{
+							{
+								Dim:  4,
+								Data: &schemapb.VectorField_Float16Vector{Float16Vector: make([]byte, 4*2*5)}, // 4 vectors
+							},
+							{
+								Dim:  4,
+								Data: &schemapb.VectorField_Float16Vector{Float16Vector: make([]byte, 4*2*10)}, // 10 vectors
+							},
+						}}},
+					},
+				},
+			},
+			expect: 2,
 		},
 	}
 	for _, tc := range cases {

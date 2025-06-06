@@ -277,6 +277,11 @@ func TestProxy(t *testing.T) {
 	params := paramtable.Get()
 	testutil.ResetEnvironment()
 
+	// params.Save(params.EtcdCfg.RequestTimeout.Key, "300000")
+	// params.Save(params.CommonCfg.SessionTTL.Key, "300")
+	// params.Save(params.CommonCfg.SessionRetryTimes.Key, "500")
+	// params.Save(params.CommonCfg.GracefulStopTimeout.Key, "3600")
+
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
 	params.DataCoordGrpcServerCfg.IP = "localhost"
@@ -413,9 +418,12 @@ func TestProxy(t *testing.T) {
 	floatVecField := "fVec"
 	binaryVecField := "bVec"
 	dim := 128
-	rowNum := 3000
+	rowNum := 100
 	floatIndexName := "float_index"
 	binaryIndexName := "binary_index"
+	structId := "structI32"
+	structFVec := "structFVec"
+	structField := "structField"
 	nlist := 10
 	nq := 10
 	var segmentIDs []int64
@@ -462,6 +470,48 @@ func TestProxy(t *testing.T) {
 			IndexParams: nil,
 			AutoID:      false,
 		}
+		// struct schema fields
+		sId := &schemapb.FieldSchema{
+			FieldID:      103,
+			Name:         structId,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_Array,
+			ElementType:  schemapb.DataType_Int32,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "100",
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		sFVec := &schemapb.FieldSchema{
+			FieldID:      104,
+			Name:         structFVec,
+			IsPrimaryKey: false,
+			Description:  "",
+			DataType:     schemapb.DataType_ArrayOfVector,
+			ElementType:  schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: strconv.Itoa(dim),
+				},
+				{
+					Key:   common.MaxCapacityKey,
+					Value: "100",
+				},
+			},
+			IndexParams: nil,
+			AutoID:      false,
+		}
+		structF := &schemapb.StructArrayFieldSchema{
+			FieldID: 105,
+			Name:    structField,
+			Fields:  []*schemapb.FieldSchema{sId, sFVec},
+		}
 		return &schemapb.CollectionSchema{
 			Name:        collectionName,
 			Description: "",
@@ -471,6 +521,7 @@ func TestProxy(t *testing.T) {
 				fVec,
 				bVec,
 			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{structF},
 		}
 	}
 	schema := constructCollectionSchema()
@@ -491,13 +542,14 @@ func TestProxy(t *testing.T) {
 	constructCollectionInsertRequest := func() *milvuspb.InsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
+		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
 		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.InsertRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
 			PartitionName:  "",
-			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn},
+			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, structColumn},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(rowNum),
 		}
@@ -506,13 +558,14 @@ func TestProxy(t *testing.T) {
 	constructPartitionInsertRequest := func() *milvuspb.InsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
+		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
 		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.InsertRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn},
+			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, structColumn},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(rowNum),
 		}
@@ -521,13 +574,14 @@ func TestProxy(t *testing.T) {
 	constructCollectionUpsertRequestNoPK := func() *milvuspb.UpsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
+		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
 		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn},
+			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, structColumn},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(rowNum),
 		}
@@ -537,19 +591,20 @@ func TestProxy(t *testing.T) {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
+		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
 		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
-			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn, bVecColumn},
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn, bVecColumn, structColumn},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(rowNum),
 		}
 	}
 
-	constructCreateIndexRequest := func(dataType schemapb.DataType) *milvuspb.CreateIndexRequest {
+	constructCreateIndexRequest := func(dataType schemapb.DataType, fieldName string) *milvuspb.CreateIndexRequest {
 		req := &milvuspb.CreateIndexRequest{
 			Base:           nil,
 			DbName:         dbName,
@@ -558,7 +613,7 @@ func TestProxy(t *testing.T) {
 		switch dataType {
 		case schemapb.DataType_FloatVector:
 			{
-				req.FieldName = floatVecField
+				req.FieldName = fieldName
 				req.IndexName = floatIndexName
 				req.ExtraParams = []*commonpb.KeyValuePair{
 					{
@@ -581,7 +636,7 @@ func TestProxy(t *testing.T) {
 			}
 		case schemapb.DataType_BinaryVector:
 			{
-				req.FieldName = binaryVecField
+				req.FieldName = fieldName
 				req.IndexName = binaryIndexName
 				req.ExtraParams = []*commonpb.KeyValuePair{
 					{
@@ -785,9 +840,31 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, collectionID, resp.CollectionID)
-		// TODO(dragondriver): shards num
 		assert.Equal(t, len(schema.Fields), len(resp.Schema.Fields))
-		// TODO(dragondriver): compare fields schema, not sure the order of fields
+		assert.Equal(t, len(schema.StructArrayFields), len(resp.Schema.StructArrayFields))
+
+		fieldsMap := make(map[string]*schemapb.FieldSchema)
+		for _, field := range resp.Schema.Fields {
+			fieldsMap[field.Name] = field
+		}
+		for _, structField := range resp.Schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				fieldsMap[field.Name] = field
+			}
+		}
+		assert.Equal(t, len(fieldsMap), len(schema.Fields)+len(schema.StructArrayFields[0].Fields))
+		for _, field := range schema.Fields {
+			fSchema, ok := fieldsMap[field.Name]
+			assert.True(t, ok)
+			assert.True(t, proto.Equal(field, fSchema))
+		}
+		for _, structField := range schema.StructArrayFields {
+			for _, field := range structField.Fields {
+				fSchema, ok := fieldsMap[field.Name]
+				assert.True(t, ok)
+				assert.True(t, proto.Equal(field, fSchema))
+			}
+		}
 
 		// describe other collection -> fail
 		resp, err = proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
@@ -996,7 +1073,7 @@ func TestProxy(t *testing.T) {
 
 		resp, err := proxy.Insert(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode(), "resp: %+v", resp.GetStatus().GetReason())
 		assert.Equal(t, rowNum, len(resp.SuccIndex))
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.InsertCnt)
@@ -1043,7 +1120,7 @@ func TestProxy(t *testing.T) {
 				break
 			}
 			// avoid too frequent rpc call
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond)
 			counter++
 		}
 	})
@@ -1078,7 +1155,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("create index for floatVec field", func(t *testing.T) {
 		defer wg.Done()
-		req := constructCreateIndexRequest(schemapb.DataType_FloatVector)
+		req := constructCreateIndexRequest(schemapb.DataType_FloatVector, floatVecField)
 
 		resp, err := proxy.CreateIndex(ctx, req)
 		assert.NoError(t, err)
@@ -1220,7 +1297,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("create index for binVec field", func(t *testing.T) {
 		defer wg.Done()
-		req := constructCreateIndexRequest(schemapb.DataType_BinaryVector)
+		req := constructCreateIndexRequest(schemapb.DataType_BinaryVector, binaryVecField)
 
 		resp, err := proxy.CreateIndex(ctx, req)
 		assert.NoError(t, err)

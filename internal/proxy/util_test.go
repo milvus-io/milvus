@@ -1003,7 +1003,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
 	})
@@ -1033,7 +1033,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1074,7 +1074,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 	})
@@ -1104,7 +1104,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
 	})
@@ -1133,7 +1133,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1167,7 +1167,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1205,7 +1205,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1239,7 +1239,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1273,7 +1273,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1306,7 +1306,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 	t.Run("normal when upsert", func(t *testing.T) {
@@ -1349,7 +1349,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NoError(t, err)
 
 		task = insertTask{
@@ -1390,7 +1390,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				},
 			},
 		}
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, false)
 		assert.NoError(t, err)
 	})
 
@@ -1433,7 +1433,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 
@@ -1476,7 +1476,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema.Fields, task.schema, task.insertMsg, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 		paramtable.Get().Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
@@ -1508,7 +1508,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 		},
 	}
 
-	_, err := checkPrimaryFieldData(case1.schema, case1.insertMsg)
+	_, err := checkPrimaryFieldData(case1.schema.Fields, case1.schema, case1.insertMsg)
 	assert.NotEqual(t, nil, err)
 
 	// the num of passed fields is less than needed
@@ -1549,7 +1549,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			Status: merr.Success(),
 		},
 	}
-	_, err = checkPrimaryFieldData(case2.schema, case2.insertMsg)
+	_, err = checkPrimaryFieldData(case2.schema.Fields, case2.schema, case2.insertMsg)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == false, no primary field schema
@@ -1589,7 +1589,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			Status: merr.Success(),
 		},
 	}
-	_, err = checkPrimaryFieldData(case3.schema, case3.insertMsg)
+	_, err = checkPrimaryFieldData(case3.schema.Fields, case3.schema, case3.insertMsg)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == true, has primary field schema, but primary field data exist
@@ -1636,7 +1636,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 	case4.schema.Fields[0].IsPrimaryKey = true
 	case4.schema.Fields[0].AutoID = true
 	case4.insertMsg.FieldsData[0] = newScalarFieldData(case4.schema.Fields[0], case4.schema.Fields[0].Name, 10)
-	_, err = checkPrimaryFieldData(case4.schema, case4.insertMsg)
+	_, err = checkPrimaryFieldData(case4.schema.Fields, case4.schema, case4.insertMsg)
 	assert.NotEqual(t, nil, err)
 
 	// autoID == true, has primary field schema, but DataType don't match
@@ -1644,7 +1644,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 	case4.schema.Fields[0].IsPrimaryKey = false
 	case4.schema.Fields[1].IsPrimaryKey = true
 	case4.schema.Fields[1].AutoID = true
-	_, err = checkPrimaryFieldData(case4.schema, case4.insertMsg)
+	_, err = checkPrimaryFieldData(case4.schema.Fields, case4.schema, case4.insertMsg)
 	assert.NotEqual(t, nil, err)
 }
 
@@ -1672,7 +1672,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -1716,7 +1716,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -1757,7 +1757,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -1802,7 +1802,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -1853,7 +1853,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NotEqual(t, nil, err)
 	})
 
@@ -1894,7 +1894,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NoError(t, nil, err)
 
 		// autoid==false
@@ -1933,7 +1933,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err = checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err = checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		assert.NoError(t, nil, err)
 	})
 
@@ -1984,7 +1984,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 				Status: merr.Success(),
 			},
 		}
-		_, _, err := checkUpsertPrimaryFieldData(task.schema, task.insertMsg)
+		_, _, err := checkUpsertPrimaryFieldData(task.schema.Fields, task.schema, task.insertMsg)
 		newPK := task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData()
 		assert.Equal(t, newPK, task.insertMsg.RowIDs)
 		assert.NoError(t, nil, err)
@@ -3304,7 +3304,7 @@ func TestCheckVarcharFormat(t *testing.T) {
 		},
 	}
 
-	err := checkInputUtf8Compatiable(schema, data)
+	err := checkInputUtf8Compatiable(schema.Fields, data)
 	assert.NoError(t, err)
 
 	// invalid data
@@ -3326,7 +3326,7 @@ func TestCheckVarcharFormat(t *testing.T) {
 			}},
 		},
 	}
-	err = checkInputUtf8Compatiable(schema, data)
+	err = checkInputUtf8Compatiable(schema.Fields, data)
 	assert.Error(t, err)
 }
 
@@ -3369,7 +3369,7 @@ func BenchmarkCheckVarcharFormat(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		checkInputUtf8Compatiable(schema, data)
+		checkInputUtf8Compatiable(schema.Fields, data)
 	}
 }
 

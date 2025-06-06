@@ -1653,6 +1653,18 @@ func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb
 			return field.GetDataType(), nil
 		}
 	}
+
+	for _, structField := range collection.Schema().GetStructArrayFields() {
+		if structField.GetFieldID() == fieldID {
+			return schemapb.DataType_ArrayOfStruct, nil
+		}
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == fieldID {
+				return subField.GetDataType(), nil
+			}
+		}
+	}
+
 	return 0, merr.WrapErrFieldNotFound(fieldID)
 }
 

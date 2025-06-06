@@ -124,6 +124,13 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			if err := v.checkArrayFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_ArrayOfVector:
+			if err := v.checkArrayOfVectorFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+
+		case schemapb.DataType_ArrayOfStruct:
+			panic("unreachable")
 
 		default:
 		}
@@ -332,7 +339,7 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 		return err
 	}
 
-	if fieldSchema.GetNullable() {
+	if !fieldSchema.GetNullable() {
 		return nil
 	}
 
@@ -881,6 +888,33 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		}
 	}
 	return v.checkArrayElement(data, fieldSchema)
+}
+
+func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetVectors().GetVectorArray()
+	if data == nil {
+		elementTypeStr := fieldSchema.GetElementType().String()
+		msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+		expectStr := fmt.Sprintf("need %s array", elementTypeStr)
+		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
+	}
+
+	switch fieldSchema.GetElementType() {
+	case schemapb.DataType_FloatVector:
+		for _, vector := range data.GetData() {
+			floatVector := vector.GetFloatVector()
+			if floatVector == nil {
+				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+				return merr.WrapErrParameterInvalid("need float vector array", "got nil", msg)
+			}
+			if v.checkNAN {
+				return typeutil.VerifyFloats32(floatVector.GetData())
+			}
+		}
+		return nil
+	default:
+		panic("not implemented")
+	}
 }
 
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) (int, bool) {
