@@ -242,20 +242,20 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return knowhere::BruteForce::AnnIterator<float>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_FLOAT16:
             return knowhere::BruteForce::AnnIterator<float16>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_BFLOAT16:
             return knowhere::BruteForce::AnnIterator<bfloat16>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_SPARSE_FLOAT:
             return knowhere::BruteForce::AnnIterator<
                 knowhere::sparse::SparseRow<float>>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         case DataType::VECTOR_INT8:
             return knowhere::BruteForce::AnnIterator<int8>(
-                base_dataset, query_dataset, config, bitset);
+                base_dataset, query_dataset, config, bitset, false);
         default:
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",
