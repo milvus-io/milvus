@@ -104,6 +104,30 @@ func HashDeleteData(task Task, delData *storage.DeleteData) ([]*storage.DeleteDa
 	return res, nil
 }
 
+// this method is only for GetRowsStats() to get a row from storage.InsertData
+// the GetRowsStats() is called by PreImportTask, some of nullable/default_value fields in the storage.InsertData could be zero row
+func getRowFromInsertData(rows *storage.InsertData, i int) map[int64]interface{} {
+	res := make(map[int64]interface{})
+	for field, data := range rows.Data {
+		if data.RowNum() > i {
+			res[field] = data.GetRow(i)
+		}
+	}
+	return res
+}
+
+// this method is only for GetRowsStats() to get a row from storage.InsertData
+// the GetRowsStats() is called by PreImportTask, some of nullable/default_value fields in the storage.InsertData could be zero row
+func getRowSizeFromInsertData(rows *storage.InsertData, i int) int {
+	size := 0
+	for _, data := range rows.Data {
+		if data.RowNum() > i {
+			size += data.GetRowSize(i)
+		}
+	}
+	return size
+}
+
 func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.PartitionImportStats, error) {
 	var (
 		schema       = task.GetSchema()
@@ -127,7 +151,7 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		hashDataSize[i] = make([]int, partitionNum)
 	}
 
-	rowNum := GetInsertDataRowCount(rows, schema)
+	rowNum, _ := GetInsertDataRowCount(rows, schema)
 	if pkField.GetAutoID() {
 		fn := hashByPartition(int64(partitionNum), partKeyField)
 		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {
@@ -136,9 +160,10 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		hashByPartRowsCount := make([]int, partitionNum)
 		hashByPartDataSize := make([]int, partitionNum)
 		for i := 0; i < rowNum; i++ {
-			p := fn(rows.GetRow(i)[id2])
+			row := getRowFromInsertData(rows, i)
+			p := fn(row[id2])
 			hashByPartRowsCount[p]++
-			hashByPartDataSize[p] += rows.GetRowSize(i)
+			hashByPartDataSize[p] += getRowSizeFromInsertData(rows, i)
 		}
 		// When autoID is enabled, the generated IDs will be evenly hashed across all channels.
 		// Therefore, here we just assign an average number of rows to each channel.
@@ -152,10 +177,10 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 		f1 := hashByVChannel(int64(channelNum), pkField)
 		f2 := hashByPartition(int64(partitionNum), partKeyField)
 		for i := 0; i < rowNum; i++ {
-			row := rows.GetRow(i)
+			row := getRowFromInsertData(rows, i)
 			p1, p2 := f1(row[id1]), f2(row[id2])
 			hashRowsCount[p1][p2]++
-			hashDataSize[p1][p2] += rows.GetRowSize(i)
+			hashDataSize[p1][p2] += getRowSizeFromInsertData(rows, i)
 		}
 	}
 
