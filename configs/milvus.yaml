@@ -833,7 +833,7 @@ grpc:
     level: WARNING
   gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
-    compressionEnabled: false
+    #compressionEnabled: true
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000

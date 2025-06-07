@@ -118,6 +118,7 @@ type ClientBase[T interface {
 	ClientMaxSendSize      int
 	ClientMaxRecvSize      int
 	CompressionEnabled     bool
+	CompressionAlgo        string
 	RetryServiceNameConfig string
 
 	DialTimeout      time.Duration
@@ -157,6 +158,7 @@ func NewClientBase[T interface {
 		InitialBackoff:          config.InitialBackoff.GetAsFloat(),
 		MaxBackoff:              config.MaxBackoff.GetAsFloat(),
 		CompressionEnabled:      config.CompressionEnabled.GetAsBool(),
+		CompressionAlgo:         config.CompressionAlgo.GetValue(),
 		minResetInterval:        config.MinResetInterval.GetAsDuration(time.Millisecond),
 		minSessionCheckInterval: config.MinSessionCheckInterval.GetAsDuration(time.Millisecond),
 		maxCancelError:          config.MaxCancelError.GetAsInt32(),
@@ -266,9 +268,9 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	var conn *grpc.ClientConn
-	compress := None
+	compress := ""
 	if c.CompressionEnabled {
-		compress = Zstd
+		compress = c.CompressionAlgo
 	}
 	if c.encryption {
 		log.Ctx(ctx).Debug("Running in internalTLS mode with encryption enabled")

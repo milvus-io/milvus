@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -103,6 +104,13 @@ func (c *Client) dialOptions() []grpc.DialOption {
 		options = append(options, c.config.DialOptions...)
 	}
 
+	// enable gzip compression by default
+	options = append(options,
+		grpc.WithDefaultCallOptions(
+			grpc.UseCompressor(gzip.Name),
+		),
+	)
+
 	options = append(options,
 		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
 			grpc_retry.WithMax(6),
@@ -111,7 +119,7 @@ func (c *Client) dialOptions() []grpc.DialOption {
 			}),
 			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
 
-		// c.getRetryOnRateLimitInterceptor(),
+			// c.getRetryOnRateLimitInterceptor(),
 		))
 
 	options = append(options, grpc.WithChainUnaryInterceptor(
