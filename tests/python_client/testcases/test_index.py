@@ -1183,19 +1183,6 @@ class TestIndexInvalid(TestcaseBase):
                                   check_items={"err_code": 1100,
                                                "err_msg": "invalid index type: ANNOY"})
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_index_json(self):
-        """
-        target: test create index on json fields
-        method: 1.create collection, and create index
-        expected: create index raise an error
-        """
-        collection_w = self.init_collection_general(prefix, True, nb=100, is_index=False)[0]
-        # create index on JSON/Array field is not supported
-        collection_w.create_index(ct.default_json_field_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "create auto index on type:JSON is not supported"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_scalar_index_on_vector_field(self, scalar_index, vector_data_type):

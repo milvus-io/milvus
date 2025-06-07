@@ -244,8 +244,11 @@ func TestCreateAutoIndexAllFields(t *testing.T) {
 	for _, field := range schema.Fields {
 		if field.DataType == entity.FieldTypeJSON {
 			idx = index.NewAutoIndex(entity.IP)
-			_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
-			common.CheckErr(t, err, false, fmt.Sprintf("create auto index on type:%s is not supported", field.DataType))
+			opt := client.NewCreateIndexOption(schema.CollectionName, field.Name, idx)
+			opt.WithExtraParam("json_path", field.Name)
+			opt.WithExtraParam("json_cast_type", "varchar")
+			_, err := mc.CreateIndex(ctx, opt)
+			common.CheckErr(t, err, true)
 		} else {
 			if field.DataType == entity.FieldTypeBinaryVector {
 				idx = index.NewAutoIndex(entity.JACCARD)
