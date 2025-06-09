@@ -56,11 +56,15 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
 
         auto out = reader->Read(event_data_length);
         AssertInfo(out.first.ok(), "read binlog failed");
+        std::string cipherStr = std::string(reinterpret_cast<const char*>(out.second.get()), event_data_length); 
 
-        auto decrypted = decryptor->Decrypt(out.second);
+        auto decrypted = decryptor->Decrypt(cipherStr);
 
-        reader = std::make_shared<BinlogReader>(decrypted.first, decrypted.second);
-        event_data_length = decrypted.second;
+        auto decyptedBytes = std::shared_ptr<uint8_t[]>(new uint8_t[decrypted.size()]);
+        memcpy(decyptedBytes.get(), decrypted.data(), decrypted.size());
+
+        reader = std::make_shared<BinlogReader>(decyptedBytes, decrypted.size());
+        event_data_length = decrypted.size();
     }
 
     switch (header.event_type_) {

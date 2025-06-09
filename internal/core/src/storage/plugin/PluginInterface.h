@@ -10,8 +10,6 @@
 namespace milvus::storage{
 namespace plugin{
 
-using ByteArray = std::string;
-
 class IEncryptor;
 class IDecryptor;
 class ICipherPlugin;
@@ -28,9 +26,9 @@ class ICipherPlugin: public IPlugin{
 public:
     virtual ~ICipherPlugin() = default;
 
-    virtual void Update(int64_t ez_id, int64_t coll_id, const ByteArray& key) = 0;
+    virtual void Update(int64_t ez_id, int64_t coll_id, const std::string& key) = 0;
 
-    virtual std::pair<std::shared_ptr<IEncryptor>, ByteArray>
+    virtual std::pair<std::shared_ptr<IEncryptor>, std::string>
     GetEncryptor(int64_t ez_id, int64_t coll_id) = 0;
 
     virtual std::shared_ptr<IDecryptor>
@@ -40,15 +38,15 @@ public:
 class IEncryptor {
 public:
     virtual ~IEncryptor() = default;
-    virtual ByteArray
-    Encrypt(const ByteArray& plaintext) = 0;
+    virtual std::string
+    Encrypt(const std::string& plaintext) = 0;
 };
 
 class IDecryptor {
 public:
     virtual ~IDecryptor() = default;
-    virtual ByteArray
-    Decrypt(const ByteArray& ciphertext) = 0;
+    virtual std::string
+    Decrypt(const std::string& ciphertext) = 0;
 };
 
 
