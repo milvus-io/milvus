@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -300,7 +301,7 @@ func (mt *MetaTable) createDefaultDb() error {
 	}
 
 	if hookutil.IsClusterEncyptionEnabled() {
-		cipherPrors := []*commonpb.KeyValuePair{
+		cipherProps := []*commonpb.KeyValuePair{
 			{
 				Key:   hookutil.EncryptionEnabledKey,
 				Value: "true",
@@ -310,7 +311,7 @@ func (mt *MetaTable) createDefaultDb() error {
 				Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
 			},
 		}
-		defaultProperties = append(defaultProperties, cipherPrors...)
+		defaultProperties = append(defaultProperties, cipherProps...)
 	}
 
 	return mt.createDatabasePrivate(mt.ctx, model.NewDefaultDatabase(defaultProperties), ts)
@@ -335,6 +336,17 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 
 	if err := mt.catalog.CreateDatabase(ctx, db, ts); err != nil {
 		return err
+	}
+
+	// Call back cipher plugin when creating database succeeded
+	if hookutil.IsDBEncyptionEnabled(db.Properties) {
+		createConfig := map[string]string{
+			hookutil.CipherConfigCreateEZ:     strconv.FormatInt(db.ID, 10),
+			hookutil.CipherConfigKeyKmsKeyArn: hookutil.GetEZRootKeyByDBProperties(db.Properties),
+		}
+		if err := hookutil.GetCipher().Init(createConfig); err != nil {
+			return err
+		}
 	}
 
 	mt.names.createDbIfNotExist(dbName)
@@ -386,6 +398,17 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 
 	if err := mt.catalog.DropDatabase(ctx, db.ID, ts); err != nil {
 		return err
+	}
+
+	// Call back cipher plugin when dropping database succeeded
+	if hookutil.IsDBEncyptionEnabled(db.Properties) {
+		dropConfig := map[string]string{
+			hookutil.CipherConfigRemoveEZ: strconv.FormatInt(db.ID, 10),
+		}
+		if err := hookutil.GetCipher().Init(dropConfig); err != nil {
+			log.Ctx(ctx).Warn("drop database ez failed", zap.String("db", dbName), zap.Int64("dbID", db.ID), zap.Uint64("ts", ts), zap.Error("err", err))
+			// ignore the err
+		}
 	}
 
 	mt.names.dropDb(dbName)

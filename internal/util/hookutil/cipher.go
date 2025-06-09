@@ -55,6 +55,11 @@ const (
 	EncryptionEnabledKey = "cipher.enabled"
 	EncryptionRootKeyKey = "cipher.key"
 	EncryptionEzIDKey    = "cipher.ezID"
+
+	CipherConfigCreateEZ       = "cipher.ez.create"
+	CipherConfigRemoveEZ       = "cipher.ez.remove"
+	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
+	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
 )
 
 type EZ struct {
@@ -109,6 +114,15 @@ func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
 	return false
 }
 
+func GetEZRootKeyByDBProperties(dbProperties []*commonpb.KeyValuePair) string {
+	for _, property := range dbProperties {
+		if property.Key == EncryptionRootKeyKey {
+			return property.Value
+		}
+	}
+	return paramtable.GetCipherParams().DefaultRootKey.GetValue()
+}
+
 // For test only
 func InitTestCipher() {
 	InitOnceCipher()
@@ -128,7 +142,6 @@ func storeCipher(cipher hook.Cipher) {
 
 func initCipher() error {
 	storeCipher(nil)
-	// TODO: Fix: [error="fail to open the cipher plugin, error: plugin.Open(\"/home/yangxuan/Github/milvus-cloud-plugin/so/cipher\"): plugin was built with a different version of package internal/abi"]
 
 	pathGo := paramtable.GetCipherParams().SoPathGo.GetValue()
 	if pathGo == "" {
@@ -139,7 +152,7 @@ func initCipher() error {
 	pathCpp := paramtable.GetCipherParams().SoPathCpp.GetValue()
 	if pathCpp == "" {
 		log.Info("empty so path for cpp plugin, skip to load cipher plugin")
-		// return nil TODO: For test
+		return nil
 	}
 
 	log.Info("start to load cipher plugin", zap.String("path", pathGo))
@@ -161,8 +174,9 @@ func initCipher() error {
 		return fmt.Errorf("fail to convert the `CipherPlugin` interface")
 	}
 
-	etcdConfigs := paramtable.Get().EtcdCfg.GetAll()
-	if err = cipherVal.Init(etcdConfigs); err != nil {
+	initConfigs := paramtable.Get().EtcdCfg.GetAll()
+	initConfigs[CipherConfigMilvusRoleName] = paramtable.GetRole()
+	if err = cipherVal.Init(initConfigs); err != nil {
 		return fmt.Errorf("fail to init configs for the cipher plugin, error: %s", err.Error())
 	}
 	storeCipher((cipherVal))
