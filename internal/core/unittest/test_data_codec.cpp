@@ -842,7 +842,7 @@ TEST(storage, InsertDataJsonFillWithNull) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::JSON, true);
     int64_t size = 2;
-    uint8_t* valid_data = new uint8_t[1]{0x00};
+    uint8_t* valid_data = new uint8_t[1]{0xFC};
     field_data->FillFieldData(std::nullopt, size);
 
     auto payload_reader =
