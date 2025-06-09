@@ -283,14 +283,15 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				req.NeedTransfer = false
 			} else {
 				// prefer to release segment by latest and serviceable shard leader
-				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+				view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard), meta.WithServiceable())
 				if view == nil {
 					// if no serviceable shard leader, try to find the latest shard leader
-					view = ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica))
+					view = ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
 					if view == nil {
 						msg := "no shard leader for the segment to execute releasing"
 						err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 						log.Warn(msg, zap.Error(err))
+						return
 					}
 				}
 
