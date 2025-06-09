@@ -178,7 +178,7 @@ func TestManager(t *testing.T) {
 			d.curTs.Store(1000)
 		}
 
-		checkIntervalK := paramtable.Get().MQCfg.MergeCheckInterval.Key
+		checkIntervalK := paramtable.Get().MQCfg.CheckInterval.Key
 		paramtable.Get().Save(checkIntervalK, "0.01")
 		defer paramtable.Get().Reset(checkIntervalK)
 

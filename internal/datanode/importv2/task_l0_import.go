@@ -127,7 +127,7 @@ func (t *L0ImportTask) Clone() Task {
 }
 
 func (t *L0ImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
+	bufferSize := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt() * 1024 * 1024
 	log.Info("start to import l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", t.GetSchema()))...)

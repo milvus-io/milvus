@@ -125,8 +125,8 @@ func (c *dispatcherManager) Close() {
 func (c *dispatcherManager) Run() {
 	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 	log.Info("dispatcherManager is running...")
-	ticker1 := time.NewTicker(10 * time.Second)
-	ticker2 := time.NewTicker(paramtable.Get().MQCfg.MergeCheckInterval.GetAsDuration(time.Second))
+	ticker1 := time.NewTicker(30 * time.Second)
+	ticker2 := time.NewTicker(paramtable.Get().MQCfg.CheckInterval.GetAsDuration(time.Second))
 	defer ticker1.Stop()
 	defer ticker2.Stop()
 	for {
