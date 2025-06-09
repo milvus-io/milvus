@@ -174,6 +174,35 @@ TEST_F(StringIndexMarisaTest, PrefixMatch) {
     }
 }
 
+TEST_F(StringIndexMarisaTest, IsNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    index->Build(nb, strs.data());
+    auto bitset = index->IsNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == 0);
+}
+
+TEST_F(StringIndexMarisaTest, IsNullHasNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    FixedVector<bool> is_null(nb);
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->IsNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
+}
+
+TEST_F(StringIndexMarisaTest, IsNotNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    index->Build(nb, strs.data());
+    auto bitset = index->IsNotNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == strs.size());
+}
+
 TEST_F(StringIndexMarisaTest, Query) {
     auto index = milvus::index::CreateStringIndexMarisa();
     index->Build(nb, strs.data());

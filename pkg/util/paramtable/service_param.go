@@ -544,10 +544,10 @@ type MQConfig struct {
 	IgnoreBadPosition ParamItem `refreshable:"true"`
 
 	// msgdispatcher
-	MergeCheckInterval ParamItem `refreshable:"false"`
-	TargetBufSize      ParamItem `refreshable:"false"`
-	MaxTolerantLag     ParamItem `refreshable:"true"`
-	MaxPositionTsGap   ParamItem `refreshable:"true"`
+	CheckInterval    ParamItem `refreshable:"false"`
+	TargetBufSize    ParamItem `refreshable:"false"`
+	MaxTolerantLag   ParamItem `refreshable:"true"`
+	MaxPositionTsGap ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -580,14 +580,14 @@ Valid values: [default, pulsar, kafka, rocksmq, woodpecker]`,
 	}
 	p.TargetBufSize.Init(base.mgr)
 
-	p.MergeCheckInterval = ParamItem{
+	p.CheckInterval = ParamItem{
 		Key:          "mq.dispatcher.mergeCheckInterval",
 		Version:      "2.4.4",
-		DefaultValue: "1",
+		DefaultValue: "0.1",
 		Doc:          `the interval time(in seconds) for dispatcher to check whether to merge`,
 		Export:       true,
 	}
-	p.MergeCheckInterval.Init(base.mgr)
+	p.CheckInterval.Init(base.mgr)
 
 	p.MaxPositionTsGap = ParamItem{
 		Key:          "mq.dispatcher.maxPositionGapInMinutes",

@@ -1892,7 +1892,7 @@ please adjust in embedded Milvus: false`,
 	p.RetryTimesOnReplica = ParamItem{
 		Key:          "proxy.retryTimesOnReplica",
 		Version:      "2.3.0",
-		DefaultValue: "2",
+		DefaultValue: "5",
 		Doc:          "retry times on each replica",
 	}
 	p.RetryTimesOnReplica.Init(base.mgr)
