@@ -256,8 +256,26 @@ GetOptFieldIvfData(const DataType& dt,
 }
 
 std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
-MemFileManagerImpl::CacheOptFieldToMemory(OptFieldT& fields_map) {
-    const uint32_t num_of_fields = fields_map.size();
+MemFileManagerImpl::CacheOptFieldToMemory(const Config& config) {
+    auto storage_version =
+        index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
+            .value_or(0);
+    if (storage_version == STORAGE_V2) {
+        return cache_opt_field_memory_v2(config);
+    }
+    return cache_opt_field_memory(config);
+}
+
+std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return res;
+    }
+    auto fields_map = opt_fields.value();
+    auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
     } else if (num_of_fields > 1) {
@@ -266,7 +284,6 @@ MemFileManagerImpl::CacheOptFieldToMemory(OptFieldT& fields_map) {
             "vector index build with multiple fields is not supported yet");
     }
 
-    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
     for (auto& [field_id, tup] : fields_map) {
         const auto& field_type = std::get<1>(tup);
         auto& field_paths = std::get<2>(tup);
@@ -278,6 +295,45 @@ MemFileManagerImpl::CacheOptFieldToMemory(OptFieldT& fields_map) {
         SortByPath(field_paths);
         std::vector<FieldDataPtr> field_datas =
             FetchFieldData(rcm_.get(), field_paths);
+        res[field_id] = GetOptFieldIvfData(field_type, field_datas);
+    }
+    return res;
+}
+
+std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
+    auto opt_fields =
+        index::GetValueFromConfig<OptFieldT>(config, VEC_OPT_FIELDS);
+    if (!opt_fields.has_value()) {
+        return {};
+    }
+    auto fields_map = opt_fields.value();
+    auto num_of_fields = fields_map.size();
+    if (0 == num_of_fields) {
+        return {};
+    } else if (num_of_fields > 1) {
+        PanicInfo(
+            ErrorCode::NotImplemented,
+            "vector index build with multiple fields is not supported yet");
+    }
+
+    auto segment_insert_files =
+        index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
+            config, SEGMENT_INSERT_FILES_KEY);
+    AssertInfo(segment_insert_files.has_value(),
+               "insert file paths for storage v2 is empty when build index");
+    auto remote_files = segment_insert_files.value();
+    for (auto& files : remote_files) {
+        SortByPath(files);
+    }
+
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
+    for (auto& [field_id, tup] : fields_map) {
+        const auto& field_type = std::get<1>(tup);
+
+        auto field_datas =
+            GetFieldDatasFromStorageV2(remote_files, field_id, field_type, 1);
+
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);
     }
     return res;

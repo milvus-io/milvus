@@ -203,7 +203,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.ReplicaSelectionPolicy.GetValue(), "look_aside")
 		assert.Equal(t, Params.CheckQueryNodeHealthInterval.GetAsInt(), 1000)
 		assert.Equal(t, Params.CostMetricsExpireTime.GetAsInt(), 1000)
-		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 2)
+		assert.Equal(t, Params.RetryTimesOnReplica.GetAsInt(), 5)
 		assert.EqualValues(t, Params.HealthCheckTimeout.GetAsInt64(), 3000)
 
 		params.Save("proxy.gracefulStopTimeout", "100")
@@ -603,7 +603,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
 		assert.Equal(t, 16, maxConcurrentImportTaskNum)
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
-		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
+		assert.Equal(t, 64, Params.ImportInsertBufferSize.GetAsInt())
+		assert.Equal(t, 16, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 16, Params.MaxTaskSlotNum.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
