@@ -19,6 +19,7 @@ package querynodev2
 /*
 #cgo pkg-config: milvus_core
 
+#include "common/type_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/segcore_init_c.h"
@@ -295,6 +296,13 @@ func (node *QueryNode) InitSegcore() error {
 	vectorFieldCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.GetValue())
 	if err != nil {
 		return err
+	}
+	deprecatedCacheWarmupPolicy := paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
+	if deprecatedCacheWarmupPolicy == "sync" {
+		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
 	}
 	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
 	if err != nil {

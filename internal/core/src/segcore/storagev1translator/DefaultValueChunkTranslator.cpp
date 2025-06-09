@@ -53,6 +53,7 @@ DefaultValueChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 milvus::cachinglayer::ResourceUsage
 DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
+    // TODO(tiered storage 1): provide a better estimation.
     return milvus::cachinglayer::ResourceUsage{0, 0};
 }
 

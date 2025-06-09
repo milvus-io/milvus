@@ -2807,7 +2807,8 @@ type queryNodeConfig struct {
 
 	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
 
-	ReadAheadPolicy ParamItem `refreshable:"false"`
+	ReadAheadPolicy     ParamItem `refreshable:"false"`
+	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
@@ -2987,11 +2988,11 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 	p.TieredMemoryLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
 		Version:      "2.6.0",
-		DefaultValue: "0.6",
+		DefaultValue: "0.75",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
-				return "0.6"
+				return "0.75"
 			}
 			return fmt.Sprintf("%f", ratio)
 		},
@@ -3037,11 +3038,11 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	p.TieredDiskLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
 		Version:      "2.6.0",
-		DefaultValue: "0.6",
+		DefaultValue: "0.75",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
-				return "0.6"
+				return "0.75"
 			}
 			return fmt.Sprintf("%f", ratio)
 		},
@@ -3098,11 +3099,11 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	p.TieredEvictionIntervalMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
 		Version:      "2.6.0",
-		DefaultValue: "10000",
+		DefaultValue: "1000",
 		Formatter: func(v string) string {
 			window := getAsInt64(v)
 			if window < 0 {
-				return "10000"
+				return "1000"
 			}
 			return fmt.Sprintf("%d", window)
 		},
@@ -3477,6 +3478,15 @@ However, this optimization may come at the cost of a slight decrease in query la
 		Export:       true,
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
+
+	// this is being deprecated, thus not exported
+	p.ChunkCacheWarmingUp = ParamItem{
+		Key:          "queryNode.cache.warmup",
+		Version:      "2.3.6",
+		DefaultValue: "disable",
+		Export:       false,
+	}
+	p.ChunkCacheWarmingUp.Init(base.mgr)
 
 	p.MaxReceiveChanSize = ParamItem{
 		Key:          "queryNode.scheduler.receiveChanSize",
