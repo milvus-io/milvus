@@ -280,6 +280,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 
+	if err = ValidateTask(t); err != nil {
+		return err
+	}
+
 	log.Debug("search PreExecute done.",
 		zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Bool("use_default_consistency", useDefaultConsistency),

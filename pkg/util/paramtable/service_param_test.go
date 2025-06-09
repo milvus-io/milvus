@@ -35,7 +35,7 @@ func TestServiceParam(t *testing.T) {
 
 	t.Run("test MQConfig", func(t *testing.T) {
 		Params := &SParams.MQCfg
-		assert.Equal(t, 1*time.Second, Params.MergeCheckInterval.GetAsDuration(time.Second))
+		assert.Equal(t, 100*time.Millisecond, Params.CheckInterval.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.TargetBufSize.GetAsInt())
 		assert.Equal(t, 3*time.Second, Params.MaxTolerantLag.GetAsDuration(time.Second))
 		assert.Equal(t, 60*time.Minute, Params.MaxPositionTsGap.GetAsDuration(time.Minute))

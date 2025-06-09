@@ -118,6 +118,9 @@ class StringIndexMarisa : public StringIndex {
     in_lexicographic_order();
 
     void
+    SetNull(TargetBitmap& bitset);
+
+    void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 

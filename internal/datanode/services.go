@@ -465,6 +465,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 		zap.Strings("vchannels", req.GetVchannels()),
+		zap.Uint64("ts", req.GetTs()),
+		zap.Int64("idBegin", req.GetIDRange().GetBegin()),
+		zap.Int64("idEnd", req.GetIDRange().GetEnd()),
 		zap.Any("segments", req.GetRequestSegments()),
 		zap.Any("files", req.GetFiles()))
 
@@ -809,9 +812,14 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		if err != nil {
 			return merr.Status(err), nil
 		}
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
 		return node.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
-			TaskIDs: []int64{taskID},
-			JobType: jobType,
+			ClusterID: clusterID,
+			TaskIDs:   []int64{taskID},
+			JobType:   jobType,
 		})
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())

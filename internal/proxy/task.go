@@ -3026,20 +3026,16 @@ func (t *RunAnalyzerTask) OnEnqueue() error {
 }
 
 func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
-	dbName := t.GetDbName()
-	if dbName == "" {
-		dbName = "default"
-	}
-	t.dbName = dbName
+	t.dbName = t.GetDbName()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, dbName, t.GetCollectionName())
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 
 	t.collectionID = collID
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, t.GetCollectionName())
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
