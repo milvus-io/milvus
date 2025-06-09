@@ -117,6 +117,7 @@ func (job *LoadCollectionJob) PreExecute() error {
 	}
 
 	reqFieldIDs := req.GetLoadFields()
+	// todo(SpadeA): consider struct fields
 	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) && len(req.GetLoadFields()) == 0 {
 		// here is a compatible logic: meta is still old, but req was sent in new version
 		// in older versions, a full load will be saved all field id, in newer version, use empty loaded list as all loaded
@@ -327,6 +328,7 @@ func (job *LoadPartitionJob) PreExecute() error {
 	}
 
 	reqFieldIDs := req.GetLoadFields()
+	// todo(SpadeA): consider struct fields
 	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) && len(req.GetLoadFields()) == 0 {
 		// here is a compatible logic: meta is still old, but req was sent in new version
 		// in older versions, a full load will be saved all field id, in newer version, use empty loaded list as all loaded

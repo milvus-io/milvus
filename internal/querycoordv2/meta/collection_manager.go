@@ -230,6 +230,7 @@ func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *q
 		return err
 	}
 
+	// todo(SpadeA): consider struct fields
 	// fill all field id as legacy default behavior
 	collection.LoadFields = lo.FilterMap(resp.GetSchema().GetFields(), func(fieldSchema *schemapb.FieldSchema, _ int) (int64, bool) {
 		// load fields list excludes system fields

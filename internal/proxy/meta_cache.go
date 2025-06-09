@@ -127,6 +127,7 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 	fieldMap := typeutil.NewConcurrentMap[string, int64]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
+	// todo(SpadeA): consider struct fields
 	for _, field := range schema.GetFields() {
 		fieldMap.Insert(field.GetName(), field.GetFieldID())
 		if field.GetIsPartitionKey() {
@@ -179,7 +180,12 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 	fieldIDs := typeutil.NewSet[int64]()
 	// fieldIDs := make([]int64, 0, len(loadFields))
 	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
+	// todo(SpadeA): check struct field
 	for _, name := range loadFields {
+		if s.schemaHelper.IsStructArrayField(name) {
+			panic("not implemented")
+		}
+
 		fieldSchema, err := s.schemaHelper.GetFieldFromName(name)
 		if err != nil {
 			return nil, err
@@ -428,6 +434,11 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	if err != nil {
 		return nil, err
 	}
+
+	// loadStructFields, err := m.getCollectionLoadStructFields(ctx, collection.CollectionID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	// check partitionID, createdTimestamp and utcstamp has sam element numbers
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {

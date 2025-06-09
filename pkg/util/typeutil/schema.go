@@ -417,6 +417,15 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 	return helper.allFields[offset], nil
 }
 
+func (helper *SchemaHelper) IsStructArrayField(fieldName string) bool {
+	for _, field := range helper.schema.StructArrayFields {
+		if field.Name == fieldName {
+			return true
+		}
+	}
+	return false
+}
+
 // GetFieldFromNameDefaultJSON is used to find the schema by field name, if not exist, use json field
 func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.nameOffset[fieldName]

@@ -111,6 +111,20 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 					break
 				}
 			}
+
+			if !fieldFound {
+			structFieldLoop:
+				for _, structField := range schema.StructArrayFields {
+					for _, field := range structField.Fields {
+						if reqField == field.Name {
+							outputFieldIDs = append(outputFieldIDs, field.FieldID)
+							fieldFound = true
+							break structFieldLoop
+						}
+					}
+				}
+			}
+
 			if !fieldFound {
 				return nil, fmt.Errorf("field %s not exist", reqField)
 			}
@@ -396,6 +410,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	if t.ids != nil {
 		pkField := ""
+		// todo(SpadeA): consider struct fields
 		for _, field := range schema.Fields {
 			if field.IsPrimaryKey {
 				pkField = field.Name
@@ -535,6 +550,58 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+// FieldsData in results are flattened, so we need to reconstruct the struct fields
+func reconstructStructFieldData(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
+	if len(schema.StructArrayFields) == 0 {
+		return
+	}
+
+	regularFieldIDs := make(map[int64]interface{})
+	subFieldToStructMap := make(map[int64]int64)
+	groupedStructFields := make(map[int64][]*schemapb.FieldData)
+	structFieldNames := make(map[int64]string)
+	reconstructedOutputFields := make([]string, 0, len(results.FieldsData))
+
+	// record all regular field IDs
+	for _, field := range schema.Fields {
+		regularFieldIDs[field.GetFieldID()] = nil
+	}
+
+	// build the mapping from sub-field ID to struct field ID
+	for _, structField := range schema.StructArrayFields {
+		for _, subField := range structField.GetFields() {
+			subFieldToStructMap[subField.GetFieldID()] = structField.GetFieldID()
+		}
+		structFieldNames[structField.GetFieldID()] = structField.GetName()
+	}
+
+	fieldsData := make([]*schemapb.FieldData, 0, len(results.FieldsData))
+	for _, field := range results.FieldsData {
+		fieldID := field.GetFieldId()
+		if _, ok := regularFieldIDs[fieldID]; ok {
+			fieldsData = append(fieldsData, field)
+			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
+		} else {
+			structFieldID := subFieldToStructMap[fieldID]
+			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
+		}
+	}
+
+	for structFieldID, fields := range groupedStructFields {
+		fieldData := &schemapb.FieldData{
+			FieldName: structFieldNames[structFieldID],
+			FieldId:   structFieldID,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+		}
+		fieldsData = append(fieldsData, fieldData)
+		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
+	}
+
+	results.FieldsData = fieldsData
+	results.OutputFields = reconstructedOutputFields
+}
+
 func (t *queryTask) PostExecute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder("queryTask PostExecute")
 	defer func() {
@@ -576,6 +643,8 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	t.result.OutputFields = t.userOutputFields
+	reconstructStructFieldData(t.result, t.schema.CollectionSchema)
+
 	primaryFieldSchema, err := t.schema.GetPkField()
 	if err != nil {
 		log.Warn("failed to get primary field schema", zap.Error(err))
