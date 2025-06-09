@@ -19,6 +19,7 @@ func init() {
 func resetMessageAckCallbacks() {
 	messageAckCallbacks = map[message.MessageType]*syncutil.Future[MessageCallback]{
 		message.MessageTypeDropPartition: syncutil.NewFuture[MessageCallback](),
+		message.MessageTypeImport:        syncutil.NewFuture[MessageCallback](),
 	}
 }
 

@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -55,9 +56,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -341,6 +344,37 @@ func (s *Server) initMessageAckCallback() {
 	registry.RegisterMessageAckCallback(message.MessageTypeDropPartition, func(ctx context.Context, msg message.MutableMessage) error {
 		dropPartitionMsg := message.MustAsMutableDropPartitionMessageV1(msg)
 		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{dropPartitionMsg.Header().PartitionId})
+	})
+	registry.RegisterMessageAckCallback(message.MessageTypeImport, func(ctx context.Context, msg message.MutableMessage) error {
+		importMsg := message.MustAsMutableImportMessageV1(msg)
+		body := importMsg.MustBody()
+		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			CollectionID:   body.GetCollectionID(),
+			CollectionName: body.GetCollectionName(),
+			PartitionIDs:   body.GetPartitionIDs(),
+			ChannelNames:   []string{msg.VChannel()},
+			Schema:         body.GetSchema(),
+			Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+				return &internalpb.ImportFile{
+					Id:    file.GetId(),
+					Paths: file.GetPaths(),
+				}
+			}),
+			Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+			DataTimestamp: body.GetBase().GetTimestamp(),
+			JobID:         body.GetJobID(),
+		})
+		err = merr.CheckRPCCall(importResp, err)
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Ctx(ctx).Warn("import message failed because of collection not found, skip it", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+			return nil
+		}
+		if err != nil {
+			log.Ctx(ctx).Warn("import message failed", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+			return err
+		}
+		log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
+		return nil
 	})
 }
 

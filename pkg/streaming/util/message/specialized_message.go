@@ -349,6 +349,15 @@ func (m *specializedMutableMessageImpl[H, B]) Body() (B, error) {
 	return unmarshalProtoB[B](m.Payload())
 }
 
+// MustBody returns the message body.
+func (m *specializedMutableMessageImpl[H, B]) MustBody() B {
+	b, err := m.Body()
+	if err != nil {
+		panic(fmt.Sprintf("failed to unmarshal specialized body,%s", err.Error()))
+	}
+	return b
+}
+
 // OverwriteMessageHeader overwrites the message header.
 func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 	m.header = header
