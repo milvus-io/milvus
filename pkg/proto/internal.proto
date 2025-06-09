@@ -434,3 +434,12 @@ message GetSegmentsInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo segmentInfos = 2;
 }
+
+message GetQuotaMetricsRequest {
+    common.MsgBase base = 1;
+}
+
+message GetQuotaMetricsResponse {
+  common.Status status = 1;
+  string metrics_info = 2;
+}

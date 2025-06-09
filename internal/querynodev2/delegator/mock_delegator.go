@@ -140,6 +140,53 @@ func (_c *MockShardDelegator_Collection_Call) RunAndReturn(run func() int64) *Mo
 	return _c
 }
 
+// GetChannelQueryView provides a mock function with no fields
+func (_m *MockShardDelegator) GetChannelQueryView() *channelQueryView {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetChannelQueryView")
+	}
+
+	var r0 *channelQueryView
+	if rf, ok := ret.Get(0).(func() *channelQueryView); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*channelQueryView)
+		}
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetChannelQueryView_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannelQueryView'
+type MockShardDelegator_GetChannelQueryView_Call struct {
+	*mock.Call
+}
+
+// GetChannelQueryView is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) GetChannelQueryView() *MockShardDelegator_GetChannelQueryView_Call {
+	return &MockShardDelegator_GetChannelQueryView_Call{Call: _e.mock.On("GetChannelQueryView")}
+}
+
+func (_c *MockShardDelegator_GetChannelQueryView_Call) Run(run func()) *MockShardDelegator_GetChannelQueryView_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetChannelQueryView_Call) Return(_a0 *channelQueryView) *MockShardDelegator_GetChannelQueryView_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetChannelQueryView_Call) RunAndReturn(run func() *channelQueryView) *MockShardDelegator_GetChannelQueryView_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetDeleteBufferSize provides a mock function with no fields
 func (_m *MockShardDelegator) GetDeleteBufferSize() (int64, int64) {
 	ret := _m.Called()
@@ -239,53 +286,6 @@ func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) Return(_a0 map[int6
 }
 
 func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) RunAndReturn(run func(context.Context) map[int64]int64) *MockShardDelegator_GetPartitionStatsVersions_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetChannelQueryView provides a mock function with no fields
-func (_m *MockShardDelegator) GetChannelQueryView() *channelQueryView {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetChannelQueryView")
-	}
-
-	var r0 *channelQueryView
-	if rf, ok := ret.Get(0).(func() *channelQueryView); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*channelQueryView)
-		}
-	}
-
-	return r0
-}
-
-// MockShardDelegator_GetChannelQueryView_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetChannelQueryView'
-type MockShardDelegator_GetChannelQueryView_Call struct {
-	*mock.Call
-}
-
-// GetChannelQueryView is a helper method to define mock.On call
-func (_e *MockShardDelegator_Expecter) GetChannelQueryView() *MockShardDelegator_GetChannelQueryView_Call {
-	return &MockShardDelegator_GetChannelQueryView_Call{Call: _e.mock.On("GetChannelQueryView")}
-}
-
-func (_c *MockShardDelegator_GetChannelQueryView_Call) Run(run func()) *MockShardDelegator_GetChannelQueryView_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_GetChannelQueryView_Call) Return(_a0 *channelQueryView) *MockShardDelegator_GetChannelQueryView_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardDelegator_GetChannelQueryView_Call) RunAndReturn(run func() *channelQueryView) *MockShardDelegator_GetChannelQueryView_Call {
 	_c.Call.Return(run)
 	return _c
 }

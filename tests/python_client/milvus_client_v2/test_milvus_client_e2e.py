@@ -506,7 +506,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
 
         # Multiple fields is not null
         multi_not_null_filter = "varchar_field is not null and json_field is not null and array_field is not null"
-        multi_not_null_expected = [r for r in total_rows if r["varchar_field"] is not None and r["json_field"] is not None and r["array_field"] is not None]
+        multi_not_null_expected = [r for r in total_rows if r["varchar_field"] is not None and
+                                   r["json_field"] is not None and r["array_field"] is not None]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -524,8 +525,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # Test case 1: int field is null AND float field > value AND varchar field is not null
         complex_mix_filter1 = "int32_field is null and float_field > 10.0 and varchar_field is not null"
         complex_mix_expected1 = [r for r in total_rows if r["int32_field"] is None and
-                               r["float_field"] is not None and r["float_field"] > 10.0 and
-                               r["varchar_field"] is not None]
+                                 r["float_field"] is not None and r["float_field"] > 10.0 and
+                                 r["varchar_field"] is not None]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -542,8 +543,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # Test case 2: varchar field is not null AND int field between values AND float field is null
         complex_mix_filter2 = "varchar_field is not null and 5 <= int64_field <= 15 and float_field is null"
         complex_mix_expected2 = [r for r in total_rows if r["varchar_field"] is not None and
-                               r["int64_field"] is not None and 5 <= r["int64_field"] <= 15 and
-                               r["float_field"] is None]
+                                 r["int64_field"] is not None and 5 <= r["int64_field"] <= 15 and
+                                 r["float_field"] is None]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -558,10 +559,11 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         )
 
         # Test case 3: Multiple fields with mixed null/not null conditions and range comparisons
-        complex_mix_filter3 = "int8_field is not null and int8_field < 50 and double_field is null and varchar_field is not null and varchar_field like \"varchar_2%\""
+        complex_mix_filter3 = ("int8_field is not null and int8_field < 50 and double_field is null and "
+                               "varchar_field is not null and varchar_field like \"varchar_2%\"")
         complex_mix_expected3 = [r for r in total_rows if r["int8_field"] is not None and r["int8_field"] < 50 and
-                               r["double_field"] is None and
-                               r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_2")]
+                                 r["double_field"] is None and
+                                 r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_2")]
         query_res, _ = self.query(
             client,
             collection_name,

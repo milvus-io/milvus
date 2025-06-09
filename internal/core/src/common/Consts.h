@@ -81,6 +81,7 @@ const size_t MARISA_NULL_KEY_ID = -1;
 
 const std::string JSON_CAST_TYPE = "json_cast_type";
 const std::string JSON_PATH = "json_path";
+const std::string JSON_CAST_FUNCTION = "json_cast_function";
 const bool DEFAULT_OPTIMIZE_EXPR_ENABLED = true;
 const int64_t DEFAULT_CONVERT_OR_TO_IN_NUMERIC_LIMIT = 150;
 const int64_t DEFAULT_JSON_INDEX_MEMORY_BUDGET = 16777216;  // bytes, 16MB
@@ -95,7 +96,10 @@ const std::string PARTITION_KEY_ISOLATION_KEY = "partition_key_isolation";
 const std::string STORAGE_VERSION_KEY = "storage_version";
 const std::string DIM_KEY = "dim";
 const std::string DATA_TYPE_KEY = "data_type";
+const std::string INDEX_NUM_ROWS_KEY = "index_num_rows";
 
 // storage version
 const int64_t STORAGE_V1 = 1;
 const int64_t STORAGE_V2 = 2;
+
+const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";

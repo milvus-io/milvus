@@ -104,6 +104,7 @@ func (b *builderImpl) setCustomWpConfig(wpConfig *config.Configuration, cfg *par
 	wpConfig.Woodpecker.Logstore.LogFileSyncPolicy.MaxFlushSize = cfg.FlushMaxSize.GetAsSize()
 	wpConfig.Woodpecker.Logstore.LogFileSyncPolicy.MaxFlushThreads = cfg.FlushMaxThreads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.LogFileSyncPolicy.RetryInterval = int(cfg.RetryInterval.GetAsDurationByParse().Milliseconds())
+	wpConfig.Woodpecker.Logstore.LogFileCompactionPolicy.MaxBytes = cfg.CompactionSize.GetAsSize()
 	wpConfig.Woodpecker.Logstore.FragmentManager.MaxBytes = cfg.FragmentCachedMaxBytes.GetAsSize()
 	wpConfig.Woodpecker.Logstore.FragmentManager.MaxInterval = int(cfg.FragmentCachedInterval.GetAsDurationByParse().Milliseconds())
 	// storage

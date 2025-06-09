@@ -26,6 +26,7 @@
 #include "knowhere/comp/index_param.h"
 #include "parquet/schema.h"
 #include "storage/Event.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
@@ -232,6 +233,10 @@ SortByPath(std::vector<std::pair<std::string, int64_t>>& paths) {
                    std::stol(b.first.substr(b.first.find_last_of("/") + 1));
         });
 }
+
+std::vector<FieldDataPtr>
+CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
+                           const Config& config);
 
 // used only for test
 inline std::shared_ptr<ArrowDataWrapper>

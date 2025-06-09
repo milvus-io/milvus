@@ -1805,3 +1805,14 @@ func (c *Client) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		return client.UpdateLoadConfig(ctx, req)
 	})
 }
+
+func (c *Client) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.GetQuotaMetricsResponse, error) {
+		return client.GetQuotaMetrics(ctx, req)
+	})
+}

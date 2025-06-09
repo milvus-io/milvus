@@ -628,13 +628,6 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 		},
 		Status: merr.Success(),
 	}, nil).Maybe()
-	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
-	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			StateCode: commonpb.StateCode_Healthy,
-		},
-		Status: merr.Success(),
-	}, nil).Maybe()
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{

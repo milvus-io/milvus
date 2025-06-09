@@ -2993,7 +2993,7 @@ checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
 [[package]]
 name = "ownedbytes"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -3001,7 +3001,7 @@ dependencies = [
 [[package]]
 name = "ownedbytes"
 version = "0.7.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "stable_deref_trait",
 ]
@@ -3381,8 +3381,7 @@ dependencies = [
 [[package]]
 name = "rust-stemmers"
 version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
+source = "git+https://github.com/milvus-io/rust-stemmers.git#3b2545218f76e797baecbf91fa1cbd2c0db60726"
 dependencies = [
  "serde",
  "serde_derive",
@@ -3764,7 +3763,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.21.1"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -3819,7 +3818,7 @@ dependencies = [
 [[package]]
 name = "tantivy"
 version = "0.23.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -3902,7 +3901,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.5.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "bitpacking 0.8.4",
 ]
@@ -3910,7 +3909,7 @@ dependencies = [
 [[package]]
 name = "tantivy-bitpacker"
 version = "0.6.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "bitpacking 0.9.2",
 ]
@@ -3918,7 +3917,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "fastdivide",
  "fnv",
@@ -3933,7 +3932,7 @@ dependencies = [
 [[package]]
 name = "tantivy-columnar"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "downcast-rs",
  "fastdivide",
@@ -3948,7 +3947,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.6.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -3960,7 +3959,7 @@ dependencies = [
 [[package]]
 name = "tantivy-common"
 version = "0.7.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -3995,7 +3994,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.21.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "nom",
 ]
@@ -4003,7 +4002,7 @@ dependencies = [
 [[package]]
 name = "tantivy-query-grammar"
 version = "0.22.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "nom",
 ]
@@ -4011,7 +4010,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "tantivy-common 0.6.0",
  "tantivy-fst 0.4.0",
@@ -4021,7 +4020,7 @@ dependencies = [
 [[package]]
 name = "tantivy-sstable"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "futures-util",
  "itertools 0.14.0",
@@ -4034,7 +4033,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "murmurhash32",
  "tantivy-common 0.6.0",
@@ -4043,7 +4042,7 @@ dependencies = [
 [[package]]
 name = "tantivy-stacker"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "murmurhash32",
  "rand_distr",
@@ -4053,7 +4052,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.2.0"
-source = "git+https://github.com/milvus-io/tantivy.git?tag=0.21.1-fix3#fbf1fd51983b6ddc5777ea3c96823557b9da0473"
+source = "git+https://github.com/zilliztech/tantivy?tag=0.21.1-fix4#bc211a5a76930b120b1eeb25073be27f20ba0387"
 dependencies = [
  "serde",
 ]
@@ -4061,7 +4060,7 @@ dependencies = [
 [[package]]
 name = "tantivy-tokenizer-api"
 version = "0.3.0"
-source = "git+https://github.com/zilliztech/tantivy.git#8ea93cae1a177b2580c36e1e4a0c612c5d1649e9"
+source = "git+https://github.com/zilliztech/tantivy.git#4dbc21ddd7852f005cdb31c2f43e4db8d0dd1baa"
 dependencies = [
  "serde",
 ]
@@ -4595,7 +4594,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

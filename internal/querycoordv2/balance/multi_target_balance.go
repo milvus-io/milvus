@@ -499,11 +499,12 @@ func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceRe
 	var rwNodes, roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
 		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+		roNodes = append(roNodes, replica.GetRONodes()...)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
 
-	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 
@@ -525,7 +526,7 @@ func (b *MultiTargetBalancer) balanceSegments(ctx context.Context, replica *meta
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
 
-	if len(rwNodes) == 0 || !b.permitBalanceSegment(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 	// print current distribution before generating plans

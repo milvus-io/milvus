@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -2553,4 +2554,37 @@ func Test_GetChannelRecoveryInfo(t *testing.T) {
 	cancel()
 	_, err = client.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{})
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func Test_GetQuotaMetrics(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockRC := mocks.NewMockRootCoordClient(t)
+	mockmix := MixCoordClient{
+		RootCoordClient: mockRC,
+	}
+
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockRC.EXPECT().GetQuotaMetrics(mock1.Anything, mock1.Anything).Return(&internalpb.GetQuotaMetricsResponse{
+		Status:      merr.Success(),
+		MetricsInfo: `{"proxy": {"tasks": 100}}`,
+	}, nil).Once()
+	resp, err := client.GetQuotaMetrics(ctx, &internalpb.GetQuotaMetricsRequest{})
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, `{"proxy": {"tasks": 100}}`, resp.GetMetricsInfo())
 }

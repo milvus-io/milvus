@@ -135,19 +135,19 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 				zap.Any("available nodes", rwNodes),
 			)
 			// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-			if b.permitBalanceChannel(replica.GetCollectionID()) && !streamingutil.IsStreamingServiceEnabled() {
+			if !streamingutil.IsStreamingServiceEnabled() {
 				channelPlans = append(channelPlans, b.genStoppingChannelPlan(ctx, replica, channelName, rwNodes, roNodes)...)
 			}
 
-			if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
+			if len(channelPlans) == 0 {
 				segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(ctx, replica, channelName, rwNodes, roNodes)...)
 			}
 		} else {
-			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && b.permitBalanceChannel(replica.GetCollectionID()) && !streamingutil.IsStreamingServiceEnabled() {
+			if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() && !streamingutil.IsStreamingServiceEnabled() {
 				channelPlans = append(channelPlans, b.genChannelPlan(ctx, replica, channelName, rwNodes)...)
 			}
 
-			if len(channelPlans) == 0 && b.permitBalanceSegment(replica.GetCollectionID()) {
+			if len(channelPlans) == 0 {
 				segmentPlans = append(segmentPlans, b.genSegmentPlan(ctx, br, replica, channelName, rwNodes)...)
 			}
 		}

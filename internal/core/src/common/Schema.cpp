@@ -102,7 +102,7 @@ Schema::ConvertToArrowSchema() const {
 }
 
 std::unique_ptr<std::vector<FieldMeta>>
-Schema::absent_fields(Schema& old_schema) const {
+Schema::AbsentFields(Schema& old_schema) const {
     std::vector<FieldMeta> result;
     for (const auto& [field_id, field_meta] : fields_) {
         auto it = old_schema.fields_.find(field_id);

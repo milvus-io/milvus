@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <memory>
 
+#include "common/Consts.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "index/BitmapIndex.h"
@@ -159,8 +160,9 @@ class BitmapIndexTest : public testing::Test {
         Config config;
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] = nb_;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row_;
+            config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
 
         auto build_index =

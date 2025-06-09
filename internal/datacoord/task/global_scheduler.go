@@ -230,8 +230,15 @@ func (s *globalTaskScheduler) check() {
 }
 
 func (s *globalTaskScheduler) updateTaskTimeMetrics() {
-	maxTaskQueueingTime := make(map[string]int64)
-	maxTaskRunningTime := make(map[string]int64)
+	var (
+		taskNumByTypeAndState = make(map[string]map[string]int64) // taskType => [taskState => taskNum]
+		maxTaskQueueingTime   = make(map[string]int64)
+		maxTaskRunningTime    = make(map[string]int64)
+	)
+
+	for _, taskType := range taskcommon.TypeList {
+		taskNumByTypeAndState[taskType] = make(map[string]int64)
+	}
 
 	collectPendingMetricsFunc := func(taskID int64) {
 		task := s.pendingTasks.Get(taskID)
@@ -242,23 +249,28 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 		s.mu.Lock(taskID)
 		defer s.mu.Unlock(taskID)
 
+		taskType := task.GetTaskType()
+
 		queueingTime := time.Since(task.GetTaskTime(taskcommon.TimeQueue))
 		if queueingTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
 			log.Ctx(s.ctx).Warn("task queueing time is too long", zap.Int64("taskID", taskID),
 				zap.Int64("queueing time(ms)", queueingTime.Milliseconds()))
 		}
 
-		maxQueueingTime, ok := maxTaskQueueingTime[task.GetTaskType()]
+		maxQueueingTime, ok := maxTaskQueueingTime[taskType]
 		if !ok || maxQueueingTime < queueingTime.Milliseconds() {
-			maxTaskQueueingTime[task.GetTaskType()] = queueingTime.Milliseconds()
+			maxTaskQueueingTime[taskType] = queueingTime.Milliseconds()
 		}
 
-		metrics.TaskVersion.WithLabelValues(task.GetTaskType()).Observe(float64(task.GetTaskVersion()))
+		taskNumByTypeAndState[taskType][task.GetTaskState().String()]++
+		metrics.TaskVersion.WithLabelValues(taskType).Observe(float64(task.GetTaskVersion()))
 	}
 
 	collectRunningMetricsFunc := func(task Task) {
 		s.mu.Lock(task.GetTaskID())
 		defer s.mu.Unlock(task.GetTaskID())
+
+		taskType := task.GetTaskType()
 
 		runningTime := time.Since(task.GetTaskTime(taskcommon.TimeStart))
 		if runningTime > paramtable.Get().DataCoordCfg.TaskSlowThreshold.GetAsDuration(time.Second) {
@@ -266,10 +278,12 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 				zap.Int64("running time(ms)", runningTime.Milliseconds()))
 		}
 
-		maxRunningTime, ok := maxTaskRunningTime[task.GetTaskType()]
+		maxRunningTime, ok := maxTaskRunningTime[taskType]
 		if !ok || maxRunningTime < runningTime.Milliseconds() {
-			maxTaskRunningTime[task.GetTaskType()] = runningTime.Milliseconds()
+			maxTaskRunningTime[taskType] = runningTime.Milliseconds()
 		}
+
+		taskNumByTypeAndState[taskType][task.GetTaskState().String()]++
 	}
 
 	taskIDs := s.pendingTasks.TaskIDs()
@@ -291,6 +305,13 @@ func (s *globalTaskScheduler) updateTaskTimeMetrics() {
 	for taskType, runningTime := range maxTaskRunningTime {
 		metrics.DataCoordTaskExecuteLatency.
 			WithLabelValues(taskType, metrics.Executing).Observe(float64(runningTime))
+	}
+
+	metrics.TaskNumInGlobalScheduler.Reset()
+	for taskType, taskNumByState := range taskNumByTypeAndState {
+		for taskState, taskNum := range taskNumByState {
+			metrics.TaskNumInGlobalScheduler.WithLabelValues(taskType, taskState).Set(float64(taskNum))
+		}
 	}
 }
 
