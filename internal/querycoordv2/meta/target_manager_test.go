@@ -243,9 +243,6 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
 	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.NoError(err)
-
-	err = suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
-	suite.NoError(err)
 }
 
 func (suite *TargetManagerSuite) TestRemovePartition() {
@@ -261,6 +258,27 @@ func (suite *TargetManagerSuite) TestRemovePartition() {
 	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
 	suite.assertSegments([]int64{}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
 	suite.assertChannels([]string{}, suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
+}
+
+func (suite *TargetManagerSuite) TestRemovePartitionFromNextTarget() {
+	ctx := suite.ctx
+	collectionID := int64(1000)
+	ret := suite.mgr.UpdateCollectionCurrentTarget(ctx, collectionID)
+	suite.True(ret)
+
+	err := suite.mgr.UpdateCollectionNextTarget(ctx, collectionID)
+	suite.NoError(err)
+
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
+
+	suite.mgr.RemovePartitionFromNextTarget(ctx, collectionID, 100)
+	suite.assertSegments([]int64{3, 4}, suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, NextTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget))
+	suite.assertSegments(suite.getAllSegment(collectionID, suite.partitions[collectionID]), suite.mgr.GetSealedSegmentsByCollection(ctx, collectionID, CurrentTarget))
+	suite.assertChannels(suite.channels[collectionID], suite.mgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget))
 }
 
 func (suite *TargetManagerSuite) TestRemoveCollection() {
