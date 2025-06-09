@@ -205,10 +205,8 @@ class TestMilvusClientDatabaseInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        error = {ct.err_code: 1, ct.err_msg: f"Unexpected error, message=<GrpcHandler.list_database() "
-                                             f"got an unexpected keyword argument 'db_name'"}
-        self.list_databases(client, db_name=db_name,
-                            check_task=CheckTasks.err_res, check_items=error)
+        res, _ = self.list_databases(client, db_name=db_name)
+        assert "default" in res
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("db_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "  ", "nonexistent"])
