@@ -234,51 +234,67 @@ func (b *balancerImpl) checkIfAllNodeGreaterThan260AndWatch(ctx context.Context)
 func (b *balancerImpl) checkIfAllNodeGreaterThan260(ctx context.Context) (bool, error) {
 	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole, typeutil.QueryNodeRole}
 	for _, role := range expectedRoles {
-		logger := b.Logger().With(zap.String("role", role))
-		rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
-		defer rb.Close()
-
-		r := rb.Resolver()
-		state, err := r.GetLatestState(ctx)
-		if err != nil {
-			logger.Warn("fail to get latest state", zap.Error(err))
-			return false, err
-		}
-		if len(state.Sessions()) > 0 {
-			logger.Info("node is not greater than 2.6.0 when checking", zap.Int("sessionCount", len(state.Sessions())))
-			return false, nil
+		if greaterThan260, err := b.checkIfRoleGreaterThan260(ctx, role); err != nil || !greaterThan260 {
+			return greaterThan260, err
 		}
 	}
 	b.Logger().Info("all nodes is greater than 2.6.0 when checking")
 	return true, b.channelMetaManager.MarkStreamingHasEnabled(ctx)
 }
 
+// checkIfRoleGreaterThan260 check if the role is greater than 2.6.0.
+func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role string) (bool, error) {
+	logger := b.Logger().With(zap.String("role", role))
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	defer rb.Close()
+
+	r := rb.Resolver()
+	state, err := r.GetLatestState(ctx)
+	if err != nil {
+		logger.Warn("fail to get latest state", zap.Error(err))
+		return false, err
+	}
+	if len(state.Sessions()) > 0 {
+		logger.Info("node is not greater than 2.6.0 when checking", zap.Int("sessionCount", len(state.Sessions())))
+		return false, nil
+	}
+	return true, nil
+}
+
 // blockUntilAllNodeIsGreaterThan260AtBackground block until all node is greater than 2.6.0 at background.
 func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260AtBackground(ctx context.Context) error {
-	doneErr := errors.New("done")
 	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole, typeutil.QueryNodeRole}
 	for _, role := range expectedRoles {
-		logger := b.Logger().With(zap.String("role", role))
-		logger.Info("start to wait that the nodes is greater than 2.6.0")
-		// Check if there's any proxy or data node with version < 2.6.0.
-		rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
-		defer rb.Close()
-
-		r := rb.Resolver()
-		err := r.Watch(ctx, func(vs resolver.VersionedState) error {
-			if len(vs.Sessions()) == 0 {
-				return doneErr
-			}
-			logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
-			return nil
-		})
-		if err != nil && !errors.Is(err, doneErr) {
-			logger.Info("fail to wait that the nodes is greater than 2.6.0", zap.Error(err))
+		if err := b.blockUntilRoleGreaterThan260AtBackground(ctx, role); err != nil {
 			return err
 		}
-		logger.Info("all nodes is greater than 2.6.0 when watching")
 	}
 	return b.channelMetaManager.MarkStreamingHasEnabled(ctx)
+}
+
+// blockUntilRoleGreaterThan260AtBackground block until the role is greater than 2.6.0 at background.
+func (b *balancerImpl) blockUntilRoleGreaterThan260AtBackground(ctx context.Context, role string) error {
+	doneErr := errors.New("done")
+	logger := b.Logger().With(zap.String("role", role))
+	logger.Info("start to wait that the nodes is greater than 2.6.0")
+	// Check if there's any proxy or data node with version < 2.6.0.
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	defer rb.Close()
+
+	r := rb.Resolver()
+	err := r.Watch(ctx, func(vs resolver.VersionedState) error {
+		if len(vs.Sessions()) == 0 {
+			return doneErr
+		}
+		logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
+		return nil
+	})
+	if err != nil && !errors.Is(err, doneErr) {
+		logger.Info("fail to wait that the nodes is greater than 2.6.0", zap.Error(err))
+		return err
+	}
+	logger.Info("all nodes is greater than 2.6.0 when watching")
+	return nil
 }
 
 // applyAllRequest apply all request in the request channel.
