@@ -310,6 +310,7 @@ func (s *mixCoordImpl) GetStateCode() commonpb.StateCode {
 func (s *mixCoordImpl) GracefulStop() {
 	if s.streamingCoord != nil {
 		s.streamingCoord.Stop()
+		s.streamingCoord = nil
 	}
 }
 
@@ -1057,4 +1058,8 @@ func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, 
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
+}
+
+func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return s.rootcoordServer.GetQuotaMetrics(ctx, req)
 }

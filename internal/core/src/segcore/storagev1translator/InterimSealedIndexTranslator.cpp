@@ -59,10 +59,15 @@ InterimSealedIndexTranslator::get_cells(
     std::unique_ptr<index::VectorIndex> vec_index = nullptr;
     if (!is_sparse_) {
         knowhere::ViewDataOp view_data = [field_raw_data_ptr =
-                                                vec_data_](size_t id) {
+                                              vec_data_](size_t id) {
             const void* data;
             int64_t data_id = id;
-            field_raw_data_ptr->BulkValueAt([&data, &data_id](const char* value, size_t i) {data = static_cast<const void*>(value);}, &data_id, 1);                       
+            field_raw_data_ptr->BulkValueAt(
+                [&data, &data_id](const char* value, size_t i) {
+                    data = static_cast<const void*>(value);
+                },
+                &data_id,
+                1);
             return data;
         };
 
@@ -71,28 +76,29 @@ InterimSealedIndexTranslator::get_cells(
                 index_type_,
                 metric_type_,
                 knowhere::Version::GetCurrentVersion().VersionNumber(),
-                view_data, false);
+                view_data,
+                false);
         } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
-            vec_index =
-                std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
-                    index_type_,
-                    metric_type_,
-                    knowhere::Version::GetCurrentVersion().VersionNumber(),
-                    view_data, false);
-        } else if (vec_data_type_ ==
-                    DataType::VECTOR_BFLOAT16) {
-            vec_index =
-                std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
-                    index_type_,
-                    metric_type_,   
-                    knowhere::Version::GetCurrentVersion().VersionNumber(),
-                    view_data, false);
+            vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
+                index_type_,
+                metric_type_,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                view_data,
+                false);
+        } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
+            vec_index = std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
+                index_type_,
+                metric_type_,
+                knowhere::Version::GetCurrentVersion().VersionNumber(),
+                view_data,
+                false);
         }
     } else {
         vec_index = std::make_unique<index::VectorMemIndex<float>>(
             index_type_,
             metric_type_,
-            knowhere::Version::GetCurrentVersion().VersionNumber(), false);
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false);
     }
 
     auto num_chunk = vec_data_->num_chunks();

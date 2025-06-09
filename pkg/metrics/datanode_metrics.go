@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -326,10 +327,27 @@ var (
 			Help:      "latency of building the index by knowhere",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
+
+	DataNodeSlot = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "slot",
+			Help:      "number of available and used slot",
+		}, []string{nodeIDLabelName, "type"})
 )
+
+var registerDNOnce sync.Once
 
 // RegisterDataNode registers DataNode metrics
 func RegisterDataNode(registry *prometheus.Registry) {
+	registerDNOnce.Do(func() {
+		registerDataNodeOnce(registry)
+	})
+}
+
+// registerDataNodeOnce registers DataNode metrics
+func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeNumFlowGraphs)
 	// input related
 	registry.MustRegister(DataNodeConsumeMsgRowsCount)
@@ -366,6 +384,7 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeIndexTaskLatencyInQueue)
 	registry.MustRegister(DataNodeBuildIndexLatency)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
+	registry.MustRegister(DataNodeSlot)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {

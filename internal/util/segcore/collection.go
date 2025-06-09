@@ -21,9 +21,10 @@ import (
 
 // CreateCCollectionRequest is a request to create a CCollection.
 type CreateCCollectionRequest struct {
-	CollectionID int64
-	Schema       *schemapb.CollectionSchema
-	IndexMeta    *segcorepb.CollectionIndexMeta
+	CollectionID  int64
+	Schema        *schemapb.CollectionSchema
+	IndexMeta     *segcorepb.CollectionIndexMeta
+	LoadFieldList []int64
 }
 
 // CreateCCollection creates a CCollection from a CreateCCollectionRequest.
@@ -46,6 +47,14 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	}
 	if indexMetaBlob != nil {
 		status = C.SetIndexMeta(ptr, unsafe.Pointer(&indexMetaBlob[0]), (C.int64_t)(len(indexMetaBlob)))
+		if err := ConsumeCStatusIntoError(&status); err != nil {
+			C.DeleteCollection(ptr)
+			return nil, err
+		}
+	}
+	if req.LoadFieldList != nil {
+		status = C.UpdateLoadFields(ptr, (*C.int64_t)(unsafe.Pointer(&req.LoadFieldList[0])),
+			C.int64_t(len(req.LoadFieldList)))
 		if err := ConsumeCStatusIntoError(&status); err != nil {
 			C.DeleteCollection(ptr)
 			return nil, err

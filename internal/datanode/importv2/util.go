@@ -193,8 +193,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 	return nil
 }
 
-type nullDefaultAppender[T any] struct {
-}
+type nullDefaultAppender[T any] struct{}
 
 func (h *nullDefaultAppender[T]) AppendDefault(fieldData storage.FieldData, defaultVal T, rowNum int) error {
 	values := make([]T, rowNum)
@@ -378,6 +377,8 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 		if runner == nil {
 			continue
 		}
+
+		defer runner.Close()
 
 		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
 		inputDatas := make([]any, 0, len(inputFieldIDs))

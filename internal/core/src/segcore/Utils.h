@@ -131,6 +131,6 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             Timestamp value);
 
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index);
+getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
 
 }  // namespace milvus::segcore

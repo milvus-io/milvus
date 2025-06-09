@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -199,35 +200,28 @@ func (impl *flusherComponents) recover(ctx context.Context, recoverInfos map[str
 // buildDataSyncServiceWithRetry builds the data sync service with retry.
 func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context, recoverInfo *datapb.GetChannelRecoveryInfoResponse) (*dataSyncServiceWrapper, error) {
 	// Flush all the growing segment that is not created by streaming.
-	segmentIDs := make([]int64, 0, len(recoverInfo.GetInfo().UnflushedSegments))
-	for _, segment := range recoverInfo.GetInfo().UnflushedSegments {
-		if segment.IsCreatedByStreaming {
-			continue
-		}
-		msg := message.NewFlushMessageBuilderV2().
-			WithVChannel(recoverInfo.GetInfo().GetChannelName()).
-			WithHeader(&message.FlushMessageHeader{
-				CollectionId: recoverInfo.GetInfo().GetCollectionID(),
-				PartitionId:  segment.PartitionID,
-				SegmentId:    segment.ID,
-			}).
-			WithBody(&message.FlushMessageBody{}).MustBuildMutable()
+	for _, segment := range recoverInfo.SegmentsNotCreatedByStreaming {
+		logger := impl.logger.With(
+			zap.Int64("collectionID", segment.CollectionId),
+			zap.String("vchannel", recoverInfo.GetInfo().GetChannelName()),
+			zap.Int64("partitionID", segment.PartitionId),
+			zap.Int64("segmentID", segment.SegmentId),
+		)
 		if err := retry.Do(ctx, func() error {
-			appendResult, err := impl.wal.Append(ctx, msg)
+			msg := message.NewFlushMessageBuilderV2().
+				WithVChannel(recoverInfo.GetInfo().GetChannelName()).
+				WithHeader(&message.FlushMessageHeader{
+					CollectionId: segment.CollectionId,
+					PartitionId:  segment.PartitionId,
+					SegmentId:    segment.SegmentId,
+				}).
+				WithBody(&message.FlushMessageBody{}).MustBuildMutable()
+			appendResult, err := impl.wal.Append(utility.WithFlushFromOldArch(ctx), msg)
 			if err != nil {
-				impl.logger.Warn(
-					"fail to append flush message for segments that not created by streaming service into wal",
-					zap.String("vchannel", recoverInfo.GetInfo().GetChannelName()),
-					zap.Error(err))
+				logger.Warn("fail to append flush message for segments that not created by streaming service into wal", zap.Error(err))
 				return err
 			}
-			impl.logger.Info(
-				"append flush message for segments that not created by streaming service into wal",
-				zap.String("vchannel", recoverInfo.GetInfo().GetChannelName()),
-				zap.Int64s("segmentIDs", segmentIDs),
-				zap.Stringer("msgID", appendResult.MessageID),
-				zap.Uint64("timeTick", appendResult.TimeTick),
-			)
+			logger.Info("append flush message for segments that not created by streaming service into wal", zap.Stringer("msgID", appendResult.MessageID), zap.Uint64("timeTick", appendResult.TimeTick))
 			return nil
 		}, retry.AttemptAlways()); err != nil {
 			return nil, err

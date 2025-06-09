@@ -205,6 +205,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// segment group
 	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
+	router.POST(QuotaCenterCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetQuotaMetricsReq{} }, wrapperTraceLog(h.getQuotaMetrics))))
 }
 
 type (
@@ -2686,5 +2687,18 @@ func (h *HandlersV2) getSegmentsInfo(ctx context.Context, c *gin.Context, anyReq
 		returnData["segmentInfos"] = infos
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
+	return resp, err
+}
+
+func (h *HandlersV2) getQuotaMetrics(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &internalpb.GetQuotaMetricsRequest{}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetQuotaMetrics", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetQuotaMetrics(reqCtx, req.(*internalpb.GetQuotaMetricsRequest))
+	})
+	if err == nil {
+		response := resp.(*internalpb.GetQuotaMetricsResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: response.GetMetricsInfo()})
+	}
+
 	return resp, err
 }

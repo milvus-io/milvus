@@ -579,7 +579,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
             self.flush(client, collection_name)
         # 4. query when there is no json path index under all expressions
         # skip negative expression for issue 40685
-        #  "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
+        # "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
         express_list = cf.gen_json_field_expressions_all_single_operator()
         compare_dict = {}
         for i in range(len(express_list)):

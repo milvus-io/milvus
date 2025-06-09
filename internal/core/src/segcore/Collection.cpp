@@ -79,8 +79,14 @@ Collection::parse_schema(const void* schema_proto_blob,
 
     AssertInfo(suc, "parse schema proto failed");
 
+    auto old_schema = schema_;
+
     schema_ = Schema::ParseFrom(collection_schema);
     schema_->set_schema_version(version);
+
+    if (old_schema) {
+        schema_->UpdateLoadFields(old_schema->load_fields());
+    }
 }
 
 }  // namespace milvus::segcore

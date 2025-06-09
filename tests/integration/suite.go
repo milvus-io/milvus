@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
@@ -31,6 +32,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -40,6 +43,18 @@ var caseTimeout time.Duration
 
 func init() {
 	flag.DurationVar(&caseTimeout, "caseTimeout", 10*time.Minute, "timeout duration for single case")
+	streamingutil.SetStreamingServiceEnabled()
+}
+
+// WithoutStreamingService run the test not in streaming service
+func WithoutStreamingService() func() {
+	oldVersion := common.Version
+	common.Version = semver.MustParse("2.5.9")
+	streamingutil.UnsetStreamingServiceEnabled()
+	return func() {
+		common.Version = oldVersion
+		streamingutil.SetStreamingServiceEnabled()
+	}
 }
 
 // EmbedEtcdSuite contains embed setup & teardown related logic
@@ -130,6 +145,7 @@ func (s *MiniClusterSuite) SetupTest() {
 			select {
 			case <-timeoutCtx.Done():
 				s.Fail("node id check timeout")
+				return
 			case report := <-c.Extension.GetReportChan():
 				reportInfo := report.(map[string]any)
 				s.T().Log("node id report info: ", reportInfo)

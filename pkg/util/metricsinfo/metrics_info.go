@@ -46,6 +46,22 @@ type HardwareMetrics struct {
 	IOWaitPercentage float64 `json:"io_wait_percentage"` // IO Wait in %
 }
 
+type TaskQueueMetrics struct {
+	Type           string        `json:"type"`
+	PendingCount   int64         `json:"pending_count"`
+	ExecutingCount int64         `json:"executing_count"`
+	PendingTasks   []TaskMetrics `json:"pending_tasks"`
+	ExecutingTasks []TaskMetrics `json:"executing_tasks"`
+}
+
+type TaskMetrics struct {
+	Type         string `json:"type"`
+	MaxQueueTime int64  `json:"max_queue_ms"`
+	MinQueueTime int64  `json:"min_queue_ms"`
+	AvgQueueTime int64  `json:"avg_queue_ms"`
+	Count        int64  `json:"count"`
+}
+
 const (
 	// GitCommitEnvKey defines the key to retrieve the commit corresponding to the current milvus version
 	// from the metrics information

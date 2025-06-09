@@ -148,13 +148,21 @@ JsonInvertedIndex<T>::build_index_for_json(
                     }
                 }
             } else {
-                value_result<SIMDJSON_T> res =
-                    json_column->at<SIMDJSON_T>(nested_path_);
-                if (res.error() != simdjson::SUCCESS) {
-                    error_recorder_.Record(
-                        *json_column, nested_path_, res.error());
+                if (cast_function_.match<T>()) {
+                    auto res = JsonCastFunction::CastJsonValue<T>(
+                        cast_function_, *json_column, nested_path_);
+                    if (res.has_value()) {
+                        values.push_back(res.value());
+                    }
                 } else {
-                    values.push_back(static_cast<T>(res.value()));
+                    value_result<SIMDJSON_T> res =
+                        json_column->at<SIMDJSON_T>(nested_path_);
+                    if (res.error() != simdjson::SUCCESS) {
+                        error_recorder_.Record(
+                            *json_column, nested_path_, res.error());
+                    } else {
+                        values.push_back(static_cast<T>(res.value()));
+                    }
                 }
             }
             this->wrapper_->template add_array_data<T>(
@@ -167,10 +175,14 @@ JsonInvertedIndex<T>::build_index_for_json(
 
 template <typename T>
 bool
-JsonInvertedIndex<T>::IsDataTypeSupported(DataType data_type) const {
+JsonInvertedIndex<T>::IsDataTypeSupported(DataType data_type,
+                                          bool is_array) const {
+    bool cast_type_is_array =
+        cast_type_.data_type() == JsonCastType::DataType::ARRAY;
     auto type = cast_type_.ToMilvusDataType();
-    return type == data_type ||
-           (data_type == DataType::INT64 && type == DataType::DOUBLE);
+    return is_array == cast_type_is_array &&
+           (type == data_type ||
+            (data_type == DataType::INT64 && type == DataType::DOUBLE));
 }
 
 template class JsonInvertedIndex<bool>;

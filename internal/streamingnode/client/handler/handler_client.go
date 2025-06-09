@@ -31,6 +31,7 @@ var (
 	_                           HandlerClient = (*handlerClientImpl)(nil)
 	ErrClientClosed                           = errors.New("handler client is closed")
 	ErrClientAssignmentNotReady               = errors.New("handler client assignment not ready")
+	ErrReadOnlyWAL                            = errors.New("wal is read only")
 )
 
 type (

@@ -4056,6 +4056,65 @@ func (_c *MixCoord_GetQueryNodeDistribution_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// GetQuotaMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetQuotaMetrics(_a0 context.Context, _a1 *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQuotaMetrics")
+	}
+
+	var r0 *internalpb.GetQuotaMetricsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetQuotaMetricsRequest) *internalpb.GetQuotaMetricsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetQuotaMetricsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetQuotaMetricsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetQuotaMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQuotaMetrics'
+type MixCoord_GetQuotaMetrics_Call struct {
+	*mock.Call
+}
+
+// GetQuotaMetrics is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetQuotaMetricsRequest
+func (_e *MixCoord_Expecter) GetQuotaMetrics(_a0 interface{}, _a1 interface{}) *MixCoord_GetQuotaMetrics_Call {
+	return &MixCoord_GetQuotaMetrics_Call{Call: _e.mock.On("GetQuotaMetrics", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetQuotaMetrics_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetQuotaMetricsRequest)) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetQuotaMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQuotaMetricsResponse, _a1 error) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRecoveryInfo provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetRecoveryInfo(_a0 context.Context, _a1 *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret := _m.Called(_a0, _a1)

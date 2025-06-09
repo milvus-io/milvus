@@ -22,5 +22,5 @@ TEST(ArrowFileSystemSingleton, LocalArrowFileSystemSingleton) {
     CStatus status = InitLocalArrowFileSystemSingleton(path);
     EXPECT_EQ(status.error_code, 0);
 
-    CleanLocalArrowFileSystemSingleton();
+    CleanArrowFileSystemSingleton();
 }

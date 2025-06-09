@@ -5,8 +5,10 @@ package mock_balancer
 import (
 	context "context"
 
-	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	syncutil "github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	mock "github.com/stretchr/testify/mock"
+
+	types "github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 
 	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -157,6 +159,39 @@ func (_c *MockBalancer_MarkAsUnavailable_Call) Return(_a0 error) *MockBalancer_M
 
 func (_c *MockBalancer_MarkAsUnavailable_Call) RunAndReturn(run func(context.Context, []types.PChannelInfo) error) *MockBalancer_MarkAsUnavailable_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RegisterStreamingEnabledNotifier provides a mock function with given fields: notifier
+func (_m *MockBalancer) RegisterStreamingEnabledNotifier(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
+	_m.Called(notifier)
+}
+
+// MockBalancer_RegisterStreamingEnabledNotifier_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterStreamingEnabledNotifier'
+type MockBalancer_RegisterStreamingEnabledNotifier_Call struct {
+	*mock.Call
+}
+
+// RegisterStreamingEnabledNotifier is a helper method to define mock.On call
+//   - notifier *syncutil.AsyncTaskNotifier[struct{}]
+func (_e *MockBalancer_Expecter) RegisterStreamingEnabledNotifier(notifier interface{}) *MockBalancer_RegisterStreamingEnabledNotifier_Call {
+	return &MockBalancer_RegisterStreamingEnabledNotifier_Call{Call: _e.mock.On("RegisterStreamingEnabledNotifier", notifier)}
+}
+
+func (_c *MockBalancer_RegisterStreamingEnabledNotifier_Call) Run(run func(notifier *syncutil.AsyncTaskNotifier[struct{}])) *MockBalancer_RegisterStreamingEnabledNotifier_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*syncutil.AsyncTaskNotifier[struct{}]))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_RegisterStreamingEnabledNotifier_Call) Return() *MockBalancer_RegisterStreamingEnabledNotifier_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBalancer_RegisterStreamingEnabledNotifier_Call) RunAndReturn(run func(*syncutil.AsyncTaskNotifier[struct{}])) *MockBalancer_RegisterStreamingEnabledNotifier_Call {
+	_c.Run(run)
 	return _c
 }
 

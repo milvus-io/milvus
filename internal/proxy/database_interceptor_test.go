@@ -96,6 +96,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.ManualCompactionRequest{},
+			&milvuspb.RunAnalyzerRequest{},
 		}
 
 		md := metadata.Pairs(util.HeaderDBName, "db")

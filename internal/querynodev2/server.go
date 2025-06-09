@@ -24,7 +24,7 @@ package querynodev2
 #include "segcore/segcore_init_c.h"
 #include "common/init_c.h"
 #include "exec/expression/function/init_c.h"
-
+#include "storage/storage_c.h"
 */
 import "C"
 
@@ -70,6 +70,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -189,6 +190,20 @@ func (node *QueryNode) Register() error {
 	return nil
 }
 
+func ResizeHighPriorityPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(0), C.float(newRatio))
+	}
+}
+
+func (node *QueryNode) RegisterSegcoreConfigWatcher() {
+	pt := paramtable.Get()
+	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
+}
+
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
@@ -217,12 +232,13 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitIndexSliceSize(cIndexSliceSize)
 
 	// set up thread pool for different priorities
-	cHighPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsInt64())
+	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
-	cMiddlePriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt64())
+	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
-	cLowPriorityThreadCoreCoefficient := C.int64_t(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt64())
+	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	node.RegisterSegcoreConfigWatcher()
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
@@ -540,11 +556,14 @@ func (node *QueryNode) Stop() error {
 					channelNum      = 0
 				)
 				if node.manager != nil {
-					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
-					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutLevel(datapb.SegmentLevel_L0))
+					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing), segments.WithoutLevel(datapb.SegmentLevel_L0))
 				}
 				if node.pipelineManager != nil {
 					channelNum = node.pipelineManager.Num()
+				}
+				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
+					break outer
 				}
 
 				select {

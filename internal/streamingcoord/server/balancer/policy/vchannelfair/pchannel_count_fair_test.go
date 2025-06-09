@@ -31,13 +31,13 @@ func TestPChannelCountFair(t *testing.T) {
 	}))
 
 	assert.Equal(t, 10, len(expected.ChannelAssignment))
-	assert.EqualValues(t, int64(2), expected.ChannelAssignment[newChannelID("c1")].ServerID)
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c3")].ServerID)
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c4")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c2")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c5")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c6")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c7")].ServerID)
+	assert.EqualValues(t, int64(2), expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c3")].Node.ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c4")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c2")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c5")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c6")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c7")].Node.ServerID)
 	counts := countByServerID(expected)
 	assert.Equal(t, 3, len(counts))
 	for _, count := range counts {
@@ -60,8 +60,8 @@ func TestPChannelCountFair(t *testing.T) {
 	}, make(map[string]map[string]int64), []int64{1, 2, 3}))
 
 	assert.Equal(t, 10, len(expected.ChannelAssignment))
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c1")].ServerID)
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c4")].ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c4")].Node.ServerID)
 	counts = countByServerID(expected)
 	assert.Equal(t, 3, len(counts))
 	for _, count := range counts {
@@ -84,15 +84,15 @@ func TestPChannelCountFair(t *testing.T) {
 	}, make(map[string]map[string]int64), []int64{1, 2, 3}))
 
 	assert.Equal(t, 10, len(expected.ChannelAssignment))
-	assert.Equal(t, int64(1), expected.ChannelAssignment[newChannelID("c1")].ServerID)
-	assert.Equal(t, int64(1), expected.ChannelAssignment[newChannelID("c2")].ServerID)
-	assert.Equal(t, int64(1), expected.ChannelAssignment[newChannelID("c3")].ServerID)
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c4")].ServerID)
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c5")].ServerID)
-	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c6")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c7")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c8")].ServerID)
-	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c9")].ServerID)
+	assert.Equal(t, int64(1), expected.ChannelAssignment[newChannelID("c1")].Node.ServerID)
+	assert.Equal(t, int64(1), expected.ChannelAssignment[newChannelID("c2")].Node.ServerID)
+	assert.Equal(t, int64(1), expected.ChannelAssignment[newChannelID("c3")].Node.ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c4")].Node.ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c5")].Node.ServerID)
+	assert.Equal(t, int64(2), expected.ChannelAssignment[newChannelID("c6")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c7")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c8")].Node.ServerID)
+	assert.Equal(t, int64(3), expected.ChannelAssignment[newChannelID("c9")].Node.ServerID)
 	counts = countByServerID(expected)
 	assert.Equal(t, 3, len(counts))
 	for _, count := range counts {
@@ -108,7 +108,7 @@ func TestPChannelCountFair(t *testing.T) {
 func countByServerID(expected balancer.ExpectedLayout) map[int64]int {
 	counts := make(map[int64]int)
 	for _, node := range expected.ChannelAssignment {
-		counts[node.ServerID]++
+		counts[node.Node.ServerID]++
 	}
 	return counts
 }
@@ -122,9 +122,11 @@ func newChannelID(channel string) types.ChannelID {
 // newLayout creates a new layout for test.
 func newLayout(channels map[string]int, vchannels map[string]map[string]int64, serverID []int64) balancer.CurrentLayout {
 	layout := balancer.CurrentLayout{
-		Channels:        make(map[types.ChannelID]channel.PChannelStatsView),
-		AllNodesInfo:    make(map[int64]types.StreamingNodeInfo),
-		ChannelsToNodes: make(map[types.ChannelID]int64),
+		Channels:           make(map[channel.ChannelID]types.PChannelInfo),
+		Stats:              make(map[channel.ChannelID]channel.PChannelStatsView),
+		AllNodesInfo:       make(map[int64]types.StreamingNodeInfo),
+		ChannelsToNodes:    make(map[types.ChannelID]int64),
+		ExpectedAccessMode: make(map[channel.ChannelID]types.AccessMode),
 	}
 	for _, id := range serverID {
 		layout.AllNodesInfo[id] = types.StreamingNodeInfo{
@@ -133,13 +135,19 @@ func newLayout(channels map[string]int, vchannels map[string]map[string]int64, s
 	}
 	for c, node := range channels {
 		if vc, ok := vchannels[c]; !ok {
-			layout.Channels[newChannelID(c)] = channel.PChannelStatsView{VChannels: make(map[string]int64)}
+			layout.Stats[newChannelID(c)] = channel.PChannelStatsView{VChannels: make(map[string]int64)}
 		} else {
-			layout.Channels[newChannelID(c)] = channel.PChannelStatsView{VChannels: vc}
+			layout.Stats[newChannelID(c)] = channel.PChannelStatsView{VChannels: vc}
 		}
 		if node > 0 {
 			layout.ChannelsToNodes[newChannelID(c)] = int64(node)
 		}
+		layout.Channels[newChannelID(c)] = types.PChannelInfo{
+			Name:       c,
+			Term:       0,
+			AccessMode: types.AccessModeRW,
+		}
+		layout.ExpectedAccessMode[newChannelID(c)] = types.AccessModeRW
 	}
 	return layout
 }

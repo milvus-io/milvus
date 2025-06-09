@@ -40,5 +40,7 @@ func (s *SealSuite) TearDownSuite() {
 }
 
 func TestSealPolicies(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(SealSuite))
 }

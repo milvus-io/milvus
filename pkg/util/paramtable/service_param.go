@@ -544,10 +544,10 @@ type MQConfig struct {
 	IgnoreBadPosition ParamItem `refreshable:"true"`
 
 	// msgdispatcher
-	MergeCheckInterval ParamItem `refreshable:"false"`
-	TargetBufSize      ParamItem `refreshable:"false"`
-	MaxTolerantLag     ParamItem `refreshable:"true"`
-	MaxPositionTsGap   ParamItem `refreshable:"true"`
+	CheckInterval    ParamItem `refreshable:"false"`
+	TargetBufSize    ParamItem `refreshable:"false"`
+	MaxTolerantLag   ParamItem `refreshable:"true"`
+	MaxPositionTsGap ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -580,14 +580,14 @@ Valid values: [default, pulsar, kafka, rocksmq, woodpecker]`,
 	}
 	p.TargetBufSize.Init(base.mgr)
 
-	p.MergeCheckInterval = ParamItem{
+	p.CheckInterval = ParamItem{
 		Key:          "mq.dispatcher.mergeCheckInterval",
 		Version:      "2.4.4",
-		DefaultValue: "1",
+		DefaultValue: "0.1",
 		Doc:          `the interval time(in seconds) for dispatcher to check whether to merge`,
 		Export:       true,
 	}
-	p.MergeCheckInterval.Init(base.mgr)
+	p.CheckInterval.Init(base.mgr)
 
 	p.MaxPositionTsGap = ParamItem{
 		Key:          "mq.dispatcher.maxPositionGapInMinutes",
@@ -681,6 +681,7 @@ type WoodpeckerConfig struct {
 	RetryInterval          ParamItem `refreshable:"true"`
 	FlushMaxSize           ParamItem `refreshable:"true"`
 	FlushMaxThreads        ParamItem `refreshable:"true"`
+	CompactionSize         ParamItem `refreshable:"true"`
 	FragmentCachedMaxBytes ParamItem `refreshable:"true"`
 	FragmentCachedInterval ParamItem `refreshable:"true"`
 
@@ -729,8 +730,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "2GB",
-		Doc:          "Maximum entries count of a segment, default is 2GB",
+		DefaultValue: "128M",
+		Doc:          "Maximum entries count of a segment, default is 128M",
 		Export:       true,
 	}
 	p.SegmentRollingMaxSize.Init(base.mgr)
@@ -765,7 +766,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxEntries = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxEntries",
 		Version:      "2.6.0",
-		DefaultValue: "100000",
+		DefaultValue: "10000",
 		Doc:          "Maximum entries number of write buffer.",
 		Export:       true,
 	}
@@ -774,7 +775,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.logFileSyncPolicy.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "64M",
+		DefaultValue: "32M",
 		Doc:          "Maximum size of write buffer in bytes.",
 		Export:       true,
 	}
@@ -816,10 +817,19 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.FlushMaxThreads.Init(base.mgr)
 
+	p.CompactionSize = ParamItem{
+		Key:          "woodpecker.logstore.logFileCompactionPolicy.maxSize",
+		Version:      "2.6.0",
+		DefaultValue: "8M",
+		Doc:          "The maximum size of the merged files, default is 8M.",
+		Export:       true,
+	}
+	p.CompactionSize.Init(base.mgr)
+
 	p.FragmentCachedMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.fragmentManager.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "512M",
+		DefaultValue: "128M",
 		Doc:          "Maximum size of fragment cached data in bytes.",
 		Export:       true,
 	}
