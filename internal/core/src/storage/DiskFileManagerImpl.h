@@ -27,6 +27,7 @@
 #include "storage/LocalChunkManager.h"
 #include "common/Consts.h"
 #include "storage/Types.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -103,13 +104,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     void
-    CacheIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheIndexToDisk(const std::vector<std::string>& remote_files, milvus::ThreadPoolPriority priority);
 
     void
-    CacheTextLogToDisk(const std::vector<std::string>& remote_files);
+    CacheTextLogToDisk(const std::vector<std::string>& remote_files, milvus::ThreadPoolPriority priority);
 
     void
-    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files, milvus::ThreadPoolPriority priority);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -160,7 +161,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDiskInternal(
         const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix);
+        const std::string local_index_prefix,
+        milvus::ThreadPoolPriority priority);
 
     template <typename DataType>
     std::string

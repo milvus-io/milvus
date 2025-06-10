@@ -159,7 +159,7 @@ TextMatchIndex::Load(const Config& config) {
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
     }
-    disk_file_manager_->CacheTextLogToDisk(files_value);
+    disk_file_manager_->CacheTextLogToDisk(files_value, ThreadPoolPriority::LOW);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),

@@ -259,7 +259,7 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                                             file) != null_offset_files.end();
                        }),
         inverted_index_files.end());
-    disk_file_manager_->CacheIndexToDisk(inverted_index_files);
+    disk_file_manager_->CacheIndexToDisk(inverted_index_files, ThreadPoolPriority::LOW);
     path_ = prefix;
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),
                                                      milvus::index::SetBitset);
