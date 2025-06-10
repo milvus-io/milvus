@@ -423,7 +423,6 @@ class ResponseChecker:
         log.info("search_results_check: checking the searching results")
         enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
         pk_name = check_items.get("pk_name", ct.default_primary_field_name)
-
         if func_name != 'search' and func_name != 'hybrid_search':
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
         if len(check_items) == 0:
@@ -432,6 +431,7 @@ class ResponseChecker:
             if check_items["_async"]:
                 search_res.done()
                 search_res = search_res.result()
+        search_res.materialize()
         if check_items.get("output_fields", None):
             assert set(search_res[0][0].entity.fields.keys()) == set(check_items["output_fields"])
             original_entities = check_items.get("original_entities", None)
@@ -558,6 +558,7 @@ class ResponseChecker:
                             The type of with_vec value is bool, True value means check vector field, False otherwise
         :type check_items: dict
         """
+        query_res.materialize()
         if func_name != 'query':
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
