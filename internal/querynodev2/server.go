@@ -201,13 +201,26 @@ func ResizeHighPriorityPool(evt *config.Event) {
 	}
 }
 
+func ReconfigFileWriterParams(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		mode := pt.CommonCfg.DiskWriteMode.GetValue()
+		bufferSize := pt.CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()
+		C.InitFileWriterConfig(C.CString(mode), C.uint64_t(bufferSize))
+	}
+}
+
 func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
+	pt.Watch(pt.CommonCfg.DiskWriteMode.Key,
+		config.NewHandler("common.diskWriteMode", ReconfigFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,
+		config.NewHandler("common.diskWriteBufferSizeKb", ReconfigFileWriterParams))
 }
 
-// InitSegcore set init params of segCore, such as chunckRows, SIMD type...
+// InitSegcore set init params of segCore, such as chunkRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
@@ -241,6 +254,12 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+
+	cDiskWriteMode := C.CString(paramtable.Get().CommonCfg.DiskWriteMode.GetValue())
+	cDiskWriteBufferSizeKb := C.uint64_t(paramtable.Get().CommonCfg.DiskWriteBufferSizeKb.GetAsUint64())
+	C.InitFileWriterConfig(cDiskWriteMode, cDiskWriteBufferSizeKb)
+	C.free(unsafe.Pointer(cDiskWriteMode))
+
 	node.RegisterSegcoreConfigWatcher()
 
 	cCPUNum := C.int(hardware.GetCPUNum())

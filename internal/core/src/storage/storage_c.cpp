@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
+#include "storage/FileWriter.h"
 #include "monitor/prometheus_client.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
@@ -111,6 +112,22 @@ InitMmapManager(CMmapConfig c_mmap_config) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
+}
+
+CStatus
+InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb) {
+    std::string mode_str(mode);
+
+    if (mode_str == "direct") {
+        milvus::storage::FileWriterConfig::GetInstance().SetMode(milvus::storage::FileWriterConfig::WriteMode::DIRECT);
+        milvus::storage::FileWriterConfig::GetInstance().SetBufferSize(buffer_size_kb * 1024);
+    } else if (mode_str == "buffered") {
+        milvus::storage::FileWriterConfig::GetInstance().SetMode(milvus::storage::FileWriterConfig::WriteMode::BUFFERED);
+    } else {
+        return milvus::FailureCStatus(milvus::ConfigInvalid, "Invalid mode");
+    }
+
+    return milvus::SuccessCStatus();
 }
 
 void

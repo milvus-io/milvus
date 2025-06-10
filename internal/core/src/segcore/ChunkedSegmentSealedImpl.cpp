@@ -425,7 +425,7 @@ ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
         std::shared_ptr<milvus::ArrowDataWrapper> r;
         while (data.arrow_reader_channel->pop(r)) {
             auto array_vec = read_single_column_batches(r->reader);
-            auto chunk = create_chunk(field_meta, 1, array_vec);
+            auto chunk = create_chunk(field_meta, array_vec);
             auto chunk_ptr = static_cast<FixedWidthChunk*>(chunk.get());
             std::copy_n(static_cast<const Timestamp*>(chunk_ptr->Span().data()),
                         chunk_ptr->Span().row_count(),
