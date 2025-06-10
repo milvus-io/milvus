@@ -14,16 +14,12 @@
 //
 
 #include "ThreadPools.h"
+#include <mutex>
 
 namespace milvus {
 
 std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
     ThreadPools::thread_pool_map;
-std::map<ThreadPoolPriority, std::string> ThreadPools::name_map = {
-    {ThreadPoolPriority::LOW, "low_priority_thread_pool"},
-    {ThreadPoolPriority::MIDDLE, "middle_priority_thread_pool"},
-    {ThreadPoolPriority::HIGH, "high_priority_thread_pool"}};
-;
 std::shared_mutex ThreadPools::mutex_;
 
 void
@@ -54,7 +50,7 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
                 coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
                 break;
         }
-        std::string name = name_map[priority];
+        std::string name = name_map()[priority];
         auto result = thread_pool_map.emplace(
             priority, std::make_unique<ThreadPool>(coefficient, name));
         return *(result.first->second);

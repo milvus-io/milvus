@@ -43,9 +43,18 @@ class ThreadPools {
  private:
     void
     ShutDown();
+
+    static std::map<ThreadPoolPriority, std::string>
+    name_map() {
+        static std::map<ThreadPoolPriority, std::string> name_map = {
+            {HIGH, "HIGH_SEGC_POOL"},
+            {MIDDLE, "MIDD_SEGC_POOL"},
+            {LOW, "LOW_SEGC_POOL"}};
+        return name_map;
+    }
+
     static std::map<ThreadPoolPriority, std::unique_ptr<ThreadPool>>
         thread_pool_map;
-    static std::map<ThreadPoolPriority, std::string> name_map;
     static std::shared_mutex mutex_;
 };
 
