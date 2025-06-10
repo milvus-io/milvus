@@ -213,6 +213,7 @@ func (s *PartialSearchTestSuit) TestAllNodeDownOnSingleReplica() {
 	for _, qn := range s.Cluster.GetAllQueryNodes() {
 		qn.Stop()
 	}
+	time.Sleep(2 * time.Second)
 	s.Cluster.AddQueryNode()
 
 	time.Sleep(20 * time.Second)
