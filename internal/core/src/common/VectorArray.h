@@ -31,13 +31,6 @@ class VectorArray : public milvus::VectorTrait {
         delete[] data_;
     }
 
-    VectorArray(
-        char* data, int len, int dim, size_t size, DataType element_type)
-        : size_(size), length_(len), dim_(dim), element_type_(element_type) {
-        data_ = new char[size];
-        std::copy(data, data + size, data_);
-    }
-
     // One row of VectorFieldProto
     explicit VectorArray(const VectorFieldProto& vector_field) {
         dim_ = vector_field.dim();
@@ -65,12 +58,11 @@ class VectorArray : public milvus::VectorTrait {
     }
 
     explicit VectorArray(const VectorArray& other)
-        : size_(other.size_),
-          length_(other.length_),
-          dim_(other.dim_),
-          element_type_(other.element_type_) {
-        data_ = new char[size_];
-        std::copy(other.data_, other.data_ + other.size_, data_);
+        : VectorArray(other.data_,
+                      other.length_,
+                      other.dim_,
+                      other.size_,
+                      other.element_type_) {
     }
 
     friend void
@@ -232,6 +224,13 @@ class VectorArray : public milvus::VectorTrait {
     }
 
  private:
+    VectorArray(
+        char* data, int len, int dim, size_t size, DataType element_type)
+        : size_(size), length_(len), dim_(dim), element_type_(element_type) {
+        data_ = new char[size];
+        std::copy(data, data + size, data_);
+    }
+
     int64_t dim_ = 0;
     char* data_{nullptr};
     // length of the array
@@ -246,11 +245,11 @@ class VectorArrayView {
     VectorArrayView() = default;
 
     VectorArrayView(const VectorArrayView& other)
-        : data_(other.data_),
-          length_(other.length_),
-          size_(other.size_),
-          element_type_(other.element_type_),
-          dim_(other.dim_) {
+        : VectorArrayView(other.data_,
+                          other.dim_,
+                          other.length_,
+                          other.size_,
+                          other.element_type_) {
     }
 
     VectorArrayView(
@@ -342,7 +341,7 @@ class VectorArrayView {
  private:
     char* data_{nullptr};
     int64_t dim_ = 0;
-    // length of the array
+    // number of vectors in this array
     int length_ = 0;
     // size of the array in bytes
     int size_ = 0;

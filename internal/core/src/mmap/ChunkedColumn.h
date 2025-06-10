@@ -193,7 +193,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     VectorArrayViews(int64_t chunk_id) const override {
         PanicInfo(
             ErrorCode::Unsupported,
-            "VectorArrayViews only supported for VectorArrayChunkedColumn");
+            "VectorArrayViews only supported for ChunkedVectorArrayColumn");
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
