@@ -108,6 +108,7 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
 
 		assert.Equal(t, wpCfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds(), int64(200))
+		assert.Equal(t, wpCfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds(), int64(10))
 		assert.Equal(t, wpCfg.SyncMaxEntries.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.SyncMaxBytes.GetAsSize(), int64(32*1024*1024))
 		assert.Equal(t, wpCfg.FlushMaxRetries.GetAsInt(), 5)
@@ -115,8 +116,6 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.FlushMaxThreads.GetAsInt(), 4)
 		assert.Equal(t, wpCfg.RetryInterval.GetAsDurationByParse().Milliseconds(), int64(1000))
 		assert.Equal(t, wpCfg.CompactionSize.GetAsSize(), int64(8*1024*1024))
-		assert.Equal(t, wpCfg.FragmentCachedMaxBytes.GetAsSize(), int64(128*1024*1024))
-		assert.Equal(t, wpCfg.FragmentCachedInterval.GetAsDurationByParse().Milliseconds(), int64(1000))
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "/var/lib/milvus/woodpecker")

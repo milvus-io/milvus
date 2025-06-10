@@ -1476,19 +1476,19 @@ ChunkedSegmentSealedImpl::HasRawData(int64_t field_id) const {
         if (get_bit(index_ready_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
                        "vector index is not ready");
-            auto accessor =
-                SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
-                                  ->indexing_->PinCells({0}));
-            auto vec_index = accessor->get_cell_of(0);
-            return vec_index->HasRawData();
+            AssertInfo(
+                index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
+                "index_has_raw_data_ is not set for fieldID: " +
+                    std::to_string(fieldID.get()));
+            return index_has_raw_data_.at(fieldID);
         } else if (get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),
-                       "vector index is not ready");
-            auto accessor =
-                SemiInlineGet(vector_indexings_.get_field_indexing(fieldID)
-                                  ->indexing_->PinCells({0}));
-            auto vec_index = accessor->get_cell_of(0);
-            return vec_index->HasRawData() ||
+                       "interim index is not ready");
+            AssertInfo(
+                index_has_raw_data_.find(fieldID) != index_has_raw_data_.end(),
+                "index_has_raw_data_ is not set for fieldID: " +
+                    std::to_string(fieldID.get()));
+            return index_has_raw_data_.at(fieldID) ||
                    get_bit(field_data_ready_bitset_, fieldID);
         }
     } else if (IsJsonDataType(field_meta.get_data_type())) {
@@ -1745,7 +1745,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         }
         auto dim = is_sparse ? std::numeric_limits<uint32_t>::max()
                              : field_meta.get_dim();
-
+        auto interim_index_type = field_binlog_config->GetIndexType();
         auto build_config =
             field_binlog_config->GetBuildBaseParams(field_meta.get_data_type());
         build_config[knowhere::meta::DIM] = std::to_string(dim);
@@ -1763,7 +1763,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
                         vec_data,
                         std::to_string(id_),
                         std::to_string(field_id.get()),
-                        field_binlog_config->GetIndexType(),
+                        interim_index_type,
                         index_metric,
                         build_config,
                         dim,
@@ -1779,7 +1779,24 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
 
             vec_binlog_config_[field_id] = std::move(field_binlog_config);
             set_bit(binlog_index_bitset_, field_id, true);
-            index_has_raw_data_[field_id] = true;
+            auto index_version =
+                knowhere::Version::GetCurrentVersion().VersionNumber();
+            if (is_sparse ||
+                field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                index_has_raw_data_[field_id] =
+                    knowhere::IndexStaticFaced<float>::HasRawData(
+                        interim_index_type, index_version, build_config);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                index_has_raw_data_[field_id] =
+                    knowhere::IndexStaticFaced<float16>::HasRawData(
+                        interim_index_type, index_version, build_config);
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                index_has_raw_data_[field_id] =
+                    knowhere::IndexStaticFaced<bfloat16>::HasRawData(
+                        interim_index_type, index_version, build_config);
+            }
+
             LOG_INFO(
                 "replace binlog with intermin index in segment {}, field {}.",
                 this->get_segment_id(),
