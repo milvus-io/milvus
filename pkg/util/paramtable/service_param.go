@@ -674,16 +674,15 @@ type WoodpeckerConfig struct {
 	AuditorMaxInterval    ParamItem `refreshable:"true"`
 
 	// logstore
-	SyncMaxInterval        ParamItem `refreshable:"true"`
-	SyncMaxBytes           ParamItem `refreshable:"true"`
-	SyncMaxEntries         ParamItem `refreshable:"true"`
-	FlushMaxRetries        ParamItem `refreshable:"true"`
-	RetryInterval          ParamItem `refreshable:"true"`
-	FlushMaxSize           ParamItem `refreshable:"true"`
-	FlushMaxThreads        ParamItem `refreshable:"true"`
-	CompactionSize         ParamItem `refreshable:"true"`
-	FragmentCachedMaxBytes ParamItem `refreshable:"true"`
-	FragmentCachedInterval ParamItem `refreshable:"true"`
+	SyncMaxInterval                ParamItem `refreshable:"true"`
+	SyncMaxIntervalForLocalStorage ParamItem `refreshable:"true"`
+	SyncMaxBytes                   ParamItem `refreshable:"true"`
+	SyncMaxEntries                 ParamItem `refreshable:"true"`
+	FlushMaxRetries                ParamItem `refreshable:"true"`
+	RetryInterval                  ParamItem `refreshable:"true"`
+	FlushMaxSize                   ParamItem `refreshable:"true"`
+	FlushMaxThreads                ParamItem `refreshable:"true"`
+	CompactionSize                 ParamItem `refreshable:"true"`
 
 	// storage
 	StorageType ParamItem `refreshable:"false"`
@@ -755,7 +754,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.AuditorMaxInterval.Init(base.mgr)
 
 	p.SyncMaxInterval = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.maxInterval",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxInterval",
 		Version:      "2.6.0",
 		DefaultValue: "200ms",
 		Doc:          "Maximum interval between two sync operations, default is 200 milliseconds.",
@@ -763,8 +762,17 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	}
 	p.SyncMaxInterval.Init(base.mgr)
 
+	p.SyncMaxIntervalForLocalStorage = ParamItem{
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxIntervalForLocalStorage",
+		Version:      "2.6.0",
+		DefaultValue: "10ms",
+		Doc:          "Maximum interval between two sync operations local storage backend, default is 10 milliseconds.",
+		Export:       true,
+	}
+	p.SyncMaxIntervalForLocalStorage.Init(base.mgr)
+
 	p.SyncMaxEntries = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.maxEntries",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxEntries",
 		Version:      "2.6.0",
 		DefaultValue: "10000",
 		Doc:          "Maximum entries number of write buffer.",
@@ -773,7 +781,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxEntries.Init(base.mgr)
 
 	p.SyncMaxBytes = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.maxBytes",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxBytes",
 		Version:      "2.6.0",
 		DefaultValue: "32M",
 		Doc:          "Maximum size of write buffer in bytes.",
@@ -782,7 +790,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes.Init(base.mgr)
 
 	p.FlushMaxRetries = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushRetries",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushRetries",
 		Version:      "2.6.0",
 		DefaultValue: "5",
 		Doc:          "Maximum size of write buffer in bytes.",
@@ -791,7 +799,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxRetries.Init(base.mgr)
 
 	p.FlushMaxSize = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushSize",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushSize",
 		Version:      "2.6.0",
 		DefaultValue: "8M",
 		Doc:          "Maximum size of a fragment in bytes to flush, default is 8M.",
@@ -800,7 +808,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxSize.Init(base.mgr)
 
 	p.RetryInterval = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.retryInterval",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.retryInterval",
 		Version:      "2.6.0",
 		DefaultValue: "1000ms",
 		Doc:          "Maximum interval between two retries. default is 1000 milliseconds.",
@@ -809,7 +817,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.RetryInterval.Init(base.mgr)
 
 	p.FlushMaxThreads = ParamItem{
-		Key:          "woodpecker.logstore.logFileSyncPolicy.maxFlushThreads",
+		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushThreads",
 		Version:      "2.6.0",
 		DefaultValue: "4",
 		Doc:          "Maximum number of threads to flush data",
@@ -818,31 +826,13 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxThreads.Init(base.mgr)
 
 	p.CompactionSize = ParamItem{
-		Key:          "woodpecker.logstore.logFileCompactionPolicy.maxSize",
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.maxSize",
 		Version:      "2.6.0",
 		DefaultValue: "8M",
 		Doc:          "The maximum size of the merged files, default is 8M.",
 		Export:       true,
 	}
 	p.CompactionSize.Init(base.mgr)
-
-	p.FragmentCachedMaxBytes = ParamItem{
-		Key:          "woodpecker.logstore.fragmentManager.maxBytes",
-		Version:      "2.6.0",
-		DefaultValue: "128M",
-		Doc:          "Maximum size of fragment cached data in bytes.",
-		Export:       true,
-	}
-	p.FragmentCachedMaxBytes.Init(base.mgr)
-
-	p.FragmentCachedInterval = ParamItem{
-		Key:          "woodpecker.logstore.fragmentManager.maxInterval",
-		Version:      "2.6.0",
-		DefaultValue: "1s",
-		Doc:          "Maximum interval between two fragment evicts. default is 1 second",
-		Export:       true,
-	}
-	p.FragmentCachedInterval.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "woodpecker.storage.type",

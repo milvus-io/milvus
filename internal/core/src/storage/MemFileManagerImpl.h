@@ -74,17 +74,23 @@ class MemFileManagerImpl : public FileManagerImpl {
     }
 
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
-    CacheOptFieldToMemory(OptFieldT& fields_map);
+    CacheOptFieldToMemory(const Config& config);
 
  private:
     bool
     AddBinarySet(const BinarySet& binary_set, const std::string& prefix);
 
     std::vector<FieldDataPtr>
-    cache_row_data_to_memory_internal(const Config& config);
+    cache_raw_data_to_memory_internal(const Config& config);
 
     std::vector<FieldDataPtr>
-    cache_row_data_to_memory_storage_v2(const Config& config);
+    cache_raw_data_to_memory_storage_v2(const Config& config);
+
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+    cache_opt_field_memory(const Config& config);
+
+    std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>>
+    cache_opt_field_memory_v2(const Config& config);
 
  private:
     // remote file path
