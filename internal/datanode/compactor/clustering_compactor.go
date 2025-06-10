@@ -587,9 +587,18 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return merr.WrapErrIllegalCompactionPlan()
 	}
 
-	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-		return t.binlogIO.Download(ctx, paths)
-	}), storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize))
+	// TODO bucketName shall be passed via StorageConfig like index/stats task
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+
+	rr, err := storage.NewBinlogRecordReader(ctx,
+		segment.GetFieldBinlogs(),
+		t.plan.Schema,
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.binlogIO.Download(ctx, paths)
+		}),
+		storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithBucketName(bucketName),
+	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
@@ -856,9 +865,19 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 
-	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
-		return t.binlogIO.Download(ctx, paths)
-	}), storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize))
+	// TODO bucketName shall be passed via StorageConfig like index/stats task
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+
+	rr, err := storage.NewBinlogRecordReader(ctx,
+		segment.GetFieldBinlogs(),
+		t.plan.Schema,
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			return t.binlogIO.Download(ctx, paths)
+		}),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithBucketName(bucketName),
+	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return make(map[interface{}]int64), err

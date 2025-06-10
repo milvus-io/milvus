@@ -20,6 +20,7 @@
 
 #include "common/Common.h"
 #include "common/FieldData.h"
+#include "common/Types.h"
 #include "log/Log.h"
 #include "storage/Util.h"
 #include "storage/FileManager.h"
@@ -137,13 +138,13 @@ MemFileManagerImpl::CacheRawDataToMemory(const Config& config) {
         index::GetValueFromConfig<int64_t>(config, STORAGE_VERSION_KEY)
             .value_or(0);
     if (storage_version == STORAGE_V2) {
-        return cache_row_data_to_memory_storage_v2(config);
+        return cache_raw_data_to_memory_storage_v2(config);
     }
-    return cache_row_data_to_memory_internal(config);
+    return cache_raw_data_to_memory_internal(config);
 }
 
 std::vector<FieldDataPtr>
-MemFileManagerImpl::cache_row_data_to_memory_internal(const Config& config) {
+MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
     auto insert_files = index::GetValueFromConfig<std::vector<std::string>>(
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
@@ -180,7 +181,7 @@ MemFileManagerImpl::cache_row_data_to_memory_internal(const Config& config) {
 }
 
 std::vector<FieldDataPtr>
-MemFileManagerImpl::cache_row_data_to_memory_storage_v2(const Config& config) {
+MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
     AssertInfo(data_type.has_value(), "data type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);

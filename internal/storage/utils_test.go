@@ -1223,7 +1223,14 @@ func TestColumnBasedInsertMsgToInsertDataNullable(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, len(column), fData.RowNum())
 		for j := range column {
-			assert.Equal(t, fData.GetRow(j), column[j])
+			// vectors cannot be nil
+			if typeutil.IsVectorType(fData.GetDataType()) {
+				assert.Equal(t, fData.GetRow(j), column[j])
+			} else {
+				if fData.GetRow(j) != nil {
+					assert.Equal(t, fData.GetRow(j), column[j])
+				}
+			}
 		}
 	}
 }

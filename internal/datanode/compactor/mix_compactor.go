@@ -217,7 +217,16 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download), storage.WithVersion(seg.GetStorageVersion()))
+	// TODO bucketName shall be passed via StorageConfig like index/stats task
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+
+	reader, err := storage.NewBinlogRecordReader(ctx,
+		seg.GetFieldBinlogs(),
+		t.plan.GetSchema(),
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithVersion(seg.GetStorageVersion()),
+		storage.WithBucketName(bucketName),
+	)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
