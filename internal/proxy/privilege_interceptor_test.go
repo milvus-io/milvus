@@ -25,6 +25,7 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 func TestPrivilegeInterceptor(t *testing.T) {
 	ctx := context.Background()
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 
 	t.Run("Authorization Disabled", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
@@ -213,6 +214,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 
 	t.Run("Resource Group Privilege", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.ListResourceGroupsRequest{})
 		assert.Error(t, err)
@@ -268,6 +270,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 
 func TestPrivilegeGroup(t *testing.T) {
 	ctx := context.Background()
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 
 	t.Run("grant ReadOnly to single collection", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
@@ -601,6 +604,7 @@ func TestPrivilegeGroup(t *testing.T) {
 func TestBuiltinPrivilegeGroup(t *testing.T) {
 	t.Run("ClusterAdmin", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
 		initPrivilegeGroups()
 
 		var err error
