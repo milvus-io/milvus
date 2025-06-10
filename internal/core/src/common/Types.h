@@ -491,7 +491,8 @@ IsBinaryVectorMetricType(const MetricType& metric_type) {
     return metric_type == knowhere::metric::HAMMING ||
            metric_type == knowhere::metric::JACCARD ||
            metric_type == knowhere::metric::SUPERSTRUCTURE ||
-           metric_type == knowhere::metric::SUBSTRUCTURE;
+           metric_type == knowhere::metric::SUBSTRUCTURE ||
+           metric_type == knowhere::metric::MHJACCARD;
 }
 
 inline bool
