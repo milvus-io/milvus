@@ -1043,6 +1043,12 @@ func (sd *shardDelegator) Close() {
 		sd.idfOracle.Close()
 	}
 
+	if sd.functionRunners != nil {
+		for _, function := range sd.functionRunners {
+			function.Close()
+		}
+	}
+
 	// clean up l0 segment in delete buffer
 	start := time.Now()
 	sd.deleteBuffer.Clear()
