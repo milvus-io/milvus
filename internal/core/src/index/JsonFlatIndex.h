@@ -201,11 +201,6 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
                                                                this->wrapper_);
     }
 
-    bool
-    IsDataTypeSupported(DataType data_type) const override {
-        return data_type == DataType::JSON;
-    }
-
     JsonCastType
     GetCastType() const override {
         return JsonCastType::FromString("JSON");
