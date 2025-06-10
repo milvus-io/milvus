@@ -142,6 +142,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 60*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
 		params.Save("common.sync.taskPoolReleaseTimeoutSeconds", "100")
 		assert.Equal(t, 100*time.Second, params.CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second))
+
+		assert.Equal(t, 1, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
+		params.Save("common.storage.zstd.concurrency", "2")
+		assert.Equal(t, 2, params.CommonCfg.StorageZstdConcurrency.GetAsInt())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
