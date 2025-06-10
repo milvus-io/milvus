@@ -897,6 +897,8 @@ common:
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
   simdType: auto
+  diskWriteMode: buffered # This parameter is used to control the write mode of the disk. The option is `direct` or `buffered`
+  diskWriteBufferSizeKb: 64 # Disk write buffer size in KB, only used when disk write mode is `direct`, default is 64KB
   security:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
