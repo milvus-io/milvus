@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -385,11 +386,15 @@ func (s *Server) initMessageCallback() {
 			return err
 		}
 		options := funcutil.Map2KeyValuePair(b.GetOptions())
+		_, err = importutilv2.GetTimeoutTs(options)
+		if err != nil {
+			return err
+		}
 		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, b.GetFiles(), options)
 		if err != nil {
 			return err
 		}
-		err = ValidateMaxImportJobExceed(ctx, s.importMeta, b.GetJobID())
+		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
 		if err != nil {
 			return err
 		}

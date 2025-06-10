@@ -734,7 +734,7 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 }
 
 // ValidateMaxImportJobExceed checks if the number of import jobs exceeds the limit.
-func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta, jobID int64) error {
+func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) error {
 	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
 	executingNum := importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
 	if executingNum >= maxNum {
