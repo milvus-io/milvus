@@ -366,6 +366,8 @@ func TestRateLimitInterceptor(t *testing.T) {
 	})
 
 	t.Run("test super user skip rate limit", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key)
 		paramtable.Get().Save("common.security.superUsersSkipRateLimit", "root")
 		defer paramtable.Get().Reset("common.security.superUsersSkipRateLimit")
 
