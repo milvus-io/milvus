@@ -21,6 +21,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+const (
+	versionChecker260 = "<2.6.0-dev"
+)
+
 // RecoverBalancer recover the balancer working.
 func RecoverBalancer(
 	ctx context.Context,
@@ -48,7 +52,11 @@ func RecoverBalancer(
 		backgroundTaskNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
 	}
 	b.SetLogger(logger)
-	go b.execute()
+	ready260Future, err := b.checkIfAllNodeGreaterThan260AndWatch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	go b.execute(ready260Future)
 	return b, nil
 }
 
@@ -132,13 +140,12 @@ func (b *balancerImpl) Close() {
 }
 
 // execute the balancer.
-func (b *balancerImpl) execute() {
+func (b *balancerImpl) execute(ready260Future *syncutil.Future[error]) {
 	b.Logger().Info("balancer start to execute")
 	defer func() {
 		b.backgroundTaskNotifier.Finish(struct{}{})
 		b.Logger().Info("balancer execute finished")
 	}()
-	ready260Future := b.blockUntilAllNodeIsGreaterThan260(b.ctx)
 
 	balanceTimer := typeutil.NewBackoffTimer(&backoffConfigFetcher{})
 	nodeChanged, err := resource.Resource().StreamingNodeManagerClient().WatchNodeChanged(b.backgroundTaskNotifier.Context())
@@ -202,48 +209,92 @@ func (b *balancerImpl) execute() {
 	}
 }
 
-// blockUntilAllNodeIsGreaterThan260 block until all node is greater than 2.6.0.
-// It's just a protection, but didn't promised that there will never be a node with version < 2.6.0 join the cluster.
-// These promise can only be achieved by the cluster dev-ops.
-func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260(ctx context.Context) *syncutil.Future[error] {
+// checkIfAllNodeGreaterThan260AndWatch check if all node is greater than 2.6.0.
+// It will return a future if there's any node with version < 2.6.0,
+// and the future will be set when the all node version is greater than 2.6.0.
+func (b *balancerImpl) checkIfAllNodeGreaterThan260AndWatch(ctx context.Context) (*syncutil.Future[error], error) {
 	f := syncutil.NewFuture[error]()
 	if b.channelMetaManager.IsStreamingEnabledOnce() {
 		// Once the streaming is enabled, we can not check the node version anymore.
 		// because the first channel-assignment is generated after the old node is down.
-		return nil
+		return nil, nil
+	}
+
+	if greaterThan260, err := b.checkIfAllNodeGreaterThan260(ctx); err != nil || greaterThan260 {
+		return nil, err
 	}
 	go func() {
 		err := b.blockUntilAllNodeIsGreaterThan260AtBackground(ctx)
 		f.Set(err)
 	}()
-	return f
+	return f, nil
+}
+
+// checkIfAllNodeGreaterThan260 check if all node is greater than 2.6.0.
+func (b *balancerImpl) checkIfAllNodeGreaterThan260(ctx context.Context) (bool, error) {
+	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole, typeutil.QueryNodeRole}
+	for _, role := range expectedRoles {
+		if greaterThan260, err := b.checkIfRoleGreaterThan260(ctx, role); err != nil || !greaterThan260 {
+			return greaterThan260, err
+		}
+	}
+	b.Logger().Info("all nodes is greater than 2.6.0 when checking")
+	return true, b.channelMetaManager.MarkStreamingHasEnabled(ctx)
+}
+
+// checkIfRoleGreaterThan260 check if the role is greater than 2.6.0.
+func (b *balancerImpl) checkIfRoleGreaterThan260(ctx context.Context, role string) (bool, error) {
+	logger := b.Logger().With(zap.String("role", role))
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	defer rb.Close()
+
+	r := rb.Resolver()
+	state, err := r.GetLatestState(ctx)
+	if err != nil {
+		logger.Warn("fail to get latest state", zap.Error(err))
+		return false, err
+	}
+	if len(state.Sessions()) > 0 {
+		logger.Info("node is not greater than 2.6.0 when checking", zap.Int("sessionCount", len(state.Sessions())))
+		return false, nil
+	}
+	return true, nil
 }
 
 // blockUntilAllNodeIsGreaterThan260AtBackground block until all node is greater than 2.6.0 at background.
 func (b *balancerImpl) blockUntilAllNodeIsGreaterThan260AtBackground(ctx context.Context) error {
-	doneErr := errors.New("done")
 	expectedRoles := []string{typeutil.ProxyRole, typeutil.DataNodeRole, typeutil.QueryNodeRole}
 	for _, role := range expectedRoles {
-		logger := b.Logger().With(zap.String("role", role))
-		logger.Info("start to wait that the nodes is greater than 2.6.0")
-		// Check if there's any proxy or data node with version < 2.6.0.
-		rosolver := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), "<2.6.0-dev")
-		r := rosolver.Resolver()
-		err := r.Watch(ctx, func(vs resolver.VersionedState) error {
-			if len(vs.Sessions()) == 0 {
-				return doneErr
-			}
-			logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
-			return nil
-		})
-		if err != nil && !errors.Is(err, doneErr) {
-			logger.Info("fail to wait that the nodes is greater than 2.6.0", zap.Error(err))
+		if err := b.blockUntilRoleGreaterThan260AtBackground(ctx, role); err != nil {
 			return err
 		}
-		logger.Info("all nodes is greater than 2.6.0")
-		rosolver.Close()
 	}
 	return b.channelMetaManager.MarkStreamingHasEnabled(ctx)
+}
+
+// blockUntilRoleGreaterThan260AtBackground block until the role is greater than 2.6.0 at background.
+func (b *balancerImpl) blockUntilRoleGreaterThan260AtBackground(ctx context.Context, role string) error {
+	doneErr := errors.New("done")
+	logger := b.Logger().With(zap.String("role", role))
+	logger.Info("start to wait that the nodes is greater than 2.6.0")
+	// Check if there's any proxy or data node with version < 2.6.0.
+	rb := resolver.NewSessionBuilder(resource.Resource().ETCD(), sessionutil.GetSessionPrefixByRole(role), versionChecker260)
+	defer rb.Close()
+
+	r := rb.Resolver()
+	err := r.Watch(ctx, func(vs resolver.VersionedState) error {
+		if len(vs.Sessions()) == 0 {
+			return doneErr
+		}
+		logger.Info("session changes", zap.Int("sessionCount", len(vs.Sessions())))
+		return nil
+	})
+	if err != nil && !errors.Is(err, doneErr) {
+		logger.Info("fail to wait that the nodes is greater than 2.6.0", zap.Error(err))
+		return err
+	}
+	logger.Info("all nodes is greater than 2.6.0 when watching")
+	return nil
 }
 
 // applyAllRequest apply all request in the request channel.

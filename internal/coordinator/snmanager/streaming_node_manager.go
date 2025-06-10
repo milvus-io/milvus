@@ -17,6 +17,8 @@ import (
 
 var StaticStreamingNodeManager = newStreamingNodeManager()
 
+var ErrStreamingServiceNotReady = errors.New("streaming service is not ready, may be on-upgrading from old arch")
+
 // TODO: can be removed after streaming service fully manage all growing data.
 func newStreamingNodeManager() *StreamingNodeManager {
 	snm := &StreamingNodeManager{
@@ -31,6 +33,34 @@ func newStreamingNodeManager() *StreamingNodeManager {
 	return snm
 }
 
+// NewStreamingReadyNotifier creates a new streaming ready notifier.
+func NewStreamingReadyNotifier() *StreamingReadyNotifier {
+	return &StreamingReadyNotifier{
+		inner: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+}
+
+// StreamingReadyNotifier is a notifier for streaming service ready.
+type StreamingReadyNotifier struct {
+	inner *syncutil.AsyncTaskNotifier[struct{}]
+}
+
+// Release releases the notifier.
+func (s *StreamingReadyNotifier) Release() {
+	s.inner.Finish(struct{}{})
+}
+
+// Ready returns a channel that will be closed when the streaming service is ready.
+func (s *StreamingReadyNotifier) Ready() <-chan struct{} {
+	return s.inner.Context().Done()
+}
+
+// IsReady returns true if the streaming service is ready.
+func (s *StreamingReadyNotifier) IsReady() bool {
+	return s.inner.Context().Err() != nil
+}
+
+// Context returns the context of the notifier.
 // StreamingNodeManager is a manager for manage the querynode that embedded into streaming node.
 // StreamingNodeManager is exclusive with ResourceManager.
 type StreamingNodeManager struct {
@@ -58,13 +88,27 @@ func (s *StreamingNodeManager) GetLatestWALLocated(ctx context.Context, vchannel
 	return serverID, nil
 }
 
+// CheckIfStreamingServiceReady checks if the streaming service is ready.
+func (s *StreamingNodeManager) CheckIfStreamingServiceReady(ctx context.Context) error {
+	n := NewStreamingReadyNotifier()
+	if err := s.RegisterStreamingEnabledListener(ctx, n); err != nil {
+		return err
+	}
+	defer n.Release()
+	if !n.IsReady() {
+		// The notifier is not canceled, so the streaming service is not ready.
+		return ErrStreamingServiceNotReady
+	}
+	return nil
+}
+
 // RegisterStreamingEnabledNotifier registers a notifier into the balancer.
-func (s *StreamingNodeManager) RegisterStreamingEnabledListener(ctx context.Context, notifier *syncutil.AsyncTaskNotifier[struct{}]) error {
+func (s *StreamingNodeManager) RegisterStreamingEnabledListener(ctx context.Context, notifier *StreamingReadyNotifier) error {
 	balancer, err := s.balancer.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
-	balancer.RegisterStreamingEnabledNotifier(notifier)
+	balancer.RegisterStreamingEnabledNotifier(notifier.inner)
 	return nil
 }
 
