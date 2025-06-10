@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <memory>
+
 #include "FieldMeta.h"
 #include "Types.h"
 #include "common/VectorTrait.h"
@@ -27,9 +29,7 @@ class VectorArray : public milvus::VectorTrait {
  public:
     VectorArray() = default;
 
-    ~VectorArray() {
-        delete[] data_;
-    }
+    ~VectorArray() = default;
 
     // One row of VectorFieldProto
     explicit VectorArray(const VectorFieldProto& vector_field) {
@@ -45,7 +45,7 @@ class VectorArray : public milvus::VectorTrait {
                 std::copy(vector_field.float_vector().data().begin(),
                           vector_field.float_vector().data().end(),
                           data);
-                data_ = reinterpret_cast<char*>(data);
+                data_ = std::unique_ptr<char[]>(reinterpret_cast<char*>(data));
                 break;
             }
             default: {
@@ -58,7 +58,7 @@ class VectorArray : public milvus::VectorTrait {
     }
 
     explicit VectorArray(const VectorArray& other)
-        : VectorArray(other.data_,
+        : VectorArray(other.data_.get(),
                       other.length_,
                       other.dim_,
                       other.size_,
@@ -105,8 +105,8 @@ class VectorArray : public milvus::VectorTrait {
 
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                auto* a = reinterpret_cast<const float*>(data_);
-                auto* b = reinterpret_cast<const float*>(other.data_);
+                auto* a = reinterpret_cast<const float*>(data_.get());
+                auto* b = reinterpret_cast<const float*>(other.data_.get());
                 return std::equal(
                     a, a + length_ * dim_, b, [](float x, float y) {
                         return std::abs(x - y) < 1e-6f;
@@ -132,7 +132,8 @@ class VectorArray : public milvus::VectorTrait {
             case DataType::VECTOR_FLOAT: {
                 static_assert(std::is_same_v<VectorElement, float>,
                               "VectorElement must be float for VECTOR_FLOAT");
-                return reinterpret_cast<VectorElement*>(data_) + index * dim_;
+                return reinterpret_cast<VectorElement*>(data_.get()) +
+                       index * dim_;
             }
             default: {
                 // TODO(SpadeA): add other vector types
@@ -149,7 +150,7 @@ class VectorArray : public milvus::VectorTrait {
         vector_field.set_dim(dim_);
         switch (element_type_) {
             case DataType::VECTOR_FLOAT: {
-                auto data = reinterpret_cast<const float*>(data_);
+                auto data = reinterpret_cast<const float*>(data_.get());
                 vector_field.mutable_float_vector()->mutable_data()->Add(
                     data, data + length_ * dim_);
                 break;
@@ -186,7 +187,7 @@ class VectorArray : public milvus::VectorTrait {
 
     const char*
     data() const {
-        return data_;
+        return data_.get();
     }
 
     bool
@@ -207,7 +208,7 @@ class VectorArray : public milvus::VectorTrait {
                     return true;
                 }
 
-                const float* a = reinterpret_cast<const float*>(data_);
+                const float* a = reinterpret_cast<const float*>(data_.get());
                 const float* b = vector_field.float_vector().data().data();
                 return std::equal(
                     a, a + length_ * dim_, b, [](float x, float y) {
@@ -227,13 +228,13 @@ class VectorArray : public milvus::VectorTrait {
     VectorArray(
         char* data, int len, int dim, size_t size, DataType element_type)
         : size_(size), length_(len), dim_(dim), element_type_(element_type) {
-        data_ = new char[size];
-        std::copy(data, data + size, data_);
+        data_ = std::make_unique<char[]>(size);
+        std::copy(data, data + size, data_.get());
     }
 
     int64_t dim_ = 0;
-    char* data_{nullptr};
-    // length of the array
+    std::unique_ptr<char[]> data_;
+    // number of vectors in this array
     int length_ = 0;
     // size of the array in bytes
     int size_ = 0;
