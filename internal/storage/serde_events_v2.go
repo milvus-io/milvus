@@ -337,7 +337,9 @@ func (pw *PackedBinlogRecordWriter) splitColumnByRecord(r Record) []storagecommo
 		arr := r.Column(field.FieldID)
 		size := arr.Data().SizeInBytes()
 		rows := uint64(arr.Len())
-		if rows != 0 && int64(size/rows) >= packed.ColumnGroupSizeThreshold {
+		if IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+		} else if rows != 0 && int64(size/rows) >= packed.ColumnGroupSizeThreshold {
 			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
 		} else {
 			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
