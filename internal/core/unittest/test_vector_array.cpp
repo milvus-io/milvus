@@ -117,12 +117,7 @@ TEST(VectorArray, TestConstructVectorArray) {
 
     ASSERT_TRUE(float_vector_array.is_same_array(field_float_vector_array));
 
-    auto float_vector_array_tmp =
-        VectorArray(const_cast<char*>(float_vector_array.data()),
-                    float_vector_array.length(),
-                    float_vector_array.dim(),
-                    float_vector_array.byte_size(),
-                    float_vector_array.get_element_type());
+    auto float_vector_array_tmp = VectorArray(float_vector_array);
 
     ASSERT_TRUE(float_vector_array_tmp.is_same_array(field_float_vector_array));
 
