@@ -1564,6 +1564,18 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		allFieldNameMap[field.Name] = field
 	}
 
+	// User may specify a struct array field or some specific fields in the struct array field
+	for _, subStruct := range schema.StructArrayFields {
+		for _, field := range subStruct.Fields {
+			allFieldNameMap[field.Name] = field
+		}
+	}
+
+	structArrayNameToFields := make(map[string][]*schemapb.FieldSchema)
+	for _, subStruct := range schema.StructArrayFields {
+		structArrayNameToFields[subStruct.Name] = subStruct.Fields
+	}
+
 	userRequestedPkFieldExplicitly := false
 
 	for _, outputFieldName := range outputFields {
@@ -1581,7 +1593,17 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 				}
 			}
 			useAllDyncamicFields = true
+			break
 		} else {
+			if structArrayField, ok := structArrayNameToFields[outputFieldName]; ok {
+				for _, field := range structArrayField {
+					if schema.IsFieldLoaded(field.GetFieldID()) {
+						resultFieldNameMap[field.Name] = true
+						userOutputFieldsMap[field.Name] = true
+					}
+				}
+				continue
+			}
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
 					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)

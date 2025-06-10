@@ -472,7 +472,7 @@ func TestProxy(t *testing.T) {
 		}
 		// struct schema fields
 		sId := &schemapb.FieldSchema{
-			FieldID:      103,
+			FieldID:      104,
 			Name:         structId,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -488,7 +488,7 @@ func TestProxy(t *testing.T) {
 			AutoID:      false,
 		}
 		sFVec := &schemapb.FieldSchema{
-			FieldID:      104,
+			FieldID:      105,
 			Name:         structFVec,
 			IsPrimaryKey: false,
 			Description:  "",
@@ -508,7 +508,7 @@ func TestProxy(t *testing.T) {
 			AutoID:      false,
 		}
 		structF := &schemapb.StructArrayFieldSchema{
-			FieldID: 105,
+			FieldID: 103,
 			Name:    structField,
 			Fields:  []*schemapb.FieldSchema{sId, sFVec},
 		}

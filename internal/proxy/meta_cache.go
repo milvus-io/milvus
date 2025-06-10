@@ -127,7 +127,6 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 	fieldMap := typeutil.NewConcurrentMap[string, int64]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
-	// todo(SpadeA): consider struct fields
 	for _, field := range schema.GetFields() {
 		fieldMap.Insert(field.GetName(), field.GetFieldID())
 		if field.GetIsPartitionKey() {
@@ -135,6 +134,12 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 		}
 		if field.GetIsPrimaryKey() {
 			pkField = field
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		fieldMap.Insert(structField.GetName(), structField.GetFieldID())
+		for _, field := range structField.GetFields() {
+			fieldMap.Insert(field.GetName(), field.GetFieldID())
 		}
 	}
 	// skip load fields logic for now
@@ -180,8 +185,8 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 	fieldIDs := typeutil.NewSet[int64]()
 	// fieldIDs := make([]int64, 0, len(loadFields))
 	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
-	// todo(SpadeA): check struct field
 	for _, name := range loadFields {
+		// todo(SpadeA): check struct field
 		if s.schemaHelper.IsStructArrayField(name) {
 			panic("not implemented")
 		}

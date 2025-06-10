@@ -201,9 +201,22 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
 	name2id := map[string]int64{}
-	for idx, field := range schema.GetFields() {
+	idx := 0
+	for _, field := range schema.GetFields() {
 		field.FieldID = int64(idx + StartOfUserFieldID)
+		idx++
+
 		name2id[field.GetName()] = field.GetFieldID()
+	}
+
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		structArrayField.FieldID = int64(idx + StartOfUserFieldID)
+		idx++
+
+		for _, field := range structArrayField.GetFields() {
+			field.FieldID = int64(idx + StartOfUserFieldID)
+			idx++
+		}
 	}
 
 	for fidx, function := range schema.GetFunctions() {

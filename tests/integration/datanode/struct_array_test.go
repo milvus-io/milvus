@@ -251,7 +251,7 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 	}
 }
 
-func (s *ArrayStructDataNodeSuite) search(collectionName string) {
+func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	c := s.Cluster
 	var err error
 	// Query
@@ -272,7 +272,28 @@ func (s *ArrayStructDataNodeSuite) search(collectionName string) {
 	}
 	queryResult, err := c.Proxy.Query(context.TODO(), queryReq)
 	s.NoError(err)
-	// s.Equal(len(queryResult.FieldsData), 2)
+	s.Equal(len(queryResult.FieldsData), 3)
+	s.checkFieldsData(queryResult.FieldsData)
+
+	queryReq = &milvuspb.QueryRequest{
+		Base:               nil,
+		CollectionName:     collectionName,
+		PartitionNames:     nil,
+		Expr:               "",
+		OutputFields:       []string{integration.StructArrayField},
+		TravelTimestamp:    0,
+		GuaranteeTimestamp: 0,
+		QueryParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "limit",
+				Value: strconv.Itoa(s.rowsPerCollection),
+			},
+		},
+	}
+	queryResult, err = c.Proxy.Query(context.TODO(), queryReq)
+	s.NoError(err)
+	// struct array field + pk
+	s.Equal(len(queryResult.FieldsData), 2)
 	s.checkFieldsData(queryResult.FieldsData)
 
 	// Search
@@ -298,7 +319,7 @@ func (s *ArrayStructDataNodeSuite) TestSwapQN() {
 	s.Cluster.AddDataNode()
 	cn := "new_collection_a"
 	s.loadCollection(cn)
-	s.search(cn)
+	s.query(cn)
 	s.checkCollections()
 }
 
