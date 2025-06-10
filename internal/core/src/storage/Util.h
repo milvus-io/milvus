@@ -126,6 +126,19 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t field_id);
 
 std::string
+GenNgramIndexPathIdentifier(int64_t build_id,
+                            int64_t index_version,
+                            int64_t segment_id,
+                            int64_t field_id);
+
+std::string
+GenNgramIndexPrefix(ChunkManagerPtr cm,
+                    int64_t build_id,
+                    int64_t index_version,
+                    int64_t segment_id,
+                    int64_t field_id);
+
+std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
                           int64_t segment_id,
                           int64_t field_id);

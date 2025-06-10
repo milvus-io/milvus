@@ -21,6 +21,7 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -67,6 +68,13 @@ class SegmentSealed : public SegmentInternalInterface {
     LoadJsonKeyIndex(
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
+
+    virtual void
+    LoadNgramIndex(FieldId field_id,
+                   std::unique_ptr<index::NgramInvertedIndex> index) = 0;
+
+    virtual index::NgramInvertedIndex*
+    GetNgramIndex(FieldId field_id) const override = 0;
 
     SegmentType
     type() const override {

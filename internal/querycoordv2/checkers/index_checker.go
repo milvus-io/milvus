@@ -182,6 +182,11 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 					segmentsStatsToUpdate.Insert(segmentInfo.ID)
 				}
 			}
+			for field := range segmentInfo.GetNgramIndexStats() {
+				if missingFields.Contain(field) {
+					segmentsStatsToUpdate.Insert(segmentInfo.ID)
+				}
+			}
 		}
 	}
 
@@ -236,23 +241,29 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 
 func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb.CollectionSchema, loadField []int64) (missFieldIDs []int64) {
 	var result []int64
+	if schema == nil {
+		log.Warn("schema released during check index", zap.Int64("collection", segment.GetCollectionID()))
+		return result
+	}
 
+	loadFieldMap := make(map[int64]struct{})
+	for _, v := range loadField {
+		loadFieldMap[v] = struct{}{}
+	}
+	jsonStatsFieldMap := make(map[int64]struct{})
 	if paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
-		if schema == nil {
-			log.Warn("schema released during check index", zap.Int64("collection", segment.GetCollectionID()))
-			return result
-		}
-		loadFieldMap := make(map[int64]struct{})
-		for _, v := range loadField {
-			loadFieldMap[v] = struct{}{}
-		}
-		jsonStatsFieldMap := make(map[int64]struct{})
 		for _, v := range segment.JSONIndexField {
 			jsonStatsFieldMap[v] = struct{}{}
 		}
-		for _, field := range schema.GetFields() {
+	}
+	ngramStatsFieldMap := make(map[int64]struct{})
+	for _, v := range segment.NgramIndexStats {
+		ngramStatsFieldMap[v.FieldID] = struct{}{}
+	}
+	for _, field := range schema.GetFields() {
+		h := typeutil.CreateFieldSchemaHelper(field)
+		if paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
 			// Check if the field exists in both loadFieldMap and jsonStatsFieldMap
-			h := typeutil.CreateFieldSchemaHelper(field)
 			if h.EnableJSONKeyStatsIndex() {
 				if _, ok := loadFieldMap[field.FieldID]; ok {
 					if _, ok := jsonStatsFieldMap[field.FieldID]; !ok {
@@ -261,7 +272,15 @@ func (c *IndexChecker) checkSegmentStats(segment *meta.Segment, schema *schemapb
 				}
 			}
 		}
+		if h.EnableNgramIndex() {
+			if _, ok := loadFieldMap[field.FieldID]; ok {
+				if _, ok := ngramStatsFieldMap[field.FieldID]; !ok {
+					result = append(result, field.FieldID)
+				}
+			}
+		}
 	}
+
 	return result
 }
 
