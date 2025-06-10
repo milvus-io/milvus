@@ -911,3 +911,7 @@ func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.mixCoord.GetQuotaMetrics(ctx, req)
 }
+
+func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	return s.mixCoord.ListLoadedSegments(ctx, req)
+}

@@ -415,6 +415,7 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
 func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
+
 	start := time.Now()
 	log := log.With(zap.String("gcName", "recycleDroppedSegments"), zap.Time("startAt", start))
 	log.Info("start clear dropped segments...")
@@ -456,6 +457,17 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		channelCPs[channel] = pos.GetTimestamp()
 	}
 
+	// try to get loaded segments
+	loadedSegments := typeutil.NewSet[int64]()
+	segments, err := gc.handler.ListLoadedSegments(ctx)
+	if err != nil {
+		log.Warn("failed to get loaded segments", zap.Error(err))
+		return
+	}
+	for _, segmentID := range segments {
+		loadedSegments.Insert(segmentID)
+	}
+
 	log.Info("start to GC segments", zap.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
@@ -465,6 +477,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 
 		log := log.With(zap.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
+		if loadedSegments.Contain(segmentID) {
+			log.Info("skip GC segment since it is loaded", zap.Int64("segmentID", segmentID))
+			continue
+		}
 		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
 			continue
 		}

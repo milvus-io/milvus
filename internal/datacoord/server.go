@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
@@ -1216,4 +1217,14 @@ func (s *Server) updateBalanceConfig() bool {
 	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
 	log.RatedDebug(10, "old data node exist", zap.Strings("sessions", lo.Keys(sessions)))
 	return false
+}
+
+func (s *Server) listLoadedSegments(ctx context.Context) ([]int64, error) {
+	req := &querypb.ListLoadedSegmentsRequest{}
+	resp, err := s.mixCoord.ListLoadedSegments(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+
+	return resp.SegmentIDs, nil
 }

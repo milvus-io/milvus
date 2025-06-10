@@ -964,6 +964,65 @@ func (_c *MockQueryCoord_ListCheckers_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// ListLoadedSegments provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ListLoadedSegments(_a0 context.Context, _a1 *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLoadedSegments")
+	}
+
+	var r0 *querypb.ListLoadedSegmentsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListLoadedSegmentsRequest) *querypb.ListLoadedSegmentsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListLoadedSegmentsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListLoadedSegmentsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ListLoadedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLoadedSegments'
+type MockQueryCoord_ListLoadedSegments_Call struct {
+	*mock.Call
+}
+
+// ListLoadedSegments is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ListLoadedSegmentsRequest
+func (_e *MockQueryCoord_Expecter) ListLoadedSegments(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ListLoadedSegments_Call {
+	return &MockQueryCoord_ListLoadedSegments_Call{Call: _e.mock.On("ListLoadedSegments", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ListLoadedSegments_Call) Run(run func(_a0 context.Context, _a1 *querypb.ListLoadedSegmentsRequest)) *MockQueryCoord_ListLoadedSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ListLoadedSegmentsRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ListLoadedSegments_Call) Return(_a0 *querypb.ListLoadedSegmentsResponse, _a1 error) *MockQueryCoord_ListLoadedSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ListLoadedSegments_Call) RunAndReturn(run func(context.Context, *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error)) *MockQueryCoord_ListLoadedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListQueryNode provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) ListQueryNode(_a0 context.Context, _a1 *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
 	ret := _m.Called(_a0, _a1)
