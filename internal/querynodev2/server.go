@@ -303,6 +303,8 @@ func (node *QueryNode) InitSegcore() error {
 		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
 		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
 		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
+	} else if deprecatedCacheWarmupPolicy == "async" {
+		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
 	}
 	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
 	if err != nil {
