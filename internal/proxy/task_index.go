@@ -239,6 +239,8 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					return getPrimitiveIndexType(dataType), nil
 				} else if typeutil.IsArrayType(dataType) {
 					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
+				} else if typeutil.IsJSONType(dataType) {
+					return Params.AutoIndexConfig.ScalarJSONIndexType.GetValue(), nil
 				}
 				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}()

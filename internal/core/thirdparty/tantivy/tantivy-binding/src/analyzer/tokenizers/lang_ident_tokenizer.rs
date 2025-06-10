@@ -36,7 +36,7 @@ impl Identifier for WhatlangIdentifier {
         detect(text)
             .map_or("default", |info| {
                 if info.confidence() > self.confidence {
-                    info.lang().code()
+                    info.lang().eng_name()
                 } else {
                     "default"
                 }
