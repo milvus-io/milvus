@@ -29,6 +29,8 @@
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealed.h"
@@ -824,14 +826,34 @@ class SegmentExpr : public Expr {
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
                 Index* index_ptr = nullptr;
+                PinWrapper<const index::IndexBase*> json_pw;
                 PinWrapper<const Index*> pw;
+                // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
+                std::shared_ptr<
+                    index::JsonFlatIndexQueryExecutor<IndexInnerType>>
+                    executor;
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
+                    json_pw = segment_->chunk_json_index(field_id_, pointer, i);
 
-                    pw = segment_->chunk_scalar_index<IndexInnerType>(
-                        field_id_, pointer, i);
-                    index_ptr = const_cast<Index*>(pw.get());
+                    // check if it is a json flat index, if so, create a json flat index query executor
+                    auto json_flat_index =
+                        dynamic_cast<const index::JsonFlatIndex*>(
+                            json_pw.get());
+
+                    if (json_flat_index) {
+                        auto index_path = json_flat_index->GetNestedPath();
+                        executor =
+                            json_flat_index
+                                ->template create_executor<IndexInnerType>(
+                                    pointer.substr(index_path.size()));
+                        index_ptr = executor.get();
+                    } else {
+                        auto json_index =
+                            const_cast<index::IndexBase*>(json_pw.get());
+                        index_ptr = dynamic_cast<Index*>(json_index);
+                    }
                 } else {
                     pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_,
                                                                       i);
