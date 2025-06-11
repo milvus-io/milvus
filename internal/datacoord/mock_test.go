@@ -202,7 +202,9 @@ func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQ
 }
 
 func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
-	return nil, nil
+	return &querypb.ListLoadedSegmentsResponse{
+		Status: merr.Success(),
+	}, nil
 }
 
 func newMockMixCoord() *mockMixCoord {
