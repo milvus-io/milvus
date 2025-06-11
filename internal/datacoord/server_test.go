@@ -2651,7 +2651,7 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 
 	t.Run("test old node exist", func(t *testing.T) {
 		Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
-		defer Params.Reset(Params.DataCordCfg.AutoBalance.Key)
+		defer Params.Reset(Params.DataCoordCfg.AutoBalance.Key)
 		oldSessions := make(map[string]*sessionutil.Session)
 		oldSessions["s1"] = sessionutil.NewSession(context.Background())
 
