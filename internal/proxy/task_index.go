@@ -195,6 +195,9 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if jsonCastType, exist := indexParamsMap[common.JSONCastTypeKey]; exist {
 		indexParamsMap[common.JSONCastTypeKey] = strings.ToUpper(strings.TrimSpace(jsonCastType))
 	}
+	if jsonCastFunction, exist := indexParamsMap[common.JSONCastFunctionKey]; exist {
+		indexParamsMap[common.JSONCastFunctionKey] = strings.ToUpper(strings.TrimSpace(jsonCastFunction))
+	}
 
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
 		return err

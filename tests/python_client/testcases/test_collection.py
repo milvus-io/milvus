@@ -2785,10 +2785,7 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
-        collection_w.load(replica_number=replicas,
-                          check_task=CheckTasks.err_res,
-                          check_items={"err_code": 1,
-                                       "err_msg": "`replica_number` value None is illegal"})
+        collection_w.load(replica_number=replicas)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_replica_greater_than_querynodes(self):
@@ -3147,6 +3144,7 @@ class TestDescribeCollection(TestcaseBase):
         assert isinstance(res['collection_id'], int) and isinstance(res['created_timestamp'], int)
         del res['collection_id']
         del res['created_timestamp']
+        del res['update_timestamp']
         log.info(res)
         assert description == res
 

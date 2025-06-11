@@ -140,8 +140,9 @@ func (suite *EmbeddingNodeSuite) TestCreateEmbeddingNode() {
 		collSchema := proto.Clone(suite.collectionSchema).(*schemapb.CollectionSchema)
 		collection := segments.NewCollectionWithoutSegcoreForTest(suite.collectionID, collSchema)
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
-		_, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
+		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 	})
 }
 
@@ -151,6 +152,7 @@ func (suite *EmbeddingNodeSuite) TestOperator() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(nil).Once()
 		suite.Panics(func() {
@@ -163,6 +165,7 @@ func (suite *EmbeddingNodeSuite) TestOperator() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Times(2)
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		suite.Panics(func() {
 			node.Operate(&insertNodeMsg{
@@ -192,6 +195,7 @@ func (suite *EmbeddingNodeSuite) TestOperator() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Times(2)
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		suite.NotPanics(func() {
 			output := node.Operate(&insertNodeMsg{
@@ -213,6 +217,7 @@ func (suite *EmbeddingNodeSuite) TestAddInsertData() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		// transfer insert msg failed because rowbase data not support sparse vector
 		insertDatas := make(map[int64]*delegator.InsertData)
@@ -237,6 +242,7 @@ func (suite *EmbeddingNodeSuite) TestAddInsertData() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		insertDatas := make(map[int64]*delegator.InsertData)
 		err = node.addInsertData(insertDatas, suite.msgs[0], collection)
@@ -250,6 +256,7 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		runner := function.NewMockFunctionRunner(suite.T())
 		runner.EXPECT().BatchRun(mock.Anything).Return(nil, errors.New("mock error"))
@@ -265,6 +272,7 @@ func (suite *EmbeddingNodeSuite) TestBM25Embedding() {
 		suite.colManager.EXPECT().Get(suite.collectionID).Return(collection).Once()
 		node, err := newEmbeddingNode(suite.collectionID, suite.channel, suite.manager, 128)
 		suite.NoError(err)
+		defer node.Close()
 
 		runner := function.NewMockFunctionRunner(suite.T())
 		runner.EXPECT().BatchRun(mock.Anything).Return([]interface{}{1}, nil)

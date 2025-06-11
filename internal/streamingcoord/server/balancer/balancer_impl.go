@@ -315,13 +315,16 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 
 	// different channel can be execute concurrently.
 	g, _ := errgroup.WithContext(ctx)
+	opTimeout := paramtable.Get().StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse()
 	// generate balance operations and applied them.
 	for _, channel := range modifiedChannels {
 		channel := channel
 		g.Go(func() error {
 			// all history channels should be remove from related nodes.
 			for _, assignment := range channel.AssignHistories() {
-				if err := resource.Resource().StreamingNodeManagerClient().Remove(ctx, assignment); err != nil {
+				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
+				defer cancel()
+				if err := resource.Resource().StreamingNodeManagerClient().Remove(opCtx, assignment); err != nil {
 					b.Logger().Warn("fail to remove channel", zap.String("assignment", assignment.String()), zap.Error(err))
 					return err
 				}
@@ -329,7 +332,9 @@ func (b *balancerImpl) applyBalanceResultToStreamingNode(ctx context.Context, mo
 			}
 
 			// assign the channel to the target node.
-			if err := resource.Resource().StreamingNodeManagerClient().Assign(ctx, channel.CurrentAssignment()); err != nil {
+			opCtx, cancel := context.WithTimeout(ctx, opTimeout)
+			defer cancel()
+			if err := resource.Resource().StreamingNodeManagerClient().Assign(opCtx, channel.CurrentAssignment()); err != nil {
 				b.Logger().Warn("fail to assign channel", zap.String("assignment", channel.CurrentAssignment().String()), zap.Error(err))
 				return err
 			}

@@ -59,6 +59,9 @@ func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, 
 	if err != nil {
 		return 0, err
 	}
+	if w.Channel().AccessMode != types.AccessModeRW {
+		return 0, ErrReadOnlyWAL
+	}
 	return w.GetLatestMVCCTimestamp(ctx, vchannel)
 }
 

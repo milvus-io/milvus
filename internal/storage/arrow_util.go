@@ -27,189 +27,211 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) error {
+func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(defaultValue.GetBoolData())
+				return 1, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		ba, ok := a.(*array.Boolean)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(ba.Value(idx))
+			return 1, nil
 		}
-		return nil
 	case *array.Int8Builder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(int8(defaultValue.GetIntData()))
+				return 1, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		ia, ok := a.(*array.Int8)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(ia.Value(idx))
+			return 1, nil
 		}
-		return nil
 	case *array.Int16Builder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(int16(defaultValue.GetIntData()))
+				return 2, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		ia, ok := a.(*array.Int16)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(ia.Value(idx))
+			return 2, nil
 		}
-		return nil
 	case *array.Int32Builder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(defaultValue.GetIntData())
+				return 4, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		ia, ok := a.(*array.Int32)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(ia.Value(idx))
+			return 4, nil
 		}
-		return nil
 	case *array.Int64Builder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(defaultValue.GetLongData())
+				return 8, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		ia, ok := a.(*array.Int64)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ia.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(ia.Value(idx))
+			return 8, nil
 		}
-		return nil
 	case *array.Float32Builder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(defaultValue.GetFloatData())
+				return 4, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		fa, ok := a.(*array.Float32)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(fa.Value(idx))
+			return 4, nil
 		}
-		return nil
 	case *array.Float64Builder:
 		if a == nil {
 			if defaultValue != nil {
 				b.Append(defaultValue.GetDoubleData())
+				return 8, nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		fa, ok := a.(*array.Float64)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
 			b.Append(fa.Value(idx))
+			return 8, nil
 		}
-		return nil
 	case *array.StringBuilder:
 		if a == nil {
 			if defaultValue != nil {
-				b.Append(defaultValue.GetStringData())
+				val := defaultValue.GetStringData()
+				b.Append(val)
+				return uint64(len(val)), nil
 			} else {
 				b.AppendNull()
+				return 0, nil
 			}
-			return nil
 		}
 		sa, ok := a.(*array.String)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if sa.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
-			b.Append(sa.Value(idx))
+			val := sa.Value(idx)
+			b.Append(val)
+			return uint64(len(val)), nil
 		}
-		return nil
 	case *array.BinaryBuilder:
 		// array type, not support defaultValue now
 		if a == nil {
 			b.AppendNull()
-			return nil
+			return 0, nil
 		}
 		ba, ok := a.(*array.Binary)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
-			b.Append(ba.Value(idx))
+			val := ba.Value(idx)
+			b.Append(val)
+			return uint64(len(val)), nil
 		}
-		return nil
 	case *array.FixedSizeBinaryBuilder:
 		ba, ok := a.(*array.FixedSizeBinary)
 		if !ok {
-			return fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
+			return 0, fmt.Errorf("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if ba.IsNull(idx) {
 			b.AppendNull()
+			return 0, nil
 		} else {
-			b.Append(ba.Value(idx))
+			val := ba.Value(idx)
+			b.Append(val)
+			return uint64(len(val)), nil
 		}
-		return nil
 	default:
-		return fmt.Errorf("unsupported builder type: %T", builder)
+		return 0, fmt.Errorf("unsupported builder type: %T", builder)
 	}
 }
 
@@ -222,20 +244,31 @@ type RecordBuilder struct {
 	builders []array.Builder
 
 	nRows int
+	size  uint64
 }
 
-func (b *RecordBuilder) Append(rec Record, start, end int) {
+func (b *RecordBuilder) Append(rec Record, start, end int) error {
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
-			appendValueAt(builder, rec.Column(f.FieldID), offset, f.GetDefaultValue())
+			col := rec.Column(f.FieldID)
+			size, err := appendValueAt(builder, col, offset, f.GetDefaultValue())
+			if err != nil {
+				return fmt.Errorf("failed to append value at offset %d for field %s: %w", offset, f.GetName(), err)
+			}
+			b.size += size
 		}
 	}
 	b.nRows += (end - start)
+	return nil
 }
 
 func (b *RecordBuilder) GetRowNum() int {
 	return b.nRows
+}
+
+func (b *RecordBuilder) GetSize() uint64 {
+	return b.size
 }
 
 func (b *RecordBuilder) Build() Record {
@@ -256,6 +289,7 @@ func (b *RecordBuilder) Build() Record {
 
 	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(b.nRows)), field2Col)
 	b.nRows = 0
+	b.size = 0
 	return rec
 }
 

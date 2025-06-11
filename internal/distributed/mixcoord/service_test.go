@@ -743,4 +743,13 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
+
+	t.Run("GetQuotaMetrics", func(t *testing.T) {
+		req := &internalpb.GetQuotaMetricsRequest{}
+		mockMixCoord.EXPECT().GetQuotaMetrics(mock.Anything, req).Return(&internalpb.GetQuotaMetricsResponse{Status: merr.Success(), MetricsInfo: `{"proxy": {"tasks": 100}}`}, nil)
+		resp, err := server.GetQuotaMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, `{"proxy": {"tasks": 100}}`, resp.GetMetricsInfo())
+	})
 }

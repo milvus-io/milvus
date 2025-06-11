@@ -144,10 +144,13 @@ type task interface {
 	SetOnEnqueueTime()
 	GetDurationInQueue() time.Duration
 	IsSubTask() bool
+	SetExecutingTime()
+	GetDurationInExecuting() time.Duration
 }
 
 type baseTask struct {
 	onEnqueueTime time.Time
+	executingTime time.Time
 }
 
 func (bt *baseTask) CanSkipAllocTimestamp() bool {
@@ -164,6 +167,14 @@ func (bt *baseTask) GetDurationInQueue() time.Duration {
 
 func (bt *baseTask) IsSubTask() bool {
 	return false
+}
+
+func (bt *baseTask) SetExecutingTime() {
+	bt.executingTime = time.Now()
+}
+
+func (bt *baseTask) GetDurationInExecuting() time.Duration {
+	return time.Since(bt.executingTime)
 }
 
 type dmlTask interface {
@@ -3015,20 +3026,16 @@ func (t *RunAnalyzerTask) OnEnqueue() error {
 }
 
 func (t *RunAnalyzerTask) PreExecute(ctx context.Context) error {
-	dbName := t.GetDbName()
-	if dbName == "" {
-		dbName = "default"
-	}
-	t.dbName = dbName
+	t.dbName = t.GetDbName()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, dbName, t.GetCollectionName())
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}
 
 	t.collectionID = collID
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, t.GetCollectionName())
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.dbName, t.GetCollectionName())
 	if err != nil { // err is not nil if collection not exists
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
 	}

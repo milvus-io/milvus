@@ -60,6 +60,8 @@ func (h *heapArray[E]) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	var zero E
+	old[n-1] = zero // release the memory of underlying array.
 	*h = old[0 : n-1]
 	return x
 }
@@ -94,6 +96,8 @@ func (h *objectHeapArray[O, E]) Pop() interface{} {
 	old := h.objects
 	n := len(old)
 	x := old[n-1]
+	var zero O
+	old[n-1] = zero // release the memory of underlying array.
 	h.objects = old[0 : n-1]
 	return x
 }

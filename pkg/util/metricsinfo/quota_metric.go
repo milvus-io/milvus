@@ -88,6 +88,14 @@ type DataNodeQuotaMetrics struct {
 
 // ProxyQuotaMetrics are metrics of Proxy.
 type ProxyQuotaMetrics struct {
-	Hms HardwareMetrics
-	Rms []RateMetric
+	Hms          HardwareMetrics
+	Rms          []RateMetric
+	QueueMetrics []TaskQueueMetrics
+}
+
+type QuotaCenterMetrics struct {
+	QueryNodeMetrics map[int64]*QueryNodeQuotaMetrics
+	DataNodeMetrics  map[int64]*DataNodeQuotaMetrics
+	ProxyMetrics     map[int64]*ProxyQuotaMetrics
+	DataCoordMetrics *DataCoordQuotaMetrics
 }

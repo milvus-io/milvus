@@ -499,6 +499,7 @@ func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceRe
 	var rwNodes, roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
 		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+		roNodes = append(roNodes, replica.GetRONodes()...)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
