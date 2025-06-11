@@ -1,8 +1,20 @@
+# ==============================================================================
+# Mergify Configuration for Milvus Project
+# This file defines automated rules for pull request management
+# ==============================================================================
+
+# ==============================================================================
+# GLOBAL CONFIGURATIONS AND ALIASES
+# Define reusable conditions and patterns for better maintainability
+# ==============================================================================
 misc:
+  # File pattern matchers
   - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
   - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
+  
+  # Build and test status conditions
   - when_build_and_test_status_successs: &Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 22.04'
@@ -21,19 +33,25 @@ misc:
   - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=integration-test'
       - 'status-success=Integration Test'
+  
+  # Branch configurations
   - branch: &BRANCHES
-      #  In this pull request, the changes are based on the master branch
       - &MASTER_BRANCH base=master
-      - &23_BRANCH base=2.3
-      - &24_BRANCH base=2.4
-      - &25_BRANCH base=2.5
-      #  In this pull request, the changes are based on the 2.x(or 2.x.x) branch
       - &2X_BRANCH base~=^2(\.\d+){1,2}$
 
+# ==============================================================================
+# PULL REQUEST RULES
+# Organized by functionality for better maintenance and understanding
+# ==============================================================================
 pull_request_rules:
+  
+  # ==========================================================================
+  # DCO (Developer Certificate of Origin) MANAGEMENT
+  # Handles DCO compliance for all contributions
+  # ==========================================================================
+  
   - name: Add needs-dco label when DCO check failed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - -status-success=DCO
     actions:
@@ -48,7 +66,6 @@ pull_request_rules:
 
   - name: Add dco-passed label when DCO check passed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - status-success=DCO
     actions:
@@ -58,6 +75,11 @@ pull_request_rules:
         add:
           - dco-passed
 
+  # ==========================================================================
+  # CONTINUOUS INTEGRATION (CI) STATUS MANAGEMENT
+  # Rules for managing CI test results and labeling PRs accordingly
+  # ==========================================================================
+  
   - name: Test passed for code changed on master 
     conditions:
       - *MASTER_BRANCH
@@ -76,14 +98,16 @@ pull_request_rules:
       label:
         add:
           - ci-passed
+          
   - name: Test passed for code changed on 2.* branch
     conditions:
       - *2X_BRANCH
-      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      # 2.* skip WHEN_GO_SDK_STATUS_SUCCESS
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 13'
       # - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
@@ -94,9 +118,9 @@ pull_request_rules:
         add:
           - ci-passed
 
+  # Special cases for minimal testing requirements
   - name: Test passed for tests changed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - -files~=^(?!tests\/python_client).+
       - 'status-success=cpu-e2e'
@@ -107,7 +131,6 @@ pull_request_rules:
 
   - name: Test passed for docs changed only
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - -files~=^(?!.*\.(md)).*$
     actions:
@@ -117,7 +140,6 @@ pull_request_rules:
 
   - name: Test passed for non go or c++ code changed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'status-success=cpu-e2e'
       - *no_source_code_files
@@ -128,7 +150,6 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed-master
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
@@ -143,7 +164,6 @@ pull_request_rules:
 
   - name: Test passed for mergify changed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - -files~=^(?!\.github\/mergify\.yml).*$
     actions:
@@ -151,9 +171,9 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for title skip e2e
+  # Skip E2E testing rules
+  - name: Test passed for title skip e2e when no source code changed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - title~=\[skip e2e\]
       - label=kind/enhancement
@@ -163,89 +183,8 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Blocking PR if missing a related issue or doesn't have kind/enhancement label
+  - name: Test passed for skip e2e when source code changed
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - and:
-          - -body~=\#[0-9]{1,6}(\s+|$)
-          - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-      - or:
-        - and:
-          - label=kind/enhancement
-          - or:
-            - label=size/L
-            - label=size/XL
-            - label=size/XXL
-        - label=kind/bug
-        - label=kind/feature
-          
-      - -label=kind/doc
-      - -label=kind/test
-      - -title~=\[automated\]
-    actions:
-      label:
-        add:
-          - do-not-merge/missing-related-issue
-      comment:
-        message: |
-          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #<xyz>”)
-
-  - name: Dismiss block label if related issue be added into PR
-    conditions:
-      - and:
-          # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-          - or: *BRANCHES
-          - or:
-              - body~=\#[0-9]{1,6}(\s+|$)
-              - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
-    actions:
-      label:
-        remove:
-          - do-not-merge/missing-related-issue
-
-  - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
-    conditions:
-      - *2X_BRANCH
-      - and:
-          - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
-          - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
-      - -label=kind/branch-feature
-      - -title~=\[automated\]
-    actions:
-      label:
-        add:
-          - do-not-merge/missing-related-pr
-      comment:
-        message: |
-          @{{author}} Please associate the related pr of master to the body of your Pull Request.  (eg. “pr: #<xyz>”)
-
-  - name: Dismiss block label if related pr be added into PR
-    conditions:
-      - *2X_BRANCH
-      - or:
-          - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
-          - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
-          - label=kind/branch-feature
-    actions:
-      label:
-        remove:
-          - do-not-merge/missing-related-pr
-
-  - name: Dismiss block label if automated create PR
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - title~=\[automated\]
-    actions:
-      label:
-        remove:
-          - do-not-merge/missing-related-issue
-          - do-not-merge/missing-related-pr
-
-  - name: Test passed for skip e2e-master
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
       - title~=\[skip e2e\]
@@ -261,36 +200,13 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for skip e2e - 2.2.*
-    conditions:
-      - *2X_BRANCH
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
-      - title~=\[skip e2e\]
-      - or: *WHEN_CPP_UNIT_TEST_SUCCESS
-      - or: *WHEN_GO_UNIT_TEST_SUCCESS
-      - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
-      - 'status-success=Code Checker MacOS 13'
-      - *source_code_files
-    actions:
-      label:
-        add:
-          - ci-passed
-
-  - name: Assign the 'lgtm' and 'approved' labels following the successful testing of the 'Update Knowhere Commit'
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - 'title~=Update Knowhere Commit'
-      - label=ci-passed
-    actions:
-      label:
-        add:
-          - lgtm
-          - approved
+  # ==========================================================================
+  # CI FAILURE HANDLING
+  # Remove ci-passed labels when tests fail
+  # ==========================================================================
 
   - name:  master or 2.x - Remove ci-passed label when status for code checker or ut is not success
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or:
         - *MASTER_BRANCH
         - *2X_BRANCH
@@ -314,7 +230,6 @@ pull_request_rules:
 
   - name: Remove ci-passed label when status for jenkins job is not success
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - label!=manual-pass
       - -title~=\[skip e2e\]
@@ -325,86 +240,94 @@ pull_request_rules:
         remove:
           - ci-passed
 
-  - name: Add comment when jenkins job failed
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - 'check-failure=cpu-e2e'
-    actions:
-      comment:
-        message: |
-          @{{author}} E2e jenkins job failed, comment `/run-cpu-e2e` can trigger the job again.
+  # ==========================================================================
+  # PR VALIDATION AND BLOCKING RULES
+  # Ensure PRs meet project standards before merging
+  # ==========================================================================
 
-# when go-sdk check failed, prompt user to rerun go-sdk job
-  - name: Add comment when go-sdk check failed
+  - name: Blocking PR if missing a related issue or doesn't have kind/enhancement label
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
-      - 'check-failure=go-sdk'
-    actions:
-      comment:
-        message: |
-          @{{author}} go-sdk check failed, comment `rerun go-sdk` can trigger the job again.
-
-# when cpp-unit-test check failed, prompt user to rerun cpp-unit-test job
-  - name: Add comment when cpp-unit-test check failed
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - 'check-failure=cpp-unit-test'
-    actions:
-      comment:
-        message: |
-          @{{author}} cpp-unit-test check failed, comment `rerun cpp-unit-test` can trigger the job again.
-
-# when go-unit-test check failed, prompt user to rerun go-unit-test job
-  - name: Add comment when go-unit-test check failed
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - 'check-failure=go-unit-test'
-    actions:
-      comment:
-        message: |
-          @{{author}} go-unit-test check failed, comment `rerun go-unit-test` can trigger the job again.
-
-# when integration-test check failed, prompt user to rerun integration-test job
-  - name: Add comment when integration-test check failed
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
-      - 'check-failure=integration-test'
-    actions:
-      comment:
-        message: |
-          @{{author}} integration-test check failed, comment `rerun integration-test` can trigger the job again.
-
-  - name: Add comment when code checker or ut failed -master
-    conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
-      - or: *BRANCHES
+      - and:
+          - -body~=\#[0-9]{1,6}(\s+|$)
+          - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
       - or:
-          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
-          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
+        - and:
+          - label=kind/enhancement
+          - or:
+            - label=size/L
+            - label=size/XL
+            - label=size/XXL
+        - label=kind/bug
+        - label=kind/feature
+      - -label=kind/doc
+      - -label=kind/test
+      - -title~=\[automated\]
     actions:
+      label:
+        add:
+          - do-not-merge/missing-related-issue
       comment:
         message: |
-          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. "issue: #<xyz>")
 
-  - name: Add comment when code checker or ut failed -2.2.*
+  - name: Dismiss block label if related issue be added into PR
+    conditions:
+      - and:
+          - or: *BRANCHES
+          - or:
+              - body~=\#[0-9]{1,6}(\s+|$)
+              - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+
+  - name: Blocking PR if missing a related master PR or doesn't have kind/branch-feature label
+    conditions:
+      - *2X_BRANCH
+      - and:
+          - -body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+          - -body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+      - -label=kind/branch-feature
+      - -title~=\[automated\]
+    actions:
+      label:
+        add:
+          - do-not-merge/missing-related-pr
+      comment:
+        message: |
+          @{{author}} Please associate the related pr of master to the body of your Pull Request.  (eg. "pr: #<xyz>")
+
+  - name: Dismiss block label if related pr be added into PR
     conditions:
       - *2X_BRANCH
       - or:
-          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
-          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
+          - body~=pr\:\ \#[0-9]{1,6}(\s+|$)
+          - body~=https://github.com/milvus-io/milvus/pull/[0-9]{1,6}(\s+|$)
+          - label=kind/branch-feature
     actions:
-      comment:
-        message: |
-          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+      label:
+        remove:
+          - do-not-merge/missing-related-pr
+
+  - name: Dismiss block label if automated create PR
+    conditions:
+      - or: *BRANCHES
+      - title~=\[automated\]
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-related-issue
+          - do-not-merge/missing-related-pr
+
+  # ==========================================================================
+  # PR FORMAT VALIDATION
+  # Enforce consistent PR title and description formats
+  # ==========================================================================
 
   - name: Add 'do-not-merge/invalid-pr-format' label for invalid PR titles
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - or:
         - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
@@ -448,7 +371,6 @@ pull_request_rules:
 
   - name: Remove 'do-not-merge/invalid-pr-format' label for valid PRs
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
       - '-body=^$'
@@ -458,9 +380,87 @@ pull_request_rules:
         remove:
           - do-not-merge/invalid-pr-format
 
+
+
+  # ==========================================================================
+  # FAILURE NOTIFICATION AND RETRY HELPERS
+  # Provide helpful comments when CI jobs fail with retry instructions
+  # ==========================================================================
+
+  - name: Add comment when cpu-e2e job failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=cpu-e2e'
+    actions:
+      comment:
+        message: |
+          @{{author}} cpu-e2e job failed, comment `/run-cpu-e2e` can trigger the job again.
+
+  - name: Add comment when go-sdk check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=go-sdk'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-sdk check failed, comment `rerun go-sdk` can trigger the job again.
+
+  - name: Add comment when cpp-unit-test check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=cpp-unit-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} cpp-unit-test check failed, comment `rerun cpp-unit-test` can trigger the job again.
+
+  - name: Add comment when go-unit-test check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=go-unit-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} go-unit-test check failed, comment `rerun go-unit-test` can trigger the job again.
+
+  - name: Add comment when integration-test check failed
+    conditions:
+      - or: *BRANCHES
+      - 'check-failure=integration-test'
+    actions:
+      comment:
+        message: |
+          @{{author}} integration-test check failed, comment `rerun integration-test` can trigger the job again.
+
+  - name: Add comment when code checker or ut failed -master
+    conditions:
+      - or: *BRANCHES
+      - or:
+          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
+    actions:
+      comment:
+        message: |
+          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+
+  - name: Add comment when code checker or ut failed -2.2.*
+    conditions:
+      - *2X_BRANCH
+      - or:
+          # - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
+          - 'check-failure=Build and test AMD64 Ubuntu 20.04'
+    actions:
+      comment:
+        message: |
+          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+
+  # ==========================================================================
+  # AUTOMATIC LABELING BASED ON PR TITLES
+  # Automatically categorize PRs based on their title prefixes
+  # ==========================================================================
+
   - name: Label bug fix PRs
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'title~=^fix:'
     actions:
@@ -470,7 +470,6 @@ pull_request_rules:
 
   - name: Label feature PRs
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'title~=^feat:'
     actions:
@@ -480,7 +479,6 @@ pull_request_rules:
 
   - name: Label enhancement PRs
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'title~=^enhance:'
     actions:
@@ -490,7 +488,6 @@ pull_request_rules:
 
   - name: Label test PRs
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'title~=^test:'
     actions:
@@ -500,12 +497,27 @@ pull_request_rules:
 
   - name: Label doc PRs
     conditions:
-      # branch condition: in this pull request, the changes are based on any branch referenced by BRANCHES
       - or: *BRANCHES
       - 'title~=^doc:'
     actions:
       label:
         add:
           - kind/doc
+
+  # ==========================================================================
+  # SPECIAL AUTOMATION RULES
+  # Handle specific automated workflows and updates
+  # ==========================================================================
+
+  - name: Assign the 'lgtm' and 'approved' labels following the successful testing of the 'Update Knowhere Commit'
+    conditions:
+      - or: *BRANCHES
+      - 'title~=Update Knowhere Commit'
+      - label=ci-passed
+    actions:
+      label:
+        add:
+          - lgtm
+          - approved
 
         
