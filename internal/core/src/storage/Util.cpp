@@ -558,16 +558,6 @@ GenIndexPathIdentifier(int64_t build_id, int64_t index_version) {
 }
 
 std::string
-GenTextIndexPathIdentifier(int64_t build_id,
-                           int64_t index_version,
-                           int64_t segment_id,
-                           int64_t field_id) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
-           "/";
-}
-
-std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
                    int64_t index_version) {
@@ -576,6 +566,24 @@ GenIndexPathPrefix(ChunkManagerPtr cm,
     boost::filesystem::path path1 =
         GenIndexPathIdentifier(build_id, index_version);
     return (prefix / path / path1).string();
+}
+
+std::string
+GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
+    boost::filesystem::path path1 = std::to_string(build_id);
+    return (prefix / path / path1).string();
+}
+
+std::string
+GenTextIndexPathIdentifier(int64_t build_id,
+                           int64_t index_version,
+                           int64_t segment_id,
+                           int64_t field_id) {
+    return std::to_string(build_id) + "/" + std::to_string(index_version) +
+           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
+           "/";
 }
 
 std::string
@@ -588,6 +596,14 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
     boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
     boost::filesystem::path path1 = GenTextIndexPathIdentifier(
         build_id, index_version, segment_id, field_id);
+    return (prefix / path / path1).string();
+}
+
+std::string
+GetTextIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
+    boost::filesystem::path prefix = cm->GetRootPath();
+    boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
+    boost::filesystem::path path1 = std::to_string(build_id);
     return (prefix / path / path1).string();
 }
 
@@ -623,9 +639,9 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
+GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
     boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
+    boost::filesystem::path path = std::string(JSON_KEY_INDEX_LOG_ROOT_PATH);
     boost::filesystem::path path1 = std::to_string(build_id);
     return (prefix / path / path1).string();
 }
