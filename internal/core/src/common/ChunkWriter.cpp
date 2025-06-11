@@ -159,11 +159,11 @@ ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
             scalar_array.ParseFromArray(str.data(), str.size());
             auto arr = Array(scalar_array);
             size += arr.byte_size();
-            arrays.push_back(std::move(arr));
             if (is_string) {
                 // element offsets size
                 size += sizeof(uint32_t) * arr.length();
             }
+            arrays.push_back(std::move(arr));
         }
         row_nums_ += array->length();
         if (nullable_) {
