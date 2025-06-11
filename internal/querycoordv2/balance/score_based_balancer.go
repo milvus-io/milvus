@@ -481,11 +481,12 @@ func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceRep
 	var roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
 		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+		roNodes = append(roNodes, replica.GetRONodes()...)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
 
-	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 
@@ -513,9 +514,6 @@ func (b *ScoreBasedBalancer) balanceSegments(ctx context.Context, br *balanceRep
 	if len(rwNodes) == 0 {
 		// no available nodes to balance
 		br.AddRecord(StrRecord("no rwNodes to balance"))
-		return nil
-	}
-	if !b.permitBalanceSegment(replica.GetCollectionID()) {
 		return nil
 	}
 	// print current distribution before generating plans

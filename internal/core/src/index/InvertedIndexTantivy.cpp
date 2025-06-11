@@ -61,18 +61,21 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
                                               d_type_,
                                               path_.c_str(),
                                               tantivy_index_version_,
-                                              inverted_index_single_segment_);
+                                              inverted_index_single_segment_,
+                                              user_specified_doc_id_);
 }
 
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
     uint32_t tantivy_index_version,
     const storage::FileManagerContext& ctx,
-    bool inverted_index_single_segment)
+    bool inverted_index_single_segment,
+    bool user_specified_doc_id)
     : ScalarIndex<T>(INVERTED_INDEX_TYPE),
       schema_(ctx.fieldDataMeta.field_schema),
       tantivy_index_version_(tantivy_index_version),
-      inverted_index_single_segment_(inverted_index_single_segment) {
+      inverted_index_single_segment_(inverted_index_single_segment),
+      user_specified_doc_id_(user_specified_doc_id) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     // push init wrapper to load process
@@ -165,25 +168,8 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
 template <typename T>
 void
 InvertedIndexTantivy<T>::Build(const Config& config) {
-    auto field_datas = mem_file_manager_->CacheRawDataToMemory(config);
-    auto lack_binlog_rows =
-        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value() && lack_binlog_rows.value() > 0) {
-        auto field_schema = mem_file_manager_->GetFieldDataMeta().field_schema;
-        auto default_value = [&]() -> std::optional<DefaultValueType> {
-            if (!field_schema.has_default_value()) {
-                return std::nullopt;
-            }
-            return field_schema.default_value();
-        }();
-        auto field_data = storage::CreateFieldData(
-            static_cast<DataType>(field_schema.data_type()),
-            true,
-            1,
-            lack_binlog_rows.value());
-        field_data->FillFieldData(default_value, lack_binlog_rows.value());
-        field_datas.insert(field_datas.begin(), field_data);
-    }
+    auto field_datas =
+        storage::CacheRawDataAndFillMissing(mem_file_manager_, config);
     BuildWithFieldData(field_datas);
 }
 

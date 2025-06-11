@@ -199,6 +199,172 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_as_primary(self):
+        """
+        target: test fast create collection with add new field as primary
+        method: create collection name with add new field as primary
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim, field_name = 8, "field_new"
+        error = {ct.err_code: 1100, ct.err_msg: f"not support to add pk field, "
+                                                f"field name = {field_name}: invalid parameter"}
+        self.create_collection(client, collection_name, dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.INT64,
+                                  nullable=True, is_primary=True, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_as_auto_id(self):
+        """
+        target: test fast create collection with add new field as auto id
+        method: create collection name with add new field as auto id
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim, field_name = 8, "field_new"
+        error = {ct.err_code: 1, ct.err_msg: f"The auto_id can only be specified on the primary key field"}
+        self.create_collection(client, collection_name, dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.INT64,
+                                  nullable=True, auto_id=True, check_task=CheckTasks.err_res,
+                                  check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_with_disable_nullable(self):
+        """
+        target: test fast create collection with add new field as nullable false
+        method: create collection name with add new field as nullable false
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim, field_name = 8, "field_new"
+        error = {ct.err_code: 1100, ct.err_msg: f"added field must be nullable, please check it, "
+                                                f"field name = {field_name}: invalid parameter"}
+        self.create_collection(client, collection_name, dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.INT64,
+                                  nullable=False, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_as_partition_ley(self):
+        """
+        target: test fast create collection with add new field as partition key
+        method: create collection name with add new field as partition key
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim, field_name = 8, "field_new"
+        error = {ct.err_code: 1100, ct.err_msg: f"not support to add partition key field, "
+                                                f"field name  = {field_name}: invalid parameter"}
+        self.create_collection(client, collection_name, dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.INT64,
+                                  nullable=True, is_partition_key=True,
+                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_exceed_max_length(self):
+        """
+        target: test fast create collection with add new field with exceed max length
+        method: create collection name with add new field with exceed max length
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim, field_name = 8, "field_new"
+        error = {ct.err_code: 1100, ct.err_msg: f"the maximum length specified for the field({field_name}) "
+                                                f"should be in (0, 65535], but got 65536 instead: invalid parameter"}
+        self.create_collection(client, collection_name, dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
+                                  nullable=True, max_length=65536, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_as_cluster_key(self):
+        """
+        target: test fast create collection with add new field as cluster key
+        method: create collection with add new field as cluster key(already has cluster key)
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        field_name = "field_new"
+        error = {ct.err_code: 1100, ct.err_msg: f"already has another clutering key field, "
+                                                f"field name: {field_name}: invalid parameter"}
+        schema = self.create_schema(client)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_clustering_key=True)
+
+        self.create_collection(client, collection_name, schema=schema)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.INT64,
+                                  nullable=True, is_clustering_key=True,
+                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_same_other_name(self):
+        """
+        target: test fast create collection with add new field as other same name
+        method: create collection with add new field as other same name
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        error = {ct.err_code: 1100, ct.err_msg: f"duplicate field name: {default_string_field_name}: invalid parameter"}
+        schema = self.create_schema(client)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_clustering_key=True)
+
+        self.create_collection(client, collection_name, schema=schema)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.add_collection_field(client, collection_name, field_name=default_string_field_name,
+                                  data_type=DataType.VARCHAR, nullable=True, max_length=64,
+                                  check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_add_field_exceed_max_field_number(self):
+        """
+        target: test fast create collection with add new field with exceed max field number
+        method: create collection name with add new field with exceed max field number
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        dim, field_name = 8, "field_new"
+        error = {ct.err_code: 1100, ct.err_msg: f"The number of fields has reached the maximum value 64: "
+                                                f"invalid parameter"}
+        self.create_collection(client, collection_name, dim)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        for i in range(62):
+            self.add_collection_field(client, collection_name, field_name=f"{field_name}_{i}",
+                                      data_type=DataType.VARCHAR, nullable=True, max_length=64)
+        self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.VARCHAR,
+                                  nullable=True, max_length=64, check_task=CheckTasks.err_res, check_items=error)
+
 
 class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
     """ Test case of create collection interface """
@@ -279,7 +445,8 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.INT8_VECTOR])
-    def test_milvus_client_collection_self_creation_default(self, nullable, vector_type):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_collection_self_creation_default(self, nullable, vector_type, add_field):
         """
         target: test self create collection normal case
         method: create collection
@@ -311,6 +478,12 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                        "vector_name": "embeddings"}
         if nullable:
             check_items["nullable_fields"] = ["nullable_field", "array_field"]
+        if add_field:
+            self.add_collection_field(client, collection_name, field_name="field_new_int64", data_type=DataType.INT64,
+                                      nullable=True, is_cluster_key=True)
+            self.add_collection_field(client, collection_name, field_name="field_new_var", data_type=DataType.VARCHAR,
+                                      nullable=True, default_vaule="field_new_var", max_length=64)
+            check_items["add_fields"] = ["field_new_int64", "field_new_var"]
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items=check_items)
@@ -333,9 +506,9 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id_int64", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field("int8embeddings_1", DataType.INT8_VECTOR, dim=dim * 2)
-        schema.add_field("int8embeddings_2", DataType.FLOAT16_VECTOR, dim=int(dim / 2))
-        schema.add_field("int8embeddings_3", DataType.BFLOAT16_VECTOR, dim=int(dim / 2))
+        schema.add_field("embeddings_1", DataType.INT8_VECTOR, dim=dim * 2)
+        schema.add_field("embeddings_2", DataType.FLOAT16_VECTOR, dim=int(dim / 2))
+        schema.add_field("embeddings_3", DataType.BFLOAT16_VECTOR, dim=int(dim / 2))
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index("embeddings", metric_type="COSINE")
         index_params.add_index("embeddings_1", metric_type="IP")
@@ -346,7 +519,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         check_items = {"collection_name": collection_name,
-                       "dim": [dim, dim * 2, dim / 2, dim / 2],
+                       "dim": [dim, dim * 2, int(dim / 2), int(dim / 2)],
                        "consistency_level": 0,
                        "enable_dynamic_field": False,
                        "id_name": "id_int64",
@@ -1208,7 +1381,7 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
         self.alter_collection_properties(client, alter_name, properties,
                                      check_task=CheckTasks.err_res,
                                      check_items=error)
-        
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("properties", [""])
     def test_milvus_client_alter_collection_properties_invalid_properties(self, properties):
@@ -1250,7 +1423,7 @@ class TestMilvusClientCollectionPropertiesInvalid(TestMilvusClientV2Base):
         self.drop_collection_properties(client, drop_name, properties,
                                         check_task=CheckTasks.err_res,
                                         check_items=error)
-        
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("property_keys", ["", {}, []])
     def test_milvus_client_drop_collection_properties_invalid_properties(self, property_keys):

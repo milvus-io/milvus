@@ -155,6 +155,12 @@ func (s *MultiAnalyzerBM25FunctionSuite) TestBatchRun() {
 		s.Equal(16, len(sparseArray.GetContents()[0]))
 		// bytes size will be 3 * 2 * 4 = 24
 		s.Equal(24, len(sparseArray.GetContents()[1]))
+
+		runner.Close()
+
+		// run after close
+		_, err = runner.BatchRun(text, analyzerName)
+		s.Error(err)
 	})
 }
 

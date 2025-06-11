@@ -152,6 +152,8 @@ service RootCoord {
     rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
     rpc DescribeDatabase(DescribeDatabaseRequest) returns(DescribeDatabaseResponse){}
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
+
+    rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
 }
 
 message AllocTimestampRequest {

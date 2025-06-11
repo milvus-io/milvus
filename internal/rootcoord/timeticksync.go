@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -272,15 +271,15 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	streamingNotifier := syncutil.NewAsyncTaskNotifier[struct{}]()
-	defer streamingNotifier.Finish(struct{}{})
+	streamingNotifier := snmanager.NewStreamingReadyNotifier()
+	defer streamingNotifier.Release()
 
 	if streamingutil.IsStreamingServiceEnabled() {
 		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(t.ctx, streamingNotifier); err != nil {
 			log.Info("register streaming enabled listener failed", zap.Error(err))
 			return
 		}
-		if streamingNotifier.Context().Err() != nil {
+		if streamingNotifier.IsReady() {
 			log.Info("streaming service has been enabled, proxy timetick from rootcoord should not start")
 			return
 		}
@@ -295,7 +294,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 
 	for {
 		select {
-		case <-streamingNotifier.Context().Done():
+		case <-streamingNotifier.Ready():
 			log.Info("streaming service has been enabled, proxy timetick from rootcoord should stop")
 			return
 		case <-t.ctx.Done():
@@ -349,9 +348,6 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 
 // SendTimeTickToChannel send each channel's min timetick to msg stream
 func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Timestamp) error {
-	if streamingutil.IsStreamingServiceEnabled() {
-		return nil
-	}
 	func() {
 		sub := tsoutil.SubByNow(ts)
 		for _, chanName := range chanNames {

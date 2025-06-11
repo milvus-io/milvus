@@ -240,7 +240,7 @@ func (d *Dispatcher) work() {
 			return
 		case pack := <-d.stream.Chan():
 			if pack == nil || len(pack.EndPositions) != 1 {
-				log.Error("consumed invalid msgPack")
+				log.Error("consumed invalid msgPack", zap.Any("pack", pack))
 				continue
 			}
 			d.curTs.Store(pack.EndPositions[0].GetTimestamp())

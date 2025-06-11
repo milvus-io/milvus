@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -41,6 +42,94 @@ func TestProxy_metrics(t *testing.T) {
 	assert.NotNil(t, resp)
 }
 
+func createMockDDQueue() *ddTaskQueue {
+	q := &ddTaskQueue{
+		baseTaskQueue: newBaseTaskQueue(nil),
+	}
+	q.unissuedTasks.PushBack(&createCollectionTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.unissuedTasks.PushBack(&createPartitionTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.activeTasks[1] = &loadCollectionTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	}
+	return q
+}
+
+func createMockDMQueue() *dmTaskQueue {
+	q := &dmTaskQueue{
+		baseTaskQueue: newBaseTaskQueue(nil),
+	}
+	q.unissuedTasks.PushBack(&insertTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.unissuedTasks.PushBack(&upsertTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.activeTasks[1] = &deleteTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	}
+	return q
+}
+
+func createMockDQQueue() *dqTaskQueue {
+	q := &dqTaskQueue{
+		baseTaskQueue: newBaseTaskQueue(nil),
+	}
+	q.unissuedTasks.PushBack(&queryTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.unissuedTasks.PushBack(&searchTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.activeTasks[1] = &queryTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	}
+	return q
+}
+
+func createMockDCQueue() *ddTaskQueue {
+	q := &ddTaskQueue{
+		baseTaskQueue: newBaseTaskQueue(nil),
+	}
+	q.unissuedTasks.PushBack(&flushTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.unissuedTasks.PushBack(&flushTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	})
+	q.activeTasks[1] = &flushTask{
+		baseTask: baseTask{
+			onEnqueueTime: time.Now(),
+		},
+	}
+	return q
+}
+
 func getMockProxyRequestMetrics() *Proxy {
 	mixc := NewMixCoordMock()
 	defer mixc.Close()
@@ -48,6 +137,12 @@ func getMockProxyRequestMetrics() *Proxy {
 	proxy := &Proxy{
 		mixCoord: mixc,
 		session:  &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{Address: funcutil.GenRandomStr()}},
+		sched: &taskScheduler{
+			ddQueue: createMockDDQueue(),
+			dmQueue: createMockDMQueue(),
+			dqQueue: createMockDQQueue(),
+			dcQueue: createMockDCQueue(),
+		},
 	}
 
 	mixc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

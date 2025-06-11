@@ -240,3 +240,9 @@ func (c *Client) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 		return client.GetSegmentsInfo(ctx, req)
 	})
 }
+
+func (c *Client) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.GetQuotaMetricsResponse, error) {
+		return client.GetQuotaMetrics(ctx, req)
+	})
+}

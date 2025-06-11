@@ -978,8 +978,12 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
 
 // Get the globally configured cache warmup policy for the given content type.
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index) {
+getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list) {
     auto& manager = milvus::cachinglayer::Manager::GetInstance();
+    // if field not in load list(hint), disable warmup
+    if (!in_load_list) {
+        return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    }
     if (is_index) {
         return is_vector ? manager.getVectorIndexCacheWarmupPolicy()
                          : manager.getScalarIndexCacheWarmupPolicy();

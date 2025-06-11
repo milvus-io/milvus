@@ -73,6 +73,7 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Close()
 
 		var output []Msg
 		assert.NotPanics(t, func() {
@@ -114,6 +115,7 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	t.Run("with close msg", func(t *testing.T) {
 		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Close()
 
 		var output []Msg
 
@@ -131,6 +133,7 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	t.Run("prepare insert failed", func(t *testing.T) {
 		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Close()
 
 		assert.Panics(t, func() {
 			node.Operate([]Msg{
@@ -152,6 +155,7 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	t.Run("embedding failed", func(t *testing.T) {
 		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Close()
 
 		node.functionRunners[0].GetSchema().Type = 0
 		assert.Panics(t, func() {

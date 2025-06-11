@@ -1124,3 +1124,7 @@ func (s *Server) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReque
 func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
 	return s.proxy.GetSegmentsInfo(ctx, req)
 }
+
+func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return s.proxy.GetQuotaMetrics(ctx, req)
+}

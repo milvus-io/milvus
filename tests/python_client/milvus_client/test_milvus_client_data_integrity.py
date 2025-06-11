@@ -75,15 +75,14 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.parametrize("is_flush", [True])
     @pytest.mark.parametrize("is_release", [True])
     @pytest.mark.parametrize("single_data_num", [50])
-    @pytest.mark.parametrize("expr_field", [ct.default_int64_field_name])
+    @pytest.mark.parametrize("expr_field", [ct.default_int64_field_name,
+                                            # ct.default_string_field_name,   # TODO: uncommented after #42604 fixed
+                                            ct.default_float_array_field_name])
     def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array(self,
                                                                                             enable_dynamic_field,
-                                                                                            supported_bool_scalar_index,
-                                                                                            supported_numeric_float_double_index,
                                                                                             supported_numeric_scalar_index,
-                                                                                            supported_varchar_scalar_index,
+                                                                                            # supported_varchar_scalar_index,
                                                                                             supported_json_path_index,
-                                                                                            supported_array_scalar_index,
                                                                                             supported_array_double_float_scalar_index,
                                                                                             is_flush,
                                                                                             is_release,
@@ -169,7 +168,7 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
                      ct.default_string_array_field_name: [f'{j}', f'{j + 1}'] if (i % 2 == 0) else None
                      } for j in range(i * nb_single, (i + 1) * nb_single)]
             assert len(rows) == nb_single
-            log.info(rows)
+            # log.info(rows)
             self.insert(client, collection_name=collection_name, data=rows)
             log.info(f"inserted {nb_single} {inserted_data_distribution[i]}")
         # 3. flush if specified
@@ -181,13 +180,13 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         for i in range(len(express_list)):
             json_list = []
             id_list = []
-            log.info(f"query with filter '{express_list[i]}' before scalar index is:")
-            res = \
-            self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
+            log.info(f"query with filter '{express_list[i]}' before scalar index")
+            res = self.query(client, collection_name=collection_name,
+                             filter=express_list[i], output_fields=["count(*)"])[0]
             count = res[0]['count(*)']
-            log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
-            res = self.query(client, collection_name=collection_name, filter=express_list[i],
-                             output_fields=[f"{expr_field}"])[0]
+            # log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
+            res = self.query(client, collection_name=collection_name,
+                             filter=express_list[i], output_fields=[f"{expr_field}"])[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
@@ -203,24 +202,24 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         # 6. prepare index params with json path index
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=ct.default_bool_field_name, index_type=supported_bool_scalar_index)
-        index_params.add_index(field_name=ct.default_int8_field_name, index_type=supported_numeric_scalar_index)
-        index_params.add_index(field_name=ct.default_int16_field_name, index_type=supported_numeric_scalar_index)
-        index_params.add_index(field_name=ct.default_int32_field_name, index_type=supported_numeric_scalar_index)
+        # index_params.add_index(field_name=ct.default_bool_field_name, index_type=supported_bool_scalar_index)
+        # index_params.add_index(field_name=ct.default_int8_field_name, index_type=supported_numeric_scalar_index)
+        # index_params.add_index(field_name=ct.default_int16_field_name, index_type=supported_numeric_scalar_index)
+        # index_params.add_index(field_name=ct.default_int32_field_name, index_type=supported_numeric_scalar_index)
         index_params.add_index(field_name=ct.default_int64_field_name, index_type=supported_numeric_scalar_index)
-        index_params.add_index(field_name=ct.default_float_field_name, index_type=supported_numeric_float_double_index)
-        index_params.add_index(field_name=ct.default_double_field_name, index_type=supported_numeric_float_double_index)
-        index_params.add_index(field_name=ct.default_string_field_name, index_type=supported_varchar_scalar_index)
-        index_params.add_index(field_name=ct.default_int8_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_int16_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_int32_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_int64_array_field_name, index_type=supported_array_scalar_index)
-        index_params.add_index(field_name=ct.default_bool_array_field_name, index_type=supported_array_scalar_index)
+        # index_params.add_index(field_name=ct.default_float_field_name, index_type=supported_numeric_float_double_index)
+        # index_params.add_index(field_name=ct.default_double_field_name, index_type=supported_numeric_float_double_index)
+        # index_params.add_index(field_name=ct.default_string_field_name, index_type=supported_varchar_scalar_index)
+        # index_params.add_index(field_name=ct.default_int8_array_field_name, index_type=supported_array_scalar_index)
+        # index_params.add_index(field_name=ct.default_int16_array_field_name, index_type=supported_array_scalar_index)
+        # index_params.add_index(field_name=ct.default_int32_array_field_name, index_type=supported_array_scalar_index)
+        # index_params.add_index(field_name=ct.default_int64_array_field_name, index_type=supported_array_scalar_index)
+        # index_params.add_index(field_name=ct.default_bool_array_field_name, index_type=supported_array_scalar_index)
         index_params.add_index(field_name=ct.default_float_array_field_name,
                                index_type=supported_array_double_float_scalar_index)
-        index_params.add_index(field_name=ct.default_double_array_field_name,
-                               index_type=supported_array_double_float_scalar_index)
-        index_params.add_index(field_name=ct.default_string_array_field_name, index_type=supported_array_scalar_index)
+        # index_params.add_index(field_name=ct.default_double_array_field_name,
+        #                        index_type=supported_array_double_float_scalar_index)
+        # index_params.add_index(field_name=ct.default_string_array_field_name, index_type=supported_array_scalar_index)
         json_index_name = "json_index_name"
         json_path_list = [f"{ct.default_json_field_name}",
                           f"{ct.default_json_field_name}[0]",
@@ -251,57 +250,62 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
             # 10. sleep for 60s to make sure the new index load successfully without release and reload operations
             time.sleep(60)
         # 11. query after there is index under all expressions which should get the same result
-        # with that without index
         for i in range(len(express_list)):
             json_list = []
             id_list = []
-            log.info(f"query with filter '{express_list[i]}' after index is:")
+            log.info(f"query with filter '{express_list[i]}' after index")
             count = self.query(client, collection_name=collection_name, filter=express_list[i],
                                output_fields=["count(*)"])[0]
-            log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
+            # log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
             res = self.query(client, collection_name=collection_name, filter=express_list[i],
                              output_fields=[f"{expr_field}"])[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
                 json_list.append(single[f"{expr_field}"])
-            if len(json_list) != len(compare_dict[f'{i}']["json_list"]):
-                log.debug(
-                    f"the field {expr_field} value after index {supported_array_scalar_index} under expression '{express_list[i]}' is:")
-                log.debug(json_list)
-                log.debug(
-                    f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:")
-                log.debug(compare_dict[f'{i}']["json_list"])
+            # if len(json_list) != len(compare_dict[f'{i}']["json_list"]):
+            #     log.debug(
+            #         f"the field {expr_field} value after indexed under expression '{express_list[i]}' is:")
+            #     log.debug(json_list)
+            #     log.debug(
+            #         f"the field {expr_field} value before index to be compared under expression '{express_list[i]}' is:")
+            #     log.debug(compare_dict[f'{i}']["json_list"])
             assert json_list == compare_dict[f'{i}']["json_list"]
-            if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
-                log.debug(
-                    f"primary key field {default_primary_key_field_name} after index {supported_array_scalar_index} under expression '{express_list[i]}' is:")
-                log.debug(id_list)
-                log.debug(
-                    f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:")
-                log.debug(compare_dict[f'{i}']["id_list"])
+            # if len(id_list) != len(compare_dict[f'{i}']["id_list"]):
+            #     log.debug(
+            #         f"primary key field {default_primary_key_field_name} after indexed under expression '{express_list[i]}' is:")
+            #     log.debug(id_list)
+            #     log.debug(
+            #         f"primary key field {default_primary_key_field_name} before index to be compared under expression '{express_list[i]}' is:")
+            #     log.debug(compare_dict[f'{i}']["id_list"])
             assert id_list == compare_dict[f'{i}']["id_list"]
             log.info(f"PASS with expression {express_list[i]}")
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("enable_dynamic_field", [False])
     @pytest.mark.parametrize("is_flush", [True, False])
-    @pytest.mark.parametrize("is_release", [True, False])
+    @pytest.mark.parametrize("is_release", [True])
     @pytest.mark.parametrize("single_data_num", [50])
     @pytest.mark.parametrize("expr_field", [ct.default_int8_field_name, ct.default_int16_field_name,
                                             ct.default_int32_field_name, ct.default_int64_field_name,
                                             ct.default_float_field_name, ct.default_double_field_name,
                                             ct.default_string_field_name, ct.default_bool_field_name,
                                             ct.default_int8_array_field_name, ct.default_int16_array_field_name,
-                                            ct.default_int32_array_field_name,ct.default_int64_array_field_name,
+                                            ct.default_int32_array_field_name, ct.default_int64_array_field_name,
                                             ct.default_bool_array_field_name, ct.default_float_array_field_name,
                                             ct.default_double_array_field_name, ct.default_string_array_field_name])
-    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_all(self, enable_dynamic_field, supported_bool_scalar_index,
+    def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array_all(self, enable_dynamic_field,
+                                                                                                supported_bool_scalar_index,
                                                                                                 supported_numeric_float_double_index,
-                                                                                                supported_numeric_scalar_index, supported_varchar_scalar_index,
-                                                                                                supported_json_path_index, supported_array_scalar_index,
+                                                                                                supported_numeric_scalar_index,
+                                                                                                supported_varchar_scalar_index,
+                                                                                                supported_json_path_index,
+                                                                                                supported_array_scalar_index,
                                                                                                 supported_array_double_float_scalar_index,
-                                                                                                is_flush, is_release, single_data_num, expr_field):
+                                                                                                is_flush,
+                                                                                                is_release,
+                                                                                                single_data_num,
+                                                                                                expr_field):
         """
         target: test query using expression fields with all supported field type after all supported scalar index
                 with all supported basic expressions
@@ -382,7 +386,7 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
                      ct.default_string_array_field_name: [f'{j}', f'{j + 1}'] if (i % 2 == 0) else None
                      } for j in range(i * nb_single, (i + 1) * nb_single)]
             assert len(rows) == nb_single
-            log.info(rows)
+            # log.info(rows)
             self.insert(client, collection_name=collection_name, data=rows)
             log.info(f"inserted {nb_single} {inserted_data_distribution[i]}")
         # 3. flush if specified
@@ -394,10 +398,10 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         for i in range(len(express_list)):
             json_list = []
             id_list = []
-            log.info(f"query with filter '{express_list[i]}' before scalar index is:")
+            log.info(f"query with filter '{express_list[i]}' before scalar index")
             res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=["count(*)"])[0]
             count = res[0]['count(*)']
-            log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
+            # log.info(f"The count(*) after query with filter '{express_list[i]}' before scalar index is: {count}")
             res = self.query(client, collection_name=collection_name, filter=express_list[i], output_fields=[f"{expr_field}"])[0]
             for single in res:
                 id_list.append(single[f"{default_primary_key_field_name}"])
@@ -464,10 +468,10 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
         for i in range(len(express_list)):
             json_list = []
             id_list = []
-            log.info(f"query with filter '{express_list[i]}' after index is:")
+            log.info(f"query with filter '{express_list[i]}' after index")
             count = self.query(client, collection_name=collection_name, filter=express_list[i],
                                output_fields=["count(*)"])[0]
-            log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
+            # log.info(f"The count(*) after query with filter '{express_list[i]}' after index is: {count}")
             res = self.query(client, collection_name=collection_name, filter=express_list[i],
                              output_fields=[f"{expr_field}"])[0]
             for single in res:

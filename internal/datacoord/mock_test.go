@@ -197,6 +197,10 @@ func (m *mockMixCoord) AddCollectionField(ctx context.Context, req *milvuspb.Add
 	panic("implement me")
 }
 
+func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	panic("implement me")
+}
+
 func newMockMixCoord() *mockMixCoord {
 	return &mockMixCoord{state: commonpb.StateCode_Healthy}
 }

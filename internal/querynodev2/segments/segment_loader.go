@@ -259,7 +259,12 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		addBucketNameStorageV2(segmentInfo)
 	}
 
-	coll := loader.manager.Collection.Get(collectionID)
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		log.Warn("failed to get collection", zap.Error(err))
+		return nil, err
+	}
 
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
@@ -276,7 +281,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	var err error
 	var requestResourceResult requestResourceResult
 
-	if !isLazyLoad(coll, segmentType) {
+	if !isLazyLoad(collection, segmentType) {
 		// Check memory & storage limit
 		// no need to check resource for lazy load here
 		requestResourceResult, err = loader.requestResource(ctx, infos...)
@@ -299,13 +304,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		})
 		debug.FreeOSMemory()
 	}()
-
-	collection := loader.manager.Collection.Get(collectionID)
-	if collection == nil {
-		err := merr.WrapErrCollectionNotFound(collectionID)
-		log.Warn("failed to get collection", zap.Error(err))
-		return nil, err
-	}
 
 	for _, info := range infos {
 		loadInfo := info
@@ -1713,7 +1711,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 			}
 
 			// TODO add field info sync between segcore and go segment for storage v2
-			if loadInfo.GetStorageVersion() != 2 {
+			if loadInfo.GetStorageVersion() != storage.StorageV2 {
 				fieldInfo, ok := fieldInfos[info.GetFieldID()]
 				if !ok {
 					return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))

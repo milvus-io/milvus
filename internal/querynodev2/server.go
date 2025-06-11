@@ -70,6 +70,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -555,11 +556,14 @@ func (node *QueryNode) Stop() error {
 					channelNum      = 0
 				)
 				if node.manager != nil {
-					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
-					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutLevel(datapb.SegmentLevel_L0))
+					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing), segments.WithoutLevel(datapb.SegmentLevel_L0))
 				}
 				if node.pipelineManager != nil {
 					channelNum = node.pipelineManager.Num()
+				}
+				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
+					break outer
 				}
 
 				select {

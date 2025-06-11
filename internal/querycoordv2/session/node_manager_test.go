@@ -88,6 +88,58 @@ func (s *NodeManagerSuite) TestNodeInfo() {
 	s.NotNil(node.LastHeartbeat())
 }
 
+// TestCPUNumFunctionality tests the newly added CPU core number functionality
+func (s *NodeManagerSuite) TestCPUNumFunctionality() {
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost:19530",
+		Hostname: "test-host",
+	})
+
+	// Test initial CPU core number
+	s.Equal(int64(0), node.CPUNum())
+
+	// Test WithCPUNum option
+	node.UpdateStats(WithCPUNum(8))
+	s.Equal(int64(8), node.CPUNum())
+
+	// Test updating CPU core number
+	node.UpdateStats(WithCPUNum(16))
+	s.Equal(int64(16), node.CPUNum())
+
+	// Test multiple stats update including CPU core number
+	node.UpdateStats(
+		WithSegmentCnt(100),
+		WithChannelCnt(5),
+		WithMemCapacity(4096.0),
+		WithCPUNum(32),
+	)
+	s.Equal(int64(32), node.CPUNum())
+	s.Equal(100, node.SegmentCnt())
+	s.Equal(5, node.ChannelCnt())
+	s.Equal(4096.0, node.MemCapacity())
+}
+
+// TestMemCapacityFunctionality tests memory capacity related methods
+func (s *NodeManagerSuite) TestMemCapacityFunctionality() {
+	node := NewNodeInfo(ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost:19530",
+		Hostname: "test-host",
+	})
+
+	// Test initial memory capacity
+	s.Equal(float64(0), node.MemCapacity())
+
+	// Test WithMemCapacity option
+	node.UpdateStats(WithMemCapacity(1024.5))
+	s.Equal(1024.5, node.MemCapacity())
+
+	// Test updating memory capacity
+	node.UpdateStats(WithMemCapacity(2048.75))
+	s.Equal(2048.75, node.MemCapacity())
+}
+
 func TestNodeManagerSuite(t *testing.T) {
 	suite.Run(t, new(NodeManagerSuite))
 }

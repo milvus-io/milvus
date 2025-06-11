@@ -110,6 +110,14 @@ func (ga *GroupedAllocator) GetAllocator(name string) Allocator[string] {
 	return ga.children[name]
 }
 
+// Note: GroupedAllocator should notify its all children.
+func (ga *GroupedAllocator) notify() {
+	ga.SharedAllocator.notify()
+	for _, child := range ga.children {
+		child.notify()
+	}
+}
+
 type GroupedAllocatorBuilder struct {
 	ga GroupedAllocator
 }

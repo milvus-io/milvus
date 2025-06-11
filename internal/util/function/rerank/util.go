@@ -24,6 +24,8 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type PKType interface {
@@ -40,9 +42,9 @@ type columns struct {
 
 type rerankInputs struct {
 	// nqs,searchResultsIndex
-	data [][]*columns
-
-	nq int64
+	data         [][]*columns
+	idGroupValue map[any]any
+	nq           int64
 
 	// There is only fieldId in schemapb.SearchResultData, but no fieldName
 	inputFieldIds []int64
@@ -69,7 +71,7 @@ func organizeFieldIdData(multipSearchResultData []*schemapb.SearchResultData, in
 	return multipIdField, nil
 }
 
-func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputFieldIds []int64) (*rerankInputs, error) {
+func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputFieldIds []int64, isGrouping bool) (*rerankInputs, error) {
 	if len(multipSearchResultData) == 0 {
 		return &rerankInputs{}, nil
 	}
@@ -84,27 +86,34 @@ func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputF
 		cols[i] = make([]*columns, len(multipSearchResultData))
 	}
 	for retIdx, searchResult := range multipSearchResultData {
-		for _, fieldId := range inputFieldIds {
-			fieldData := multipIdField[retIdx][fieldId]
-			start := int64(0)
-			for i := int64(0); i < nq; i++ {
-				size := searchResult.Topks[i]
+		start := int64(0)
+		for i := int64(0); i < nq; i++ {
+			size := searchResult.Topks[i]
+			if cols[i][retIdx] == nil {
+				cols[i][retIdx] = &columns{}
+				cols[i][retIdx].size = size
+				cols[i][retIdx].ids = getIds(searchResult.Ids, start, size)
+				cols[i][retIdx].scores = searchResult.Scores[start : start+size]
+			}
+			for _, fieldId := range inputFieldIds {
+				fieldData := multipIdField[retIdx][fieldId]
 				d, err := getField(fieldData, start, size)
 				if err != nil {
 					return nil, err
 				}
-				if cols[i][retIdx] == nil {
-					cols[i][retIdx] = &columns{}
-					cols[i][retIdx].size = size
-					cols[i][retIdx].ids = getIds(searchResult.Ids, start, size)
-					cols[i][retIdx].scores = searchResult.Scores[start : start+size]
-				}
 				cols[i][retIdx].data = append(cols[i][retIdx].data, d)
-				start += size
 			}
+			start += size
 		}
 	}
-	return &rerankInputs{cols, nq, inputFieldIds}, nil
+	if isGrouping {
+		idGroup, err := genIdGroupingMap(multipSearchResultData)
+		if err != nil {
+			return nil, err
+		}
+		return &rerankInputs{cols, idGroup, nq, inputFieldIds}, nil
+	}
+	return &rerankInputs{cols, nil, nq, inputFieldIds}, nil
 }
 
 func (inputs *rerankInputs) numOfQueries() int64 {
@@ -116,9 +125,13 @@ type rerankOutputs struct {
 }
 
 func newRerankOutputs(searchParams *SearchParams) *rerankOutputs {
+	topk := searchParams.limit
+	if searchParams.isGrouping() {
+		topk = topk * searchParams.groupSize
+	}
 	ret := &schemapb.SearchResultData{
 		NumQueries: searchParams.nq,
-		TopK:       searchParams.limit,
+		TopK:       topk,
 		FieldsData: make([]*schemapb.FieldData, 0),
 		Scores:     []float32{},
 		Ids:        &schemapb.IDs{},
@@ -153,27 +166,10 @@ func appendResult[T PKType](outputs *rerankOutputs, ids []T, scores []float32) {
 }
 
 type IDScores[T PKType] struct {
-	// idScores map[T]float32
 	ids    []T
 	scores []float32
 	size   int64
 }
-
-// func (s *IDScores[T]) GetSortedIdScores() ([]T, []float32) {
-// 	ids := make([]T, 0, s.size)
-// 	big := func(i, j int) bool {
-// 		if s.idScores[ids[i]] == s.idScores[ids[j]] {
-// 			return ids[i] < ids[j]
-// 		}
-// 		return s.idScores[ids[i]] > s.idScores[ids[j]]
-// 	}
-// 	sort.Slice(ids, big)
-// 	scores := make([]float32, 0, s.size)
-// 	for _, id := range ids {
-// 		scores = append(scores, s.idScores[id])
-// 	}
-// 	return ids, scores
-// }
 
 func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams) *IDScores[T] {
 	ids := make([]T, 0, len(idScores))
@@ -207,6 +203,120 @@ func newIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams) *
 	}
 	ret.size = int64(len(ret.ids))
 	return &ret
+}
+
+func genIDGroupValueMap[T PKType]() map[T]any {
+	return nil
+}
+
+func groupScore[T PKType](group *Group[T], scorerType string) (float32, error) {
+	switch scorerType {
+	case maxScorer:
+		return group.maxScore, nil
+	case sumScorer:
+		return group.sumScore, nil
+	case avgScorer:
+		if len(group.idList) == 0 {
+			return 0, merr.WrapErrParameterInvalid(1, len(group.idList),
+				"input group for score must have at least one id, must be sth wrong within code")
+		}
+		return group.sumScore / float32(len(group.idList)), nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("input group scorer type: %s is not supported!", scorerType)
+	}
+}
+
+type Group[T PKType] struct {
+	idList     []T
+	scoreList  []float32
+	groupVal   any
+	maxScore   float32
+	sumScore   float32
+	finalScore float32
+}
+
+func newGroupingIDScores[T PKType](idScores map[T]float32, searchParams *SearchParams, idGroup map[any]any) (*IDScores[T], error) {
+	ids := make([]T, 0, len(idScores))
+	for id := range idScores {
+		ids = append(ids, id)
+	}
+
+	sort.Slice(ids, func(i, j int) bool {
+		if idScores[ids[i]] == idScores[ids[j]] {
+			return ids[i] < ids[j]
+		}
+		return idScores[ids[i]] > idScores[ids[j]]
+	})
+
+	buckets := make(map[interface{}]*Group[T])
+	for _, id := range ids {
+		score := idScores[id]
+		groupVal := idGroup[id]
+		if buckets[groupVal] == nil {
+			buckets[groupVal] = &Group[T]{
+				idList:    make([]T, 0),
+				scoreList: make([]float32, 0),
+				groupVal:  groupVal,
+			}
+		}
+		if int64(len(buckets[groupVal].idList)) >= searchParams.groupSize {
+			continue
+		}
+		buckets[groupVal].idList = append(buckets[groupVal].idList, id)
+		buckets[groupVal].scoreList = append(buckets[groupVal].scoreList, idScores[id])
+		if score > buckets[groupVal].maxScore {
+			buckets[groupVal].maxScore = score
+		}
+		buckets[groupVal].sumScore += score
+	}
+
+	groupList := make([]*Group[T], len(buckets))
+	idx := 0
+	var err error
+	for _, group := range buckets {
+		if group.finalScore, err = groupScore(group, searchParams.groupScore); err != nil {
+			return nil, err
+		}
+		groupList[idx] = group
+		idx += 1
+	}
+	sort.Slice(groupList, func(i, j int) bool {
+		if groupList[i].finalScore == groupList[j].finalScore {
+			if len(groupList[i].idList) == len(groupList[j].idList) {
+				// if final score and size of group are both equal
+				// choose the group with smaller first key
+				// here, it's guaranteed all group having at least one id in the idList
+				return groupList[i].idList[0] < groupList[j].idList[0]
+			}
+			// choose the larger group when scores are equal
+			return len(groupList[i].idList) > len(groupList[j].idList)
+		}
+		return groupList[i].finalScore > groupList[j].finalScore
+	})
+
+	if int64(len(groupList)) > searchParams.limit+searchParams.offset {
+		groupList = groupList[:searchParams.limit+searchParams.offset]
+	}
+
+	ret := IDScores[T]{
+		make([]T, 0, searchParams.limit),
+		make([]float32, 0, searchParams.limit),
+		0,
+	}
+	for index := int(searchParams.offset); index < len(groupList); index++ {
+		group := groupList[index]
+		for i, score := range group.scoreList {
+			// idList and scoreList must have same length
+			if searchParams.roundDecimal != -1 {
+				multiplier := math.Pow(10.0, float64(searchParams.roundDecimal))
+				score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
+			}
+			ret.scores = append(ret.scores, score)
+			ret.ids = append(ret.ids, group.idList[i])
+		}
+	}
+	ret.size = int64(len(ret.ids))
+	return &ret, nil
 }
 
 func getField(inputField *schemapb.FieldData, start int64, size int64) (any, error) {
@@ -298,4 +408,23 @@ func getPKType(collSchema *schemapb.CollectionSchema) (schemapb.DataType, error)
 		return pkType, fmt.Errorf("Collection %s can not found pk field", collSchema.Name)
 	}
 	return pkType, nil
+}
+
+func genIdGroupingMap(multipSearchResultData []*schemapb.SearchResultData) (map[any]any, error) {
+	idGroupValue := map[any]any{}
+	for _, result := range multipSearchResultData {
+		if result.GetGroupByFieldValue() == nil {
+			return nil, fmt.Errorf("Group value is nil")
+		}
+		size := typeutil.GetSizeOfIDs(result.Ids)
+		groupIter := typeutil.GetDataIterator(result.GetGroupByFieldValue())
+		for i := 0; i < size; i++ {
+			groupByVal := groupIter(i)
+			id := typeutil.GetPK(result.Ids, int64(i))
+			if _, exist := idGroupValue[id]; !exist {
+				idGroupValue[id] = groupByVal
+			}
+		}
+	}
+	return idGroupValue, nil
 }
