@@ -87,49 +87,44 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
                            DataType data_type);
 
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
-
-std::string
-GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
-
-std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
-
-std::string
-GenTextIndexPathIdentifier(int64_t build_id,
-                           int64_t index_version,
-                           int64_t segment_id,
-                           int64_t field_id);
-
-std::string
-GenTextIndexPathPrefix(ChunkManagerPtr cm,
-                       int64_t build_id,
+GenIndexPathIdentifier(int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
                        int64_t field_id);
 
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GetTextIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
+GenIndexPathPrefix(ChunkManagerPtr cm,
+                   int64_t build_id,
+                   int64_t index_version,
+                   int64_t segment_id,
+                   int64_t field_id,
+                   bool is_temp);
 
-std::string
-GenJsonKeyIndexPathIdentifier(int64_t build_id,
-                              int64_t index_version,
-                              int64_t collection_id,
-                              int64_t partition_id,
-                              int64_t segment_id,
-                              int64_t field_id);
 
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                          int64_t build_id,
-                          int64_t index_version,
-                          int64_t collection_id,
-                          int64_t partition_id,
-                          int64_t segment_id,
-                          int64_t field_id);
+GenTextIndexPathPrefix(
+    ChunkManagerPtr cm,
+    int64_t build_id,
+    int64_t index_version,
+    int64_t segment_id,
+    int64_t field_id,
+    bool is_temp);
 
+
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
+GenJsonKeyIndexPathPrefix(
+    ChunkManagerPtr cm,
+    int64_t build_id,
+    int64_t index_version,
+    int64_t segment_id,
+    int64_t field_id,
+    bool is_temp);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
