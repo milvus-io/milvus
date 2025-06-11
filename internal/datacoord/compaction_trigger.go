@@ -333,6 +333,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 	}
 
+	log.Info("handleSignal receive")
 	groups, err := t.getCandidates(signal)
 	if err != nil {
 		log.Warn("handle signal failed, get candidates return error", zap.Error(err))
