@@ -54,7 +54,7 @@ func (t *mixCompactionTask) GetTaskSlot() int64 {
 	if slotUsage == 0 {
 		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
-			segment := t.meta.GetHealthySegment(context.TODO(), t.GetTaskProto().GetInputSegments()[0])
+			segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
 			if segment != nil {
 				slotUsage = calculateStatsTaskSlot(segment.getSegmentSize())
 			}
@@ -224,6 +224,13 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	// Apply metrics after successful meta update.
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
 	metricMutation.commit()
+	for _, newSegID := range newSegmentIDs {
+		select {
+		case getBuildIndexChSingleton() <- newSegID:
+		default:
+		}
+	}
+
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
 	if err != nil {
 		log.Warn("mixCompaction failed to setState meta saved", zap.Error(err))
