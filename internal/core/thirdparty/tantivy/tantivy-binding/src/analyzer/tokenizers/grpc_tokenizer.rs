@@ -1,5 +1,9 @@
 use std::vec::Vec;
+use std::sync::{Arc,Mutex};
+use std::collections::HashMap;
 use serde_json as json;
+use once_cell::sync::Lazy;
+use tokio::runtime::{Runtime};
 use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
 use crate::error::TantivyBindingError;
 
@@ -10,8 +14,6 @@ pub mod tokenizer {
 use tokenizer::tokenizer_client::TokenizerClient;
 use tokenizer::tokenization_request::Parameter;
 use tokenizer::TokenizationRequest;
-use once_cell::sync::Lazy;
-use tokio::runtime::Runtime;
 
 static TOKIO_RT: Lazy<Runtime> = Lazy::new(|| {
     Runtime::new().expect("Failed to create Tokio runtime")
@@ -19,6 +21,7 @@ static TOKIO_RT: Lazy<Runtime> = Lazy::new(|| {
 
 #[derive(Clone)]
 pub struct GrpcTokenizer {
+    token_cache: Arc<Mutex<HashMap<String, Vec<Token>>>>,
     endpoint: String,
     parameters: Vec<Parameter>,
 }
@@ -48,6 +51,36 @@ impl TokenStream for GrpcTokenStream {
 
     fn token_mut(&mut self) -> &mut Token {
         &mut self.tokens[self.index - 1]
+    }
+}
+
+async fn grpc_tokenize_async(
+    endpoint: String,
+    text: String,
+    parameters: Vec<Parameter>,
+) -> Option<Vec<Token>> {
+    let mut client = TokenizerClient::connect(endpoint).await.ok()?;
+    let request = tonic::Request::new(TokenizationRequest {
+        text: text.clone(),
+        parameters,
+    });
+
+    match client.tokenize(request).await {
+        Ok(response) => {
+            let response = response.into_inner();
+            let tokens = response.tokens.into_iter().map(|t| Token {
+                offset_from: t.offset_from as usize,
+                offset_to: t.offset_to as usize,
+                position: t.position as usize,
+                text: t.text,
+                position_length: t.position_length as usize,
+            }).collect();
+            Some(tokens)
+        }
+        Err(e) => {
+            eprintln!("gRPC request failed: {}", e);
+            None
+        }
     }
 }
 
@@ -126,55 +159,45 @@ impl GrpcTokenizer {
         }
 
         Ok(GrpcTokenizer {
+            token_cache: Arc::new(Mutex::new(HashMap::new())),
             endpoint: endpoint.to_string(),
             parameters: parameters,
         })
     }
 
+    fn poll_tokens(&self, text: &str) -> Option<Vec<Token>> {
+        let mut cache = self.token_cache.lock().unwrap();
+        cache.get(text).cloned()
+    }
+
     fn tokenize(&self, text: &str) -> Vec<Token> {
-        let request = tonic::Request::new(TokenizationRequest {
-            text: text.to_string(),
-            parameters: self.parameters.clone(),
-        });
+        let newtext = text.to_string();
+        let endpoint = self.endpoint.clone();
+        let parameters = self.parameters.clone();
+        let cache = self.token_cache.clone();
 
         // gRPC client works asynchronously using the Tokio runtime.
         // It requires the Tokio runtime to create a gRPC client and send requests.
         // Use the Tokio runtime to send gRPC requests asynchronously and wait for responses.
-        let response = TOKIO_RT.block_on(async {
-            let mut client = match TokenizerClient::connect(self.endpoint.clone()).await {
-                Ok(client) => client,
-                Err(e) => {
-                    eprintln!("gRPC tokenizer connect error: {}", e);
-                    return None;
-                }
-            };
-            match client.tokenize(request).await {
-                Ok(resp) => Some(resp),
-                Err(e) => {
-                    eprintln!("gRPC tokenizer request error: {}", e);
-                    None
-                }
+        TOKIO_RT.spawn(async move {
+            if let Some(tokens) = grpc_tokenize_async(endpoint, newtext.clone(), parameters).await {
+                let mut guard = cache.lock().unwrap();
+                guard.insert(newtext, tokens);
+            } else {
+                let mut guard = cache.lock().unwrap();
+                // If the gRPC call fails, we can still insert an empty vector to avoid repeated calls
+                eprintln!("gRPC call failed for text: {}", newtext);
+                guard.insert(newtext, vec![]);
             }
         });
 
-        let response = match response {
-            Some(resp) => resp,
-            None => return vec![],
-        };
-
-        let ori_tokens = response.into_inner().tokens;
-        let mut tokens = Vec::with_capacity(ori_tokens.len());
-
-        for token in ori_tokens {
-            tokens.push(Token {
-                offset_from: token.offset_from as usize,
-                offset_to: token.offset_to as usize,
-                position: token.position as usize,
-                text: token.text,
-                position_length: (token.offset_to - token.offset_from) as usize,
-            });
+        loop {
+            if let Some(tokens) = self.poll_tokens(text) {
+                return tokens;
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
-        tokens
     }
 }
 

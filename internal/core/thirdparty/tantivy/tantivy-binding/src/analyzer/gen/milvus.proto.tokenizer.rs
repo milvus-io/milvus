@@ -31,6 +31,8 @@ pub struct Token {
     pub offset_to: i32,
     #[prost(int32, tag = "4")]
     pub position: i32,
+    #[prost(int32, tag = "5")]
+    pub position_length: i32,
 }
 /// Generated client implementations.
 pub mod tokenizer_client {
