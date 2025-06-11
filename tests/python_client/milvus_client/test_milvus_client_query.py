@@ -160,7 +160,6 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #41702")
     def test_milvus_client_query_output_fields_dynamic_name(self):
         """
         target: test query (high level api) normal case
@@ -197,11 +196,10 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         res = self.query(client, collection_name, filter=default_search_exp,
                          output_fields=[f'$meta["{default_string_field_name}"]'],
                          check_task=CheckTasks.check_query_results,
-                         check_items={exp_res: rows,
+                         check_items={exp_res: [{"id": item["id"]} for item in rows],
                                       "with_vec": True,
                                       "pk_name": default_primary_key_field_name})[0]
-        assert set(res[0].keys()) == {default_primary_key_field_name, default_vector_field_name,
-                                      default_float_field_name, default_string_field_name}
+        assert set(res[0].keys()) == {default_primary_key_field_name}
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -624,7 +622,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
             self.flush(client, collection_name)
         # 4. query when there is no json path index under all expressions
         # skip negative expression for issue 40685
-        #  "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
+        # "my_json['a'] != 1", "my_json['a'] != 1.0", "my_json['a'] != '1'", "my_json['a'] != 1.1", "my_json['a'] not in [1]"
         express_list = cf.gen_json_field_expressions_all_single_operator()
         compare_dict = {}
         for i in range(len(express_list)):
