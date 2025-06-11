@@ -270,6 +270,7 @@ type commonConfig struct {
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
 	StoragePathPrefix         ParamItem `refreshable:"false"`
+	StorageZstdConcurrency    ParamItem `refreshable:"false"`
 	TTMsgEnabled              ParamItem `refreshable:"true"`
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
@@ -825,6 +826,17 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "",
 	}
 	p.StoragePathPrefix.Init(base.mgr)
+
+	p.StorageZstdConcurrency = ParamItem{
+		Key:          "common.storage.zstd.concurrency",
+		Version:      "2.6.0",
+		DefaultValue: "1",
+		Doc: `The number of concurrent zstd compress threads for one binlog generation, 0 means use all cores.
+Every concurrent zstd compress thread will use additional memory.
+The default value is 1, which is enough for most cases.`,
+		Export: false,
+	}
+	p.StorageZstdConcurrency.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",
