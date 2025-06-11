@@ -1677,7 +1677,8 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 }
 
 bool
-ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
+ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
+                                                 int64_t num_rows) {
     if (col_index_meta_ == nullptr || !col_index_meta_->HasFiled(field_id)) {
         return false;
     }
@@ -1721,12 +1722,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         return false;
     }
     try {
-        // get binlog data and meta
-        int64_t row_count;
-        {
-            std::shared_lock lck(mutex_);
-            row_count = num_rows_.value();
-        }
+        int64_t row_count = num_rows;
 
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
@@ -1859,7 +1855,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         insert_record_.seal_pks();
     }
 
-    bool generated_interim_index = generate_interim_index(field_id);
+    bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
     std::unique_lock lck(mutex_);
     set_bit(field_data_ready_bitset_, field_id, true);
