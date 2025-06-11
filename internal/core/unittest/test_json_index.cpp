@@ -24,6 +24,7 @@
 #include "segcore/Types.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 #include <gtest/gtest.h>
@@ -140,9 +141,10 @@ TEST(JsonIndexTest, TestJsonContains) {
     segcore::LoadIndexInfo load_index_info;
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
     load_index_info.index_params = {{JSON_PATH, json_path},
                                     {JSON_CAST_TYPE, "ARRAY_DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     segment->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
