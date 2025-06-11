@@ -276,7 +276,7 @@ class VectorArrayView {
                 return reinterpret_cast<VectorElement*>(data_) + index * dim_;
             }
             default: {
-                // TODO(SpadeA): add other vector types
+                // TODO(SpadeA): add other vector types.
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
