@@ -227,7 +227,7 @@ GroupChunkTranslator::load_group_chunk(
 
             auto file =
                 File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-            auto chunk = create_chunk(field_meta, dim, file, 0, array_vec);
+            chunk = create_chunk(field_meta, dim, file, 0, array_vec);
             auto ok = unlink(filepath.c_str());
             AssertInfo(
                 ok == 0,
