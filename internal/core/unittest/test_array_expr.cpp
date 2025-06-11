@@ -568,8 +568,10 @@ TEST(Expr, TestArrayRange) {
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
-        auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_bool_array_col =
+            raw_data.get_col<ScalarFieldProto>(bool_array_fid);
         auto new_string_array_col =
             raw_data.get_col<ScalarFieldProto>(string_array_fid);
         auto new_float_array_col =
@@ -721,7 +723,8 @@ TEST(Expr, TestArrayEqual) {
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
         long_array_col.insert(long_array_col.end(),
                               new_long_array_col.begin(),
                               new_long_array_col.end());
@@ -826,7 +829,8 @@ TEST(Expr, TestArrayNullExpr) {
 
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter, 0, 1, 3);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
         long_array_col.insert(long_array_col.end(),
                               new_long_array_col.begin(),
                               new_long_array_col.end());
@@ -993,9 +997,12 @@ TEST(Expr, TestArrayContains) {
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_int_array_col = raw_data.get_col<ScalarFieldProto>(int_array_fid);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
-        auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
+        auto new_int_array_col =
+            raw_data.get_col<ScalarFieldProto>(int_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_bool_array_col =
+            raw_data.get_col<ScalarFieldProto>(bool_array_fid);
         auto new_float_array_col =
             raw_data.get_col<ScalarFieldProto>(float_array_fid);
         auto new_double_array_col =
@@ -1516,8 +1523,10 @@ TEST(Expr, TestArrayBinaryArith) {
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_int_array_col = raw_data.get_col<ScalarFieldProto>(int_array_fid);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_int_array_col =
+            raw_data.get_col<ScalarFieldProto>(int_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
         auto new_float_array_col =
             raw_data.get_col<ScalarFieldProto>(float_array_fid);
         auto new_double_array_col =
@@ -2585,8 +2594,10 @@ TEST(Expr, TestArrayInTerm) {
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
-        auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_bool_array_col =
+            raw_data.get_col<ScalarFieldProto>(bool_array_fid);
         auto new_float_array_col =
             raw_data.get_col<ScalarFieldProto>(float_array_fid);
         auto new_string_array_col =
@@ -2802,7 +2813,8 @@ TEST(Expr, TestTermInArray) {
     int num_iters = 1;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+        auto new_long_array_col =
+            raw_data.get_col<ScalarFieldProto>(long_array_fid);
         array_cols["long"].insert(array_cols["long"].end(),
                                   new_long_array_col.begin(),
                                   new_long_array_col.end());

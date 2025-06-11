@@ -2296,7 +2296,8 @@ TEST(Sealed, QueryVectorArrayAllFields) {
     int64_t dim = 128;
     auto dataset = DataGen(schema, dataset_size);
     auto segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
-    auto segment = dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
     auto int64_values = dataset.get_col<int64_t>(int64_field);
     auto array_vec_values = dataset.get_col<VectorFieldProto>(array_vec);
