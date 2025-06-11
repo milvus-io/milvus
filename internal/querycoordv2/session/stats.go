@@ -20,6 +20,7 @@ type stats struct {
 	segmentCnt      int
 	channelCnt      int
 	memCapacityInMB float64
+	CPUNum          int64
 }
 
 func (s *stats) setSegmentCnt(cnt int) {
@@ -44,6 +45,14 @@ func (s *stats) setMemCapacity(capacity float64) {
 
 func (s *stats) getMemCapacity() float64 {
 	return s.memCapacityInMB
+}
+
+func (s *stats) setCPUNum(num int64) {
+	s.CPUNum = num
+}
+
+func (s *stats) getCPUNum() int64 {
+	return s.CPUNum
 }
 
 func newStats() stats {
