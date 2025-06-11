@@ -322,11 +322,32 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		log.Warn(msg, zap.Error(err))
 		return merr.Status(err), nil
 	}
-	position := &msgpb.MsgPosition{
-		ChannelName: channel.SeekPosition.ChannelName,
-		MsgID:       channel.SeekPosition.MsgID,
-		Timestamp:   channel.SeekPosition.Timestamp,
+
+	var position *msgpb.MsgPosition
+	if channel.GetSeekPosition().GetTimestamp() > channel.GetDeleteCheckpoint().GetTimestamp() {
+		msg := "channel seek position is greater than delete checkpoint, use delete checkpoint to seek"
+		log.Info(msg,
+			zap.Time("seekPosition", tsoutil.PhysicalTime(channel.GetSeekPosition().GetTimestamp())),
+			zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(channel.GetDeleteCheckpoint().GetTimestamp())),
+		)
+		position = &msgpb.MsgPosition{
+			ChannelName: channel.DeleteCheckpoint.ChannelName,
+			MsgID:       channel.DeleteCheckpoint.MsgID,
+			Timestamp:   channel.DeleteCheckpoint.Timestamp,
+		}
+	} else {
+		msg := "channel seek position is smaller than delete checkpoint, use seek position to seek"
+		log.Info(msg,
+			zap.Time("seekPosition", tsoutil.PhysicalTime(channel.GetSeekPosition().GetTimestamp())),
+			zap.Time("deleteCheckpoint", tsoutil.PhysicalTime(channel.GetDeleteCheckpoint().GetTimestamp())),
+		)
+		position = &msgpb.MsgPosition{
+			ChannelName: channel.SeekPosition.ChannelName,
+			MsgID:       channel.SeekPosition.MsgID,
+			Timestamp:   channel.SeekPosition.Timestamp,
+		}
 	}
+
 	err = pipeline.ConsumeMsgStream(ctx, position)
 	if err != nil {
 		err = merr.WrapErrServiceUnavailable(err.Error(), "InitPipelineFailed")

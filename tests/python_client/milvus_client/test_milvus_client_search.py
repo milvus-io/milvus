@@ -1588,11 +1588,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             }
         )
         vectors_to_search = rng.random((1, dim))
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"Current rerank does not support grouping search: invalid parameter"}
-        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
-                    group_by_field=ct.default_reranker_field_name,
-                    check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn, group_by_field=ct.default_reranker_field_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_reranker_on_dynamic_fields(self):

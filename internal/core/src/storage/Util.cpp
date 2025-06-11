@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
+#include "arrow/array/builder_nested.h"
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "fmt/format.h"

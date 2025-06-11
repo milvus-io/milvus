@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -2822,4 +2823,31 @@ func TestJsonIndex(t *testing.T) {
 	}
 	resp, err = s.CreateIndex(context.Background(), req)
 	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// test json flat index
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "h",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_JSON))}, {Key: common.JSONPathKey, Value: "json[\"a\"][\"b\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// test json flat index with dynamic field
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     2,
+		IndexName:   "i",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_JSON))}, {Key: common.JSONPathKey, Value: "dynamic"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+	// duplicated json flat index
+	req = &indexpb.CreateIndexRequest{
+		FieldID:     0,
+		IndexName:   "a",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.JSONCastTypeKey, Value: strconv.Itoa(int(schemapb.DataType_JSON))}, {Key: common.JSONPathKey, Value: "json[\"a\"]"}},
+	}
+	resp, err = s.CreateIndex(context.Background(), req)
+	assert.Error(t, merr.CheckRPCCall(resp, err))
 }
