@@ -281,7 +281,6 @@ class ResponseChecker:
                 assert dim_list[0] == dim_list_expected
             else:
                 assert dim_list == dim_list_expected
-            assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
         if check_items.get("nullable_fields", None) is not None:
             nullable_fields = check_items.get("nullable_fields")
             if not isinstance(nullable_fields, list):

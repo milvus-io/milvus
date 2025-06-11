@@ -239,8 +239,6 @@ CreateIndex(CIndex* res_index,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
-        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
                 field_type, config, fileManagerContext);

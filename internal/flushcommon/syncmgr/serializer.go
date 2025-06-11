@@ -143,3 +143,9 @@ func (p *SyncPack) WithDataSource(source string) *SyncPack {
 	p.dataSource = source
 	return p
 }
+
+func (p *SyncPack) ReleaseData() {
+	p.insertData = nil
+	p.deltaData = nil
+	p.bm25Stats = nil
+}

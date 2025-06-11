@@ -64,7 +64,7 @@ TEST(storage, InsertDataBoolNullable) {
     FixedVector<bool> data = {true, false, false, false, true};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::BOOL, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
 
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
@@ -131,7 +131,7 @@ TEST(storage, InsertDataInt8Nullable) {
     FixedVector<int8_t> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT8, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -195,7 +195,7 @@ TEST(storage, InsertDataInt16Nullable) {
     FixedVector<int16_t> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT16, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -259,7 +259,7 @@ TEST(storage, InsertDataInt32Nullable) {
     FixedVector<int32_t> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT32, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -323,7 +323,7 @@ TEST(storage, InsertDataInt64Nullable) {
     FixedVector<int64_t> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT64, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -393,7 +393,7 @@ TEST(storage, InsertDataStringNullable) {
         "test1", "test2", "test3", "test4", "test5"};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::STRING, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -460,7 +460,7 @@ TEST(storage, InsertDataFloatNullable) {
     FixedVector<float> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::FLOAT, true);
-    std::array<uint8_t, 1> valid_data = {0x13};
+    std::array<uint8_t, 1> valid_data = {0xF3};
     field_data->FillFieldData(data.data(), valid_data.data(), data.size());
 
     auto payload_reader =
@@ -523,7 +523,7 @@ TEST(storage, InsertDataDoubleNullable) {
     FixedVector<double> data = {1, 2, 3, 4, 5};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::DOUBLE, true);
-    uint8_t* valid_data = new uint8_t[1]{0x13};
+    uint8_t* valid_data = new uint8_t[1]{0xF3};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -774,7 +774,7 @@ TEST(storage, InsertDataStringArrayNullable) {
     FixedVector<Array> data = {string_array, int_array};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::ARRAY, true);
-    uint8_t* valid_data = new uint8_t[1]{0x01};
+    uint8_t* valid_data = new uint8_t[1]{0xFD};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -812,7 +812,7 @@ TEST(storage, InsertDataJsonNullable) {
                               Json(simdjson::padded_string(std::string("A")))};
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::JSON, true);
-    uint8_t* valid_data = new uint8_t[1]{0x00};
+    uint8_t* valid_data = new uint8_t[1]{0xFC};
     field_data->FillFieldData(data.data(), valid_data, data.size());
 
     auto payload_reader =
@@ -842,7 +842,7 @@ TEST(storage, InsertDataJsonFillWithNull) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::JSON, true);
     int64_t size = 2;
-    uint8_t* valid_data = new uint8_t[1]{0x00};
+    uint8_t* valid_data = new uint8_t[1]{0xFC};
     field_data->FillFieldData(std::nullopt, size);
 
     auto payload_reader =

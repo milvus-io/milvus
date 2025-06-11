@@ -537,6 +537,14 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}, nil
 }
 
+func getGroupScorerStr(params []*commonpb.KeyValuePair) string {
+	groupScorerStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RankGroupScorer, params)
+	if err != nil {
+		groupScorerStr = MaxScorer
+	}
+	return groupScorerStr
+}
+
 func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest {
 	ret := &milvuspb.SearchRequest{
 		Base:                  req.GetBase(),

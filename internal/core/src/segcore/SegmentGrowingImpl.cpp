@@ -1197,7 +1197,7 @@ void
 SegmentGrowingImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(mutex_);
 
-    auto absent_fields = sch->absent_fields(*schema_);
+    auto absent_fields = sch->AbsentFields(*schema_);
 
     for (const auto& field_meta : *absent_fields) {
         fill_empty_field(field_meta);

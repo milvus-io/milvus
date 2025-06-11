@@ -459,7 +459,22 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		fixedSizeSerializer,
+		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
+			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
+				if vv, ok := v.([]byte); ok {
+					builder.Append(vv)
+					return true
+				} else if vv, ok := v.([]int8); ok {
+					builder.Append(arrow.Int8Traits.CastToBytes(vv))
+					return true
+				}
+			}
+			return false
+		},
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
 		func(i int) arrow.DataType {

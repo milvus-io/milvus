@@ -38,7 +38,7 @@ def get_chaos_info():
         with open(constants.CHAOS_INFO_SAVE_PATH, 'r') as f:
             chaos_info = json.load(f)
     except Exception as e:
-        log.warn(f"get_chaos_info error: {e}")
+        log.warning(f"get_chaos_info error: {e}")
         return None
     return chaos_info
 

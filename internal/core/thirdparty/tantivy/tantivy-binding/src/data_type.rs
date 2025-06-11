@@ -8,4 +8,5 @@ pub enum TantivyDataType {
     I64,
     F64,
     Bool,
+    JSON,
 }

@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
+#include "arrow/array/builder_nested.h"
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "fmt/format.h"
@@ -343,7 +344,11 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
             return std::make_shared<arrow::BooleanScalar>(
                 default_value.bool_data());
         case DataType::INT8:
+            return std::make_shared<arrow::Int8Scalar>(
+                default_value.int_data());
         case DataType::INT16:
+            return std::make_shared<arrow::Int16Scalar>(
+                default_value.int_data());
         case DataType::INT32:
             return std::make_shared<arrow::Int32Scalar>(
                 default_value.int_data());

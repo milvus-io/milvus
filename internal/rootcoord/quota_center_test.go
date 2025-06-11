@@ -1734,6 +1734,14 @@ func TestCheckDiskQuota(t *testing.T) {
 			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(4, 40, 400), configQuotaValue)
 		}
 	})
+
+	t.Run("get quota center metrics", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		quotaCenter := newQuotaCenterForTesting(t, ctx, meta)
+		metrics := quotaCenter.getQuotaMetrics()
+		assert.Equal(t, commonpb.ErrorCode_Success, metrics.Status.ErrorCode)
+		assert.NotEqual(t, "", metrics.MetricsInfo)
+	})
 }
 
 func TestTORequestLimiter(t *testing.T) {

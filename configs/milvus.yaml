@@ -173,7 +173,7 @@ mq:
   pursuitBufferTime: 60 # pursuit mode buffer time in seconds
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
-    mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
+    mergeCheckInterval: 0.1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
@@ -187,22 +187,22 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2GB # Maximum entries count of a segment, default is 2GB
+      maxSize: 128M # Maximum entries count of a segment, default is 128M
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
-    logFileSyncPolicy:
+    segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
-      maxBytes: 64M # Maximum size of write buffer in bytes.
-      maxEntries: 100000 # Maximum entries number of write buffer.
+      maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
+      maxBytes: 32M # Maximum size of write buffer in bytes.
+      maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
       maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
       maxFlushThreads: 4 # Maximum number of threads to flush data
-    fragmentManager:
-      maxBytes: 512M # Maximum size of fragment cached data in bytes.
-      maxInterval: 1s # Maximum interval between two fragment evicts. default is 1 second
+    segmentCompactionPolicy:
+      maxSize: 8M # The maximum size of the merged files, default is 8M.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
@@ -302,6 +302,10 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
+  # maximum number of result entries, typically Nq * TopK * GroupSize. 
+  # It costs additional memory and time to process a large number of result entries. 
+  # If the number of result entries exceeds this limit, the search will be rejected.
+  maxResultEntries: 1000000
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -737,7 +741,8 @@ dataNode:
   import:
     maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
-    readBufferSizeInMB: 16 # The data block size (in MB) read from chunk manager by the datanode during import.
+    readBufferSizeInMB: 64 # The insert buffer size (in MB) during import.
+    readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     maxTaskSlotNum: 16 # The maximum number of slots occupied by each import/pre-import task.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
@@ -1198,6 +1203,9 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+    # The timeout of wal balancer operation, 10s by default.
+    # If the operation exceeds this timeout, it will be canceled.
+    operationTimeout: 10s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:
