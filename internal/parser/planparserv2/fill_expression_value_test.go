@@ -265,16 +265,19 @@ func (s *FillExpressionValueSuite) TestBinaryRange() {
 func (s *FillExpressionValueSuite) TestBinaryArithOpEvalRange() {
 	s.Run("normal case", func() {
 		testcases := []testcase{
-			{`Int64Field + 5.5 == 10.5`, nil},
+			{`Int64Field + 5 == 10`, nil},
 			{`Int64Field - {offset} >= {target}`, map[string]*schemapb.TemplateValue{
-				"offset": generateTemplateValue(schemapb.DataType_Double, 3.5),
-				"target": generateTemplateValue(schemapb.DataType_Double, 11.5),
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
-			{`Int64Field * 3.5 <= {target}`, map[string]*schemapb.TemplateValue{
-				"target": generateTemplateValue(schemapb.DataType_Double, 11.5),
+			{`Int64Field * 3 <= {target}`, map[string]*schemapb.TemplateValue{
+				"target": generateTemplateValue(schemapb.DataType_Int64, int64(11)),
 			}},
-			{`Int64Field / {offset} > 11.5`, map[string]*schemapb.TemplateValue{
-				"offset": generateTemplateValue(schemapb.DataType_Double, 3.5),
+			{`Int64Field / {offset} > 11`, map[string]*schemapb.TemplateValue{
+				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(3)),
+			}},
+			{`FloatField / {offset} > 11.3`, map[string]*schemapb.TemplateValue{
+				"offset": generateTemplateValue(schemapb.DataType_Double, 3.3),
 			}},
 			{`ArrayField[0] % {offset} < 11`, map[string]*schemapb.TemplateValue{
 				"offset": generateTemplateValue(schemapb.DataType_Int64, int64(3)),

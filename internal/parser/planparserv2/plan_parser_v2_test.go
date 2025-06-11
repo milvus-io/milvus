@@ -347,11 +347,8 @@ func TestExpr_castValue(t *testing.T) {
 
 	exprStr := `Int64Field + 1.1 == 2.1`
 	expr, err := ParseExpr(helper, exprStr, nil)
-	assert.NoError(t, err, exprStr)
-	assert.NotNil(t, expr, exprStr)
-	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr())
-	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetRightOperand().GetFloatVal())
-	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetValue().GetFloatVal())
+	assert.Error(t, err, exprStr)
+	assert.Nil(t, expr, exprStr)
 
 	exprStr = `FloatField +1 == 2`
 	expr, err = ParseExpr(helper, exprStr, nil)
@@ -383,6 +380,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`ArrayField[0] % 19 >= 20`,
 		`JSONField + 15 == 16`,
 		`15 + JSONField == 16`,
+		`Int64Field + (2**3) > 0`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -392,6 +390,11 @@ func TestExpr_BinaryArith(t *testing.T) {
 	unsupported := []string{
 		`ArrayField + 15 == 16`,
 		`15 + ArrayField == 16`,
+		`Int64Field + 1.1 = 2.1`,
+		`Int64Field == 2.1`,
+		`Int64Field >= 2.1`,
+		`3 > Int64Field >= 2.1`,
+		`Int64Field + (2**-1) > 0`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
