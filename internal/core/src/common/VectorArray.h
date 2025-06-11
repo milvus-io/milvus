@@ -52,7 +52,7 @@ class VectorArray : public milvus::VectorTrait {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          vector_field.data_case());
+                          static_cast<int>(vector_field.data_case()));
             }
         }
     }
@@ -116,7 +116,7 @@ class VectorArray : public milvus::VectorTrait {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
     }
@@ -139,7 +139,7 @@ class VectorArray : public milvus::VectorTrait {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
     }
@@ -159,7 +159,7 @@ class VectorArray : public milvus::VectorTrait {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
         return vector_field;
@@ -219,7 +219,7 @@ class VectorArray : public milvus::VectorTrait {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
     }
@@ -279,7 +279,7 @@ class VectorArrayView {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
     }
@@ -299,7 +299,7 @@ class VectorArrayView {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
         return vector_array;
@@ -334,7 +334,7 @@ class VectorArrayView {
                 // TODO(SpadeA): add other vector types
                 PanicInfo(NotImplemented,
                           "Not implemented vector type: {}",
-                          element_type_);
+                          static_cast<int>(element_type_));
             }
         }
     }
