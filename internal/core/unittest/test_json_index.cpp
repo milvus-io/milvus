@@ -236,7 +236,8 @@ TEST(JsonIndexTest, TestJsonCast) {
     segcore::LoadIndexInfo load_index_info;
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
+    load_index_info.cache_index =
+        CreateTestCacheIndex("", std::move(json_index));
     load_index_info.index_params = {{JSON_PATH, json_path}};
     segment->LoadIndex(load_index_info);
 
