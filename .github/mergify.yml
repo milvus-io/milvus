@@ -233,7 +233,7 @@ pull_request_rules:
       - or: *BRANCHES
       - label!=manual-pass
       - -title~=\[skip e2e\]
-      - files~=^(?!(.*_test\.go|.*\.md)).*$
+      - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
       - 'status-success!=cpu-e2e'
     actions:
       label:
