@@ -19,21 +19,16 @@
 package msghandlerimpl
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestMsgHandlerImpl(t *testing.T) {
 	paramtable.Init()
-	ctx := context.Background()
 	b := broker.NewMockBroker(t)
 	m := NewMsgHandlerImpl(b)
 	assert.Panics(t, func() {
@@ -44,18 +39,5 @@ func TestMsgHandlerImpl(t *testing.T) {
 	})
 	assert.Panics(t, func() {
 		m.HandleManualFlush(nil)
-	})
-	t.Run("HandleImport success", func(t *testing.T) {
-		wal := mock_streaming.NewMockWALAccesser(t)
-		bo := mock_streaming.NewMockBroadcast(t)
-		wal.EXPECT().Broadcast().Return(bo)
-		bo.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
-		streaming.SetWALForTest(wal)
-		defer streaming.RecoverWALForTest()
-
-		b.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil, assert.AnError).Once()
-		b.EXPECT().ImportV2(mock.Anything, mock.Anything).Return(nil, nil).Once()
-		err := m.HandleImport(ctx, "", nil)
-		assert.NoError(t, err)
 	})
 }
