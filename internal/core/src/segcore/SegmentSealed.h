@@ -144,7 +144,9 @@ class SegmentSealed : public SegmentInternalInterface {
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
                      int64_t chunk_id) const override {
-        return GetJsonIndex(field_id, path);
+        return GetJsonIndex(field_id, path)
+            .template transform<const index::IndexBase*>(
+                [](auto&& index) { return index; });
     }
     struct JsonIndex {
         FieldId field_id;
