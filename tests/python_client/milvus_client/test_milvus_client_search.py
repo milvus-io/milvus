@@ -3544,6 +3544,23 @@ class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
     @pytest.fixture(scope="function", params=["COSINE", "L2"])
     def metric_type(self, request):
         yield request.param
+    
+    @pytest.fixture(scope="function", params=[DataType.INT8, DataType.INT16, DataType.INT32,
+                                              DataType.FLOAT, DataType.DOUBLE])
+    def rerank_fields(self, request):
+        tags = request.config.getoption("--tags", default=['L0', 'L1', 'L2'], skip=True)
+        if CaseLabel.L2 not in tags:
+            if request.param not in [DataType.INT8, DataType.FLOAT]:
+                pytest.skip(f"skip rerank field type {request.param}")
+        yield request.param
+    
+    @pytest.fixture(scope="function", params=["STL_SORT", "INVERTED", "AUTOINDEX", ""])
+    def scalar_index(self, request):
+        tags = request.config.getoption("--tags", default=['L0', 'L1', 'L2'], skip=True)
+        if CaseLabel.L2 not in tags:
+            if request.param not in ["INVERTED", ""]:
+                pytest.skip(f"skip scalar index type {request.param}")
+        yield request.param
 
     """
     ******************************************************************
@@ -3807,8 +3824,6 @@ class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
                     )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("rerank_fields", [DataType.INT8, DataType.INT16, DataType.INT32,
-                                               DataType.FLOAT, DataType.DOUBLE])
     def test_milvus_client_search_with_reranker_all_supported_datatype_field(self, rerank_fields):
         """
         target: test search with reranker with partition key field
@@ -3887,13 +3902,26 @@ class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
                     )
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="pymilvus issue 42011")
-    @pytest.mark.parametrize("rerank_fields", [DataType.INT8, DataType.INT16, DataType.INT32,
-                                               DataType.FLOAT, DataType.DOUBLE])
-    @pytest.mark.parametrize("index", ["STL_SORT", "INVERTED", "AUTOINDEX", ""])
     @pytest.mark.parametrize("mmap", [True, False])
-    def test_milvus_client_search_with_reranker_scalar_index(self, rerank_fields, index, mmap):
+    def test_milvus_client_search_with_reranker_scalar_index(self, rerank_fields, scalar_index, mmap):
         """
+        Test search functionality with reranker using scalar index in Milvus client.
+        
+        This test verifies the search operation works correctly when using a reranker with different scalar index types.
+        It covers various scenarios including:
+        - Different data types for rerank fields (INT8, INT16, INT32, FLOAT, DOUBLE)
+        - Different index types (STL_SORT, INVERTED, AUTOINDEX, "")
+        - Memory-mapped and non-memory-mapped configurations
+        
+        The test performs the following steps:
+        1. Creates a collection with specified schema and index parameters
+        2. Inserts test data with appropriate data types
+        3. Builds indexes on both vector and scalar fields
+        4. Executes search operations with reranking function
+        5. Validates search results with different filter conditions
+        6. Cleans up by releasing collection and dropping indexes
+        
+        Note: This is an L1 (basic functionality) test case.
         target: test search with reranker with scalar index
         method: create connection, collection, insert and search
         expected: search successfully
@@ -3908,7 +3936,7 @@ class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
         schema.add_field(ct.default_reranker_field_name, rerank_fields, mmap_enabled=mmap)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(default_vector_field_name, index_type='HNSW', metric_type="COSINE")
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
@@ -3930,15 +3958,18 @@ class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
                  ct.default_reranker_field_name: value}
             rows.append(single_row)
         self.insert(client, collection_name, rows)
+        # flush
+        self.flush(client, collection_name)
         # 2. prepare index params
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_reranker_field_name, index_type=index, params={})
+        index_params.add_index(field_name=ct.default_reranker_field_name, index_type=scalar_index, params={})
         # 3. create index
         self.create_index(client, collection_name, index_params)
-        # 3. compact
+        # 4. compact
         self.compact(client, collection_name)
-        # 4. flush
-        self.flush(client, collection_name)
+        self.wait_for_index_ready(client, collection_name, index_name=ct.default_reranker_field_name)
+        self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name)
+
         # 5. search
         my_rerank_fn = Function(
             name="my_reranker",
@@ -3980,15 +4011,17 @@ class TestMilvusClientSearchRerankValid(TestMilvusClientV2Base):
         self.drop_index(client, collection_name, ct.default_reranker_field_name)
         self.drop_index(client, collection_name, default_vector_field_name)
         # 6. create index
-        params = {"metric_type": "L2"}
-        if index != "STL_SORT":
+        params = {"metric_type": "COSINE"}
+        if scalar_index != "STL_SORT":
             params['mmap.enabled'] = mmap
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=ct.default_reranker_field_name, index_type=index, params=params)
-        index_params.add_index(field_name=default_vector_field_name, index_type="IVF_FLAT", params=params)
+        index_params.add_index(field_name=ct.default_reranker_field_name, index_type=scalar_index, params=params)
+        index_params.add_index(field_name=default_vector_field_name, index_type='HNSW', params=params)
         self.create_index(client, collection_name, index_params)
+        self.wait_for_index_ready(client, collection_name, index_name=ct.default_reranker_field_name)
+        self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name)
         self.load_collection(client, collection_name)
-        vectors_to_search = rng.random((1, dim))
+        # vectors_to_search = rng.random((1, dim))
         self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
