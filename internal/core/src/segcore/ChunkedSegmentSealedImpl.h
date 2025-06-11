@@ -374,7 +374,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     bool
-    generate_interim_index(const FieldId field_id);
+    generate_interim_index(const FieldId field_id, int64_t num_rows);
 
     void
     fill_empty_field(const FieldMeta& field_meta);
