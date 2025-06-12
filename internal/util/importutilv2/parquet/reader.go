@@ -63,7 +63,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
 	}
-	log.Info("create parquet reader done", zap.Int("row group num", r.NumRowGroups()),
+	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
 
 	fileReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -121,10 +121,6 @@ OUTER:
 		if insertData.Data[fieldID].RowNum() == 0 {
 			return nil, io.EOF
 		}
-	}
-	err = common.FillDynamicData(insertData, r.schema)
-	if err != nil {
-		return nil, err
 	}
 	return insertData, nil
 }
