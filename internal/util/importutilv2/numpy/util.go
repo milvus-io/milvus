@@ -17,19 +17,27 @@
 package numpy
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
+	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
+	"go.uber.org/zap"
 	"golang.org/x/text/encoding/unicode"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 var (
@@ -38,6 +46,74 @@ var (
 	reUniPre  = regexp.MustCompile(`^[<|>]*?(\d.*)U$`)
 	reUniPost = regexp.MustCompile(`^[<|>]*?U(\d.*)$`)
 )
+
+func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]storage.FileReader, error) {
+	nameToPath := lo.SliceToMap(paths, func(path string) (string, string) {
+		nameWithExt := filepath.Base(path)
+		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
+		return name, path
+	})
+	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+		return field.GetName()
+	})
+
+	// this loop is for "how many fields are provided?"
+	readFields := make(map[string]int64)
+	readers := make(map[int64]storage.FileReader)
+	for name, path := range nameToPath {
+		field, ok := nameToField[name]
+		if !ok {
+			// redundant files, ignore. only accepts a special field "$meta" to store dynamic data
+			continue
+		}
+
+		// auto-id field must not provided
+		if typeutil.IsAutoPKField(field) {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
+		}
+		// function output field must not provided
+		if field.GetIsFunctionOutput() {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
+		}
+
+		// import task doesn't support parsing numpy files for array/sparse_vector fields
+		// if user provided the files, report error
+		dt := field.GetDataType()
+		if dt == schemapb.DataType_Array || dt == schemapb.DataType_SparseFloatVector {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("unsupported parsing numpy files for data type: %s", dt.String()))
+		}
+
+		reader, err := cm.Reader(ctx, path)
+		if err != nil {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
+		}
+		readers[field.GetFieldID()] = reader
+		readFields[field.GetName()] = field.GetFieldID()
+	}
+
+	// this loop is for "are there any fields not provided?"
+	for _, field := range nameToField {
+		// auto-id field, function output field already checked
+		// dynamic field, nullable field, default value field, not provided or provided both ok
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
+			field.GetNullable() || field.GetDefaultValue() != nil {
+			continue
+		}
+
+		// the other field must be provided
+		if _, ok := readers[field.GetFieldID()]; !ok {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
+		}
+	}
+
+	log.Info("create numpy readers", zap.Any("readFields", readFields))
+	return readers, nil
+}
 
 func stringLen(dtype string) (int, bool, error) {
 	var utf bool
@@ -170,8 +246,8 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 }
 
 func wrapElementTypeError(eleType schemapb.DataType, field *schemapb.FieldSchema) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' for field '%s', got type '%T'",
-		field.GetDataType().String(), field.GetName(), eleType))
+	return merr.WrapErrImportFailed(fmt.Sprintf("expected element type '%s' for field '%s', got type '%s'",
+		field.GetDataType().String(), field.GetName(), eleType.String()))
 }
 
 func wrapDimError(actualDim int, expectDim int, field *schemapb.FieldSchema) error {
@@ -234,10 +310,13 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 			return wrapDimError(shape[1], dim, field)
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_JSON:
+		if elementType != schemapb.DataType_VarChar {
+			return wrapElementTypeError(elementType, field)
+		}
 		if len(shape) != 1 {
 			return wrapShapeError(len(shape), 1, field)
 		}
-	case schemapb.DataType_None, schemapb.DataType_Array:
+	case schemapb.DataType_None, schemapb.DataType_SparseFloatVector, schemapb.DataType_Array:
 		return merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", field.GetDataType().String()))
 
 	default:

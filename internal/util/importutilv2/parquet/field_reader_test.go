@@ -46,7 +46,7 @@ func TestInvalidUTF8(t *testing.T) {
 	}
 	data[numRows-1] = "\xc3\x28" // invalid utf-8
 
-	filePath := fmt.Sprintf("test_%d_reader.parquet", rand.Int())
+	filePath := fmt.Sprintf("/tmp/test_%d_reader.parquet", rand.Int())
 	defer os.Remove(filePath)
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(t, err)
@@ -71,7 +71,7 @@ func TestInvalidUTF8(t *testing.T) {
 	fw.Close()
 
 	ctx := context.Background()
-	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath("/tmp/milvus_test/test_parquet_reader/"))
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)

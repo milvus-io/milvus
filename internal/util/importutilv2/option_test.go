@@ -154,3 +154,40 @@ func TestOption_SkipDiskQuotaCheck(t *testing.T) {
 	}
 	assert.True(t, SkipDiskQuotaCheck(options))
 }
+
+func TestOption_GetCSVSep(t *testing.T) {
+	options := []*commonpb.KeyValuePair{}
+	r, err := GetCSVSep(options)
+	assert.NoError(t, err)
+	assert.Equal(t, ',', r)
+
+	options = []*commonpb.KeyValuePair{
+		{Key: CSVSep, Value: "|"},
+	}
+	r, err = GetCSVSep(options)
+	assert.NoError(t, err)
+	assert.Equal(t, '|', r)
+
+	unsupportedSep := []rune{0, '\n', '\r', '"', 0xFFFD}
+	for _, sep := range unsupportedSep {
+		options = []*commonpb.KeyValuePair{
+			{Key: CSVSep, Value: string(sep)},
+		}
+		_, err = GetCSVSep(options)
+		assert.Error(t, err)
+	}
+}
+
+func TestOption_GetCSVNullKey(t *testing.T) {
+	options := []*commonpb.KeyValuePair{}
+	nullKey, err := GetCSVNullKey(options)
+	assert.NoError(t, err)
+	assert.Equal(t, "", nullKey)
+
+	options = []*commonpb.KeyValuePair{
+		{Key: CSVNullKey, Value: "ABC"},
+	}
+	nullKey, err = GetCSVNullKey(options)
+	assert.NoError(t, err)
+	assert.Equal(t, "ABC", nullKey)
+}

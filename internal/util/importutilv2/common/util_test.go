@@ -23,8 +23,48 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 )
+
+func TestUtil_FillDynamicData(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		EnableDynamicField: false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:   101,
+				Name:      "$meta",
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: false,
+			},
+		},
+	}
+
+	insertData, err := storage.NewInsertData(schema)
+	assert.NoError(t, err)
+
+	err = FillDynamicData(insertData, schema)
+	assert.NoError(t, err)
+
+	schema.EnableDynamicField = true
+	err = FillDynamicData(insertData, schema)
+	assert.NoError(t, err)
+
+	schema.Fields[1].IsDynamic = true
+	err = FillDynamicData(insertData, schema)
+	assert.NoError(t, err)
+
+	err = insertData.Data[100].AppendRow(int64(1))
+	assert.NoError(t, err)
+	err = FillDynamicData(insertData, schema)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, insertData.Data[101].RowNum())
+}
 
 func TestUtil_EstimateReadCountPerBatch(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
@@ -105,4 +145,58 @@ func TestUtil_EstimateReadCountPerBatch_LargeSchema(t *testing.T) {
 	count, err := EstimateReadCountPerBatch(16*1024*1024, schema)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), count)
+}
+
+func TestUtil_CheckVarcharLength(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "5",
+			},
+		},
+	}
+	err := CheckVarcharLength("aaaaaaaa", 5, fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckVarcharLength("aaaaa", 5, fieldSchema)
+	assert.NoError(t, err)
+}
+
+func TestUtil_CheckArrayCapacity(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_Array,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "5",
+			},
+		},
+	}
+	err := CheckArrayCapacity(6, 5, fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckArrayCapacity(5, 5, fieldSchema)
+	assert.NoError(t, err)
+}
+
+func TestUtil_CheckValidUTF8(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "1000",
+			},
+		},
+	}
+	err := CheckValidUTF8(string([]byte{0xC0, 0xAF}), fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckValidUTF8("abc", fieldSchema)
+	assert.NoError(t, err)
 }
