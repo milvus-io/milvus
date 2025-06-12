@@ -31,3 +31,43 @@ impl IndexReaderWrapper {
         self.index.tokenizers().register(&tokenizer_name, tokenizer)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tantivy::query::TermQuery;
+    use tempfile::TempDir;
+
+    use crate::{analyzer::create_analyzer, index_writer::IndexWriterWrapper};
+
+    #[test]
+    fn test_read() {
+        let tokenizer = create_analyzer("").unwrap();
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_text_writer(
+            "text".to_string(),
+            dir.path().to_str().unwrap().to_string(),
+            "default".to_string(),
+            tokenizer,
+            1,
+            50_000_000,
+            false,
+        );
+
+        for i in 0..10000 {
+            writer.add_string("hello world", i).unwrap();
+        }
+        writer.commit().unwrap();
+
+        let reader = writer.create_reader().unwrap();
+
+        let query = TermQuery::new(
+            tantivy::Term::from_field_text(reader.field.clone(), "hello"),
+            tantivy::schema::IndexRecordOption::Basic,
+        );
+
+        let res = reader.search(&query).unwrap();
+        assert_eq!(res, (0..10000).collect::<Vec<u32>>());
+        let res = reader.search_i64(&query).unwrap();
+        assert_eq!(res, (0..10000).collect::<Vec<i64>>());
+    }
+}
