@@ -650,8 +650,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
-		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse())
-		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
+		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse())
+		assert.Equal(t, 26*time.Hour, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
 
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")

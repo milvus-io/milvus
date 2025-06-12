@@ -1,6 +1,7 @@
 package inspector
 
 import (
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -27,6 +28,8 @@ type timeTickSyncInspectorImpl struct {
 	taskNotifier *syncutil.AsyncTaskNotifier[struct{}]
 	syncNotifier *syncNotifier
 	operators    *typeutil.ConcurrentMap[string, TimeTickSyncOperator]
+	wg           sync.WaitGroup
+	working      typeutil.ConcurrentSet[string]
 }
 
 func (s *timeTickSyncInspectorImpl) TriggerSync(pChannelInfo types.PChannelInfo, persisted bool) {
@@ -71,22 +74,40 @@ func (s *timeTickSyncInspectorImpl) background() {
 		case <-s.taskNotifier.Context().Done():
 			return
 		case <-ticker.C:
-			s.operators.Range(func(_ string, operator TimeTickSyncOperator) bool {
-				operator.Sync(s.taskNotifier.Context(), false)
+			s.operators.Range(func(name string, _ TimeTickSyncOperator) bool {
+				s.asyncSync(name, false)
 				return true
 			})
 		case <-s.syncNotifier.WaitChan():
 			signals := s.syncNotifier.Get()
 			for pchannel, persisted := range signals {
-				if operator, ok := s.operators.Get(pchannel.Name); ok {
-					operator.Sync(s.taskNotifier.Context(), persisted)
-				}
+				s.asyncSync(pchannel.Name, persisted)
 			}
 		}
 	}
 }
 
+// asyncSync syncs the pchannel in a goroutine.
+func (s *timeTickSyncInspectorImpl) asyncSync(pchannelName string, persisted bool) {
+	if !s.working.Insert(pchannelName) {
+		// Check if the sync operation of pchannel is working, if so, skip it.
+		return
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer func() {
+			s.wg.Done()
+			s.working.Remove(pchannelName)
+		}()
+		if operator, ok := s.operators.Get(pchannelName); ok {
+			operator.Sync(s.taskNotifier.Context(), persisted)
+		}
+	}()
+}
+
 func (s *timeTickSyncInspectorImpl) Close() {
 	s.taskNotifier.Cancel()
 	s.taskNotifier.BlockUntilFinish()
+	s.wg.Wait()
 }
