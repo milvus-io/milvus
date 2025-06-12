@@ -56,7 +56,7 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
-    virtual PinWrapper<const index::IndexBase*>
+    virtual PinWrapper<index::IndexBase*>
     GetJsonIndex(FieldId field_id, std::string path) const override {
         int path_len_diff = std::numeric_limits<int>::max();
         index::CacheIndexBasePtr best_match = nullptr;
@@ -92,7 +92,7 @@ class SegmentSealed : public SegmentInternalInterface {
         }
         auto ca = SemiInlineGet(best_match->PinCells({0}));
         auto index = ca->get_cell_of(0);
-        return PinWrapper<const index::IndexBase*>(ca, index);
+        return PinWrapper<index::IndexBase*>(ca, index);
     }
 
     virtual void
