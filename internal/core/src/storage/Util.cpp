@@ -1156,7 +1156,7 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
     }
 
     if (lack_binlog_rows > 0) {
-        LOG_INFO("create index lack binlog detected, lock row num: {}",
+        LOG_INFO("create index lack binlog detected, lack row num: {}",
                  lack_binlog_rows);
         auto field_schema = file_manager->GetFieldDataMeta().field_schema;
         auto default_value = [&]() -> std::optional<DefaultValueType> {

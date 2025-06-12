@@ -112,7 +112,7 @@ ChunkTranslator::get_cells(
 
     if (use_mmap_) {
         folder = std::filesystem::path(mmap_dir_path_) /
-                      std::to_string(segment_id_) / std::to_string(field_id_);
+                 std::to_string(segment_id_) / std::to_string(field_id_);
         std::filesystem::create_directories(folder);
     }
 

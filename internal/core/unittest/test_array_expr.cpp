@@ -605,7 +605,7 @@ TEST(Expr, TestArrayRange) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -743,7 +743,7 @@ TEST(Expr, TestArrayEqual) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -852,7 +852,7 @@ TEST(Expr, TestArrayNullExpr) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -964,7 +964,7 @@ TEST(Expr, PraseArrayContainsExpr) {
                          DataType::INT64,
                          false);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     }
 }
 
@@ -2431,7 +2431,7 @@ TEST(Expr, TestArrayBinaryArith) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -2763,7 +2763,7 @@ TEST(Expr, TestArrayInTerm) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],

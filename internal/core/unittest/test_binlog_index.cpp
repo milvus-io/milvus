@@ -247,7 +247,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
             : CreateSparseFloatPlaceholderGroup(num_queries);
 
     auto plan = milvus::query::CreateSearchPlanByExpr(
-        *schema, plan_str.data(), plan_str.size());
+        schema, plan_str.data(), plan_str.size());
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -346,7 +346,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
             : CreateSparseFloatPlaceholderGroup(num_queries);
 
     auto plan = milvus::query::CreateSearchPlanByExpr(
-        *schema, plan_str.data(), plan_str.size());
+        schema, plan_str.data(), plan_str.size());
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 

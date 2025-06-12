@@ -281,7 +281,7 @@ TEST(StringExpr, Term) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [_, term] : terms) {
         auto plan_proto = GenTermPlan(fvec_meta, str_meta, term);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -373,7 +373,7 @@ TEST(StringExpr, TermNullable) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [_, term] : terms) {
         auto plan_proto = GenTermPlan(fvec_meta, str_meta, term);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -511,7 +511,7 @@ TEST(StringExpr, Compare) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [op, ref_func] : testcases) {
         auto plan_proto = gen_compare_plan(op);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -660,7 +660,7 @@ TEST(StringExpr, CompareNullable) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [op, ref_func] : testcases) {
         auto plan_proto = gen_compare_plan(op);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -813,7 +813,7 @@ TEST(StringExpr, CompareNullable2) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [op, ref_func] : testcases) {
         auto plan_proto = gen_compare_plan(op);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -937,7 +937,7 @@ TEST(StringExpr, UnaryRange) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [op, value, ref_func] : testcases) {
         auto plan_proto = gen_unary_range_plan(op, value);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -1065,7 +1065,7 @@ TEST(StringExpr, UnaryRangeNullable) {
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
     for (const auto& [op, value, ref_func] : testcases) {
         auto plan_proto = gen_unary_range_plan(op, value);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -1179,7 +1179,7 @@ TEST(StringExpr, NullExpr) {
     // is_null
     for (const auto op : ops) {
         auto plan_proto = gen_plan(op);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -1310,7 +1310,7 @@ TEST(StringExpr, BinaryRange) {
          testcases) {
         auto plan_proto =
             gen_binary_range_plan(lb_inclusive, ub_inclusive, lb, ub);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -1458,7 +1458,7 @@ TEST(StringExpr, BinaryRangeNullable) {
          testcases) {
         auto plan_proto =
             gen_binary_range_plan(lb_inclusive, ub_inclusive, lb, ub);
-        auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+        auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -1531,7 +1531,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
 
     auto plan_proto = GenAlwaysTruePlan(fvec_meta, str_meta);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
-    auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
+    auto plan = ProtoParser(schema).CreatePlan(*plan_proto);
     auto num_queries = 5;
     auto topk = 10;
     auto ph_group_raw =
@@ -1607,7 +1607,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     auto plan_proto = GenPlanNode();
     plan_proto->mutable_query()->set_allocated_predicates(expr_proto);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
-    auto plan = ProtoParser(*schema).CreateRetrievePlan(*plan_proto);
+    auto plan = ProtoParser(schema).CreateRetrievePlan(*plan_proto);
 
     Timestamp time = MAX_TIMESTAMP;
 
@@ -1650,7 +1650,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFieldsNullable) {
     auto plan_proto = GenPlanNode();
     plan_proto->mutable_query()->set_allocated_predicates(expr_proto);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
-    auto plan = ProtoParser(*schema).CreateRetrievePlan(*plan_proto);
+    auto plan = ProtoParser(schema).CreateRetrievePlan(*plan_proto);
 
     Timestamp time = MAX_TIMESTAMP;
 
