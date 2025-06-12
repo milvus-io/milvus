@@ -7,7 +7,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -70,6 +69,7 @@ func NewManagerClient(etcdCli *clientv3.Client) ManagerClient {
 // getDialOptions returns grpc dial options.
 func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	cfg := &paramtable.Get().StreamingNodeGrpcClientCfg
+	tlsCfg := &paramtable.Get().InternalTLSCfg
 	retryPolicy := cfg.GetDefaultRetryPolicy()
 	retryPolicy["retryableStatusCodes"] = []string{"UNAVAILABLE"}
 	defaultServiceConfig := map[string]interface{}{
@@ -90,11 +90,15 @@ func getDialOptions(rb resolver.Builder) []grpc.DialOption {
 	if err != nil {
 		panic(err)
 	}
+	creds, err := tlsCfg.GetClientCreds(context.Background())
+	if err != nil {
+		panic(err)
+	}
 	dialOptions := cfg.GetDialOptionsFromConfig()
 	dialOptions = append(dialOptions,
 		grpc.WithBlock(),
 		grpc.WithResolvers(rb),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithChainUnaryInterceptor(
 			otelgrpc.UnaryClientInterceptor(tracer.GetInterceptorOpts()...),
 			interceptor.ClusterInjectionUnaryClientInterceptor(),
