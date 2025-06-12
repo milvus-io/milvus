@@ -375,6 +375,17 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return Json(str_view.data(), str_view.size());
     }
 
+    BsonView
+    RawBsonAt(size_t i) const override {
+        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
+        auto group_chunk = group_->GetGroupChunk(chunk_id);
+        auto chunk = group_chunk.get()->GetChunk(field_id_);
+        std::string_view str_view =
+            static_cast<StringChunk*>(chunk.get())->operator[](offset_in_chunk);
+        return BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size());
+    }
+
     void
     BulkArrayAt(std::function<void(ScalarArray&&, size_t)> fn,
                 const int64_t* offsets,

@@ -107,12 +107,12 @@ class GcpNativeChunkManager : public ChunkManager {
         return path_prefix_;
     }
 
- public:
-    inline std::string
-    GetBucketName() {
+    virtual std::string
+    GetBucketName() const {
         return default_bucket_name_;
     }
 
+ public:
     inline void
     SetBucketName(const std::string& bucket_name) {
         default_bucket_name_ = bucket_name;

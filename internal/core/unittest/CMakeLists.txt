@@ -193,6 +193,7 @@ install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
 add_subdirectory(test_cachinglayer)
+add_subdirectory(test_json_stats)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

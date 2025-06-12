@@ -351,6 +351,18 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
             static_cast<StringChunk*>(chunk)->operator[](offset_in_chunk);
         return Json(str_view.data(), str_view.size());
     }
+
+    BsonView
+    RawBsonAt(size_t i) const override {
+        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        std::string_view str_view =
+            static_cast<StringChunk*>(chunk)->operator[](offset_in_chunk);
+        return BsonView(reinterpret_cast<const uint8_t*>(str_view.data()),
+                        str_view.size());
+    }
 };
 
 class ChunkedArrayColumn : public ChunkedColumnBase {
