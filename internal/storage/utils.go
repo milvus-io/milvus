@@ -534,7 +534,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		srcField, ok := srcFields[field.GetFieldID()]
 		if !ok && field.GetFieldID() >= common.StartOfUserFieldID {
-			return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
+			if !field.GetNullable() {
+				return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
+			}
+			log.Warn("insert msg missing field but nullable", zap.Int64("fieldID", field.GetFieldID()), zap.String("fieldName", field.GetName()))
+			continue
 		}
 		var fieldData FieldData
 		switch field.DataType {
