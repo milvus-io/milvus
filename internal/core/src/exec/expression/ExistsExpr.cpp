@@ -192,13 +192,19 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, field_id, pointer](bool valid,
-                                                        uint8_t type,
-                                                        uint32_t row_id,
-                                                        uint16_t offset,
-                                                        uint16_t size,
-                                                        uint32_t value) {
-            return true;
+        auto filter_func = [segment, field_id, pointer](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                auto row_id = row_id_array[i];
+                bitset[row_id] = true;
+            }
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;

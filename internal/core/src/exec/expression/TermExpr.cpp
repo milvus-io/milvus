@@ -578,54 +578,76 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
 
         Assert(index != nullptr);
 
-        auto filter_func = [this, segment, &field_id](bool valid,
-                                                      uint8_t type,
-                                                      uint32_t row_id,
-                                                      uint16_t offset,
-                                                      uint16_t size,
-                                                      int32_t value) {
-            if (valid) {
-                if constexpr (std::is_same_v<GetType, int64_t>) {
-                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                        type != uint8_t(milvus::index::JSONType::INT64) &&
-                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
-                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
-                        return false;
-                    }
-                } else if constexpr (std::is_same_v<GetType,
-                                                    std::string_view>) {
-                    if (type != uint8_t(milvus::index::JSONType::STRING) &&
-                        type !=
-                            uint8_t(milvus::index::JSONType::STRING_ESCAPE)) {
-                        return false;
-                    }
-                } else if constexpr (std::is_same_v<GetType, double>) {
-                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                        type != uint8_t(milvus::index::JSONType::INT64) &&
-                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
-                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
-                        return false;
-                    }
-                } else if constexpr (std::is_same_v<GetType, bool>) {
-                    if (type != uint8_t(milvus::index::JSONType::BOOL)) {
-                        return false;
-                    }
+        auto filter_func = [this, segment, &field_id](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (!valid) {
+                    invalid_row_ids.push_back(row_id);
+                    continue;
                 }
-                if constexpr (std::is_same_v<GetType, int64_t>) {
-                    return this->arg_set_->In(value);
-                } else if constexpr (std::is_same_v<GetType, double>) {
-                    float restoredValue = *reinterpret_cast<float*>(&value);
-                    return this->arg_set_float_->In(restoredValue);
-                } else if constexpr (std::is_same_v<GetType, bool>) {
-                    bool restoredValue = *reinterpret_cast<bool*>(&value);
-                    return this->arg_set_->In(restoredValue);
-                }
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+                auto f = [&]() {
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                            type != uint8_t(milvus::index::JSONType::INT64) &&
+                            type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                            type != uint8_t(milvus::index::JSONType::DOUBLE)) {
+                            return false;
+                        }
+                    } else if constexpr (std::is_same_v<GetType,
+                                                        std::string_view>) {
+                        if (type != uint8_t(milvus::index::JSONType::STRING) &&
+                            type !=
+                                uint8_t(
+                                    milvus::index::JSONType::STRING_ESCAPE)) {
+                            return false;
+                        }
+                    } else if constexpr (std::is_same_v<GetType, double>) {
+                        if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                            type != uint8_t(milvus::index::JSONType::INT64) &&
+                            type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                            type != uint8_t(milvus::index::JSONType::DOUBLE)) {
+                            return false;
+                        }
+                    } else if constexpr (std::is_same_v<GetType, bool>) {
+                        if (type != uint8_t(milvus::index::JSONType::BOOL)) {
+                            return false;
+                        }
+                    }
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        return this->arg_set_->In(value);
+                    } else if constexpr (std::is_same_v<GetType, double>) {
+                        float restoredValue = *reinterpret_cast<float*>(&value);
+                        return this->arg_set_float_->In(restoredValue);
+                    } else if constexpr (std::is_same_v<GetType, bool>) {
+                        bool restoredValue = *reinterpret_cast<bool*>(&value);
+                        return this->arg_set_->In(restoredValue);
+                    }
+                };
+                bitset[row_id] = f();
+            }
+
+            auto f = [&](const milvus::Json& json,
+                         uint8_t type,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 if (type == uint8_t(milvus::index::JSONType::STRING) ||
                     type == uint8_t(milvus::index::JSONType::DOUBLE) ||
                     type == uint8_t(milvus::index::JSONType::INT64)) {
@@ -663,7 +685,19 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                     }
                     return this->arg_set_->In(ValueType(val.value()));
                 }
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    auto value = value_array[i];
+                    bitset[row_id] = f(json, type, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
