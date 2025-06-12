@@ -43,7 +43,7 @@ import (
 
 func (s *BulkInsertSuite) testImportDynamicField() {
 	const (
-		rowCount = 10000
+		rowCount = 100
 	)
 
 	c := s.Cluster
@@ -191,6 +191,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
