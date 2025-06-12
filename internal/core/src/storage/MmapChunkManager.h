@@ -125,10 +125,6 @@ class MmapBlocksHandler {
         ClearCache();
     }
     uint64_t
-    GetDiskLimit() {
-        return max_disk_limit_;
-    }
-    uint64_t
     GetFixFileSize() {
         return fix_mmap_file_size_;
     }
