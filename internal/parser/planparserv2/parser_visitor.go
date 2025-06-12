@@ -210,7 +210,7 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
 			return fmt.Errorf("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
@@ -300,7 +300,7 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {
+		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
 			return fmt.Errorf("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 

@@ -381,6 +381,7 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`JSONField + 15 == 16`,
 		`15 + JSONField == 16`,
 		`Int64Field + (2**3) > 0`,
+		`1 + FloatField > 100`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
