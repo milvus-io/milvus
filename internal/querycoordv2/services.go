@@ -1246,16 +1246,19 @@ func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoaded
 			Status: merr.Status(errors.Wrap(err, "failed to list loaded segments")),
 		}, nil
 	}
-	var segmentIDs []int64
+	segmentIDs := typeutil.NewUniqueSet()
 
-	segments := s.dist.SegmentDistManager.GetByFilter()
-	for _, segment := range segments {
-		segmentIDs = append(segmentIDs, segment.ID)
+	collections := s.meta.GetAllCollections(ctx)
+	for _, collection := range collections {
+		segments := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection.GetCollectionID(), meta.CurrentTargetFirst)
+		for _, segment := range segments {
+			segmentIDs.Insert(segment.ID)
+		}
 	}
 
 	resp := &querypb.ListLoadedSegmentsResponse{
 		Status:     merr.Success(),
-		SegmentIDs: segmentIDs,
+		SegmentIDs: segmentIDs.Collect(),
 	}
 	return resp, nil
 }
