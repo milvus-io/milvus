@@ -584,12 +584,15 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 //	return canArithmeticDataType(left.dataType, getArrayElementType(right))
 //}
 
-func canArithmetic(left, leftElement, right, rightElement schemapb.DataType) error {
+func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, reverse bool) error {
 	if typeutil.IsArrayType(left) {
 		left = leftElement
 	}
 	if typeutil.IsArrayType(right) {
 		right = rightElement
+	}
+	if reverse {
+		left, right = right, left
 	}
 	if !canArithmeticDataType(left, right) {
 		return fmt.Errorf("cannot perform arithmetic between %s field and %s", left.String(), right.String())
