@@ -35,7 +35,6 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Span.h"
-#include "common/Array.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "cachinglayer/Translator.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -188,6 +187,13 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
         PanicInfo(ErrorCode::Unsupported,
                   "ArrayViews only supported for ArrayChunkedColumn");
+    }
+
+    PinWrapper<std::vector<VectorArrayView>>
+    VectorArrayViews(int64_t chunk_id) const override {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "VectorArrayViews only supported for ChunkedVectorArrayColumn");
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
@@ -375,7 +381,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     }
 
     void
-    BulkArrayAt(std::function<void(ScalarArray&&, size_t)> fn,
+    BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
@@ -400,6 +406,39 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     }
 };
 
+class ChunkedVectorArrayColumn : public ChunkedColumnBase {
+ public:
+    explicit ChunkedVectorArrayColumn(
+        std::unique_ptr<Translator<Chunk>> translator,
+        const FieldMeta& field_meta)
+        : ChunkedColumnBase(std::move(translator), field_meta) {
+    }
+
+    void
+    BulkVectorArrayAt(std::function<void(VectorFieldProto&&, size_t)> fn,
+                      const int64_t* offsets,
+                      int64_t count) const override {
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = SemiInlineGet(slot_->PinCells(cids));
+        for (int64_t i = 0; i < count; i++) {
+            auto array =
+                static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]))
+                    ->View(offsets_in_chunk[i])
+                    .output_data();
+            fn(std::move(array), i);
+        }
+    }
+
+    PinWrapper<std::vector<VectorArrayView>>
+    VectorArrayViews(int64_t chunk_id) const override {
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<std::vector<VectorArrayView>>(
+            ca, static_cast<VectorArrayChunk*>(chunk)->Views());
+    }
+};
+
 inline std::shared_ptr<ChunkedColumnInterface>
 MakeChunkedColumnBase(DataType data_type,
                       std::unique_ptr<Translator<milvus::Chunk>> translator,
@@ -419,6 +458,12 @@ MakeChunkedColumnBase(DataType data_type,
         return std::static_pointer_cast<ChunkedColumnInterface>(
             std::make_shared<ChunkedArrayColumn>(std::move(translator),
                                                  field_meta));
+    }
+
+    if (ChunkedColumnInterface::IsChunkedVectorArrayColumnDataType(data_type)) {
+        return std::static_pointer_cast<ChunkedColumnInterface>(
+            std::make_shared<ChunkedVectorArrayColumn>(std::move(translator),
+                                                       field_meta));
     }
 
     return std::static_pointer_cast<ChunkedColumnInterface>(

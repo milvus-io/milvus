@@ -90,6 +90,10 @@ ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+    }
+
     if (field_meta.is_vector()) {
         LoadVecIndex(info);
     } else {
@@ -461,6 +465,11 @@ ChunkedSegmentSealedImpl::AddFieldDataInfoForSealed(
 int64_t
 ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
+
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+    }
+
     if (field_meta.is_vector()) {
         return int64_t(vector_indexings_.is_ready(field_id));
     }
@@ -1043,8 +1052,23 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) {
-    column->BulkArrayAt(
-        [dst](ScalarArray&& array, size_t i) { dst->at(i) = std::move(array); },
+    column->BulkArrayAt([dst](ScalarFieldProto&& array,
+                              size_t i) { dst->at(i) = std::move(array); },
+                        seg_offsets,
+                        count);
+}
+
+template <typename T>
+void
+ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<T>* dst) {
+    column->BulkVectorArrayAt(
+        [dst](VectorFieldProto&& array, size_t i) {
+            dst->at(i) = std::move(array);
+        },
         seg_offsets,
         count);
 }
@@ -1090,9 +1114,9 @@ ChunkedSegmentSealedImpl::fill_with_empty(FieldId field_id,
                                           int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        return CreateVectorDataArray(count, field_meta);
+        return CreateEmptyVectorDataArray(count, field_meta);
     }
-    return CreateScalarDataArray(count, field_meta);
+    return CreateEmptyScalarDataArray(count, field_meta);
 }
 
 void
@@ -1365,6 +1389,14 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 seg_offsets,
                 count,
                 ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
+        case DataType::VECTOR_ARRAY: {
+            bulk_subscript_vector_array_impl(
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_vector_array()->mutable_data());
             break;
         }
         default: {
@@ -1960,6 +1992,11 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
         case milvus::DataType::ARRAY: {
             column = std::make_shared<ChunkedArrayColumn>(std::move(translator),
                                                           field_meta);
+            break;
+        }
+        case milvus::DataType::VECTOR_ARRAY: {
+            column = std::make_shared<ChunkedVectorArrayColumn>(
+                std::move(translator), field_meta);
             break;
         }
         default: {
