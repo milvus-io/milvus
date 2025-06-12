@@ -755,7 +755,8 @@ func AddInsertData(dataType schemapb.DataType, data interface{}, insertData *Ins
 		}
 
 		if fieldData == nil {
-			fieldData = &VectorArrayFieldData{Data: make([]*schemapb.VectorField, 0, rowNum),
+			fieldData = &VectorArrayFieldData{
+				Data:        make([]*schemapb.VectorField, 0, rowNum),
 				Dim:         singleData[0].Dim,
 				ElementType: GetVectorElementType(singleData[0]),
 			}

@@ -1391,10 +1391,10 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 							VectorArray: &schemapb.VectorArray{
 								Data:        rawData.Data,
 								ElementType: rawData.ElementType,
-								Dim:         int64(rawData.Dim),
+								Dim:         rawData.Dim,
 							},
 						},
-						Dim: int64(rawData.Dim),
+						Dim: rawData.Dim,
 					},
 				},
 			}
