@@ -93,6 +93,7 @@ class FieldChunkMetricsTranslator
     milvus::cachinglayer::ResourceUsage
     estimated_byte_size_of_cell(
         milvus::cachinglayer::cid_t cid) const override {
+        // TODO(tiered storage 1): provide a better estimation.
         return {0, 0};
     }
     const std::string&
