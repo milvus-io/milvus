@@ -524,3 +524,28 @@ func ExampleClient_DropCollection() {
 		// handle err
 	}
 }
+
+func ExampleClient_AddCollectionField() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	milvusAddr := "127.0.0.1:19530"
+
+	cli, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: milvusAddr,
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus server: ", err.Error())
+	}
+
+	defer cli.Close(ctx)
+
+	// the field to add
+	// must be nullable for now
+	newField := entity.NewField().WithName("new_field").WithDataType(entity.FieldTypeInt64).WithNullable(true)
+
+	err = cli.AddCollectionField(ctx, milvusclient.NewAddCollectionFieldOption("customized_setup_2", newField))
+	if err != nil {
+		// handle error
+	}
+}
