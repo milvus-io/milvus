@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -5,7 +6,9 @@ use tantivy::query::{Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Type};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
-use crate::docid_collector::DocIdCollector;
+use crate::bitset_wrapper::BitsetWrapper;
+use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
+use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
@@ -18,18 +21,19 @@ pub(crate) struct IndexReaderWrapper {
     pub(crate) reader: IndexReader,
     pub(crate) index: Arc<Index>,
     pub(crate) id_field: Option<Field>,
+    pub(crate) set_bitset: SetBitsetFn,
 }
 
 impl IndexReaderWrapper {
-    pub fn load(path: &str) -> Result<IndexReaderWrapper> {
+    pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         init_log();
 
         let index = Index::open_in_dir(path)?;
 
-        IndexReaderWrapper::from_index(Arc::new(index))
+        IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
 
-    pub fn from_index(index: Arc<Index>) -> Result<IndexReaderWrapper> {
+    pub fn from_index(index: Arc<Index>, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
         let field = index.schema().fields().next().unwrap().0;
         let schema = index.schema();
         let field_name = String::from(schema.get_field_name(field));
@@ -50,6 +54,7 @@ impl IndexReaderWrapper {
             reader,
             index,
             id_field,
+            set_bitset,
         })
     }
 
@@ -67,19 +72,29 @@ impl IndexReaderWrapper {
         Ok(sum)
     }
 
-    pub(crate) fn search(&self, q: &dyn Query) -> Result<Vec<u32>> {
+    pub(crate) fn search(&self, q: &dyn Query, bitset: *mut c_void) -> Result<()> {
         let searcher = self.reader.searcher();
         match self.id_field {
             Some(_) => {
                 // newer version with doc_id.
                 searcher
-                    .search(q, &DocIdCollector::<u32>::default())
+                    .search(
+                        q,
+                        &DocIdCollector {
+                            bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
+                        },
+                    )
                     .map_err(TantivyBindingError::TantivyError)
             }
             None => {
                 // older version without doc_id, only one segment.
                 searcher
-                    .search(q, &VecCollector {})
+                    .search(
+                        q,
+                        &VecCollector {
+                            bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
+                        },
+                    )
                     .map_err(TantivyBindingError::TantivyError)
             }
         }
@@ -91,49 +106,52 @@ impl IndexReaderWrapper {
         assert!(self.id_field.is_some());
         let searcher = self.reader.searcher();
         searcher
-            .search(q, &DocIdCollector::<i64>::default())
+            .search(q, &DocIdCollectorI64::default())
             .map_err(TantivyBindingError::TantivyError)
     }
 
-    pub fn term_query_i64(&self, term: i64) -> Result<Vec<u32>> {
+    pub fn term_query_i64(&self, term: i64, bitset: *mut c_void) -> Result<()> {
         let q = TermQuery::new(
             Term::from_field_i64(self.field, term),
             IndexRecordOption::Basic,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn lower_bound_range_query_i64(
         &self,
         lower_bound: i64,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let q = RangeQuery::new_i64_bounds(
             self.field_name.to_string(),
             make_bounds(lower_bound, inclusive),
             Bound::Unbounded,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn upper_bound_range_query_i64(
         &self,
         upper_bound: i64,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let q = RangeQuery::new_i64_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
             make_bounds(upper_bound, inclusive),
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn lower_bound_range_query_bool(
         &self,
         lower_bound: bool,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), inclusive);
         let upper_bound = Bound::Unbounded;
         let q = RangeQuery::new_term_bounds(
@@ -142,14 +160,15 @@ impl IndexReaderWrapper {
             &lower_bound,
             &upper_bound,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn upper_bound_range_query_bool(
         &self,
         upper_bound: bool,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let lower_bound = Bound::Unbounded;
         let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), inclusive);
         let q = RangeQuery::new_term_bounds(
@@ -158,7 +177,7 @@ impl IndexReaderWrapper {
             &lower_bound,
             &upper_bound,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn range_query_i64(
@@ -167,19 +186,20 @@ impl IndexReaderWrapper {
         upper_bound: i64,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_i64_bounds(self.field_name.to_string(), lb, ub);
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
-    pub fn term_query_f64(&self, term: f64) -> Result<Vec<u32>> {
+    pub fn term_query_f64(&self, term: f64, bitset: *mut c_void) -> Result<()> {
         let q = TermQuery::new(
             Term::from_field_f64(self.field, term),
             IndexRecordOption::Basic,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn range_query_bool(
@@ -188,7 +208,8 @@ impl IndexReaderWrapper {
         upper_bound: bool,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let lower_bound = make_bounds(Term::from_field_bool(self.field, lower_bound), lb_inclusive);
         let upper_bound = make_bounds(Term::from_field_bool(self.field, upper_bound), ub_inclusive);
         let q = RangeQuery::new_term_bounds(
@@ -197,33 +218,35 @@ impl IndexReaderWrapper {
             &lower_bound,
             &upper_bound,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn lower_bound_range_query_f64(
         &self,
         lower_bound: f64,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let q = RangeQuery::new_f64_bounds(
             self.field_name.to_string(),
             make_bounds(lower_bound, inclusive),
             Bound::Unbounded,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn upper_bound_range_query_f64(
         &self,
         upper_bound: f64,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let q = RangeQuery::new_f64_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
             make_bounds(upper_bound, inclusive),
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn range_query_f64(
@@ -232,27 +255,28 @@ impl IndexReaderWrapper {
         upper_bound: f64,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_f64_bounds(self.field_name.to_string(), lb, ub);
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
-    pub fn term_query_bool(&self, term: bool) -> Result<Vec<u32>> {
+    pub fn term_query_bool(&self, term: bool, bitset: *mut c_void) -> Result<()> {
         let q = TermQuery::new(
             Term::from_field_bool(self.field, term),
             IndexRecordOption::Basic,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
-    pub fn term_query_keyword(&self, term: &str) -> Result<Vec<u32>> {
+    pub fn term_query_keyword(&self, term: &str, bitset: *mut c_void) -> Result<()> {
         let q = TermQuery::new(
             Term::from_field_text(self.field, term),
             IndexRecordOption::Basic,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
@@ -267,26 +291,28 @@ impl IndexReaderWrapper {
         &self,
         lower_bound: &str,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let q = RangeQuery::new_str_bounds(
             self.field_name.to_string(),
             make_bounds(lower_bound, inclusive),
             Bound::Unbounded,
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn upper_bound_range_query_keyword(
         &self,
         upper_bound: &str,
         inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let q = RangeQuery::new_str_bounds(
             self.field_name.to_string(),
             Bound::Unbounded,
             make_bounds(upper_bound, inclusive),
         );
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
     pub fn range_query_keyword(
@@ -295,34 +321,37 @@ impl IndexReaderWrapper {
         upper_bound: &str,
         lb_inclusive: bool,
         ub_inclusive: bool,
-    ) -> Result<Vec<u32>> {
+        bitset: *mut c_void,
+    ) -> Result<()> {
         let lb = make_bounds(lower_bound, lb_inclusive);
         let ub = make_bounds(upper_bound, ub_inclusive);
         let q = RangeQuery::new_str_bounds(self.field_name.to_string(), lb, ub);
-        self.search(&q)
+        self.search(&q, bitset)
     }
 
-    pub fn prefix_query_keyword(&self, prefix: &str) -> Result<Vec<u32>> {
+    pub fn prefix_query_keyword(&self, prefix: &str, bitset: *mut c_void) -> Result<()> {
         let escaped = regex::escape(prefix);
         let pattern = format!("{}(.|\n)*", escaped);
-        self.regex_query(&pattern)
+        self.regex_query(&pattern, bitset)
     }
 
-    pub fn regex_query(&self, pattern: &str) -> Result<Vec<u32>> {
+    pub fn regex_query(&self, pattern: &str, bitset: *mut c_void) -> Result<()> {
         let q = RegexQuery::from_pattern(&pattern, self.field)?;
-        self.search(&q)
+        self.search(&q, bitset)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use std::{ffi::c_void, sync::Arc};
 
     use tantivy::{
         doc,
         schema::{Schema, STORED, STRING},
         Index,
     };
+
+    use crate::util::set_bitset;
 
     use super::IndexReaderWrapper;
 
@@ -342,10 +371,17 @@ mod test {
         index_writer.commit().unwrap();
 
         let index_shared = Arc::new(index);
-        let index_reader_wrapper = IndexReaderWrapper::from_index(index_shared).unwrap();
-        let mut res = index_reader_wrapper.prefix_query_keyword("^").unwrap();
+        let mut res: Vec<u32> = vec![];
+        let index_reader_wrapper =
+            IndexReaderWrapper::from_index(index_shared, set_bitset).unwrap();
+        index_reader_wrapper
+            .prefix_query_keyword("^", &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res.len(), 1);
-        res = index_reader_wrapper.prefix_query_keyword("$").unwrap();
+        res.clear();
+        index_reader_wrapper
+            .prefix_query_keyword("$", &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res.len(), 1);
     }
 }

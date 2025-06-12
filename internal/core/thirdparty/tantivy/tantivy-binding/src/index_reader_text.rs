@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use tantivy::{
     query::BooleanQuery,
     tokenizer::{TextAnalyzer, TokenStream},
@@ -5,12 +7,12 @@ use tantivy::{
 };
 
 use crate::error::Result;
-use crate::{index_reader::IndexReaderWrapper, analyzer::standard_analyzer};
+use crate::{analyzer::standard_analyzer, index_reader::IndexReaderWrapper};
 
 impl IndexReaderWrapper {
     // split the query string into multiple tokens using index's default tokenizer,
     // and then execute the disconjunction of term query.
-    pub(crate) fn match_query(&self, q: &str) -> Result<Vec<u32>> {
+    pub(crate) fn match_query(&self, q: &str, bitset: *mut c_void) -> Result<()> {
         // clone the tokenizer to make `match_query` thread-safe.
         let mut tokenizer = self
             .index
@@ -24,7 +26,7 @@ impl IndexReaderWrapper {
             terms.push(Term::from_field_text(self.field, &token.text));
         }
         let query = BooleanQuery::new_multiterms_query(terms);
-        self.search(&query)
+        self.search(&query, bitset)
     }
 
     pub(crate) fn register_tokenizer(&self, tokenizer_name: String, tokenizer: TextAnalyzer) {
@@ -34,10 +36,12 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::c_void;
+
     use tantivy::query::TermQuery;
     use tempfile::TempDir;
 
-    use crate::{analyzer::create_analyzer, index_writer::IndexWriterWrapper};
+    use crate::{analyzer::create_analyzer, index_writer::IndexWriterWrapper, util::set_bitset};
 
     #[test]
     fn test_read() {
@@ -58,14 +62,17 @@ mod tests {
         }
         writer.commit().unwrap();
 
-        let reader = writer.create_reader().unwrap();
+        let reader = writer.create_reader(set_bitset).unwrap();
 
         let query = TermQuery::new(
             tantivy::Term::from_field_text(reader.field.clone(), "hello"),
             tantivy::schema::IndexRecordOption::Basic,
         );
 
-        let res = reader.search(&query).unwrap();
+        let mut res: Vec<u32> = vec![];
+        reader
+            .search(&query, &mut res as *mut _ as *mut c_void)
+            .unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<u32>>());
         let res = reader.search_i64(&query).unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<i64>>());

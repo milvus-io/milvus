@@ -199,4 +199,13 @@ CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
                                        const MetricType& metric_type,
                                        knowhere::Json& search_config);
 
+void inline SetBitset(void* bitset, const uint32_t* doc_id, uintptr_t n) {
+    TargetBitmap* bitmap = static_cast<TargetBitmap*>(bitset);
+
+    for (uintptr_t i = 0; i < n; ++i) {
+        assert(doc_id[i] < bitmap->size());
+        (*bitmap)[doc_id[i]] = true;
+    }
+}
+
 }  // namespace milvus::index
