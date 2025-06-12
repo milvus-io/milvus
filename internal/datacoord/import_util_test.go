@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -884,4 +886,234 @@ func TestImportTask_MarshalJSON(t *testing.T) {
 	assert.Equal(t, "ImportTask", importTask.TaskType)
 	assert.Equal(t, task.GetCreatedTime(), importTask.CreatedTime)
 	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
+}
+
+// TestImportUtil_ValidateBinlogImportRequest tests the validation of binlog import request
+func TestImportUtil_ValidateBinlogImportRequest(t *testing.T) {
+	ctx := context.Background()
+	mockCM := mocks2.NewChunkManager(t)
+
+	t.Run("empty files", func(t *testing.T) {
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		err := ValidateBinlogImportRequest(ctx, mockCM, nil, options)
+		assert.Error(t, err)
+	})
+
+	t.Run("valid files - not backup", func(t *testing.T) {
+		files := []*msgpb.ImportFile{
+			{
+				Id:    1,
+				Paths: []string{"path1"},
+			},
+		}
+		err := ValidateBinlogImportRequest(ctx, mockCM, files, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid files - too many paths", func(t *testing.T) {
+		files := []*msgpb.ImportFile{
+			{
+				Id:    1,
+				Paths: []string{"path1", "path2", "path3"},
+			},
+		}
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		err := ValidateBinlogImportRequest(ctx, mockCM, files, options)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "too many input paths")
+	})
+}
+
+// TestImportUtil_ListBinlogImportRequestFiles tests listing binlog files from import request
+func TestImportUtil_ListBinlogImportRequestFiles(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty files", func(t *testing.T) {
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		files, err := ListBinlogImportRequestFiles(ctx, nil, nil, options)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no binlog to import")
+		assert.Nil(t, files)
+	})
+
+	t.Run("not backup files", func(t *testing.T) {
+		reqFiles := []*internalpb.ImportFile{
+			{
+				Paths: []string{"path1"},
+			},
+		}
+		files, err := ListBinlogImportRequestFiles(ctx, nil, reqFiles, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, reqFiles, files)
+	})
+
+	t.Run("backup files - list error", func(t *testing.T) {
+		reqFiles := []*internalpb.ImportFile{
+			{
+				Paths: []string{"path1"},
+			},
+		}
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		mockCM := mocks2.NewChunkManager(t)
+		mockCM.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("mock error"))
+		files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles, options)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "list binlogs failed")
+		assert.Nil(t, files)
+	})
+
+	t.Run("backup files - success", func(t *testing.T) {
+		reqFiles := []*internalpb.ImportFile{
+			{
+				Paths: []string{"path1"},
+			},
+		}
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		mockCM := mocks2.NewChunkManager(t)
+		mockCM.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+				walkFunc(&storage.ChunkObjectInfo{
+					FilePath: "path1",
+				})
+				return nil
+			})
+		files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles, options)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(files))
+		assert.Equal(t, "path1", files[0].GetPaths()[0])
+	})
+
+	t.Run("backup files - empty result", func(t *testing.T) {
+		reqFiles := []*internalpb.ImportFile{
+			{
+				Paths: []string{"path1"},
+			},
+		}
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		mockCM := mocks2.NewChunkManager(t)
+		mockCM.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+				return nil
+			})
+		files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles, options)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no binlog to import")
+		assert.Nil(t, files)
+	})
+
+	t.Run("backup files - too many files", func(t *testing.T) {
+		maxFiles := paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt()
+		reqFiles := make([]*internalpb.ImportFile, maxFiles+1)
+		for i := 0; i < maxFiles+1; i++ {
+			reqFiles[i] = &internalpb.ImportFile{
+				Paths: []string{fmt.Sprintf("path%d", i)},
+			}
+		}
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		mockCM := mocks2.NewChunkManager(t)
+		mockCM.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+				for i := 0; i < maxFiles+1; i++ {
+					walkFunc(&storage.ChunkObjectInfo{
+						FilePath: fmt.Sprintf("path%d", i),
+					})
+				}
+				return nil
+			})
+		files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles, options)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("The max number of import files should not exceed %d", maxFiles))
+		assert.Nil(t, files)
+	})
+
+	t.Run("backup files - multiple files with delta", func(t *testing.T) {
+		reqFiles := []*internalpb.ImportFile{
+			{
+				Paths: []string{"insert/path1", "delta/path1"},
+			},
+		}
+		options := []*commonpb.KeyValuePair{
+			{
+				Key:   importutilv2.BackupFlag,
+				Value: "true",
+			},
+		}
+		mockCM := mocks2.NewChunkManager(t)
+		mockCM.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+				if strings.Contains(prefix, "insert") {
+					walkFunc(&storage.ChunkObjectInfo{
+						FilePath: "insert/path1",
+					})
+				} else if strings.Contains(prefix, "delta") {
+					walkFunc(&storage.ChunkObjectInfo{
+						FilePath: "delta/path1",
+					})
+				}
+				return nil
+			}).Times(2)
+		files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles, options)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(files))
+		assert.Equal(t, 2, len(files[0].GetPaths()))
+		assert.Equal(t, "insert/path1", files[0].GetPaths()[0])
+		assert.Equal(t, "delta/path1", files[0].GetPaths()[1])
+	})
+}
+
+// TestImportUtil_ValidateMaxImportJobExceed tests validation of maximum import jobs
+func TestImportUtil_ValidateMaxImportJobExceed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("job count within limit", func(t *testing.T) {
+		mockImportMeta := NewMockImportMeta(t)
+		mockImportMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
+		err := ValidateMaxImportJobExceed(ctx, mockImportMeta)
+		assert.NoError(t, err)
+	})
+
+	t.Run("job count exceeds limit", func(t *testing.T) {
+		mockImportMeta := NewMockImportMeta(t)
+		mockImportMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).
+			Return(paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt() + 1)
+		err := ValidateMaxImportJobExceed(ctx, mockImportMeta)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "The number of jobs has reached the limit")
+	})
 }

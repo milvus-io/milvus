@@ -136,7 +136,8 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_compact_normal(self, is_clustering):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_compact_normal(self, is_clustering, add_field):
         """
         target: test hybrid search with default normal case (2 vector fields)
         method: create connection, collection, insert and hybrid search
@@ -163,6 +164,14 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
              default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
              default_string_field_name: str(i)} for i in range(10*default_nb)]
         self.insert(client, collection_name, rows)
+        if add_field and not is_clustering:
+            self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                      nullable=True, is_clustering_key=True)
+            rows_new = [
+                {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
+                 default_string_field_name: str(i)} for i in range(10*default_nb, 11*default_nb)]
+            self.insert(client, collection_name, rows_new)
         self.flush(client, collection_name)
         # 3. compact
         compact_id = self.compact(client, collection_name, is_clustering=is_clustering)[0]
@@ -260,6 +269,56 @@ class TestMilvusClientCompactValid(TestMilvusClientV2Base):
         while True:
             time.sleep(1)
             res = self.get_compaction_state(client, compact_id, is_clustering=is_clustering)[0]
+            if res == "Completed":
+                break
+            if time.time() - start > cost:
+                raise Exception(1, f"Compact after index cost more than {cost}s")
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_compact_with_added_field(self):
+        """
+        target: test clustering compaction with added field as cluster key
+        method: create connection, collection, insert, add field, insert and compact
+        expected: successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_vector_field_name+"new", DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(default_vector_field_name+"new", metric_type="L2")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        # 2. insert
+        rng = np.random.default_rng(seed=19530)
+        rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
+             default_string_field_name: str(i)} for i in range(10*default_nb)]
+        self.insert(client, collection_name, rows)
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                  nullable=True, is_clustering_key=True)
+        # 3. insert new field after add field
+        rows_new = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),default_string_field_name: str(i),
+             "field_new": random.randint(1, 1000)} for i in range(10*default_nb, 11*default_nb)]
+        self.insert(client, collection_name, rows_new)
+        self.flush(client, collection_name)
+        # 4. compact
+        compact_id = self.compact(client, collection_name, is_clustering=True)[0]
+        cost = 180
+        start = time.time()
+        while True:
+            time.sleep(1)
+            res = self.get_compaction_state(client, compact_id, is_clustering=True)[0]
             if res == "Completed":
                 break
             if time.time() - start > cost:
