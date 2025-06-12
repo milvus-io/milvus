@@ -124,7 +124,7 @@ func (t *PreImportTask) Clone() Task {
 }
 
 func (t *PreImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportInsertBufferSize.GetAsInt() * 1024 * 1024
+	bufferSize := paramtable.Get().DataNodeCfg.ImportInsertBufferSize.GetAsInt()
 	log.Info("start to preimport", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", t.GetSchema()))...)
@@ -138,7 +138,8 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize)
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
@@ -146,7 +147,8 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		err = t.readFileStat(reader, i)
 		if err != nil {
 			log.Warn("preimport failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		log.Info("read file stat done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),

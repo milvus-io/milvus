@@ -154,7 +154,10 @@ StreamReducerHelper::AssembleMergedResult() {
                     ->mutable_array_data()
                     ->set_element_type(
                         proto::schema::DataType(field_meta.get_element_type()));
+            } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+                PanicInfo(NotImplemented, "VECTOR_ARRAY is not implemented");
             }
+
             new_merged_result->output_fields_data_[field_id] =
                 std::move(field_data);
         }
@@ -670,6 +673,8 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
                 ->mutable_array_data()
                 ->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
+        } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+            PanicInfo(NotImplemented, "VECTOR_ARRAY is not implemented");
         }
         search_result_data->mutable_fields_data()->AddAllocated(
             field_data.release());

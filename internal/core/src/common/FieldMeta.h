@@ -126,6 +126,23 @@ class FieldMeta {
         Assert(!nullable);
     }
 
+    // array of vector type
+    FieldMeta(FieldName name,
+              FieldId id,
+              DataType type,
+              DataType element_type,
+              int64_t dim,
+              std::optional<knowhere::MetricType> metric_type)
+        : name_(std::move(name)),
+          id_(id),
+          type_(type),
+          nullable_(false),
+          element_type_(element_type),
+          vector_info_(VectorInfo{dim, std::move(metric_type)}) {
+        Assert(type_ == DataType::VECTOR_ARRAY);
+        Assert(IsVectorDataType(element_type_));
+    }
+
     int64_t
     get_dim() const {
         Assert(IsVectorDataType(type_));
@@ -218,7 +235,11 @@ class FieldMeta {
                    "schema");
         static const size_t ARRAY_SIZE = 128;
         static const size_t JSON_SIZE = 512;
-        if (is_vector()) {
+        // assume float vector with dim 512, array length 10
+        static const size_t VECTOR_ARRAY_SIZE = 512 * 10 * 4;
+        if (type_ == DataType::VECTOR_ARRAY) {
+            return VECTOR_ARRAY_SIZE;
+        } else if (is_vector()) {
             return GetDataTypeSize(type_, get_dim());
         } else if (is_string()) {
             Assert(string_info_.has_value());

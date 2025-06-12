@@ -818,7 +818,8 @@ class TestCompactionOperation(TestcaseBase):
             end = time()
             if end - start > cost:
                 raise MilvusException(1, "Compact merge two segments more than 180s")
-        assert c_plans.plans[0].target == segments_info[0].segmentID
+        # target --sort--> querySegment
+        # assert c_plans.plans[0].target == segments_info[0].segmentID
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_no_merge(self):
@@ -849,7 +850,8 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.release()
         collection_w.load()
         seg_after, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        assert seg_after[0].segmentID == c_plans.plans[0].target
+        # target --sort--> querySegment
+        # assert seg_after[0].segmentID == c_plans.plans[0].target
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_manual_and_auto(self):
@@ -933,7 +935,8 @@ class TestCompactionOperation(TestcaseBase):
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
         assert len(segments_info) == 1*replica_num
-        assert segments_info[0].segmentID == target
+        # target --sort--> querySegment
+        # assert segments_info[0].segmentID == target
 
 
     @pytest.mark.tags(CaseLabel.L2)

@@ -3615,6 +3615,8 @@ class TestQueryCount(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
+        # recreate index wait for compactTo indexed
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
         collection_w.load()
         segment_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)

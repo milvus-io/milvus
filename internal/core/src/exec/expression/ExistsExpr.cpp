@@ -125,8 +125,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     int processed_cursor = 0;
     auto execute_sub_batch =
-        [&bitmap_input,
-         &processed_cursor]<FilterType filter_type = FilterType::sequential>(
+        [&bitmap_input, &
+         processed_cursor ]<FilterType filter_type = FilterType::sequential>(
             const milvus::Json* data,
             const bool* valid_data,
             const int32_t* offsets,
@@ -134,23 +134,23 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer) {
-            bool has_bitmap_input = !bitmap_input.empty();
-            for (int i = 0; i < size; ++i) {
-                auto offset = i;
-                if constexpr (filter_type == FilterType::random) {
-                    offset = (offsets) ? offsets[i] : i;
-                }
-                if (valid_data != nullptr && !valid_data[offset]) {
-                    res[i] = valid_res[i] = false;
-                    continue;
-                }
-                if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
-                    continue;
-                }
-                res[i] = data[offset].exist(pointer);
+        bool has_bitmap_input = !bitmap_input.empty();
+        for (int i = 0; i < size; ++i) {
+            auto offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = (offsets) ? offsets[i] : i;
             }
-            processed_cursor += size;
-        };
+            if (valid_data != nullptr && !valid_data[offset]) {
+                res[i] = valid_res[i] = false;
+                continue;
+            }
+            if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
+                continue;
+            }
+            res[i] = data[offset].exist(pointer);
+        }
+        processed_cursor += size;
+    };
 
     int64_t processed_size;
     if (has_offset_input_) {
@@ -192,13 +192,19 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, field_id, pointer](bool valid,
-                                                        uint8_t type,
-                                                        uint32_t row_id,
-                                                        uint16_t offset,
-                                                        uint16_t size,
-                                                        uint32_t value) {
-            return true;
+        auto filter_func = [segment, field_id, pointer](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                auto row_id = row_id_array[i];
+                bitset[row_id] = true;
+            }
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
