@@ -46,11 +46,6 @@ type reader struct {
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
-	for _, fieldSchema := range schema.Fields {
-		if fieldSchema.GetNullable() {
-			return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("not support bulk insert numpy files in field(%s) which set nullable == true", fieldSchema.GetName()))
-		}
-	}
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
@@ -88,15 +83,14 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	for fieldID, cr := range r.frs {
-		var data any
-		data, err = cr.Next(r.count)
+		data, validData, err := cr.Next(r.count)
 		if err != nil {
 			return nil, err
 		}
 		if data == nil {
 			return nil, io.EOF
 		}
-		err = insertData.Data[fieldID].AppendRows(data, nil)
+		err = insertData.Data[fieldID].AppendRows(data, validData)
 		if err != nil {
 			return nil, err
 		}
@@ -149,13 +143,27 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 			}
 			continue
 		}
+
 		if !hasPath {
-			if field.GetIsDynamic() {
+			// for nullable/default_value fields, if no file provided, the data will be filled by AppendNullableDefaultFieldsData()
+			// for dyanmic field, if no file provided, row count could be 0
+			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
 				continue
 			}
+
+			// other fields require numpy files
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
+		} else {
+			// import task doesn't support parsing numpy files for array/sparse_vector fields
+			// if user provided the files, report error
+			dt := field.GetDataType()
+			if dt == schemapb.DataType_Array || dt == schemapb.DataType_SparseFloatVector {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("unsupported parsing numpy files for data type: %s", dt.String()))
+			}
 		}
+
 		reader, err := cm.Reader(ctx, path)
 		if err != nil {
 			return nil, merr.WrapErrImportFailed(

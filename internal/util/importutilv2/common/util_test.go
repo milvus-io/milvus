@@ -106,3 +106,18 @@ func TestUtil_EstimateReadCountPerBatch_LargeSchema(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }
+
+func TestUtil_CheckValidUTF8(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "1000",
+			},
+		},
+	}
+	err := CheckValidUTF8(string([]byte{0xC0, 0xAF}), fieldSchema)
+	assert.Error(t, err)
+}

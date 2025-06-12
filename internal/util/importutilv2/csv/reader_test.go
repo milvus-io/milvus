@@ -149,7 +149,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	wrongSep := '\t'
 	_, err = NewReader(ctx, cm, schema, filePath, 64*1024*1024, wrongSep, nullkey)
 	suite.Error(err)
-	suite.Contains(err.Error(), "value of field is missed: ")
+	suite.Contains(err.Error(), "value of field is missed:")
 
 	// check data
 	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024, sep, nullkey)
@@ -234,6 +234,6 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 
-func TestUtil(t *testing.T) {
+func TestCsvReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }

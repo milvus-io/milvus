@@ -113,84 +113,96 @@ func (c *FieldReader) getCount(count int64) int64 {
 	return count
 }
 
-func (c *FieldReader) Next(count int64) (any, error) {
+func (c *FieldReader) Next(count int64) (any, any, error) {
 	readCount := c.getCount(count)
 	if readCount == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var (
-		data any
-		err  error
+		data      any
+		validData []bool
+		err       error
 	)
+
+	// numpy file cannot store null value, all the values must be non-null if the numpy file is accepted
+	// construct a bool array with all-true if the field is nullable
+
+	if c.field.GetNullable() || c.field.GetDefaultValue() != nil {
+		validData = make([]bool, 0, readCount)
+		for i := int64(0); i < readCount; i++ {
+			validData = append(validData, true)
+		}
+	}
+
 	dt := c.field.GetDataType()
 	switch dt {
 	case schemapb.DataType_Bool:
 		data, err = ReadN[bool](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Int8:
 		data, err = ReadN[int8](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Int16:
 		data, err = ReadN[int16](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Int32:
 		data, err = ReadN[int32](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Int64:
 		data, err = ReadN[int64](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Float:
 		data, err = ReadN[float32](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Double:
 		data, err = ReadN[float64](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_VarChar:
 		data, err = c.ReadString(readCount)
 		c.readPosition += int(readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	case schemapb.DataType_JSON:
 		var strs []string
 		strs, err = c.ReadString(readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		byteArr := make([][]byte, 0)
 		for _, str := range strs {
 			var dummy interface{}
 			err = json.Unmarshal([]byte(str), &dummy)
 			if err != nil {
-				return nil, merr.WrapErrImportFailed(
+				return nil, nil, merr.WrapErrImportFailed(
 					fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", str, c.field.GetName(), err))
 			}
 			if c.field.GetIsDynamic() {
 				var dummy2 map[string]interface{}
 				err = json.Unmarshal([]byte(str), &dummy2)
 				if err != nil {
-					return nil, merr.WrapErrImportFailed(
+					return nil, nil, merr.WrapErrImportFailed(
 						fmt.Sprintf("failed to parse value '%v' for dynamic JSON field '%s', error: %v",
 							str, c.field.GetName(), err))
 				}
@@ -202,40 +214,40 @@ func (c *FieldReader) Next(count int64) (any, error) {
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		data, err = ReadN[uint8](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_Int8Vector:
 		data, err = ReadN[int8](c.reader, c.order, readCount)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
 	case schemapb.DataType_FloatVector:
 		var elementType schemapb.DataType
 		elementType, err = convertNumpyType(c.npyReader.Header.Descr.Type)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		switch elementType {
 		case schemapb.DataType_Float:
 			data, err = ReadN[float32](c.reader, c.order, readCount)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			err = typeutil.VerifyFloats32(data.([]float32))
 			if err != nil {
-				return nil, nil
+				return nil, nil, err
 			}
 		case schemapb.DataType_Double:
 			var data64 []float64
 			data64, err = ReadN[float64](c.reader, c.order, readCount)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			err = typeutil.VerifyFloats64(data64)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			data = lo.Map(data64, func(f float64, _ int) float32 {
 				return float32(f)
@@ -243,9 +255,9 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		c.readPosition += int(readCount)
 	default:
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", dt.String()))
+		return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", dt.String()))
 	}
-	return data, nil
+	return data, validData, nil
 }
 
 // setByteOrder sets BigEndian/LittleEndian, the logic of this method is copied from npyio lib
