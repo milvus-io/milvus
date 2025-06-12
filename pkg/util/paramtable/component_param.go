@@ -5477,6 +5477,10 @@ if this parameter <= 0, will set it as 10`,
 		Version:      "2.4.0",
 		Doc:          "The insert buffer size (in MB) during import.",
 		DefaultValue: "64",
+		Formatter: func(v string) string {
+			bufferSize := getAsFloat(v)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -5487,6 +5491,10 @@ if this parameter <= 0, will set it as 10`,
 		Version:      "2.5.14",
 		Doc:          "The delete buffer size (in MB) during import.",
 		DefaultValue: "16",
+		Formatter: func(v string) string {
+			bufferSize := getAsFloat(v)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
