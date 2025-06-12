@@ -332,9 +332,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			zap.Time("seekPosition", tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())),
 		)
 		position = &msgpb.MsgPosition{
-			ChannelName: channel.GetChannelName(),
-			MsgID:       channel.GetSeekPosition().GetMsgID(),
-			Timestamp:   channel.GetSeekPosition().GetTimestamp(),
+			ChannelName: channelCheckpoint.GetChannelName(),
+			MsgID:       channelCheckpoint.GetMsgID(),
+			Timestamp:   channelCheckpoint.GetTimestamp(),
 		}
 	} else {
 		if channelCheckpoint.GetTimestamp() > deleteCheckpoint.GetTimestamp() {
