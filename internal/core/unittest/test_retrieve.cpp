@@ -64,7 +64,7 @@ TEST_P(RetrieveTest, AutoID) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<proto::plan::GenericValue> values;
     for (int i = 0; i < req_size; ++i) {
         proto::plan::GenericValue val;
@@ -121,7 +121,7 @@ TEST_P(RetrieveTest, AutoID2) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<proto::plan::GenericValue> values;
     {
         for (int i = 0; i < req_size; ++i) {
@@ -181,7 +181,7 @@ TEST_P(RetrieveTest, NotExist) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<proto::plan::GenericValue> values;
     {
         for (int i = 0; i < req_size; ++i) {
@@ -242,7 +242,7 @@ TEST_P(RetrieveTest, Empty) {
 
     auto segment = CreateSealedSegment(schema);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<proto::plan::GenericValue> values;
     {
         for (int i = 0; i < req_size; ++i) {
@@ -289,7 +289,7 @@ TEST_P(RetrieveTest, Limit) {
     auto dataset = DataGen(schema, N, 42);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     proto::plan::GenericValue unary_val;
     unary_val.set_int64_val(0);
     auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -336,7 +336,7 @@ TEST_P(RetrieveTest, FillEntry) {
     int64_t N = 101;
     auto dataset = DataGen(schema, N, 42);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     proto::plan::GenericValue unary_val;
     unary_val.set_int64_val(0);
     auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -381,7 +381,7 @@ TEST_P(RetrieveTest, LargeTimestamp) {
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<proto::plan::GenericValue> values;
     {
         for (int i = 0; i < req_size; ++i) {
@@ -450,7 +450,7 @@ TEST_P(RetrieveTest, Delete) {
     auto i64_col = dataset.get_col<int64_t>(fid_64);
     auto ts_col = dataset.get_col<int64_t>(fid_ts);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<int64_t> timestamps;
     for (int i = 0; i < req_size; ++i) {
         timestamps.emplace_back(ts_col[choose(i)]);

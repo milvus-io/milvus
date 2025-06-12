@@ -151,7 +151,7 @@ class SegmentInterface {
                     int64_t count) const = 0;
 
     virtual void
-    LazyCheckSchema(const Schema& sch) = 0;
+    LazyCheckSchema(SchemaPtr sch) = 0;
 
     // reopen segment with new schema
     virtual void

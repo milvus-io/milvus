@@ -105,7 +105,7 @@ TEST(Float16, ExecWithoutPredicateFlat) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -197,7 +197,7 @@ TEST(Float16, RetrieveEmpty) {
 
     auto segment = CreateSealedSegment(schema);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<proto::plan::GenericValue> values;
     {
         for (int i = 0; i < req_size; ++i) {
@@ -273,7 +273,7 @@ TEST(Float16, ExecWithPredicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroup<milvus::Float16Vector>(num_queries, 16, 1024);
@@ -343,7 +343,7 @@ TEST(BFloat16, ExecWithoutPredicateFlat) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -436,7 +436,7 @@ TEST(BFloat16, RetrieveEmpty) {
 
     auto segment = CreateSealedSegment(schema);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     std::vector<int64_t> values;
     std::vector<proto::plan::GenericValue> retrieve_ints;
     for (int i = 0; i < req_size; ++i) {
@@ -511,7 +511,7 @@ TEST(BFloat16, ExecWithPredicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroup<milvus::BFloat16Vector>(num_queries, 16, 1024);

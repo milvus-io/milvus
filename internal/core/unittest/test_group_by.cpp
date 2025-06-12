@@ -107,7 +107,7 @@ TEST(GroupBY, SealedIndex) {
         proto::plan::PlanNode plan_node;
         auto ok =
             google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -160,7 +160,7 @@ TEST(GroupBY, SealedIndex) {
         proto::plan::PlanNode plan_node;
         auto ok =
             google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -210,7 +210,7 @@ TEST(GroupBY, SealedIndex) {
         proto::plan::PlanNode plan_node;
         auto ok =
             google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -261,7 +261,7 @@ TEST(GroupBY, SealedIndex) {
         proto::plan::PlanNode plan_node;
         auto ok =
             google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -311,7 +311,7 @@ TEST(GroupBY, SealedIndex) {
         proto::plan::PlanNode plan_node;
         auto ok =
             google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -361,7 +361,7 @@ TEST(GroupBY, SealedIndex) {
         proto::plan::PlanNode plan_node;
         auto ok =
             google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(*schema, plan_node);
+        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -437,7 +437,7 @@ TEST(GroupBY, SealedData) {
          >)";
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         auto num_queries = 1;
         auto seed = 1024;
         auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
@@ -548,7 +548,7 @@ TEST(GroupBY, Reduce) {
          >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
@@ -643,7 +643,7 @@ TEST(GroupBY, GrowingRawData) {
          >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
@@ -743,7 +743,7 @@ TEST(GroupBY, GrowingIndex) {
          >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());

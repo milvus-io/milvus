@@ -34,7 +34,7 @@ class Collection {
                  const uint64_t version);
 
  public:
-    SchemaPtr&
+    SchemaPtr
     get_schema() {
         return schema_;
     }

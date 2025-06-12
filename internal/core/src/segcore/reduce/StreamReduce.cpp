@@ -146,7 +146,7 @@ StreamReducerHelper::AssembleMergedResult() {
             new_merged_result->topk_per_nq_prefix_sum_.begin() + 1);
         new_merged_result->result_offsets_ = std::move(new_result_offsets);
         for (auto field_id : plan_->target_entries_) {
-            auto& field_meta = plan_->schema_[field_id];
+            auto& field_meta = plan_->schema_->operator[](field_id);
             auto field_data =
                 MergeDataArray(merge_output_data_bases, field_meta);
             if (field_meta.get_data_type() == DataType::ARRAY) {
@@ -558,9 +558,9 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
 
     // reserve space for pks
     auto primary_field_id =
-        plan_->schema_.get_primary_field_id().value_or(milvus::FieldId(-1));
+        plan_->schema_->get_primary_field_id().value_or(milvus::FieldId(-1));
     AssertInfo(primary_field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
-    auto pk_type = plan_->schema_[primary_field_id].get_data_type();
+    auto pk_type = plan_->schema_->operator[](primary_field_id).get_data_type();
     switch (pk_type) {
         case milvus::DataType::INT64: {
             auto ids = std::make_unique<milvus::proto::schema::LongArray>();
@@ -665,7 +665,7 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
 
     // set output fields
     for (auto field_id : plan_->target_entries_) {
-        auto& field_meta = plan_->schema_[field_id];
+        auto& field_meta = plan_->schema_->operator[](field_id);
         auto field_data =
             milvus::segcore::MergeDataArray(result_pairs, field_meta);
         if (field_meta.get_data_type() == DataType::ARRAY) {

@@ -81,7 +81,7 @@ TEST(Sealed, without_predicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -182,7 +182,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -286,7 +286,7 @@ TEST(Sealed, with_predicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -394,7 +394,7 @@ TEST(Sealed, with_predicate_filter_all) {
     auto query_ptr = vec_col.data() + BIAS * dim;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -550,7 +550,7 @@ TEST(Sealed, LoadFieldData) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -714,7 +714,7 @@ TEST(Sealed, ClearData) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -819,7 +819,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -934,7 +934,7 @@ TEST(Sealed, LoadScalarIndex) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1036,7 +1036,7 @@ TEST(Sealed, Delete) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1118,7 +1118,7 @@ TEST(Sealed, OverlapDelete) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1242,7 +1242,7 @@ TEST(Sealed, BF) {
     auto binary_plan =
         translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     auto plan =
-        CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1305,7 +1305,7 @@ TEST(Sealed, BF_Overflow) {
     auto binary_plan =
         translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     auto plan =
-        CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1493,7 +1493,7 @@ TEST(Sealed, LoadArrayFieldData) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1550,7 +1550,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =

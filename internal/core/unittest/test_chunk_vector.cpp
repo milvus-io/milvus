@@ -290,7 +290,7 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
                       : CreatePlaceholderGroup(num_queries, 128, 1024);
 
         auto plan = milvus::query::CreateSearchPlanByExpr(
-            *schema, plan_str.data(), plan_str.size());
+            schema, plan_str.data(), plan_str.size());
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         Timestamp timestamp = 1000000;
@@ -350,7 +350,7 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan = milvus::query::CreateSearchPlanByExpr(
-        *schema, plan_str.data(), plan_str.size());
+        schema, plan_str.data(), plan_str.size());
     auto num_queries = 3;
     auto ph_group_raw =
         milvus::segcore::CreatePlaceholderGroup(num_queries, 16, 1024);

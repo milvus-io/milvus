@@ -618,7 +618,7 @@ binary_arith_op_eval_range_expr: <
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         // vectorsearch node => mvcc node => filter node
         // just test filter node
