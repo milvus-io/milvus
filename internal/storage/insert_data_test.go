@@ -224,7 +224,7 @@ func (s *InsertDataSuite) TestGetRowSize() {
 func GetFields(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
 	ret := make([]*schemapb.FieldSchema, 0, 100)
 	ret = append(ret, schema.GetFields()...)
-	for _, structField := range schema.GetStructFields() {
+	for _, structField := range schema.GetStructArrayFields() {
 		ret = append(ret, structField.GetFields()...)
 	}
 	return ret
