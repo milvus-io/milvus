@@ -2032,3 +2032,37 @@ func newReplicaDefaultRG(replicaID int64) *meta.Replica {
 		typeutil.NewUniqueSet(),
 	)
 }
+
+func (suite *TaskSuite) TestSegmentTaskShardLeaderID() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+
+	// Create a segment task
+	action := NewSegmentActionWithScope(1, ActionTypeGrow, "", 100, querypb.DataScope_Historical, 100)
+	segmentTask, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		action,
+	)
+	suite.NoError(err)
+
+	// Test initial shard leader ID (should be -1)
+	suite.Equal(int64(-1), segmentTask.ShardLeaderID())
+
+	// Test setting shard leader ID
+	expectedLeaderID := int64(123)
+	segmentTask.SetShardLeaderID(expectedLeaderID)
+	suite.Equal(expectedLeaderID, segmentTask.ShardLeaderID())
+
+	// Test setting another value
+	anotherLeaderID := int64(456)
+	segmentTask.SetShardLeaderID(anotherLeaderID)
+	suite.Equal(anotherLeaderID, segmentTask.ShardLeaderID())
+
+	// Test with zero value
+	segmentTask.SetShardLeaderID(0)
+	suite.Equal(int64(0), segmentTask.ShardLeaderID())
+}
