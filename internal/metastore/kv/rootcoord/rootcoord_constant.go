@@ -17,10 +17,11 @@ const (
 	// CollectionMetaPrefix prefix for collection meta
 	CollectionMetaPrefix = ComponentPrefix + "/collection"
 
-	PartitionMetaPrefix = ComponentPrefix + "/partitions"
-	AliasMetaPrefix     = ComponentPrefix + "/aliases"
-	FieldMetaPrefix     = ComponentPrefix + "/fields"
-	FunctionMetaPrefix  = ComponentPrefix + "/functions"
+	PartitionMetaPrefix        = ComponentPrefix + "/partitions"
+	AliasMetaPrefix            = ComponentPrefix + "/aliases"
+	FieldMetaPrefix            = ComponentPrefix + "/fields"
+	StructArrayFieldMetaPrefix = ComponentPrefix + "/struct-array-fields"
+	FunctionMetaPrefix         = ComponentPrefix + "/functions"
 
 	// CollectionAliasMetaPrefix210 prefix for collection alias meta
 	CollectionAliasMetaPrefix210 = ComponentPrefix + "/collection-alias"
