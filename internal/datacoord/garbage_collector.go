@@ -437,13 +437,13 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		}
 	}
 
-	droppedCompactTo := make(map[*SegmentInfo]struct{})
+	droppedCompactTo := make(map[int64]*SegmentInfo)
 	for id := range drops {
 		if to, ok := compactTo[id]; ok {
-			droppedCompactTo[to] = struct{}{}
+			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Keys(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Values(droppedCompactTo)...)
 	if ctx.Err() != nil {
 		return
 	}
