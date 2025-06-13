@@ -61,20 +61,28 @@ type Client interface {
 var _ Client = (*client)(nil)
 
 type client struct {
-	role       string
-	nodeID     int64
-	managers   *typeutil.ConcurrentMap[string, DispatcherManager]
-	managerMut *lock.KeyLock[string]
-	factory    msgstream.Factory
+	role                 string
+	nodeID               int64
+	managers             *typeutil.ConcurrentMap[string, DispatcherManager]
+	managerMut           *lock.KeyLock[string]
+	factory              msgstream.Factory
+	includeSkipWhenSplit bool
+}
+
+func NewClientWithIncludeSkipWhenSplit(factory msgstream.Factory, role string, nodeID int64) Client {
+	c := NewClient(factory, role, nodeID)
+	c.(*client).includeSkipWhenSplit = true
+	return c
 }
 
 func NewClient(factory msgstream.Factory, role string, nodeID int64) Client {
 	return &client{
-		role:       role,
-		nodeID:     nodeID,
-		factory:    factory,
-		managers:   typeutil.NewConcurrentMap[string, DispatcherManager](),
-		managerMut: lock.NewKeyLock[string](),
+		role:                 role,
+		nodeID:               nodeID,
+		factory:              factory,
+		managers:             typeutil.NewConcurrentMap[string, DispatcherManager](),
+		managerMut:           lock.NewKeyLock[string](),
+		includeSkipWhenSplit: false,
 	}
 }
 
@@ -91,7 +99,7 @@ func (c *client) Register(ctx context.Context, streamConfig *StreamConfig) (<-ch
 	var manager DispatcherManager
 	manager, ok := c.managers.Get(pchannel)
 	if !ok {
-		manager = NewDispatcherManager(pchannel, c.role, c.nodeID, c.factory)
+		manager = NewDispatcherManager(pchannel, c.role, c.nodeID, c.factory, c.includeSkipWhenSplit)
 		c.managers.Insert(pchannel, manager)
 		go manager.Run()
 	}
