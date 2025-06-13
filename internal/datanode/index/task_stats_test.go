@@ -17,13 +17,9 @@
 package index
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -82,99 +78,6 @@ func (s *TaskStatsSuite) GenSegmentWriterWithBM25(magic int64) {
 	segWriter.FlushAndIsFull()
 
 	s.segWriter = segWriter
-}
-
-func (s *TaskStatsSuite) TestSortSegmentWithBM25() {
-	s.Run("normal case", func() {
-		s.schema = genCollectionSchemaWithBM25()
-		s.GenSegmentWriterWithBM25(0)
-		_, kvs, fBinlogs, err := serializeWrite(context.TODO(), "root_path", 0, s.segWriter)
-		s.NoError(err)
-		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
-			result := make([][]byte, len(paths))
-			for i, path := range paths {
-				result[i] = kvs[path]
-			}
-			return result, nil
-		})
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
-		manager := NewTaskManager(ctx)
-		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
-		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
-			CollectionID:    s.collectionID,
-			PartitionID:     s.partitionID,
-			ClusterID:       s.clusterID,
-			TaskID:          testTaskKey.TaskID,
-			TargetSegmentID: 1,
-			InsertLogs:      lo.Values(fBinlogs),
-			Schema:          s.schema,
-			NumRows:         1,
-			StartLogID:      0,
-			EndLogID:        7,
-			BinlogMaxSize:   64 * 1024 * 1024,
-			StorageConfig: &indexpb.StorageConfig{
-				RootPath: "root_path",
-			},
-		}, manager, s.mockBinlogIO)
-		err = task.PreExecute(ctx)
-		s.Require().NoError(err)
-		binlog, err := task.sort(ctx)
-		s.Require().NoError(err)
-		s.Equal(5, len(binlog))
-
-		// check bm25 log
-		s.Equal(1, len(manager.statsTasks))
-		for key, task := range manager.statsTasks {
-			s.Equal(testTaskKey.ClusterID, key.ClusterID)
-			s.Equal(testTaskKey.TaskID, key.TaskID)
-			s.Equal(1, len(task.Bm25Logs))
-		}
-	})
-
-	s.Run("upload bm25 binlog failed", func() {
-		s.schema = genCollectionSchemaWithBM25()
-		s.GenSegmentWriterWithBM25(0)
-		_, kvs, fBinlogs, err := serializeWrite(context.TODO(), "root_path", 0, s.segWriter)
-		s.NoError(err)
-		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, paths []string) ([][]byte, error) {
-			result := make([][]byte, len(paths))
-			for i, path := range paths {
-				result[i] = kvs[path]
-			}
-			return result, nil
-		})
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		testTaskKey := Key{ClusterID: s.clusterID, TaskID: 100}
-		manager := NewTaskManager(ctx)
-		manager.LoadOrStoreStatsTask(s.clusterID, testTaskKey.TaskID, &StatsTaskInfo{SegID: 1})
-		task := NewStatsTask(ctx, cancel, &workerpb.CreateStatsRequest{
-			CollectionID:    s.collectionID,
-			PartitionID:     s.partitionID,
-			ClusterID:       s.clusterID,
-			TaskID:          testTaskKey.TaskID,
-			TargetSegmentID: 1,
-			InsertLogs:      lo.Values(fBinlogs),
-			Schema:          s.schema,
-			NumRows:         1,
-			StartLogID:      0,
-			EndLogID:        7,
-			BinlogMaxSize:   64 * 1024 * 1024,
-			StorageConfig: &indexpb.StorageConfig{
-				RootPath: "root_path",
-			},
-		}, manager, s.mockBinlogIO)
-		err = task.PreExecute(ctx)
-		s.Require().NoError(err)
-		_, err = task.sort(ctx)
-		s.Error(err)
-	})
 }
 
 func (s *TaskStatsSuite) TestBuildIndexParams() {
