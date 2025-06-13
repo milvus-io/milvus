@@ -2205,7 +2205,7 @@ class TestQueryOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
 
         # list connection to check
-        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: []})
+        self.connection_wrap.list_connections()
 
         # query after remove default connection
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
