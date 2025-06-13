@@ -1733,6 +1733,31 @@ func (s *GarbageCollectorSuite) TestRunRecycleTaskWithPauser() {
 	s.Equal(cnt, 2)
 }
 
+func (s *GarbageCollectorSuite) TestAvoidGCLoadedSegments() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().ListLoadedSegments(mock.Anything).Return([]int64{1}, nil).Once()
+	gc := newGarbageCollector(s.meta, handler, GcOption{
+		cli:              s.cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	s.meta.AddSegment(context.TODO(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:        1,
+			State:     commonpb.SegmentState_Dropped,
+			DroppedAt: 0,
+		},
+	})
+
+	gc.recycleDroppedSegments(context.TODO())
+	seg := s.meta.GetSegment(context.TODO(), 1)
+	s.NotNil(seg)
+}
+
 func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
 }

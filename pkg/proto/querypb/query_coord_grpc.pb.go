@@ -44,6 +44,7 @@ const (
 	QueryCoord_TransferReplica_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferReplica"
 	QueryCoord_ListResourceGroups_FullMethodName         = "/milvus.proto.query.QueryCoord/ListResourceGroups"
 	QueryCoord_DescribeResourceGroup_FullMethodName      = "/milvus.proto.query.QueryCoord/DescribeResourceGroup"
+	QueryCoord_ListLoadedSegments_FullMethodName         = "/milvus.proto.query.QueryCoord/ListLoadedSegments"
 	QueryCoord_ListCheckers_FullMethodName               = "/milvus.proto.query.QueryCoord/ListCheckers"
 	QueryCoord_ActivateChecker_FullMethodName            = "/milvus.proto.query.QueryCoord/ActivateChecker"
 	QueryCoord_DeactivateChecker_FullMethodName          = "/milvus.proto.query.QueryCoord/DeactivateChecker"
@@ -88,6 +89,7 @@ type QueryCoordClient interface {
 	TransferReplica(ctx context.Context, in *TransferReplicaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListResourceGroups(ctx context.Context, in *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error)
 	DescribeResourceGroup(ctx context.Context, in *DescribeResourceGroupRequest, opts ...grpc.CallOption) (*DescribeResourceGroupResponse, error)
+	ListLoadedSegments(ctx context.Context, in *ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*ListLoadedSegmentsResponse, error)
 	// ops interfaces
 	ListCheckers(ctx context.Context, in *ListCheckersRequest, opts ...grpc.CallOption) (*ListCheckersResponse, error)
 	ActivateChecker(ctx context.Context, in *ActivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -311,6 +313,15 @@ func (c *queryCoordClient) DescribeResourceGroup(ctx context.Context, in *Descri
 	return out, nil
 }
 
+func (c *queryCoordClient) ListLoadedSegments(ctx context.Context, in *ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*ListLoadedSegmentsResponse, error) {
+	out := new(ListLoadedSegmentsResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_ListLoadedSegments_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryCoordClient) ListCheckers(ctx context.Context, in *ListCheckersRequest, opts ...grpc.CallOption) (*ListCheckersResponse, error) {
 	out := new(ListCheckersResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_ListCheckers_FullMethodName, in, out, opts...)
@@ -465,6 +476,7 @@ type QueryCoordServer interface {
 	TransferReplica(context.Context, *TransferReplicaRequest) (*commonpb.Status, error)
 	ListResourceGroups(context.Context, *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)
 	DescribeResourceGroup(context.Context, *DescribeResourceGroupRequest) (*DescribeResourceGroupResponse, error)
+	ListLoadedSegments(context.Context, *ListLoadedSegmentsRequest) (*ListLoadedSegmentsResponse, error)
 	// ops interfaces
 	ListCheckers(context.Context, *ListCheckersRequest) (*ListCheckersResponse, error)
 	ActivateChecker(context.Context, *ActivateCheckerRequest) (*commonpb.Status, error)
@@ -551,6 +563,9 @@ func (UnimplementedQueryCoordServer) ListResourceGroups(context.Context, *milvus
 }
 func (UnimplementedQueryCoordServer) DescribeResourceGroup(context.Context, *DescribeResourceGroupRequest) (*DescribeResourceGroupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeResourceGroup not implemented")
+}
+func (UnimplementedQueryCoordServer) ListLoadedSegments(context.Context, *ListLoadedSegmentsRequest) (*ListLoadedSegmentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLoadedSegments not implemented")
 }
 func (UnimplementedQueryCoordServer) ListCheckers(context.Context, *ListCheckersRequest) (*ListCheckersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListCheckers not implemented")
@@ -1002,6 +1017,24 @@ func _QueryCoord_DescribeResourceGroup_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_ListLoadedSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLoadedSegmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).ListLoadedSegments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_ListLoadedSegments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).ListLoadedSegments(ctx, req.(*ListLoadedSegmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryCoord_ListCheckers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListCheckersRequest)
 	if err := dec(in); err != nil {
@@ -1348,6 +1381,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DescribeResourceGroup",
 			Handler:    _QueryCoord_DescribeResourceGroup_Handler,
+		},
+		{
+			MethodName: "ListLoadedSegments",
+			Handler:    _QueryCoord_ListLoadedSegments_Handler,
 		},
 		{
 			MethodName: "ListCheckers",
