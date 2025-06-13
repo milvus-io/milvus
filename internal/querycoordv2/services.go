@@ -1250,7 +1250,11 @@ func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoaded
 
 	collections := s.meta.GetAllCollections(ctx)
 	for _, collection := range collections {
-		segments := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection.GetCollectionID(), meta.CurrentTargetFirst)
+		segments := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection.GetCollectionID(), meta.CurrentTarget)
+		for _, segment := range segments {
+			segmentIDs.Insert(segment.ID)
+		}
+		segments = s.targetMgr.GetSealedSegmentsByCollection(ctx, collection.GetCollectionID(), meta.NextTarget)
 		for _, segment := range segments {
 			segmentIDs.Insert(segment.ID)
 		}
