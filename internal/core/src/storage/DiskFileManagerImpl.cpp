@@ -255,6 +255,8 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         auto file =
             File::Open(local_index_file_name, O_CREAT | O_RDWR | O_TRUNC);
 
+        LOG_INFO("debug=== cache index to disk: {}", local_index_file_name);
+
         // Get the remote files
         std::vector<std::string> batch_remote_files;
         batch_remote_files.reserve(slices.second.size());
