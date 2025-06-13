@@ -73,7 +73,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal() {
 
 	for i := 0; i < len(compactionResult.GetSegments()); i++ {
 		seg := compactionResult.GetSegments()[i]
-		s.EqualValues(1, len(seg.InsertLogs))
+		s.EqualValues(2, len(seg.InsertLogs))
 	}
 
 	s.EqualValues(10239,
@@ -129,7 +129,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	totalRowNum := int64(0)
 	statsRowNum := int64(0)
 	for _, seg := range compactionResultV2.GetSegments() {
-		s.Equal(1, len(seg.GetInsertLogs()))
+		s.Equal(2, len(seg.GetInsertLogs()))
 		s.Equal(1, len(seg.GetField2StatslogPaths()))
 		totalRowNum += seg.GetNumOfRows()
 		statsRowNum += seg.GetField2StatslogPaths()[0].GetBinlogs()[0].GetEntriesNum()
@@ -231,7 +231,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestCompactionWithBM25Function(
 
 	for i := 0; i < len(compactionResult.GetSegments()); i++ {
 		seg := compactionResult.GetSegments()[i]
-		s.Equal(1, len(seg.InsertLogs))
+		s.Equal(2, len(seg.InsertLogs))
 		s.Equal(1, len(seg.Bm25Logs))
 	}
 }
@@ -252,7 +252,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormalByMem
 	s.Equal(2, len(s.task.clusterBuffers))
 	s.Equal(2, len(compactionResult.GetSegments()))
 	segment := compactionResult.GetSegments()[0]
-	s.Equal(1, len(segment.InsertLogs))
+	s.Equal(2, len(segment.InsertLogs))
 	s.Equal(1, len(segment.Field2StatslogPaths))
 }
 
