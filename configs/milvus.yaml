@@ -158,11 +158,12 @@ minio:
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
   listObjectsMaxKeys: 0
 
-# Milvus supports four MQ: rocksmq(based on RockDB), Pulsar and Kafka.
-# You can change your mq by setting mq.type field.
-# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported in cluster mode)
+# Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
+# You can change the MQ by setting the mq.type field.
+# If the mq.type field is not set, the following priority is used when multiple MQs are configured in this file:
+# 1. standalone (local) mode: rocksmq (default) > Pulsar > Kafka > Woodpecker
+# 2. cluster mode: Pulsar (default) > Kafka (rocksmq is unsupported in cluster mode) > Woodpecker
+# Note: These MQ priorities are compatible with existing instances. For new instances, it is recommended to explicitly use Woodpecker to achieve better performance, operational simplicity, and cost efficiency.
 mq:
   # Default value: "default"
   # Valid values: [default, pulsar, kafka, rocksmq, woodpecker]
@@ -187,7 +188,7 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 128M # Maximum entries count of a segment, default is 128M
+      maxSize: 2GB # Maximum size of a segment, default is 2GB
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
@@ -195,12 +196,12 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
-      maxBytes: 32M # Maximum size of write buffer in bytes.
+      maxBytes: 128M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
-      maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
-      maxFlushThreads: 4 # Maximum number of threads to flush data
+      maxFlushSize: 4M # Maximum size of a fragment in bytes to flush, default is 4M.
+      maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
       maxSize: 8M # The maximum size of the merged files, default is 8M.
   storage:
@@ -227,6 +228,16 @@ pulsar:
   namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
   enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
+  # Perform a backlog cleanup every time the data of given bytes is written.
+  # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
+  # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
+  # set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog. 
+  # If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
+  # so admin of pulsar should give enough retention time to avoid the wal message lost.
+  # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
+  # Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
+  # The retention policy of pulsar can set shorter to save the storage space in this case.
+  backlogAutoClearBytes: 100m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -1269,14 +1280,18 @@ streaming:
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
   walTruncate:
-    # The interval of sampling wal checkpoint when truncate, 1m by default.
+    # The interval of sampling wal checkpoint when truncate, 30m by default.
     # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
     # More samples, more frequent truncate, more memory usage.
-    sampleInterval: 1m
-    # The retention interval of wal truncate, 5m by default.
+    sampleInterval: 30m
+    # The retention interval of wal truncate, 26h by default.
     # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
-    # Greater the interval, more wal storage usage, more redundant data in wal
-    retentionInterval: 5m
+    # Greater the interval, more wal storage usage, more redundant data in wal.
+    # Because current query path doesn't promise the read operation not happen before the truncate point,
+    # retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
+    # If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
+    # because the wal truncate operation is implemented by pulsar consumer.
+    retentionInterval: 26h
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

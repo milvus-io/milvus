@@ -1063,3 +1063,7 @@ func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.rootcoordServer.GetQuotaMetrics(ctx, req)
 }
+
+func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	return s.queryCoordServer.ListLoadedSegments(ctx, req)
+}

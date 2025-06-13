@@ -59,6 +59,10 @@ DiskFileManagerImpl::~DiskFileManagerImpl() {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     local_chunk_manager->RemoveDir(GetIndexPathPrefixWithBuildID(
         local_chunk_manager, index_meta_.build_id));
+    local_chunk_manager->RemoveDir(GetTextIndexPathPrefixWithBuildID(
+        local_chunk_manager, index_meta_.build_id));
+    local_chunk_manager->RemoveDir(GetJsonKeyIndexPathPrefixWithBuildID(
+        local_chunk_manager, index_meta_.build_id));
 }
 
 bool

@@ -43,7 +43,7 @@ ParsePlaceholderGroup(const Plan* plan,
         element.tag_ = info.tag();
         Assert(plan->tag2field_.count(element.tag_));
         auto field_id = plan->tag2field_.at(element.tag_);
-        auto& field_meta = plan->schema_[field_id];
+        auto& field_meta = plan->schema_->operator[](field_id);
         AssertInfo(static_cast<int>(field_meta.get_data_type()) ==
                        static_cast<int>(info.type()),
                    "vector type must be the same, field {} - type {}, search "
@@ -95,28 +95,28 @@ ParsePlanNodeProto(proto::plan::PlanNode& plan_node,
 }
 
 std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema,
+CreateSearchPlanByExpr(SchemaPtr schema,
                        const void* serialized_expr_plan,
                        const int64_t size) {
     // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
     ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
-    return ProtoParser(schema).CreatePlan(plan_node);
+    return ProtoParser(std::move(schema)).CreatePlan(plan_node);
 }
 
 std::unique_ptr<Plan>
-CreateSearchPlanFromPlanNode(const Schema& schema,
+CreateSearchPlanFromPlanNode(SchemaPtr schema,
                              const proto::plan::PlanNode& plan_node) {
-    return ProtoParser(schema).CreatePlan(plan_node);
+    return ProtoParser(std::move(schema)).CreatePlan(plan_node);
 }
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema,
+CreateRetrievePlanByExpr(SchemaPtr schema,
                          const void* serialized_expr_plan,
                          const int64_t size) {
     proto::plan::PlanNode plan_node;
     ParsePlanNodeProto(plan_node, serialized_expr_plan, size);
-    return ProtoParser(schema).CreateRetrievePlan(plan_node);
+    return ProtoParser(std::move(schema)).CreateRetrievePlan(plan_node);
 }
 
 int64_t

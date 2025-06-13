@@ -1700,23 +1700,12 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
 	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	for _, loadInfo := range infos {
-		fieldIDs := typeutil.NewSet(lo.Map(loadInfo.GetIndexInfos(), func(info *querypb.FieldIndexInfo, _ int) int64 { return info.GetFieldID() })...)
-		fieldInfos := lo.SliceToMap(lo.Filter(loadInfo.GetBinlogPaths(), func(info *datapb.FieldBinlog, _ int) bool { return fieldIDs.Contain(info.GetFieldID()) }),
-			func(info *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) { return info.GetFieldID(), info })
-
 		for _, info := range loadInfo.GetIndexInfos() {
 			if len(info.GetIndexFilePaths()) == 0 {
 				log.Warn("failed to add index for segment, index file list is empty, the segment may be too small")
 				return merr.WrapErrIndexNotFound("index file list empty")
 			}
 
-			// TODO add field info sync between segcore and go segment for storage v2
-			if loadInfo.GetStorageVersion() != storage.StorageV2 {
-				fieldInfo, ok := fieldInfos[info.GetFieldID()]
-				if !ok {
-					return merr.WrapErrParameterInvalid("index info with corresponding field info", "missing field info", strconv.FormatInt(fieldInfo.GetFieldID(), 10))
-				}
-			}
 			err := loader.loadFieldIndex(ctx, segment, info)
 			if err != nil {
 				log.Warn("failed to load index for segment", zap.Error(err))

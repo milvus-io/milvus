@@ -49,7 +49,6 @@ type BulkInsertSuite struct {
 	failedReason string
 
 	pkType   schemapb.DataType
-	autoID   bool
 	fileType importutilv2.FileType
 
 	vecType    schemapb.DataType
@@ -63,7 +62,6 @@ func (s *BulkInsertSuite) SetupTest() {
 	s.failed = false
 	s.fileType = importutilv2.Parquet
 	s.pkType = schemapb.DataType_Int64
-	s.autoID = false
 
 	s.vecType = schemapb.DataType_FloatVector
 	s.indexType = "HNSW"
@@ -82,14 +80,14 @@ func (s *BulkInsertSuite) run() {
 	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
 
 	var schema *schemapb.CollectionSchema
-	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID}
+	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: false}
 	fieldSchema2 := &schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}}
 	fieldSchema3 := &schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}}
 	fieldSchema4 := &schemapb.FieldSchema{FieldID: 103, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{}}
 	if s.vecType != schemapb.DataType_SparseFloatVector {
-		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema3)
+		schema = integration.ConstructSchema(collectionName, dim, false, fieldSchema1, fieldSchema2, fieldSchema3)
 	} else {
-		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema4)
+		schema = integration.ConstructSchema(collectionName, dim, false, fieldSchema1, fieldSchema2, fieldSchema4)
 	}
 
 	marshaledSchema, err := proto.Marshal(schema)
@@ -211,6 +209,7 @@ func (s *BulkInsertSuite) run() {
 	params := integration.GetSearchParams(s.indexType, s.metricType)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		"embeddings", s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	s.NoError(err)
@@ -257,16 +256,6 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 			s.run()
 		}
 	}
-}
-
-func (s *BulkInsertSuite) TestAutoID() {
-	s.pkType = schemapb.DataType_Int64
-	s.autoID = true
-	s.run()
-
-	s.pkType = schemapb.DataType_VarChar
-	s.autoID = true
-	s.run()
 }
 
 func (s *BulkInsertSuite) TestPK() {

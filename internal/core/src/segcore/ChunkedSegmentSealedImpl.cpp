@@ -803,7 +803,7 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
         // absent_fields.find_first() returns std::optional<>
         auto field_id =
             FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
-        auto& field_meta = plan->schema_.operator[](field_id);
+        auto& field_meta = plan->schema_->operator[](field_id);
         // request field may has added field
         if (!field_meta.is_nullable()) {
             PanicInfo(FieldNotLoaded,
@@ -1845,9 +1845,9 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 }
 
 void
-ChunkedSegmentSealedImpl::LazyCheckSchema(const Schema& sch) {
-    if (sch.get_schema_version() > schema_->get_schema_version()) {
-        Reopen(std::make_shared<Schema>(sch));
+ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
+    if (sch->get_schema_version() > schema_->get_schema_version()) {
+        Reopen(sch);
     }
 }
 

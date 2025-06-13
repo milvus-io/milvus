@@ -5477,6 +5477,10 @@ if this parameter <= 0, will set it as 10`,
 		Version:      "2.4.0",
 		Doc:          "The insert buffer size (in MB) during import.",
 		DefaultValue: "64",
+		Formatter: func(v string) string {
+			bufferSize := getAsFloat(v)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -5487,6 +5491,10 @@ if this parameter <= 0, will set it as 10`,
 		Version:      "2.5.14",
 		Doc:          "The delete buffer size (in MB) during import.",
 		DefaultValue: "16",
+		Formatter: func(v string) string {
+			bufferSize := getAsFloat(v)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -5651,8 +5659,9 @@ type streamingConfig struct {
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
-	WALTruncateSampleInterval       ParamItem `refreshable:"true"`
-	WALTruncateRetentionInterval    ParamItem `refreshable:"true"`
+
+	WALTruncateSampleInterval    ParamItem `refreshable:"true"`
+	WALTruncateRetentionInterval ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5880,10 +5889,10 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 	p.WALTruncateSampleInterval = ParamItem{
 		Key:     "streaming.walTruncate.sampleInterval",
 		Version: "2.6.0",
-		Doc: `The interval of sampling wal checkpoint when truncate, 1m by default.
+		Doc: `The interval of sampling wal checkpoint when truncate, 30m by default.
 Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
 More samples, more frequent truncate, more memory usage.`,
-		DefaultValue: "1m",
+		DefaultValue: "30m",
 		Export:       true,
 	}
 	p.WALTruncateSampleInterval.Init(base.mgr)
@@ -5891,10 +5900,14 @@ More samples, more frequent truncate, more memory usage.`,
 	p.WALTruncateRetentionInterval = ParamItem{
 		Key:     "streaming.walTruncate.retentionInterval",
 		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 5m by default.
+		Doc: `The retention interval of wal truncate, 26h by default.
 If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
-Greater the interval, more wal storage usage, more redundant data in wal`,
-		DefaultValue: "5m",
+Greater the interval, more wal storage usage, more redundant data in wal.
+Because current query path doesn't promise the read operation not happen before the truncate point,
+retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
+If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
+because the wal truncate operation is implemented by pulsar consumer.`,
+		DefaultValue: "26h",
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)

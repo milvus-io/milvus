@@ -487,7 +487,7 @@ func (node *QueryNode) Init() error {
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
 		if streamingutil.IsStreamingServiceEnabled() {
-			node.dispClient = msgdispatcher.NewClient(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
+			node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
 		} else {
 			node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		}
