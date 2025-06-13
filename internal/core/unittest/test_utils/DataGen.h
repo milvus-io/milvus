@@ -400,6 +400,26 @@ inline SchemaPtr CreateTestSchema() {
     return schema;
 }
 
+template <typename T>
+void
+InsertCol(InsertRecordProto* insert_data,
+          const std::vector<T>& data,
+          const FieldMeta& field_meta,
+          bool random_valid = false) {
+    FixedVector<bool> valid_data(data.size());
+    if (field_meta.is_nullable()) {
+        for (int i = 0; i < data.size(); ++i) {
+            int x = i;
+            if (random_valid)
+                x = rand();
+            valid_data[i] = x % 2 == 0 ? true : false;
+        }
+    }
+    auto array = milvus::segcore::CreateDataArrayFrom(
+        data.data(), valid_data.data(), data.size(), field_meta);
+    insert_data->mutable_fields_data()->AddAllocated(array.release());
+}
+
 inline GeneratedData
 DataGen(SchemaPtr schema,
         int64_t N,
