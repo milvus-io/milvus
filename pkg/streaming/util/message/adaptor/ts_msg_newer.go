@@ -127,6 +127,10 @@ type SchemaChangeMessageBody struct {
 	SchemaChangeMessage message.ImmutableSchemaChangeMessageV2
 }
 
+func (s *SchemaChangeMessageBody) ID() msgstream.UniqueID {
+	return 0
+}
+
 func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 	schChgMsg, err := message.AsImmutableCollectionSchemaChangeV2(msg)
 	if err != nil {
