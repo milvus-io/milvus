@@ -79,4 +79,9 @@ JsonCastType::ToMilvusDataType() const {
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
     }
 }
+
+std::string
+JsonCastType::ToString() const {
+    return fmt::format("{}", *this);
+}
 }  // namespace milvus
