@@ -144,6 +144,21 @@ func TestDataSorter(t *testing.T) {
 					DataType:     schemapb.DataType_SparseFloatVector,
 				},
 			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 113,
+					Name:    "field_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     114,
+							Name:        "field_sturct_float_vector",
+							Description: "float",
+							DataType:    schemapb.DataType_ArrayOfVector,
+							ElementType: schemapb.DataType_FloatVector,
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -203,6 +218,30 @@ func TestDataSorter(t *testing.T) {
 						typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
 						typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
 						typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+					},
+				},
+			},
+			114: &VectorArrayFieldData{
+				Dim:         2,
+				ElementType: schemapb.DataType_FloatVector,
+				Data: []*schemapb.VectorField{
+					{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+						},
+					},
+					{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{Data: []float32{5, 6, 7, 8, 9, 10}},
+						},
+					},
+					{
+						Dim: 2,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{Data: []float32{11, 12, 13, 14, 15, 16}},
+						},
 					},
 				},
 			},
@@ -278,6 +317,13 @@ func TestDataSorter(t *testing.T) {
 			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
 		},
 	}, &dataSorter.InsertData.Data[112].(*SparseFloatVectorFieldData).SparseFloatArray)
+
+	assert.Equal(t, []float32{11, 12, 13, 14, 15, 16},
+		dataSorter.InsertData.Data[114].(*VectorArrayFieldData).Data[0].Data.(*schemapb.VectorField_FloatVector).FloatVector.Data)
+	assert.Equal(t, []float32{1, 2, 3, 4},
+		dataSorter.InsertData.Data[114].(*VectorArrayFieldData).Data[1].Data.(*schemapb.VectorField_FloatVector).FloatVector.Data)
+	assert.Equal(t, []float32{5, 6, 7, 8, 9, 10},
+		dataSorter.InsertData.Data[114].(*VectorArrayFieldData).Data[2].Data.(*schemapb.VectorField_FloatVector).FloatVector.Data)
 }
 
 func TestDataSorter_Len(t *testing.T) {
