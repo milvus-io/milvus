@@ -243,26 +243,22 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 
 	jobType := indexpb.JobType_JobTypeIndexJob.String()
 	for k, v := range taskMetrics {
-		metrics.TaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
+		metrics.IndexStatsTaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
 	}
 	log.Ctx(m.ctx).Info("update index metric", zap.Int("collectionNum", len(taskMetrics)))
 }
 
-func checkJsonParams(index *model.Index, req *indexpb.CreateIndexRequest) bool {
-	castType1, err := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
-	if err != nil {
+func checkIdenticalJson(index *model.Index, req *indexpb.CreateIndexRequest) bool {
+	// Skip error handling since json path existence is guaranteed in CreateIndex
+	jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
+	jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+
+	if jsonPath1 != jsonPath2 {
 		return false
 	}
-	castType2, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
-	if err != nil || castType1 != castType2 {
-		return false
-	}
-	jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-	if err != nil {
-		return false
-	}
-	jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-	return err == nil && jsonPath1 == jsonPath2
+	castType1, _ := getIndexParam(index.IndexParams, common.JSONCastTypeKey)
+	castType2, _ := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+	return castType1 == castType2
 }
 
 func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
@@ -370,7 +366,8 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 			continue
 		}
 		if req.IndexName == index.IndexName {
-			if req.FieldID == index.FieldID && checkParams(index, req) && (!isJson || checkJsonParams(index, req)) {
+			if req.FieldID == index.FieldID && checkParams(index, req) &&
+				/*only check json params when it is json index*/ (!isJson || checkIdenticalJson(index, req)) {
 				return index.IndexID, nil
 			}
 			errMsg := "at most one distinct index is allowed per field"
@@ -383,16 +380,12 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJson bool)
 		}
 		if req.FieldID == index.FieldID {
 			if isJson {
-				// if it is json index, check if json paths are same
-				jsonPath1, err := getIndexParam(index.IndexParams, common.JSONPathKey)
-				if err != nil {
-					return 0, err
-				}
-				jsonPath2, err := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
-				if err != nil {
-					return 0, err
-				}
+				// Skip error handling since json path existence is guaranteed in CreateIndex
+				jsonPath1, _ := getIndexParam(index.IndexParams, common.JSONPathKey)
+				jsonPath2, _ := getIndexParam(req.GetIndexParams(), common.JSONPathKey)
+
 				if jsonPath1 != jsonPath2 {
+					// if json path is not same, create index is allowed
 					continue
 				}
 			}

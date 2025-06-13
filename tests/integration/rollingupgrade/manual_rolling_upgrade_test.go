@@ -360,5 +360,7 @@ func (s *ManualRollingUpgradeSuite) TestSuspendNode() {
 }
 
 func TestManualRollingUpgrade(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(ManualRollingUpgradeSuite))
 }

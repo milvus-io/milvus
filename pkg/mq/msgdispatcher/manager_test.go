@@ -46,7 +46,7 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		go produceTimeTick(t, ctx, producer)
 
-		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
+		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory, false)
 		assert.NotNil(t, c)
 		go c.Run()
 		defer c.Close()
@@ -93,7 +93,7 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		go produceTimeTick(t, ctx, producer)
 
-		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
+		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory, false)
 		assert.NotNil(t, c)
 
 		go c.Run()
@@ -157,7 +157,7 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		go produceTimeTick(t, ctx, producer)
 
-		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
+		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory, false)
 		assert.NotNil(t, c)
 
 		go c.Run()
@@ -181,7 +181,7 @@ func TestManager(t *testing.T) {
 			d.curTs.Store(1000)
 		}
 
-		checkIntervalK := paramtable.Get().MQCfg.MergeCheckInterval.Key
+		checkIntervalK := paramtable.Get().MQCfg.CheckInterval.Key
 		paramtable.Get().Save(checkIntervalK, "0.01")
 		defer paramtable.Get().Reset(checkIntervalK)
 
@@ -202,7 +202,7 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		go produceTimeTick(t, ctx, producer)
 
-		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory)
+		c := NewDispatcherManager(pchannel, typeutil.ProxyRole, 1, factory, false)
 
 		go c.Run()
 		defer c.Close()

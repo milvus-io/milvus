@@ -55,7 +55,7 @@ type DecayFunction[T PKType, R int32 | int64 | float32 | float64] struct {
 }
 
 func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, decayFunctionName, false)
+	base, err := newRerankBase(collSchema, funcSchema, decayFunctionName, true)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func toGreaterScore(score float32, metricType string) float32 {
 	}
 }
 
-func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns) *IDScores[T] {
+func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, searchParams *SearchParams, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
 	srcScores := maxMerge[T](cols)
 	decayScores := map[T]float32{}
 	for _, col := range cols {
@@ -186,7 +186,10 @@ func (decay *DecayFunction[T, R]) processOneSearchData(ctx context.Context, sear
 	for id := range decayScores {
 		decayScores[id] = decayScores[id] * srcScores[id]
 	}
-	return newIDScores(decayScores, searchParams)
+	if searchParams.isGrouping() {
+		return newGroupingIDScores(decayScores, searchParams, idGroup)
+	}
+	return newIDScores(decayScores, searchParams), nil
 }
 
 func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *SearchParams, inputs *rerankInputs) (*rerankOutputs, error) {
@@ -198,7 +201,10 @@ func (decay *DecayFunction[T, R]) Process(ctx context.Context, searchParams *Sea
 				col.scores[j] = toGreaterScore(score, metricType)
 			}
 		}
-		idScore := decay.processOneSearchData(ctx, searchParams, cols)
+		idScore, err := decay.processOneSearchData(ctx, searchParams, cols, inputs.idGroupValue)
+		if err != nil {
+			return nil, err
+		}
 		appendResult(outputs, idScore.ids, idScore.scores)
 	}
 	return outputs, nil

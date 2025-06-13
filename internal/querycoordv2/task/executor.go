@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -54,6 +55,7 @@ var segmentsVersion = semver.Version{
 }
 
 type Executor struct {
+	nodeID    int64
 	doneCh    chan struct{}
 	wg        sync.WaitGroup
 	meta      *meta.Meta
@@ -96,6 +98,17 @@ func (ex *Executor) Stop() {
 	ex.wg.Wait()
 }
 
+func (ex *Executor) GetTaskExecutionCap() int32 {
+	nodeInfo := ex.nodeMgr.Get(ex.nodeID)
+	if nodeInfo == nil || nodeInfo.CPUNum() == 0 {
+		return Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32()
+	}
+
+	ret := int32(math.Ceil(float64(nodeInfo.CPUNum()) * Params.QueryCoordCfg.QueryNodeTaskParallelismFactor.GetAsFloat()))
+
+	return ret
+}
+
 // Execute executes the given action,
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
@@ -104,7 +117,7 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	if exist {
 		return false
 	}
-	if ex.executingTaskNum.Inc() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
+	if ex.executingTaskNum.Inc() > ex.GetTaskExecutionCap() {
 		ex.executingTasks.Remove(task.Index())
 		ex.executingTaskNum.Dec()
 		return false

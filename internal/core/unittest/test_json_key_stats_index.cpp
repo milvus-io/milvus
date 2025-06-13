@@ -214,13 +214,19 @@ TEST_P(JsonKeyStatsIndexTest, TestTermInFunc) {
         };
         std::unordered_set<int64_t> term_set(testcase.term.begin(),
                                              testcase.term.end());
-        auto filter_func = [&term_set, this](bool valid,
-                                             uint8_t type,
-                                             uint32_t row_id,
-                                             uint16_t offset,
-                                             uint16_t size,
-                                             int32_t value) {
-            return term_set.find(int64_t(value)) != term_set.end();
+        auto filter_func = [&term_set, this](const bool* valid_array,
+                                             const uint8_t* type_array,
+                                             const uint32_t* row_id_array,
+                                             const uint16_t* offset_array,
+                                             const uint16_t* size_array,
+                                             const int32_t* value_array,
+                                             TargetBitmap& bitset,
+                                             const size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                auto value = value_array[i];
+                bitset[row_id_array[i]] =
+                    term_set.find(int64_t(value)) != term_set.end();
+            }
         };
         auto pointer = milvus::Json::pointer(testcase.nested_path);
         auto bitset =
@@ -292,27 +298,41 @@ TEST_P(JsonKeyStatsIndexTest, TestUnaryRangeInFunc) {
                 }
             }
 
-            auto filter_func = [&op, &testcase, this](bool valid,
-                                                      uint8_t type,
-                                                      uint32_t row_id,
-                                                      uint16_t offset,
-                                                      uint16_t size,
-                                                      int32_t value) {
-                switch (op) {
-                    case OpType::GreaterThan:
-                        return int64_t(value) > testcase.val;
-                    case OpType::GreaterEqual:
-                        return int64_t(value) >= testcase.val;
-                    case OpType::LessThan:
-                        return int64_t(value) < testcase.val;
-                    case OpType::LessEqual:
-                        return int64_t(value) <= testcase.val;
-                    case OpType::Equal:
-                        return int64_t(value) == testcase.val;
-                    case OpType::NotEqual:
-                        return int64_t(value) != testcase.val;
-                    default:
-                        return false;
+            auto filter_func = [&op, &testcase, this](
+                                   const bool* valid_array,
+                                   const uint8_t* type_array,
+                                   const uint32_t* row_id_array,
+                                   const uint16_t* offset_array,
+                                   const uint16_t* size_array,
+                                   const int32_t* value_array,
+                                   TargetBitmap& bitset,
+                                   const size_t n) {
+                for (size_t i = 0; i < n; i++) {
+                    auto value = value_array[i];
+                    auto row_id = row_id_array[i];
+                    switch (op) {
+                        case OpType::GreaterThan:
+                            bitset[row_id] = value > testcase.val;
+                            break;
+                        case OpType::GreaterEqual:
+                            bitset[row_id] = value >= testcase.val;
+                            break;
+                        case OpType::LessThan:
+                            bitset[row_id] = value < testcase.val;
+                            break;
+                        case OpType::LessEqual:
+                            bitset[row_id] = value <= testcase.val;
+                            break;
+                        case OpType::Equal:
+                            bitset[row_id] = value == testcase.val;
+                            break;
+                        case OpType::NotEqual:
+                            bitset[row_id] = value != testcase.val;
+                            break;
+                        default:
+                            bitset[row_id] = false;
+                            break;
+                    }
                 }
             };
             auto pointer = milvus::Json::pointer(testcase.nested_path);
@@ -372,48 +392,62 @@ TEST_P(JsonKeyStatsIndexTest, TestBinaryRangeInFunc) {
             }
         };
 
-        auto filter_func = [&testcase, this](bool valid,
-                                             uint8_t type,
-                                             uint32_t row_id,
-                                             uint16_t offset,
-                                             uint16_t size,
-                                             int32_t value) {
-            if (valid) {
-                if (testcase.lower_inclusive && testcase.upper_inclusive) {
-                    return testcase.lower <= int64_t(value) &&
-                           int64_t(value) <= testcase.upper;
-                } else if (testcase.lower_inclusive &&
-                           !testcase.upper_inclusive) {
-                    return testcase.lower <= int64_t(value) &&
-                           int64_t(value) < testcase.upper;
-                } else if (!testcase.lower_inclusive &&
-                           testcase.upper_inclusive) {
-                    return testcase.lower < int64_t(value) &&
-                           int64_t(value) <= testcase.upper;
+        auto filter_func = [&testcase, this](const bool* valid_array,
+                                             const uint8_t* type_array,
+                                             const uint32_t* row_id_array,
+                                             const uint16_t* offset_array,
+                                             const uint16_t* size_array,
+                                             const int32_t* value_array,
+                                             TargetBitmap& bitset,
+                                             const size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                if (valid) {
+                    auto value = value_array[i];
+                    auto row_id = row_id_array[i];
+                    if (testcase.lower_inclusive && testcase.upper_inclusive) {
+                        bitset[row_id] =
+                            testcase.lower <= value && value <= testcase.upper;
+                    } else if (testcase.lower_inclusive &&
+                               !testcase.upper_inclusive) {
+                        bitset[row_id] =
+                            testcase.lower <= value && value < testcase.upper;
+                    } else if (!testcase.lower_inclusive &&
+                               testcase.upper_inclusive) {
+                        bitset[row_id] =
+                            testcase.lower < value && value <= testcase.upper;
+                    } else {
+                        bitset[row_id] =
+                            testcase.lower < value && value < testcase.upper;
+                    }
                 } else {
-                    return testcase.lower < int64_t(value) &&
-                           int64_t(value) < testcase.upper;
-                }
-            } else {
-                auto val =
-                    this->data_[row_id].template at<int64_t>(offset, size);
-                if (val.error()) {
-                    return false;
-                }
-                if (testcase.lower_inclusive && testcase.upper_inclusive) {
-                    return testcase.lower <= int64_t(val.value()) &&
-                           int64_t(val.value()) <= testcase.upper;
-                } else if (testcase.lower_inclusive &&
-                           !testcase.upper_inclusive) {
-                    return testcase.lower <= int64_t(val.value()) &&
-                           int64_t(val.value()) < testcase.upper;
-                } else if (!testcase.lower_inclusive &&
-                           testcase.upper_inclusive) {
-                    return testcase.lower < int64_t(val.value()) &&
-                           int64_t(val.value()) <= testcase.upper;
-                } else {
-                    return testcase.lower < int64_t(val.value()) &&
-                           int64_t(val.value()) < testcase.upper;
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    auto row_id = row_id_array[i];
+                    auto val =
+                        this->data_[row_id].template at<int64_t>(offset, size);
+                    if (val.error()) {
+                        bitset[row_id] = false;
+                    }
+                    if (testcase.lower_inclusive && testcase.upper_inclusive) {
+                        bitset[row_id] =
+                            testcase.lower <= int64_t(val.value()) &&
+                            int64_t(val.value()) <= testcase.upper;
+                    } else if (testcase.lower_inclusive &&
+                               !testcase.upper_inclusive) {
+                        bitset[row_id] =
+                            testcase.lower <= int64_t(val.value()) &&
+                            int64_t(val.value()) < testcase.upper;
+                    } else if (!testcase.lower_inclusive &&
+                               testcase.upper_inclusive) {
+                        bitset[row_id] =
+                            testcase.lower < int64_t(val.value()) &&
+                            int64_t(val.value()) <= testcase.upper;
+                    } else {
+                        bitset[row_id] =
+                            testcase.lower < int64_t(val.value()) &&
+                            int64_t(val.value()) < testcase.upper;
+                    }
                 }
             }
         };
@@ -452,13 +486,18 @@ TEST_P(JsonKeyStatsIndexTest, TestExistInFunc) {
     };
     for (const auto& testcase : testcases) {
         auto pointer = milvus::Json::pointer(testcase.nested_path);
-        auto filter_func = [&pointer, this](bool valid,
-                                            uint8_t type,
-                                            uint32_t row_id,
-                                            uint16_t offset,
-                                            uint16_t size,
-                                            int32_t value) {
-            return this->data_[row_id].exist(pointer);
+        auto filter_func = [&pointer, this](const bool* valid_array,
+                                            const uint8_t* type_array,
+                                            const uint32_t* row_id_array,
+                                            const uint16_t* offset_array,
+                                            const uint16_t* size_array,
+                                            const int32_t* value_array,
+                                            TargetBitmap& bitset,
+                                            const size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                auto row_id = row_id_array[i];
+                bitset[row_id] = this->data_[row_id].exist(pointer);
+            }
         };
 
         auto bitset =
@@ -501,25 +540,32 @@ TEST_P(JsonKeyStatsIndexTest, TestJsonContainsAllFunc) {
             for (auto const& element : testcase.term) {
                 elements.insert(element);
             }
-            auto filter_func = [&elements, this](bool valid,
-                                                 uint8_t type,
-                                                 uint32_t row_id,
-                                                 uint16_t offset,
-                                                 uint16_t size,
-                                                 int32_t value) {
-                auto array = this->data_[row_id].array_at(offset, size);
-                std::unordered_set<int64_t> tmp_elements(elements);
-                for (auto&& it : array) {
-                    auto val = it.template get<int64_t>();
-                    if (val.error()) {
-                        continue;
+            auto filter_func = [&elements, this](const bool* valid_array,
+                                                 const uint8_t* type_array,
+                                                 const uint32_t* row_id_array,
+                                                 const uint16_t* offset_array,
+                                                 const uint16_t* size_array,
+                                                 const int32_t* value_array,
+                                                 TargetBitmap& bitset,
+                                                 const size_t n) {
+                for (size_t i = 0; i < n; i++) {
+                    auto row_id = row_id_array[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    auto array = this->data_[row_id].array_at(offset, size);
+                    std::unordered_set<int64_t> tmp_elements(elements);
+                    for (auto&& it : array) {
+                        auto val = it.template get<int64_t>();
+                        if (val.error()) {
+                            continue;
+                        }
+                        tmp_elements.erase(val.value());
                     }
-                    tmp_elements.erase(val.value());
                     if (tmp_elements.size() == 0) {
-                        return true;
+                        bitset[row_id] = true;
                     }
+                    bitset[row_id] = tmp_elements.empty();
                 }
-                return tmp_elements.empty();
             };
 
             auto bitset =
@@ -566,16 +612,18 @@ TEST(GrowingJsonKeyStatsIndexTest, GrowingIndex) {
     index->Commit();
     index->Reload();
     int64_t checkVal = 1;
-    auto filter_func = [jsons, checkVal](bool valid,
-                                         uint8_t type,
-                                         uint32_t row_id,
-                                         uint16_t offset,
-                                         uint16_t size,
-                                         int32_t value) {
-        if (value == checkVal) {
-            return true;
+    auto filter_func = [jsons, checkVal](const bool* valid_array,
+                                         const uint8_t* type_array,
+                                         const uint32_t* row_id_array,
+                                         const uint16_t* offset_array,
+                                         const uint16_t* size_array,
+                                         const int32_t* value_array,
+                                         TargetBitmap& bitset,
+                                         const size_t n) {
+        for (size_t i = 0; i < n; i++) {
+            auto value = value_array[i];
+            bitset[row_id_array[i]] = value == checkVal;
         }
-        return false;
     };
     auto pointer = milvus::Json::pointer({"int"});
     auto bitset =

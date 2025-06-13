@@ -37,6 +37,7 @@ const (
 	Proxy_ListImports_FullMethodName                   = "/milvus.proto.proxy.Proxy/ListImports"
 	Proxy_InvalidateShardLeaderCache_FullMethodName    = "/milvus.proto.proxy.Proxy/InvalidateShardLeaderCache"
 	Proxy_GetSegmentsInfo_FullMethodName               = "/milvus.proto.proxy.Proxy/GetSegmentsInfo"
+	Proxy_GetQuotaMetrics_FullMethodName               = "/milvus.proto.proxy.Proxy/GetQuotaMetrics"
 )
 
 // ProxyClient is the client API for Proxy service.
@@ -59,6 +60,7 @@ type ProxyClient interface {
 	ListImports(ctx context.Context, in *internalpb.ListImportsRequest, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error)
 	InvalidateShardLeaderCache(ctx context.Context, in *InvalidateShardLeaderCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetSegmentsInfo(ctx context.Context, in *internalpb.GetSegmentsInfoRequest, opts ...grpc.CallOption) (*internalpb.GetSegmentsInfoResponse, error)
+	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
 }
 
 type proxyClient struct {
@@ -204,6 +206,15 @@ func (c *proxyClient) GetSegmentsInfo(ctx context.Context, in *internalpb.GetSeg
 	return out, nil
 }
 
+func (c *proxyClient) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+	out := new(internalpb.GetQuotaMetricsResponse)
+	err := c.cc.Invoke(ctx, Proxy_GetQuotaMetrics_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProxyServer is the server API for Proxy service.
 // All implementations should embed UnimplementedProxyServer
 // for forward compatibility
@@ -224,6 +235,7 @@ type ProxyServer interface {
 	ListImports(context.Context, *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error)
 	InvalidateShardLeaderCache(context.Context, *InvalidateShardLeaderCacheRequest) (*commonpb.Status, error)
 	GetSegmentsInfo(context.Context, *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error)
+	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
 }
 
 // UnimplementedProxyServer should be embedded to have forward compatible implementations.
@@ -274,6 +286,9 @@ func (UnimplementedProxyServer) InvalidateShardLeaderCache(context.Context, *Inv
 }
 func (UnimplementedProxyServer) GetSegmentsInfo(context.Context, *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSegmentsInfo not implemented")
+}
+func (UnimplementedProxyServer) GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetQuotaMetrics not implemented")
 }
 
 // UnsafeProxyServer may be embedded to opt out of forward compatibility for this service.
@@ -557,6 +572,24 @@ func _Proxy_GetSegmentsInfo_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Proxy_GetQuotaMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.GetQuotaMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).GetQuotaMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_GetQuotaMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).GetQuotaMetrics(ctx, req.(*internalpb.GetQuotaMetricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Proxy_ServiceDesc is the grpc.ServiceDesc for Proxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -623,6 +656,10 @@ var Proxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSegmentsInfo",
 			Handler:    _Proxy_GetSegmentsInfo_Handler,
+		},
+		{
+			MethodName: "GetQuotaMetrics",
+			Handler:    _Proxy_GetQuotaMetrics_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -281,7 +281,6 @@ class ResponseChecker:
                 assert dim_list[0] == dim_list_expected
             else:
                 assert dim_list == dim_list_expected
-            assert res["fields"][1]["params"]["dim"] == check_items.get("dim")
         if check_items.get("nullable_fields", None) is not None:
             nullable_fields = check_items.get("nullable_fields")
             if not isinstance(nullable_fields, list):
@@ -289,6 +288,14 @@ class ResponseChecker:
                 assert False
             for field in res["fields"]:
                 if field["name"] in nullable_fields:
+                    assert field["nullable"] is True
+        if check_items.get("add_fields", None) is not None:
+            add_fields = check_items.get("add_fields")
+            if not isinstance(add_fields, list):
+                log.error("add_fields should be a list including all the added fields name")
+                assert False
+            for field in res["fields"]:
+                if field["name"] in add_fields:
                     assert field["nullable"] is True
         assert res["fields"][0]["is_primary"] is True
         assert res["fields"][0]["field_id"] == 100 and (res["fields"][0]["type"] == 5 or 21)

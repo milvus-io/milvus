@@ -16,10 +16,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -27,6 +29,7 @@
 #include "FieldMeta.h"
 #include "boost/stacktrace/frame.hpp"
 #include "boost/stacktrace/stacktrace_fwd.hpp"
+#include "common/Types.h"
 #include "pb/schema.pb.h"
 #include "log/Log.h"
 #include "Consts.h"
@@ -101,6 +104,24 @@ class Schema {
                                     metric_type,
                                     false,
                                     std::nullopt);
+        this->AddField(std::move(field_meta));
+        return field_id;
+    }
+
+    // array of vector type
+    FieldId
+    AddDebugVectorArrayField(const std::string& name,
+                             DataType element_type,
+                             int64_t dim,
+                             std::optional<knowhere::MetricType> metric_type) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        auto field_meta = FieldMeta(FieldName(name),
+                                    field_id,
+                                    DataType::VECTOR_ARRAY,
+                                    element_type,
+                                    dim,
+                                    metric_type);
         this->AddField(std::move(field_meta));
         return field_id;
     }
@@ -238,7 +259,7 @@ class Schema {
     }
 
     const std::unordered_map<FieldId, FieldMeta>
-    get_field_metas(std::vector<FieldId> field_ids) {
+    get_field_metas(const std::vector<FieldId>& field_ids) {
         std::unordered_map<FieldId, FieldMeta> field_metas;
         for (const auto& field_id : field_ids) {
             field_metas.emplace(field_id, operator[](field_id));
@@ -272,6 +293,28 @@ class Schema {
     const ArrowSchemaPtr
     ConvertToArrowSchema() const;
 
+    void
+    UpdateLoadFields(const std::vector<int64_t>& field_ids) {
+        load_fields_.clear();
+        for (auto field_id : field_ids) {
+            load_fields_.emplace(field_id);
+        }
+    }
+
+    bool
+    ShallLoadField(FieldId field_id) {
+        return load_fields_.empty() || load_fields_.count(field_id) > 0;
+    }
+
+    std::vector<int64_t>
+    load_fields() {
+        auto fields = std::vector<int64_t>();
+        for (auto field_id : field_ids_) {
+            fields.emplace_back(field_id.get());
+        }
+        return std::move(fields);
+    }
+
  public:
     static std::shared_ptr<Schema>
     ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto);
@@ -290,7 +333,7 @@ class Schema {
     }
 
     std::unique_ptr<std::vector<FieldMeta>>
-    absent_fields(Schema& old_schema) const;
+    AbsentFields(Schema& old_schema) const;
 
  private:
     int64_t debug_id = START_USER_FIELDID;
@@ -305,6 +348,10 @@ class Schema {
 
     std::optional<FieldId> primary_field_id_opt_;
     std::optional<FieldId> dynamic_field_id_opt_;
+
+    // field partial load list
+    // work as hint now
+    std::unordered_set<FieldId> load_fields_;
 
     // schema_version_, currently marked with update timestamp
     uint64_t schema_version_;

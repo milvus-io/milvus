@@ -1203,14 +1203,14 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	segmentPlans, _ := suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(segmentPlans), 2)
 
-	// mock balance channel is executing, expect to generate 0 balance segment task
+	// mock balance channel is executing, expect to generate 2 balance segment task, balance segment won't be blocked by channel balance
 	suite.mockScheduler.ExpectedCalls = nil
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(1).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	segmentPlans, _ = suite.getCollectionBalancePlans(balancer, collectionID)
-	suite.Equal(len(segmentPlans), 0)
+	suite.Equal(len(segmentPlans), 2)
 
 	// set unbalance channel distribution
 	balancer.dist.ChannelDistManager.Update(1, []*meta.DmChannel{
@@ -1228,14 +1228,14 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceSegmentAndChannel() {
 	_, channelPlans := suite.getCollectionBalancePlans(balancer, collectionID)
 	suite.Equal(len(channelPlans), 2)
 
-	// mock balance channel is executing, expect to generate 0 balance segment task
+	// mock balance channel is executing, expect to generate 2 balance segment task, balance segment won't be blocked by channel balance
 	suite.mockScheduler.ExpectedCalls = nil
 	suite.mockScheduler.EXPECT().GetChannelTaskNum(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskNum(mock.Anything, mock.Anything).Return(1).Maybe()
 	suite.mockScheduler.EXPECT().GetSegmentTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 	_, channelPlans = suite.getCollectionBalancePlans(balancer, collectionID)
-	suite.Equal(len(channelPlans), 0)
+	suite.Equal(len(channelPlans), 2)
 }
 
 func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnMultiCollections() {

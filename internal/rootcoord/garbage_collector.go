@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -168,7 +169,17 @@ func (c *bgGarbageCollector) RemoveCreatingPartition(dbID int64, partition *mode
 
 func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
 	if streamingutil.IsStreamingServiceEnabled() {
-		return c.notifyCollectionGcByStreamingService(ctx, coll)
+		notifier := snmanager.NewStreamingReadyNotifier()
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(ctx, notifier); err != nil {
+			return 0, err
+		}
+		if notifier.IsReady() {
+			// streaming service is ready, so we release the ready notifier and send it into streaming service.
+			notifier.Release()
+			return c.notifyCollectionGcByStreamingService(ctx, coll)
+		}
+		// streaming service is not ready, so we send it into msgstream.
+		defer notifier.Release()
 	}
 
 	ts, err := c.s.tsoAllocator.GenerateTSO(1)
@@ -275,27 +286,25 @@ func (c *bgGarbageCollector) notifyPartitionGcByStreamingService(ctx context.Con
 		PartitionID:   partition.PartitionID,
 	}
 
-	msgs := make([]message.MutableMessage, 0, len(vchannels))
-	for _, vchannel := range vchannels {
-		msg, err := message.NewDropPartitionMessageBuilderV1().
-			WithVChannel(vchannel).
-			WithHeader(&message.DropPartitionMessageHeader{
-				CollectionId: partition.CollectionID,
-				PartitionId:  partition.PartitionID,
-			}).
-			WithBody(req).
-			BuildMutable()
-		if err != nil {
-			return 0, err
-		}
-		msgs = append(msgs, msg)
-	}
-	// Ts is used as barrier time tick to ensure the message's time tick are given after the barrier time tick.
-	resp := streaming.WAL().AppendMessages(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
+	msg := message.NewDropPartitionMessageBuilderV1().
+		WithBroadcast(vchannels).
+		WithHeader(&message.DropPartitionMessageHeader{
+			CollectionId: partition.CollectionID,
+			PartitionId:  partition.PartitionID,
+		}).
+		WithBody(req).
+		MustBuildBroadcast()
+	r, err := streaming.WAL().Broadcast().Append(ctx, msg)
+	if err != nil {
 		return 0, err
 	}
-	return resp.MaxTimeTick(), nil
+	maxTimeTick := uint64(0)
+	for _, r := range r.AppendResults {
+		if r.TimeTick > maxTimeTick {
+			maxTimeTick = r.TimeTick
+		}
+	}
+	return maxTimeTick, nil
 }
 
 func (c *bgGarbageCollector) GcCollectionData(ctx context.Context, coll *model.Collection) (ddlTs Timestamp, err error) {
@@ -319,7 +328,19 @@ func (c *bgGarbageCollector) GcPartitionData(ctx context.Context, pChannels, vch
 	defer c.s.ddlTsLockManager.Unlock()
 
 	if streamingutil.IsStreamingServiceEnabled() {
-		ddlTs, err = c.notifyPartitionGcByStreamingService(ctx, vchannels, partition)
+		notifier := snmanager.NewStreamingReadyNotifier()
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(ctx, notifier); err != nil {
+			return 0, err
+		}
+		if notifier.IsReady() {
+			// streaming service is ready, so we release the ready notifier and send it into streaming service.
+			notifier.Release()
+			ddlTs, err = c.notifyPartitionGcByStreamingService(ctx, vchannels, partition)
+		} else {
+			// streaming service is not ready, so we send it into msgstream with the notifier holding.
+			defer notifier.Release()
+			ddlTs, err = c.notifyPartitionGc(ctx, pChannels, partition)
+		}
 	} else {
 		ddlTs, err = c.notifyPartitionGc(ctx, pChannels, partition)
 	}

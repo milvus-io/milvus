@@ -221,7 +221,8 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_delete_with_filters_partition(self):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_delete_with_filters_partition(self, add_field):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
@@ -234,14 +235,28 @@ class TestMilvusClientDeleteValid(TestMilvusClientV2Base):
         # 2. insert
         default_nb = 1000
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                default_float_field_name: i * 1.0,
+                default_string_field_name: str(i),
+                **({"field_new": "default"} if add_field else {})
+            }
+            for i in range(default_nb)
+        ]
+        if add_field:
+            self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
+                                      nullable=True, max_length=64)
         pks = self.insert(client, collection_name, rows)[0]
         # 3. get partition lists
         partition_names = self.list_partitions(client, collection_name)
         # 4. delete
         delete_num = 3
-        self.delete(client, collection_name, filter=f"id < {delete_num}", partition_names=partition_names)
+        filter = f"id < {delete_num} "
+        if add_field:
+            filter += "and field_new == 'default'"
+        self.delete(client, collection_name, filter=filter, partition_names=partition_names)
         # 5. search
         vectors_to_search = rng.random((1, default_dim))
         insert_ids = [i for i in range(default_nb)]

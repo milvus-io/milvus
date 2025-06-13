@@ -32,6 +32,7 @@ packages:
       ChannelManager:
       SubCluster:
       StatsJobManager:
+      ImportMeta:
   github.com/milvus-io/milvus/internal/datacoord/allocator:
     interfaces:
       Allocator:

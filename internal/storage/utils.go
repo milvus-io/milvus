@@ -534,7 +534,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		srcField, ok := srcFields[field.GetFieldID()]
 		if !ok && field.GetFieldID() >= common.StartOfUserFieldID {
-			return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
+			if !field.GetNullable() {
+				return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
+			}
+			log.Warn("insert msg missing field but nullable", zap.Int64("fieldID", field.GetFieldID()), zap.String("fieldName", field.GetName()))
+			continue
 		}
 		var fieldData FieldData
 		switch field.DataType {
@@ -618,6 +622,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &BoolFieldData{
 				Data:      srcData,
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_Int8:
@@ -627,6 +632,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &Int8FieldData{
 				Data:      lo.Map(srcData, func(v int32, _ int) int8 { return int8(v) }),
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_Int16:
@@ -636,6 +642,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &Int16FieldData{
 				Data:      lo.Map(srcData, func(v int32, _ int) int16 { return int16(v) }),
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_Int32:
@@ -645,6 +652,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &Int32FieldData{
 				Data:      srcData,
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_Int64:
@@ -663,6 +671,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				fieldData = &Int64FieldData{
 					Data:      srcData,
 					ValidData: validData,
+					Nullable:  field.GetNullable(),
 				}
 			}
 
@@ -673,6 +682,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &FloatFieldData{
 				Data:      srcData,
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_Double:
@@ -682,6 +692,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &DoubleFieldData{
 				Data:      srcData,
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
@@ -691,6 +702,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &StringFieldData{
 				Data:      srcData,
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		case schemapb.DataType_Array:
@@ -701,6 +713,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				ElementType: field.GetElementType(),
 				Data:        srcData,
 				ValidData:   validData,
+				Nullable:    field.GetNullable(),
 			}
 
 		case schemapb.DataType_JSON:
@@ -710,6 +723,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData = &JSONFieldData{
 				Data:      srcData,
 				ValidData: validData,
+				Nullable:  field.GetNullable(),
 			}
 
 		default:

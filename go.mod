@@ -21,7 +21,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250527033021-e6b398e94ee6
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.0-beta.0.20250604032224-16218b12b847
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
@@ -66,7 +66,6 @@ require (
 	github.com/bytedance/sonic v1.13.2
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/redact v1.1.3
-	github.com/goccy/go-json v0.10.3
 	github.com/google/uuid v1.6.0
 	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -152,6 +151,7 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
+	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -243,7 +243,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.0.0-20250522011808-4059b68a0e03 // indirect
+	github.com/zilliztech/woodpecker v0.0.0-20250609083736-62920192a254 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect

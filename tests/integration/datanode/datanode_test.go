@@ -111,10 +111,10 @@ func (s *DataNodeSuite) loadCollection(collectionName string) {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
+	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
 	log.Info("=========================Data flush finished=========================")
 
 	// create index
@@ -305,5 +305,8 @@ func (s *DataNodeSuite) TestSwapQN() {
 }
 
 func TestDataNodeUtil(t *testing.T) {
+	// node id conflict when running multiple node
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(DataNodeSuite))
 }

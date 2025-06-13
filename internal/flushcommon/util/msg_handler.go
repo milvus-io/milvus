@@ -31,8 +31,6 @@ type MsgHandler interface {
 
 	HandleManualFlush(flushMsg message.ImmutableManualFlushMessageV2) error
 
-	HandleImport(ctx context.Context, vchannel string, importMsg *msgpb.ImportMsg) error
-
 	HandleSchemaChange(ctx context.Context, schemaChangeMsg message.ImmutableSchemaChangeMessageV2) error
 }
 

@@ -26,6 +26,7 @@
 #include "knowhere/comp/index_param.h"
 #include "parquet/schema.h"
 #include "storage/Event.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
@@ -86,10 +87,13 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
                            DataType data_type);
 
 std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
+GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
 
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
+GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
+
+std::string
+GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenTextIndexPathIdentifier(int64_t build_id,
@@ -98,14 +102,14 @@ GenTextIndexPathIdentifier(int64_t build_id,
                            int64_t field_id);
 
 std::string
-GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
-
-std::string
 GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
                        int64_t field_id);
+
+std::string
+GetTextIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenJsonKeyIndexPathIdentifier(int64_t build_id,
@@ -123,6 +127,9 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t partition_id,
                           int64_t segment_id,
                           int64_t field_id);
+
+std::string
+GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
@@ -232,6 +239,10 @@ SortByPath(std::vector<std::pair<std::string, int64_t>>& paths) {
                    std::stol(b.first.substr(b.first.find_last_of("/") + 1));
         });
 }
+
+std::vector<FieldDataPtr>
+CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
+                           const Config& config);
 
 // used only for test
 inline std::shared_ptr<ArrowDataWrapper>

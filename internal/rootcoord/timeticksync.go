@@ -22,11 +22,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -231,6 +233,14 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 func (t *timetickSync) addSession(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	rangeChecker := semver.MustParseRange(">=2.6.0-dev")
+	if rangeChecker(sess.Version) {
+		log.Info("new proxy with no timetick join, ignored",
+			zap.String("version", sess.Version.String()),
+			zap.Int64("serverID", sess.ServerID),
+			zap.String("address", sess.Address))
+		return
+	}
 	t.sess2ChanTsMap[sess.ServerID] = nil
 	log.Info("Add session for timeticksync", zap.Int64("serverID", sess.ServerID))
 }
@@ -261,6 +271,20 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	streamingNotifier := snmanager.NewStreamingReadyNotifier()
+	defer streamingNotifier.Release()
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(t.ctx, streamingNotifier); err != nil {
+			log.Info("register streaming enabled listener failed", zap.Error(err))
+			return
+		}
+		if streamingNotifier.IsReady() {
+			log.Info("streaming service has been enabled, proxy timetick from rootcoord should not start")
+			return
+		}
+	}
+
 	var checker *timerecord.LongTermChecker
 	if enableTtChecker {
 		checker = timerecord.NewLongTermChecker(t.ctx, ttCheckerName, timeTickSyncTtInterval, ttCheckerWarnMsg)
@@ -270,6 +294,9 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 
 	for {
 		select {
+		case <-streamingNotifier.Ready():
+			log.Info("streaming service has been enabled, proxy timetick from rootcoord should stop")
+			return
 		case <-t.ctx.Done():
 			log.Info("rootcoord context done", zap.Error(t.ctx.Err()))
 			return
@@ -321,9 +348,6 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 
 // SendTimeTickToChannel send each channel's min timetick to msg stream
 func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Timestamp) error {
-	if streamingutil.IsStreamingServiceEnabled() {
-		return nil
-	}
 	func() {
 		sub := tsoutil.SubByNow(ts)
 		for _, chanName := range chanNames {

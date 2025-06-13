@@ -129,6 +129,17 @@ func (s *statsInspectorSuite) SetupTest() {
 						Level:        2,
 					},
 				},
+				30: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:           30,
+						CollectionID: 1,
+						PartitionID:  2,
+						State:        commonpb.SegmentState_Flushing,
+						NumOfRows:    1000,
+						MaxRowNum:    2000,
+						Level:        2,
+					},
+				},
 			},
 			secondaryIndexes: segmentInfoIndexes{
 				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
@@ -152,6 +163,17 @@ func (s *statsInspectorSuite) SetupTest() {
 								PartitionID:  2,
 								IsSorted:     true,
 								State:        commonpb.SegmentState_Flushed,
+								NumOfRows:    1000,
+								MaxRowNum:    2000,
+								Level:        2,
+							},
+						},
+						30: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:           30,
+								CollectionID: 1,
+								PartitionID:  2,
+								State:        commonpb.SegmentState_Flushing,
 								NumOfRows:    1000,
 								MaxRowNum:    2000,
 								Level:        2,
@@ -275,6 +297,7 @@ func (s *statsInspectorSuite) TestTriggerSortStatsTask() {
 
 	// Verify AllocID was called
 	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(30, indexpb.StatsSubJob_Sort))
 }
 
 func (s *statsInspectorSuite) TestCreateSortStatsTaskForSegment() {

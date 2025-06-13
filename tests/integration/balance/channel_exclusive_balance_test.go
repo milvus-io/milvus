@@ -259,5 +259,7 @@ func (s *ChannelExclusiveBalanceSuit) isSameChannel(segments []*querypb.SegmentV
 }
 
 func TestChannelExclusiveBalance(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(ChannelExclusiveBalanceSuit))
 }

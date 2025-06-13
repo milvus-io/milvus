@@ -274,8 +274,14 @@ func Power(a, b *planpb.GenericValue) *ExprWithType {
 	} else {
 		// aInt && bInt
 		// 2 ** (-1) = 0.5
-		ret.dataType = schemapb.DataType_Double
-		ret.expr.GetValueExpr().Value = NewFloat(math.Pow(float64(a.GetInt64Val()), float64(b.GetInt64Val())))
+		target := math.Pow(float64(a.GetInt64Val()), float64(b.GetInt64Val()))
+		if b.GetInt64Val() >= 0 && target <= math.MaxInt64 {
+			ret.dataType = schemapb.DataType_Int64
+			ret.expr.GetValueExpr().Value = NewInt(int64(target))
+		} else {
+			ret.dataType = schemapb.DataType_Double
+			ret.expr.GetValueExpr().Value = NewFloat(target)
+		}
 	}
 
 	return ret

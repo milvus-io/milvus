@@ -26,6 +26,8 @@ import (
 type Sizable interface {
 	getSegmentSize() int64
 	GetID() int64
+	GetEarliestTs() uint64
+	GetResidualSegmentSize() int64
 }
 
 type Knapsack[T Sizable] struct {
@@ -33,12 +35,9 @@ type Knapsack[T Sizable] struct {
 	candidates []T
 }
 
-func newKnapsack[T Sizable](name string, candidates []T) *Knapsack[T] {
+func newKnapsack[T Sizable](name string, candidates []T, less func(T, T) bool) *Knapsack[T] {
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].getSegmentSize() != candidates[j].getSegmentSize() {
-			return candidates[i].getSegmentSize() > candidates[j].getSegmentSize()
-		}
-		return candidates[i].GetID() < candidates[j].GetID()
+		return less(candidates[i], candidates[j])
 	})
 	return &Knapsack[T]{
 		name:       name,
@@ -53,9 +52,9 @@ func (c *Knapsack[T]) tryPack(size, maxLeftSize, minSegs, maxSegs int64) (bitset
 		if maxSegs == 0 {
 			break
 		}
-		if segment.getSegmentSize() <= left {
+		if segment.GetResidualSegmentSize() <= left {
 			selection.Set(uint(i))
-			left -= segment.getSegmentSize()
+			left -= segment.GetResidualSegmentSize()
 			maxSegs--
 		}
 	}
@@ -118,6 +117,27 @@ func (c *Knapsack[T]) packWith(size, maxLeftSize, minSegs, maxSegs int64, other 
 	return append(segs, otherSegs...), left
 }
 
-func newSegmentPacker(name string, candidates []*SegmentInfo) *Knapsack[*SegmentInfo] {
-	return newKnapsack(name, candidates)
+func newSegmentPacker(name string, candidates []*SegmentInfo, compactTime *compactTime) *Knapsack[*SegmentInfo] {
+	if compactTime != nil && compactTime.collectionTTL > 0 {
+		return newKnapsack(name, candidates, func(a, b *SegmentInfo) bool {
+			if a.GetEarliestTs() != b.GetEarliestTs() {
+				return a.GetEarliestTs() < b.GetEarliestTs()
+			} else if a.GetResidualSegmentSize() != b.GetResidualSegmentSize() {
+				return a.GetResidualSegmentSize() > b.GetResidualSegmentSize()
+			} else if a.getSegmentSize() != b.getSegmentSize() {
+				return a.getSegmentSize() > b.getSegmentSize()
+			}
+			return a.GetID() < b.GetID()
+		})
+	}
+	return newKnapsack(name, candidates, func(a, b *SegmentInfo) bool {
+		if a.GetResidualSegmentSize() != b.GetResidualSegmentSize() {
+			return a.GetResidualSegmentSize() > b.GetResidualSegmentSize()
+		} else if a.getSegmentSize() != b.getSegmentSize() {
+			return a.getSegmentSize() > b.getSegmentSize()
+		} else if a.GetEarliestTs() != b.GetEarliestTs() {
+			return a.GetEarliestTs() < b.GetEarliestTs()
+		}
+		return a.GetID() < b.GetID()
+	})
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 func TestL0Reader_NewL0Reader(t *testing.T) {
@@ -92,4 +94,9 @@ func TestL0Reader_Read(t *testing.T) {
 	_, err = r.Read()
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	os.Exit(m.Run())
 }

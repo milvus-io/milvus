@@ -385,6 +385,10 @@ func NewAlterCollectionFieldPropertiesOption(collectionName string, fieldName st
 	}
 }
 
+type GetCollectionOption interface {
+	Request() *milvuspb.GetCollectionStatisticsRequest
+}
+
 type getCollectionStatsOption struct {
 	collectionName string
 }
@@ -397,4 +401,28 @@ func (opt *getCollectionStatsOption) Request() *milvuspb.GetCollectionStatistics
 
 func NewGetCollectionStatsOption(collectionName string) *getCollectionStatsOption {
 	return &getCollectionStatsOption{collectionName: collectionName}
+}
+
+type AddCollectionFieldOption interface {
+	Request() *milvuspb.AddCollectionFieldRequest
+}
+
+type addCollectionFieldOption struct {
+	collectionName string
+	fieldSch       *entity.Field
+}
+
+func (c *addCollectionFieldOption) Request() *milvuspb.AddCollectionFieldRequest {
+	bs, _ := proto.Marshal(c.fieldSch.ProtoMessage())
+	return &milvuspb.AddCollectionFieldRequest{
+		CollectionName: c.collectionName,
+		Schema:         bs,
+	}
+}
+
+func NewAddCollectionFieldOption(collectionName string, field *entity.Field) *addCollectionFieldOption {
+	return &addCollectionFieldOption{
+		collectionName: collectionName,
+		fieldSch:       field,
+	}
 }

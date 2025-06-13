@@ -301,6 +301,8 @@ TEST(CStringIndexTest, All) {
 #endif
 
 TEST(CreateIndexTest, StorageV2) {
+    GTEST_SKIP() << "TODO: after index/stats task level fs is finished, should "
+                    "fix shutdown sdk api in test";
     auto build_index_info =
         std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
 

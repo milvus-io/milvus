@@ -348,5 +348,7 @@ func newCreateCollectionConfig(collectionName string) *integration.CreateCollect
 }
 
 func TestResourceGroup(t *testing.T) {
+	g := integration.WithoutStreamingService()
+	defer g()
 	suite.Run(t, new(ResourceGroupTestSuite))
 }

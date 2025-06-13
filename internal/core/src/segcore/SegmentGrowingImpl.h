@@ -103,7 +103,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Reopen(SchemaPtr sch) override;
 
     void
-    LazyCheckSchema(const Schema& sch) override;
+    LazyCheckSchema(SchemaPtr sch) override;
 
     void
     FinishLoad() override;
@@ -218,6 +218,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst) const;
 
+    // for vector array vectors
+    template <typename T>
+    void
+    bulk_subscript_vector_array_impl(
+        const VectorBase& vec_raw,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<T>* dst) const;
+
     template <typename T>
     void
     bulk_subscript_impl(FieldId field_id,
@@ -253,8 +262,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const override;
 
-    virtual std::pair<milvus::Json, bool>
-    GetJsonData(FieldId field_id, size_t offset) const override;
+    virtual void
+    BulkGetJsonData(FieldId field_id,
+                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const int64_t* offsets,
+                    int64_t count) const override;
 
  public:
     friend std::unique_ptr<SegmentGrowing>
@@ -266,9 +278,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                                 IndexMetaPtr indexMeta,
                                 const SegcoreConfig& segcore_config,
                                 int64_t segment_id)
-        : mmap_descriptor_(
-              storage::MmapChunkDescriptorPtr(new storage::MmapChunkDescriptor(
-                  {segment_id, SegmentType::Growing}))),
+        : mmap_descriptor_(storage::MmapManager::GetInstance()
+                               .GetMmapChunkManager()
+                               ->Register()),
           segcore_config_(segcore_config),
           schema_(std::move(schema)),
           index_meta_(indexMeta),
@@ -283,9 +295,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   return this->search_pk(pk, timestamp);
               },
               segment_id) {
-        auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
-        mcm->Register(mmap_descriptor_);
-
         this->CreateTextIndexes();
         this->CreateJSONIndexes();
     }
@@ -338,7 +347,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     HasIndex(FieldId field_id,
              const std::string& nested_path,
              DataType data_type,
-             bool any_type = false) const override {
+             bool any_type = false,
+             bool is_array = false) const override {
         return false;
     };
 

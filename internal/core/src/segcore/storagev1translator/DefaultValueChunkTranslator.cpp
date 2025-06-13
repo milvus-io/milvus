@@ -30,7 +30,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list, set to false to reduce memory usage */ false),
             /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);
@@ -52,6 +53,7 @@ DefaultValueChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 milvus::cachinglayer::ResourceUsage
 DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
+    // TODO(tiered storage 1): provide a better estimation.
     return milvus::cachinglayer::ResourceUsage{0, 0};
 }
 

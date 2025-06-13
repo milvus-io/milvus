@@ -22,6 +22,7 @@ import (
 	"math"
 	"path"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -39,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -314,13 +317,20 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	// Allocated IDs are used for rowID and the BEGINNING of the logID.
-	allocNum := totalRows + 1
+	// Pre-allocate IDs for autoIDs and logIDs.
+	preAllocIDNum := (totalRows + 1) * paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
 
-	idBegin, idEnd, err := alloc.AllocN(allocNum)
+	idBegin, idEnd, err := alloc.AllocN(preAllocIDNum)
 	if err != nil {
 		return nil, err
 	}
+
+	log.Info("pre-allocate ids and ts for import task", WrapTaskLog(task,
+		zap.Int64("totalRows", totalRows),
+		zap.Int64("idBegin", idBegin),
+		zap.Int64("idEnd", idEnd),
+		zap.Uint64("ts", ts))...,
+	)
 
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
@@ -542,7 +552,9 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // 10%: Completed
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
-func GetJobProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta, sjm StatsInspector) (int64, internalpb.ImportJobState, int64, int64, string) {
+func GetJobProgress(ctx context.Context, jobID int64,
+	importMeta ImportMeta, meta *meta, sjm StatsInspector,
+) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := importMeta.GetJob(ctx, jobID)
 	if job == nil {
 		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
@@ -620,7 +632,9 @@ func DropImportTask(task ImportTask, cluster session.Cluster, tm ImportMeta) err
 	return tm.UpdateTask(context.TODO(), task.GetTaskID(), UpdateNodeID(NullNodeID))
 }
 
-func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, importFile *internalpb.ImportFile) ([]*internalpb.ImportFile, error) {
+func ListBinlogsAndGroupBySegment(ctx context.Context,
+	cm storage.ChunkManager, importFile *internalpb.ImportFile,
+) ([]*internalpb.ImportFile, error) {
 	if len(importFile.GetPaths()) == 0 {
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
@@ -660,4 +674,74 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		}
 	}
 	return segmentImportFiles, nil
+}
+
+// ValidateBinlogImportRequest validates the binlog import request.
+func ValidateBinlogImportRequest(ctx context.Context, cm storage.ChunkManager,
+	reqFiles []*msgpb.ImportFile, options []*commonpb.KeyValuePair,
+) error {
+	files := lo.Map(reqFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+		return &internalpb.ImportFile{Id: file.GetId(), Paths: file.GetPaths()}
+	})
+	_, err := ListBinlogImportRequestFiles(ctx, cm, files, options)
+	return err
+}
+
+// ListBinlogImportRequestFiles lists the binlog files from the request.
+// TODO: dyh, remove listing binlog after backup-restore derectly passed the segments paths.
+func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
+	reqFiles []*internalpb.ImportFile, options []*commonpb.KeyValuePair,
+) ([]*internalpb.ImportFile, error) {
+	isBackup := importutilv2.IsBackup(options)
+	if !isBackup {
+		return reqFiles, nil
+	}
+	resFiles := make([]*internalpb.ImportFile, 0)
+	pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
+	defer pool.Release()
+	futures := make([]*conc.Future[struct{}], 0, len(reqFiles))
+	mu := &sync.Mutex{}
+	for _, importFile := range reqFiles {
+		importFile := importFile
+		futures = append(futures, pool.Submit(func() (struct{}, error) {
+			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, cm, importFile)
+			if err != nil {
+				return struct{}{}, err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			resFiles = append(resFiles, segmentPrefixes...)
+			return struct{}{}, nil
+		}))
+	}
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err))
+	}
+
+	resFiles = lo.Filter(resFiles, func(file *internalpb.ImportFile, _ int) bool {
+		return len(file.GetPaths()) > 0
+	})
+	if len(resFiles) == 0 {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", reqFiles))
+	}
+	if len(resFiles) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
+			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(resFiles)))
+	}
+	log.Info("list binlogs prefixes for import done", zap.Int("num", len(resFiles)), zap.Any("binlog_prefixes", resFiles))
+	return resFiles, nil
+}
+
+// ValidateMaxImportJobExceed checks if the number of import jobs exceeds the limit.
+func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) error {
+	maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
+	executingNum := importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
+	if executingNum >= maxNum {
+		return merr.WrapErrImportFailed(
+			fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
+				"If your request is set to only import a single file, " +
+				"please consider importing multiple files in one request for better efficiency."))
+	}
+	return nil
 }

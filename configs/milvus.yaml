@@ -173,7 +173,7 @@ mq:
   pursuitBufferTime: 60 # pursuit mode buffer time in seconds
   mqBufSize: 16 # MQ client consumer buffer length
   dispatcher:
-    mergeCheckInterval: 1 # the interval time(in seconds) for dispatcher to check whether to merge
+    mergeCheckInterval: 0.1 # the interval time(in seconds) for dispatcher to check whether to merge
     targetBufSize: 16 # the lenth of channel buffer for targe
     maxTolerantLag: 3 # Default value: "3", the timeout(in seconds) that target sends msgPack
 
@@ -187,22 +187,22 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2GB # Maximum entries count of a segment, default is 2GB
+      maxSize: 128M # Maximum entries count of a segment, default is 128M
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
-    logFileSyncPolicy:
+    segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
-      maxBytes: 64M # Maximum size of write buffer in bytes.
-      maxEntries: 100000 # Maximum entries number of write buffer.
+      maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
+      maxBytes: 32M # Maximum size of write buffer in bytes.
+      maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
       maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
       maxFlushThreads: 4 # Maximum number of threads to flush data
-    fragmentManager:
-      maxBytes: 512M # Maximum size of fragment cached data in bytes.
-      maxInterval: 1s # Maximum interval between two fragment evicts. default is 1 second
+    segmentCompactionPolicy:
+      maxSize: 8M # The maximum size of the merged files, default is 8M.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
@@ -227,6 +227,16 @@ pulsar:
   namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
   enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
+  # Perform a backlog cleanup every time the data of given bytes is written.
+  # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
+  # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
+  # set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog. 
+  # If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
+  # so admin of pulsar should give enough retention time to avoid the wal message lost.
+  # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
+  # Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
+  # The retention policy of pulsar can set shorter to save the storage space in this case.
+  backlogAutoClearBytes: 100m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -302,6 +312,10 @@ proxy:
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
+  # maximum number of result entries, typically Nq * TopK * GroupSize. 
+  # It costs additional memory and time to process a large number of result entries. 
+  # If the number of result entries exceeds this limit, the search will be rejected.
+  maxResultEntries: 1000000
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -737,7 +751,8 @@ dataNode:
   import:
     maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
-    readBufferSizeInMB: 16 # The data block size (in MB) read from chunk manager by the datanode during import.
+    readBufferSizeInMB: 64 # The insert buffer size (in MB) during import.
+    readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     maxTaskSlotNum: 16 # The maximum number of slots occupied by each import/pre-import task.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
@@ -1198,6 +1213,9 @@ streaming:
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     backoffInitialInterval: 50ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
+    # The timeout of wal balancer operation, 10s by default.
+    # If the operation exceeds this timeout, it will be canceled.
+    operationTimeout: 10s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:
@@ -1225,6 +1243,11 @@ streaming:
   walWriteAheadBuffer:
     capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
     keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+  walReadAheadBuffer:
+    # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
+    # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
+    # Use the underlying wal default value if 0 is given.
+    length: 128
   logging:
     # The threshold of slow log, 1s by default. 
     # If the wal implementation is woodpecker, the minimum threshold is 3s
@@ -1256,14 +1279,18 @@ streaming:
     # If that persist operation exceeds this timeout, the wal recovery module will close right now.
     gracefulCloseTimeout: 3s
   walTruncate:
-    # The interval of sampling wal checkpoint when truncate, 1m by default.
+    # The interval of sampling wal checkpoint when truncate, 30m by default.
     # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
     # More samples, more frequent truncate, more memory usage.
-    sampleInterval: 1m
-    # The retention interval of wal truncate, 5m by default.
+    sampleInterval: 30m
+    # The retention interval of wal truncate, 26h by default.
     # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
-    # Greater the interval, more wal storage usage, more redundant data in wal
-    retentionInterval: 5m
+    # Greater the interval, more wal storage usage, more redundant data in wal.
+    # Because current query path doesn't promise the read operation not happen before the truncate point,
+    # retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
+    # If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
+    # because the wal truncate operation is implemented by pulsar consumer.
+    retentionInterval: 26h
 
 # Any configuration related to the knowhere vector search engine
 knowhere:

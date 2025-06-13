@@ -1006,6 +1006,55 @@ func (_c *MockTargetManager_RemovePartition_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// RemovePartitionFromNextTarget provides a mock function with given fields: ctx, collectionID, partitionIDs
+func (_m *MockTargetManager) RemovePartitionFromNextTarget(ctx context.Context, collectionID int64, partitionIDs ...int64) {
+	_va := make([]interface{}, len(partitionIDs))
+	for _i := range partitionIDs {
+		_va[_i] = partitionIDs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, collectionID)
+	_ca = append(_ca, _va...)
+	_m.Called(_ca...)
+}
+
+// MockTargetManager_RemovePartitionFromNextTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePartitionFromNextTarget'
+type MockTargetManager_RemovePartitionFromNextTarget_Call struct {
+	*mock.Call
+}
+
+// RemovePartitionFromNextTarget is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - partitionIDs ...int64
+func (_e *MockTargetManager_Expecter) RemovePartitionFromNextTarget(ctx interface{}, collectionID interface{}, partitionIDs ...interface{}) *MockTargetManager_RemovePartitionFromNextTarget_Call {
+	return &MockTargetManager_RemovePartitionFromNextTarget_Call{Call: _e.mock.On("RemovePartitionFromNextTarget",
+		append([]interface{}{ctx, collectionID}, partitionIDs...)...)}
+}
+
+func (_c *MockTargetManager_RemovePartitionFromNextTarget_Call) Run(run func(ctx context.Context, collectionID int64, partitionIDs ...int64)) *MockTargetManager_RemovePartitionFromNextTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]int64, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(int64)
+			}
+		}
+		run(args[0].(context.Context), args[1].(int64), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_RemovePartitionFromNextTarget_Call) Return() *MockTargetManager_RemovePartitionFromNextTarget_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTargetManager_RemovePartitionFromNextTarget_Call) RunAndReturn(run func(context.Context, int64, ...int64)) *MockTargetManager_RemovePartitionFromNextTarget_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SaveCurrentTarget provides a mock function with given fields: ctx, catalog
 func (_m *MockTargetManager) SaveCurrentTarget(ctx context.Context, catalog metastore.QueryCoordCatalog) {
 	_m.Called(ctx, catalog)

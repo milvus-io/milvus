@@ -186,9 +186,15 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkPreImportingJob
+	fileStats := []*datapb.ImportFileStats{
+		{
+			TotalRows: 100,
+		},
+	}
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	for _, t := range preimportTasks {
-		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
 		s.NoError(err)
 	}
 
@@ -303,8 +309,14 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkPreImportingJob
+	fileStats := []*datapb.ImportFileStats{
+		{
+			TotalRows: 100,
+		},
+	}
 	for _, t := range preimportTasks {
-		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
 		s.NoError(err)
 	}
 
@@ -688,8 +700,14 @@ func TestImportCheckerCompaction(t *testing.T) {
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	preimportTasks := importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	fileStats := []*datapb.ImportFileStats{
+		{
+			TotalRows: 100,
+		},
+	}
 	for _, pt := range preimportTasks {
-		err := importMeta.UpdateTask(context.TODO(), pt.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		err := importMeta.UpdateTask(context.TODO(), pt.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
 		assert.NoError(t, err)
 	}
 	assert.Eventually(t, func() bool {

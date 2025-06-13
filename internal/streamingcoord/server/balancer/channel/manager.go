@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -18,10 +19,17 @@ var ErrChannelNotExist = errors.New("channel not exist")
 
 // RecoverChannelManager creates a new channel manager.
 func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*ChannelManager, error) {
-	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, incomingChannel...)
+	// streamingVersion is used to identify current streaming service version.
+	// Used to check if there's some upgrade happens.
+	streamingVersion, err := resource.Resource().StreamingCatalog().GetVersion(ctx)
 	if err != nil {
 		return nil, err
 	}
+	channels, metrics, err := recoverFromConfigurationAndMeta(ctx, streamingVersion, incomingChannel...)
+	if err != nil {
+		return nil, err
+	}
+
 	globalVersion := paramtable.GetNodeID()
 	return &ChannelManager{
 		cond:     syncutil.NewContextCond(&sync.Mutex{}),
@@ -30,12 +38,13 @@ func RecoverChannelManager(ctx context.Context, incomingChannel ...string) (*Cha
 			Global: globalVersion, // global version should be keep increasing globally, it's ok to use node id.
 			Local:  0,
 		},
-		metrics: metrics,
+		metrics:          metrics,
+		streamingVersion: streamingVersion,
 	}, nil
 }
 
 // recoverFromConfigurationAndMeta recovers the channel manager from configuration and meta.
-func recoverFromConfigurationAndMeta(ctx context.Context, incomingChannel ...string) (map[ChannelID]*PChannelMeta, *channelMetrics, error) {
+func recoverFromConfigurationAndMeta(ctx context.Context, streamingVersion *streamingpb.StreamingVersion, incomingChannel ...string) (map[ChannelID]*PChannelMeta, *channelMetrics, error) {
 	// Recover metrics.
 	metrics := newPChannelMetrics()
 
@@ -55,7 +64,14 @@ func recoverFromConfigurationAndMeta(ctx context.Context, incomingChannel ...str
 
 	// Get new incoming meta from configuration.
 	for _, newChannel := range incomingChannel {
-		c := newPChannelMeta(newChannel)
+		var c *PChannelMeta
+		if streamingVersion == nil {
+			// if streaming service has never been enabled, we treat all channels as read-only.
+			c = newPChannelMeta(newChannel, types.AccessModeRO)
+		} else {
+			// once the streaming service is enabled, we treat all channels as read-write.
+			c = newPChannelMeta(newChannel, types.AccessModeRW)
+		}
 		if _, ok := channels[c.ChannelID()]; !ok {
 			channels[c.ChannelID()] = c
 		}
@@ -67,10 +83,62 @@ func recoverFromConfigurationAndMeta(ctx context.Context, incomingChannel ...str
 // ChannelManager is the `wal` of channel assignment and unassignment.
 // Every operation applied to the streaming node should be recorded in ChannelManager first.
 type ChannelManager struct {
-	cond     *syncutil.ContextCond
-	channels map[ChannelID]*PChannelMeta
-	version  typeutil.VersionInt64Pair
-	metrics  *channelMetrics
+	cond             *syncutil.ContextCond
+	channels         map[ChannelID]*PChannelMeta
+	version          typeutil.VersionInt64Pair
+	metrics          *channelMetrics
+	streamingVersion *streamingpb.StreamingVersion // used to identify the current streaming service version.
+	// null if no streaming service has been run.
+	// 1 if streaming service has been run once.
+	streamingEnableNotifiers []*syncutil.AsyncTaskNotifier[struct{}]
+}
+
+// RegisterStreamingEnabledNotifier registers a notifier into the balancer.
+func (cm *ChannelManager) RegisterStreamingEnabledNotifier(notifier *syncutil.AsyncTaskNotifier[struct{}]) {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	if cm.streamingVersion != nil {
+		// If the streaming service is already enabled once, notify the notifier and ignore it.
+		notifier.Cancel()
+		return
+	}
+	cm.streamingEnableNotifiers = append(cm.streamingEnableNotifiers, notifier)
+}
+
+// IsStreamingEnabledOnce returns true if streaming is enabled once.
+func (cm *ChannelManager) IsStreamingEnabledOnce() bool {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	return cm.streamingVersion != nil
+}
+
+// MarkStreamingHasEnabled marks the streaming service has been enabled.
+func (cm *ChannelManager) MarkStreamingHasEnabled(ctx context.Context) error {
+	cm.cond.L.Lock()
+	defer cm.cond.L.Unlock()
+
+	cm.streamingVersion = &streamingpb.StreamingVersion{
+		Version: 1,
+	}
+
+	if err := retry.Do(ctx, func() error {
+		return resource.Resource().StreamingCatalog().SaveVersion(ctx, cm.streamingVersion)
+	}, retry.AttemptAlways()); err != nil {
+		return err
+	}
+
+	// notify all notifiers that the streaming service has been enabled.
+	for _, notifier := range cm.streamingEnableNotifiers {
+		notifier.Cancel()
+	}
+	// and block until the listener of notifiers are finished.
+	for _, notifier := range cm.streamingEnableNotifiers {
+		notifier.BlockUntilFinish()
+	}
+	cm.streamingEnableNotifiers = nil
+	return nil
 }
 
 // CurrentPChannelsView returns the current view of pchannels.
@@ -89,19 +157,19 @@ func (cm *ChannelManager) CurrentPChannelsView() *PChannelView {
 // When the balancer want to assign a pchannel into a new server.
 // It should always call this function to update the pchannel assignment first.
 // Otherwise, the pchannel assignment tracing is lost at meta.
-func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreamingNode map[ChannelID]types.StreamingNodeInfo) (map[ChannelID]*PChannelMeta, error) {
+func (cm *ChannelManager) AssignPChannels(ctx context.Context, pChannelToStreamingNode map[ChannelID]types.PChannelInfoAssigned) (map[ChannelID]*PChannelMeta, error) {
 	cm.cond.LockAndBroadcast()
 	defer cm.cond.L.Unlock()
 
 	// modified channels.
 	pChannelMetas := make([]*streamingpb.PChannelMeta, 0, len(pChannelToStreamingNode))
-	for id, streamingNode := range pChannelToStreamingNode {
+	for id, assign := range pChannelToStreamingNode {
 		pchannel, ok := cm.channels[id]
 		if !ok {
 			return nil, ErrChannelNotExist
 		}
 		mutablePchannel := pchannel.CopyForWrite()
-		if mutablePchannel.TryAssignToServerID(streamingNode) {
+		if mutablePchannel.TryAssignToServerID(assign.Channel.AccessMode, assign.Node) {
 			pChannelMetas = append(pChannelMetas, mutablePchannel.IntoRawMeta())
 		}
 	}
@@ -181,8 +249,11 @@ func (cm *ChannelManager) updatePChannelMeta(ctx context.Context, pChannelMetas 
 	if len(pChannelMetas) == 0 {
 		return nil
 	}
-	if err := resource.Resource().StreamingCatalog().SavePChannels(ctx, pChannelMetas); err != nil {
-		return errors.Wrap(err, "update meta at catalog")
+
+	if err := retry.Do(ctx, func() error {
+		return resource.Resource().StreamingCatalog().SavePChannels(ctx, pChannelMetas)
+	}, retry.AttemptAlways()); err != nil {
+		return err
 	}
 
 	// update in-memory copy and increase the version.

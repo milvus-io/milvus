@@ -35,7 +35,7 @@ InitLocalArrowFileSystemSingleton(const char* c_path) {
 }
 
 void
-CleanLocalArrowFileSystemSingleton() {
+CleanArrowFileSystemSingleton() {
     milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
 }
 
@@ -67,9 +67,4 @@ InitRemoteArrowFileSystemSingleton(CStorageConfig c_storage_config) {
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
-}
-
-void
-CleanRemoteArrowFileSystemSingleton() {
-    milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
 }

@@ -79,8 +79,8 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 	)
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
-			(s.GetState() != commonpb.SegmentState_Growing && s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
-			// empty growing segment don't have dml position and start position
+			((s.GetState() != commonpb.SegmentState_Growing && s.GetState() != commonpb.SegmentState_Sealed) && s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+			// empty growing and sealed segment don't have dml position and start position
 			// and it should be recovered for streamingnode, so we add the state-filter here.
 			continue
 		}
@@ -142,7 +142,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.meta, false, segments...)
+	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 
 	for _, s := range segments {
@@ -200,7 +200,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// ================================================
 
 	segmentIndexed := func(segID UniqueID) bool {
-		return indexed.Contain(segID) || validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
+		return indexed.Contain(segID) || (validSegmentInfos[segID].GetIsSorted() && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)

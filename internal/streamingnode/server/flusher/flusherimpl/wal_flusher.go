@@ -198,10 +198,14 @@ func (impl *WALFlusherImpl) generateScanner(ctx context.Context, l wal.WAL, chec
 }
 
 // dispatch dispatches the message to the related handler for flusher components.
-func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) error {
+func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	// TODO: We will merge the flusher into recovery storage in future.
 	// Currently, flusher works as a separate component.
-	defer impl.rs.ObserveMessage(msg)
+	defer func() {
+		if err = impl.rs.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+			impl.logger.Warn("failed to observe message", zap.Error(err))
+		}
+	}()
 
 	// Do the data sync service management here.
 	switch msg.MessageType() {

@@ -29,12 +29,10 @@
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 
-#include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/GroupChunk.h"
 #include "common/EasyAssert.h"
 #include "common/Span.h"
-#include "common/Array.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 
@@ -261,6 +259,20 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<ArrayChunk*>(chunk.get())->Views(offset_len));
     }
 
+    PinWrapper<std::vector<VectorArrayView>>
+    VectorArrayViews(int64_t chunk_id) const override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            PanicInfo(
+                ErrorCode::Unsupported,
+                "VectorArrayViews only supported for ChunkedVectorArrayColumn");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<std::vector<VectorArrayView>>(
+            chunk_wrapper,
+            static_cast<VectorArrayChunk*>(chunk.get())->Views());
+    }
+
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
@@ -360,23 +372,49 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     // TODO(tiered storage 2): replace with Bulk version
-    Json
-    RawJsonAt(size_t i) const override {
+    void
+    BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
+                  const int64_t* offsets,
+                  int64_t count) const override {
         if (data_type_ != DataType::JSON) {
             PanicInfo(
                 ErrorCode::Unsupported,
                 "RawJsonAt only supported for ProxyChunkColumn of Json type");
         }
-        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(i);
-        auto group_chunk = group_->GetGroupChunk(chunk_id);
-        auto chunk = group_chunk.get()->GetChunk(field_id_);
-        std::string_view str_view =
-            static_cast<StringChunk*>(chunk.get())->operator[](offset_in_chunk);
-        return Json(str_view.data(), str_view.size());
+        if (offsets == nullptr) {
+            int64_t current_offset = 0;
+            for (cid_t cid = 0; cid < num_chunks(); ++cid) {
+                auto group_chunk = group_->GetGroupChunk(cid);
+                auto chunk = group_chunk.get()->GetChunk(field_id_);
+                auto chunk_rows = chunk->RowNums();
+                for (int64_t i = 0; i < chunk_rows; ++i) {
+                    auto valid = chunk->isValid(i);
+                    auto str_view =
+                        static_cast<StringChunk*>(chunk.get())->operator[](i);
+                    fn(Json(str_view.data(), str_view.size()),
+                       current_offset + i,
+                       valid);
+                }
+                current_offset += chunk_rows;
+            }
+        } else {
+            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+            auto ca = group_->GetGroupChunks(cids);
+
+            for (int64_t i = 0; i < count; i++) {
+                auto* group_chunk = ca->get_cell_of(cids[i]);
+                auto chunk = group_chunk->GetChunk(field_id_);
+                auto valid = chunk->isValid(offsets_in_chunk[i]);
+                auto str_view = static_cast<StringChunk*>(chunk.get())
+                                    ->
+                                    operator[](offsets_in_chunk[i]);
+                fn(Json(str_view.data(), str_view.size()), i, valid);
+            }
+        }
     }
 
     void
-    BulkArrayAt(std::function<void(ScalarArray&&, size_t)> fn,
+    BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
@@ -389,6 +427,27 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
             auto array = static_cast<ArrayChunk*>(chunk.get())
+                             ->View(offsets_in_chunk[i])
+                             .output_data();
+            fn(std::move(array), i);
+        }
+    }
+
+    void
+    BulkVectorArrayAt(std::function<void(VectorFieldProto&&, size_t)> fn,
+                      const int64_t* offsets,
+                      int64_t count) const override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            PanicInfo(ErrorCode::Unsupported,
+                      "BulkVectorArrayAt only supported for "
+                      "ChunkedVectorArrayColumn");
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto array = static_cast<VectorArrayChunk*>(chunk.get())
                              ->View(offsets_in_chunk[i])
                              .output_data();
             fn(std::move(array), i);

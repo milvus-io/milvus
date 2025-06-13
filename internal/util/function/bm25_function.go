@@ -43,6 +43,9 @@ type Analyzer interface {
 // Input: string
 // Output: map[uint32]float32
 type BM25FunctionRunner struct {
+	mu     sync.RWMutex
+	closed bool
+
 	tokenizer   tokenizerapi.Tokenizer
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
@@ -122,6 +125,13 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 }
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, errors.New("analyzer receview request after function closed")
+	}
+
 	if len(inputs) > 1 {
 		return nil, errors.New("BM25 function received more than one input column")
 	}
@@ -197,6 +207,13 @@ func (v *BM25FunctionRunner) analyze(data []string, dst [][]*milvuspb.AnalyzerTo
 }
 
 func (v *BM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs ...any) ([][]*milvuspb.AnalyzerToken, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, errors.New("analyzer receview request after function closed")
+	}
+
 	if len(inputs) > 1 {
 		return nil, errors.New("analyze received should only receive text input column(not set analyzer name)")
 	}
@@ -249,6 +266,14 @@ func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 
 func (v *BM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
 	return []*schemapb.FieldSchema{v.inputField}
+}
+
+func (v *BM25FunctionRunner) Close() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	v.closed = true
+	v.tokenizer.Destroy()
 }
 
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {
