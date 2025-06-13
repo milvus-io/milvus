@@ -36,6 +36,9 @@ const multiAnalyzerParams = "multi_analyzer_params"
 // Input: string string // text, analyzer name
 // Output: map[uint32]float32
 type MultiAnalyzerBM25FunctionRunner struct {
+	mu     sync.RWMutex
+	closed bool
+
 	analyzers   map[string]tokenizerapi.Tokenizer
 	alias       map[string]string // alias -> analyzer name
 	schema      *schemapb.FunctionSchema
@@ -173,6 +176,13 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, fmt.Errorf("analyzer receview request after function closed")
+	}
+
 	if len(inputs) != 2 {
 		return nil, fmt.Errorf("BM25 function with multi analyzer must received two input column")
 	}
@@ -263,6 +273,13 @@ func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs ...any) ([][]*milvuspb.AnalyzerToken, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, fmt.Errorf("analyzer receview request after function closed")
+	}
+
 	if len(inputs) != 2 {
 		return nil, fmt.Errorf("multi analyzer must received two input column(text, analyzer_name)")
 	}
@@ -327,7 +344,11 @@ func (v *MultiAnalyzerBM25FunctionRunner) GetInputFields() []*schemapb.FieldSche
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) Close() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	for _, analyzer := range v.analyzers {
 		analyzer.Destroy()
 	}
+	v.closed = true
 }

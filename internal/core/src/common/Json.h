@@ -202,8 +202,12 @@ class Json {
     bool
     exist(std::string_view pointer) const {
         auto doc = this->doc();
-        auto res = doc.at_pointer(pointer);
-        return res.error() == simdjson::SUCCESS && !res.is_null();
+        if (pointer.empty()) {
+            return doc.error() == simdjson::SUCCESS && !doc.is_null();
+        } else {
+            auto res = doc.at_pointer(pointer);
+            return res.error() == simdjson::SUCCESS && !res.is_null();
+        }
     }
 
     // construct JSON pointer with provided path
@@ -227,7 +231,8 @@ class Json {
                                : doc().at_pointer(pointer).type();
     }
 
-    auto get_number_type(const std::string& pointer) const {
+    auto
+    get_number_type(const std::string& pointer) const {
         return pointer.empty() ? doc().get_number_type()
                                : doc().at_pointer(pointer).get_number_type();
     }

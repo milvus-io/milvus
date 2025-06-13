@@ -78,6 +78,8 @@ type Dispatcher struct {
 	targets *typeutil.ConcurrentMap[string, *target]
 
 	stream msgstream.MsgStream
+
+	includeSkipWhenSplit bool
 }
 
 func NewDispatcher(
@@ -89,6 +91,7 @@ func NewDispatcher(
 	subPos SubPos,
 	includeCurrentMsg bool,
 	pullbackEndTs typeutil.Timestamp,
+	includeSkipWhenSplit bool,
 ) (*Dispatcher, error) {
 	subName := fmt.Sprintf("%s-%d-%d", pchannel, id, time.Now().UnixNano())
 
@@ -252,7 +255,11 @@ func (d *Dispatcher) work() {
 				isReplicateChannel := strings.Contains(vchannel, paramtable.Get().CommonCfg.ReplicateMsgChannel.GetValue())
 				// The dispatcher seeks from the oldest target,
 				// so for each target, msg before the target position must be filtered out.
-				if p.EndTs <= t.pos.GetTimestamp() && !isReplicateChannel {
+				//
+				// From 2.6.0, every message has a unique timetick, so we can filter out the msg by < but not <=.
+				if ((d.includeSkipWhenSplit && p.EndTs < t.pos.GetTimestamp()) ||
+					(!d.includeSkipWhenSplit && p.EndTs <= t.pos.GetTimestamp())) &&
+					!isReplicateChannel {
 					log.Info("skip msg",
 						zap.String("vchannel", vchannel),
 						zap.Int("msgCount", len(p.Msgs)),

@@ -282,21 +282,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info("handle manual flush message success")
 			}
-		case commonpb.MsgType_Import:
-			importMsg := msg.(*msgstream.ImportMsg)
-			if importMsg.GetCollectionID() != ddn.collectionID {
-				continue
-			}
-			logger := log.With(
-				zap.String("vchannel", ddn.Name()),
-				zap.Int32("msgType", int32(msg.Type())),
-			)
-			logger.Info("receive import message")
-			if err := ddn.msgHandler.HandleImport(context.Background(), ddn.vChannelName, importMsg.ImportMsg); err != nil {
-				logger.Warn("handle import message failed", zap.Error(err))
-			} else {
-				logger.Info("handle import message success")
-			}
 		case commonpb.MsgType_AddCollectionField:
 			schemaMsg := msg.(*adaptor.SchemaChangeMessageBody)
 			header := schemaMsg.SchemaChangeMessage.Header()

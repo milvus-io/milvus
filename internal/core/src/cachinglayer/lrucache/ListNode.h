@@ -128,10 +128,10 @@ class ListNode {
             } else if (state_ == State::LOADING) {
                 // another thread has explicitly requested loading this cell, we did it first
                 // thus we set up the state first.
+                cb();
                 state_ = State::LOADED;
                 load_promise_->setValue(folly::Unit());
                 load_promise_ = nullptr;
-                cb();
                 // the node that marked LOADING has already reserved memory, do not double count.
                 touch(false);
             } else {

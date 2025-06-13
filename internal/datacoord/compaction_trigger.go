@@ -356,7 +356,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, signal.isForce, group.segments...)
+			group.segments = FilterInIndexedSegments(context.Background(), t.handler, t.meta, signal.isForce, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)

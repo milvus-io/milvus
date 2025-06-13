@@ -105,128 +105,149 @@ struct GeneratedData {
             }
 
             auto& field_meta = schema_->operator[](field_id);
-            if (field_meta.is_vector() &&
-                field_meta.get_data_type() != DataType::VECTOR_SPARSE_FLOAT) {
-                if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                    int len = raw_->num_rows() * field_meta.get_dim();
-                    ret.resize(len);
-                    auto src_data =
-                        reinterpret_cast<const T*>(target_field_data.vectors()
-                                                       .float_vector()
-                                                       .data()
-                                                       .data());
-                    std::copy_n(src_data, len, ret.data());
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_BINARY) {
-                    int len = raw_->num_rows() * (field_meta.get_dim() / 8);
-                    ret.resize(len);
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.vectors().binary_vector().data());
-                    std::copy_n(src_data, len, ret.data());
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_FLOAT16) {
-                    int len = raw_->num_rows() * field_meta.get_dim();
-                    ret.resize(len);
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.vectors().float16_vector().data());
-                    std::copy_n(src_data, len, ret.data());
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_BFLOAT16) {
-                    int len = raw_->num_rows() * field_meta.get_dim();
-                    ret.resize(len);
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.vectors().bfloat16_vector().data());
-                    std::copy_n(src_data, len, ret.data());
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_INT8) {
-                    int len = raw_->num_rows() * field_meta.get_dim();
-                    ret.resize(len);
-                    auto src_data = reinterpret_cast<const T*>(
-                        target_field_data.vectors().int8_vector().data());
-                    std::copy_n(src_data, len, ret.data());
-                } else {
-                    PanicInfo(Unsupported, "unsupported");
-                }
 
-                return std::move(ret);
-            }
-            if constexpr (std::is_same_v<T,
-                                         knowhere::sparse::SparseRow<float>>) {
-                auto sparse_float_array =
-                    target_field_data.vectors().sparse_float_vector();
-                auto rows = SparseBytesToRows(sparse_float_array.contents());
-                std::copy_n(rows.get(), raw_->num_rows(), ret.data());
-            } else if constexpr (std::is_same_v<T, ScalarArray>) {
-                auto ret_data = reinterpret_cast<ScalarArray*>(ret.data());
-                auto src_data = target_field_data.scalars().array_data().data();
+            if constexpr (std::is_same_v<T, VectorFieldProto>) {
+                auto ret_data = reinterpret_cast<VectorFieldProto*>(ret.data());
+                auto src_data =
+                    target_field_data.vectors().vector_array().data();
                 std::copy(src_data.begin(), src_data.end(), ret_data);
+                return std::move(ret);
             } else {
-                switch (field_meta.get_data_type()) {
-                    case DataType::BOOL: {
+                if (field_meta.is_vector() &&
+                    field_meta.get_data_type() !=
+                        DataType::VECTOR_SPARSE_FLOAT) {
+                    if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                        int len = raw_->num_rows() * field_meta.get_dim();
+                        ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
-                            target_field_data.scalars()
-                                .bool_data()
+                            target_field_data.vectors()
+                                .float_vector()
                                 .data()
                                 .data());
-                        std::copy_n(src_data, raw_->num_rows(), ret.data());
-                        break;
-                    }
-                    case DataType::INT8:
-                    case DataType::INT16:
-                    case DataType::INT32: {
-                        auto src_data = reinterpret_cast<const int32_t*>(
-                            target_field_data.scalars()
-                                .int_data()
-                                .data()
-                                .data());
-                        std::copy_n(src_data, raw_->num_rows(), ret.data());
-                        break;
-                    }
-                    case DataType::INT64: {
+                        std::copy_n(src_data, len, ret.data());
+                    } else if (field_meta.get_data_type() ==
+                               DataType::VECTOR_BINARY) {
+                        int len = raw_->num_rows() * (field_meta.get_dim() / 8);
+                        ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
-                            target_field_data.scalars()
-                                .long_data()
-                                .data()
-                                .data());
-                        std::copy_n(src_data, raw_->num_rows(), ret.data());
-                        break;
-                    }
-                    case DataType::FLOAT: {
+                            target_field_data.vectors().binary_vector().data());
+                        std::copy_n(src_data, len, ret.data());
+                    } else if (field_meta.get_data_type() ==
+                               DataType::VECTOR_FLOAT16) {
+                        int len = raw_->num_rows() * field_meta.get_dim();
+                        ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
-                            target_field_data.scalars()
-                                .float_data()
-                                .data()
+                            target_field_data.vectors()
+                                .float16_vector()
                                 .data());
-                        std::copy_n(src_data, raw_->num_rows(), ret.data());
-                        break;
-                    }
-                    case DataType::DOUBLE: {
+                        std::copy_n(src_data, len, ret.data());
+                    } else if (field_meta.get_data_type() ==
+                               DataType::VECTOR_BFLOAT16) {
+                        int len = raw_->num_rows() * field_meta.get_dim();
+                        ret.resize(len);
                         auto src_data = reinterpret_cast<const T*>(
-                            target_field_data.scalars()
-                                .double_data()
-                                .data()
+                            target_field_data.vectors()
+                                .bfloat16_vector()
                                 .data());
-                        std::copy_n(src_data, raw_->num_rows(), ret.data());
-                        break;
-                    }
-                    case DataType::VARCHAR: {
-                        auto ret_data =
-                            reinterpret_cast<std::string*>(ret.data());
-                        auto src_data =
-                            target_field_data.scalars().string_data().data();
-                        std::copy(src_data.begin(), src_data.end(), ret_data);
-                        break;
-                    }
-                    case DataType::JSON: {
-                        auto ret_data =
-                            reinterpret_cast<std::string*>(ret.data());
-                        auto src_data =
-                            target_field_data.scalars().json_data().data();
-                        std::copy(src_data.begin(), src_data.end(), ret_data);
-                        break;
-                    }
-                    default: {
+                        std::copy_n(src_data, len, ret.data());
+                    } else if (field_meta.get_data_type() ==
+                               DataType::VECTOR_INT8) {
+                        int len = raw_->num_rows() * field_meta.get_dim();
+                        ret.resize(len);
+                        auto src_data = reinterpret_cast<const T*>(
+                            target_field_data.vectors().int8_vector().data());
+                        std::copy_n(src_data, len, ret.data());
+                    } else {
                         PanicInfo(Unsupported, "unsupported");
+                    }
+
+                    return std::move(ret);
+                }
+                if constexpr (std::is_same_v<
+                                  T,
+                                  knowhere::sparse::SparseRow<float>>) {
+                    auto sparse_float_array =
+                        target_field_data.vectors().sparse_float_vector();
+                    auto rows =
+                        SparseBytesToRows(sparse_float_array.contents());
+                    std::copy_n(rows.get(), raw_->num_rows(), ret.data());
+                } else if constexpr (std::is_same_v<T, ScalarFieldProto>) {
+                    auto ret_data =
+                        reinterpret_cast<ScalarFieldProto*>(ret.data());
+                    auto src_data =
+                        target_field_data.scalars().array_data().data();
+                    std::copy(src_data.begin(), src_data.end(), ret_data);
+                } else {
+                    switch (field_meta.get_data_type()) {
+                        case DataType::BOOL: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .bool_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::INT8:
+                        case DataType::INT16:
+                        case DataType::INT32: {
+                            auto src_data = reinterpret_cast<const int32_t*>(
+                                target_field_data.scalars()
+                                    .int_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::INT64: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .long_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::FLOAT: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .float_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::DOUBLE: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .double_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
+                        case DataType::VARCHAR: {
+                            auto ret_data =
+                                reinterpret_cast<std::string*>(ret.data());
+                            auto src_data = target_field_data.scalars()
+                                                .string_data()
+                                                .data();
+                            std::copy(
+                                src_data.begin(), src_data.end(), ret_data);
+                            break;
+                        }
+                        case DataType::JSON: {
+                            auto ret_data =
+                                reinterpret_cast<std::string*>(ret.data());
+                            auto src_data =
+                                target_field_data.scalars().json_data().data();
+                            std::copy(
+                                src_data.begin(), src_data.end(), ret_data);
+                            break;
+                        }
+                        default: {
+                            PanicInfo(Unsupported, "unsupported");
+                        }
                     }
                 }
             }
@@ -412,55 +433,96 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
+    auto generate_float_vector = [&seed, &offset, &random, &distr](
+                                     auto& field_meta, int64_t N) {
+        auto dim = field_meta.get_dim();
+        vector<float> final(dim * N);
+        bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
+#pragma omp parallel for
+        for (int n = 0; n < N; ++n) {
+            vector<float> data(dim);
+            float sum = 0;
+
+            std::default_random_engine er2(seed + n);
+            std::normal_distribution<> distr2(0, 1);
+            for (auto& x : data) {
+                x = distr2(er2) + offset;
+                sum += x * x;
+            }
+            if (is_ip) {
+                sum = sqrt(sum);
+                for (auto& x : data) {
+                    x /= sum;
+                }
+            }
+
+            std::copy(data.begin(), data.end(), final.begin() + dim * n);
+        }
+        return final;
+    };
+
+    auto generate_binary_vector = [&seed, &offset, &random](auto& field_meta,
+                                                            int64_t N) {
+        auto dim = field_meta.get_dim();
+        Assert(dim % 8 == 0);
+        vector<uint8_t> data(dim / 8 * N);
+        for (auto& x : data) {
+            x = random();
+        }
+        return data;
+    };
+
+    auto generate_float16_vector = [&seed, &offset, &random, &distr](
+                                       auto& field_meta, int64_t N) {
+        auto dim = field_meta.get_dim();
+        vector<float16> data(dim * N);
+        for (auto& x : data) {
+            x = float16(distr(random) + offset);
+        }
+        return data;
+    };
+
+    auto generate_bfloat16_vector = [&seed, &offset, &random, &distr](
+                                        auto& field_meta, int64_t N) {
+        auto dim = field_meta.get_dim();
+        vector<bfloat16> data(dim * N);
+        for (auto& x : data) {
+            x = bfloat16(distr(random) + offset);
+        }
+        return data;
+    };
+
+    auto generate_int8_vector = [&seed, &offset, &random](auto& field_meta,
+                                                          int64_t N) {
+        auto dim = field_meta.get_dim();
+        vector<int8_t> data(dim * N);
+        for (auto& x : data) {
+            x = int8_t(random() % 256 - 128);
+        }
+        return data;
+    };
+
     for (auto field_id : schema->get_field_ids()) {
         auto field_meta = schema->operator[](field_id);
         switch (field_meta.get_data_type()) {
             case DataType::VECTOR_FLOAT: {
-                auto dim = field_meta.get_dim();
-                vector<float> final(dim * N);
-                bool is_ip =
-                    starts_with(field_meta.get_name().get(), "normalized");
-#pragma omp parallel for
-                for (int n = 0; n < N; ++n) {
-                    vector<float> data(dim);
-                    float sum = 0;
-
-                    std::default_random_engine er2(seed + n);
-                    std::normal_distribution<> distr2(0, 1);
-                    for (auto& x : data) {
-                        x = distr2(er2) + offset;
-                        sum += x * x;
-                    }
-                    if (is_ip) {
-                        sum = sqrt(sum);
-                        for (auto& x : data) {
-                            x /= sum;
-                        }
-                    }
-
-                    std::copy(
-                        data.begin(), data.end(), final.begin() + dim * n);
-                }
-                insert_cols(final, N, field_meta, random_valid);
+                auto data = generate_float_vector(field_meta, N);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::VECTOR_BINARY: {
-                auto dim = field_meta.get_dim();
-                Assert(dim % 8 == 0);
-                vector<uint8_t> data(dim / 8 * N);
-                for (auto& x : data) {
-                    x = random();
-                }
+                auto data = generate_binary_vector(field_meta, N);
                 insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::VECTOR_FLOAT16: {
-                auto dim = field_meta.get_dim();
-                vector<float16> final(dim * N);
-                for (auto& x : final) {
-                    x = float16(distr(random) + offset);
-                }
-                insert_cols(final, N, field_meta, random_valid);
+                auto data = generate_float16_vector(field_meta, N);
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                auto data = generate_bfloat16_vector(field_meta, N);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
             case DataType::VECTOR_SPARSE_FLOAT: {
@@ -472,23 +534,81 @@ DataGen(SchemaPtr schema,
                     array.release());
                 break;
             }
-            case DataType::VECTOR_BFLOAT16: {
-                auto dim = field_meta.get_dim();
-                vector<bfloat16> final(dim * N);
-                for (auto& x : final) {
-                    x = bfloat16(distr(random) + offset);
-                }
-                insert_cols(final, N, field_meta, random_valid);
+            case DataType::VECTOR_INT8: {
+                auto data = generate_int8_vector(field_meta, N);
+                insert_cols(data, N, field_meta, random_valid);
                 break;
             }
-            case DataType::VECTOR_INT8: {
+
+            case DataType::VECTOR_ARRAY: {
                 auto dim = field_meta.get_dim();
-                vector<int8> final(dim * N);
-                srand(seed);
-                for (auto& x : final) {
-                    x = int8_t(rand() % 256 - 128);
+                vector<VectorFieldProto> vector_array(N);
+                for (int i = 0; i < N / repeat_count; ++i) {
+                    VectorFieldProto field_data;
+                    field_data.set_dim(dim);
+
+                    switch (field_meta.get_element_type()) {
+                        case DataType::VECTOR_FLOAT: {
+                            auto data =
+                                generate_float_vector(field_meta, array_len);
+                            field_data.mutable_float_vector()
+                                ->mutable_data()
+                                ->Add(data.begin(), data.end());
+                            break;
+                        }
+                        case DataType::VECTOR_BINARY: {
+                            auto num_bytes = array_len * dim / 8;
+                            auto data_raw =
+                                generate_binary_vector(field_meta, array_len);
+                            auto data =
+                                reinterpret_cast<const char*>(data_raw.data());
+                            auto obj = field_data.mutable_binary_vector();
+                            obj->assign(data, num_bytes);
+                            break;
+                        }
+                        case DataType::VECTOR_FLOAT16: {
+                            auto length = array_len * dim;
+                            auto data_raw =
+                                generate_float16_vector(field_meta, array_len);
+                            auto data =
+                                reinterpret_cast<const char*>(data_raw.data());
+                            auto obj = field_data.mutable_float16_vector();
+                            obj->assign(data, length * sizeof(float16));
+                            break;
+                        }
+                        case DataType::VECTOR_SPARSE_FLOAT:
+                            PanicInfo(DataTypeInvalid, "not implemented");
+                            break;
+                        case DataType::VECTOR_BFLOAT16: {
+                            auto length = array_len * dim;
+                            auto data_raw =
+                                generate_bfloat16_vector(field_meta, array_len);
+                            auto data =
+                                reinterpret_cast<const char*>(data_raw.data());
+                            auto obj = field_data.mutable_bfloat16_vector();
+                            obj->assign(data, length * sizeof(bfloat16));
+                            break;
+                        }
+                        case DataType::VECTOR_INT8: {
+                            auto length = array_len * dim;
+                            auto data_raw =
+                                generate_int8_vector(field_meta, array_len);
+                            auto data =
+                                reinterpret_cast<const char*>(data_raw.data());
+                            auto obj = field_data.mutable_int8_vector();
+                            obj->assign(data, length * sizeof(int8_t));
+                            break;
+                        }
+                        default: {
+                            PanicInfo(DataTypeInvalid, "not implemented");
+                        }
+                    }
+
+                    for (int j = 0; j < repeat_count; ++j) {
+                        vector_array[i * repeat_count + j] = field_data;
+                    }
                 }
-                insert_cols(final, N, field_meta, random_valid);
+                insert_cols(vector_array, N, field_meta, random_valid);
                 break;
             }
             case DataType::BOOL: {
@@ -594,7 +714,7 @@ DataGen(SchemaPtr schema,
                 break;
             }
             case DataType::ARRAY: {
-                vector<ScalarArray> data(N);
+                vector<ScalarFieldProto> data(N);
                 switch (field_meta.get_element_type()) {
                     case DataType::BOOL: {
                         for (int i = 0; i < N / repeat_count; i++) {
@@ -1048,6 +1168,16 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 auto raw_data = data->vectors().int8_vector().data();
                 dim = field_meta.get_dim();
                 createFieldData(raw_data, DataType::VECTOR_INT8, dim);
+                break;
+            }
+            case DataType::VECTOR_ARRAY: {
+                auto src_data = data->vectors().vector_array().data();
+                auto dim = field_meta.get_dim();
+                std::vector<VectorArray> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    data_raw[i] = VectorArray(src_data.at(i));
+                }
+                createFieldData(data_raw.data(), DataType::VECTOR_ARRAY, dim);
                 break;
             }
             default: {

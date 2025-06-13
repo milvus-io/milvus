@@ -415,22 +415,37 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [this, segment, &field_id](bool valid,
-                                                      uint8_t type,
-                                                      uint32_t row_id,
-                                                      uint16_t offset,
-                                                      uint16_t size,
-                                                      int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+        auto filter_func = [this, segment, &field_id](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (valid) {
+                    bitset[row_id] = false;
+                } else {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                }
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
-
                 if (array.error()) {
                     return false;
                 }
@@ -444,7 +459,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                     }
                 }
                 return false;
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -599,20 +625,36 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+        auto filter_func = [segment, &elements, &field_id](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (valid) {
+                    bitset[row_id] = false;
+                } else {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                }
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -629,7 +671,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                     }
                 }
                 return false;
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -877,20 +930,36 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+        auto filter_func = [segment, &elements, &field_id](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (valid) {
+                    bitset[row_id] = false;
+                } else {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                }
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -907,7 +976,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                     }
                 }
                 return tmp_elements.empty();
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -1125,20 +1205,35 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
         auto filter_func = [segment, &elements, &elements_index, &field_id](
-                               bool valid,
-                               uint8_t type,
-                               uint32_t row_id,
-                               uint16_t offset,
-                               uint16_t size,
-                               int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (valid) {
+                    bitset[row_id] = false;
+                } else {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                }
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 std::set<int> tmp_elements_index(elements_index);
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
@@ -1215,7 +1310,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                     }
                 }
                 return tmp_elements_index.size() == 0;
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -1376,20 +1482,36 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+        auto filter_func = [segment, &elements, &field_id](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (valid) {
+                    bitset[row_id] = false;
+                } else {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                }
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1410,7 +1532,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                     }
                 }
                 return exist_elements_index.size() == elements.size();
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -1611,20 +1744,36 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, &elements, &field_id](bool valid,
-                                                           uint8_t type,
-                                                           uint32_t row_id,
-                                                           uint16_t offset,
-                                                           uint16_t size,
-                                                           int32_t value) {
-            if (valid) {
-                return false;
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+        auto filter_func = [segment, &elements, &field_id](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (valid) {
+                    bitset[row_id] = false;
+                } else {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                }
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 auto array = json.array_at(offset, size);
                 if (array.error()) {
                     return false;
@@ -1693,7 +1842,18 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                     }
                 }
                 return false;
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
