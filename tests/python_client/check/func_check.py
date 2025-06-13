@@ -402,6 +402,7 @@ class ResponseChecker:
             if check_items["_async"]:
                 search_res.done()
                 search_res = search_res.result()
+        search_res.materialize()
         if check_items.get("output_fields", None):
             assert set(search_res[0][0].entity.fields) == set(check_items["output_fields"])
             log.info('search_results_check: Output fields of query searched is correct')
@@ -529,6 +530,7 @@ class ResponseChecker:
                             The type of with_vec value is bool, True value means check vector field, False otherwise
         :type check_items: dict
         """
+        query_res.materialize()
         if func_name != 'query':
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
