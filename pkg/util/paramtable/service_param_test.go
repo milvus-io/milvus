@@ -193,6 +193,11 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, "60", Params.RequestTimeout.GetValue())
 	})
 
+	t.Run("pulsar_backlog_auto_clear_bytes", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, int64(100*1024*1024), Params.BacklogAutoClearBytes.GetAsSize())
+	})
+
 	t.Run("test rocksmqConfig", func(t *testing.T) {
 		Params := &SParams.RocksmqCfg
 

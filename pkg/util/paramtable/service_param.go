@@ -875,6 +875,8 @@ type PulsarConfig struct {
 
 	// Enable Client side metrics
 	EnableClientMetrics ParamItem `refreshable:"false"`
+
+	BacklogAutoClearBytes ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -1007,6 +1009,23 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 		Export:       true,
 	}
 	p.EnableClientMetrics.Init(base.mgr)
+
+	p.BacklogAutoClearBytes = ParamItem{
+		Key:          "pulsar.backlogAutoClearBytes",
+		Version:      "2.6.0",
+		DefaultValue: "100m",
+		Doc: `Perform a backlog cleanup every time the data of given bytes is written.
+Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
+If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
+set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog. 
+If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
+so admin of pulsar should give enough retention time to avoid the wal message lost.
+If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
+Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
+The retention policy of pulsar can set shorter to save the storage space in this case.`,
+		Export: true,
+	}
+	p.BacklogAutoClearBytes.Init(base.mgr)
 }
 
 // --- kafka ---
