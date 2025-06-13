@@ -1256,6 +1256,11 @@ func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoaded
 		}
 	}
 
+	segments := s.dist.SegmentDistManager.GetByFilter()
+	for _, segment := range segments {
+		segmentIDs.Insert(segment.ID)
+	}
+
 	resp := &querypb.ListLoadedSegmentsResponse{
 		Status:     merr.Success(),
 		SegmentIDs: segmentIDs.Collect(),
