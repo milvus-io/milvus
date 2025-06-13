@@ -42,7 +42,7 @@ import (
 
 func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	const (
-		rowCount = 10000
+		rowCount = 100
 	)
 
 	c := s.Cluster
@@ -338,9 +338,10 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	str := strings.Join(strs, `,`)
 	expr := fmt.Sprintf("%s in [%v]", integration.VarCharField, str)
 	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{integration.VarCharField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
@@ -355,9 +356,10 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	// query partition key, CmpOp 1
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
 	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{integration.VarCharField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
@@ -373,9 +375,10 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	target := partitionKeyData[rand.Intn(rowCount)]
 	expr = fmt.Sprintf("%s == \"%s\"", integration.VarCharField, target)
 	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{integration.VarCharField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)

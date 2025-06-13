@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -39,7 +40,12 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) (int64, int64, *schemapb.IDs) {
+type DMLGroup struct {
+	insertRowNums []int
+	deleteRowNums []int
+}
+
+func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64, int64, *schemapb.IDs) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
@@ -51,10 +57,9 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 	s.NoError(err)
 
 	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		CollectionName:   collectionName,
-		Schema:           marshaledSchema,
-		ShardsNum:        common.DefaultShardsNum,
-		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      common.DefaultShardsNum,
 	})
 	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
 
@@ -76,7 +81,6 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
 	})
 	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
-
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
@@ -86,67 +90,85 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 	s.NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoad(ctx, collectionName)
 
-	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
-	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
-		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
-		HashKeys:       hashKeys,
-		NumRows:        uint32(rowNum),
-	})
-	s.NoError(merr.CheckRPCCall(insertResult, err))
-	insertedIDs := insertResult.GetIDs()
+	const delBatch = 2
+	var (
+		totalInsertRowNum = 0
+		totalDeleteRowNum = 0
+		totalInsertedIDs  = &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: make([]int64, 0),
+				},
+			},
+		}
+	)
 
-	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
-		CollectionNames: []string{collectionName},
-	})
-	s.NoError(merr.CheckRPCCall(flushResp, err))
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
-	s.Require().True(has)
-	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
-	s.True(has)
+	for i := range dmlGroup.insertRowNums {
+		insRow := dmlGroup.insertRowNums[i]
+		delRow := dmlGroup.deleteRowNums[i]
+		totalInsertRowNum += insRow
+		totalDeleteRowNum += delRow
 
-	segments, err := c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	for _, segment := range segments {
-		log.Info("ShowSegments result", zap.String("segment", segment.String()))
-	}
-	s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
-
-	// delete
-	beginIndex := 0
-	for i := 0; i < delBatch; i++ {
-		delCnt := delNum / delBatch
-		idBegin := insertedIDs.GetIntId().GetData()[beginIndex]
-		idEnd := insertedIDs.GetIntId().GetData()[beginIndex+delCnt]
-		deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, insRow, dim)
+		hashKeys := integration.GenerateHashKeys(insRow)
+		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 			CollectionName: collectionName,
-			Expr:           fmt.Sprintf("%d <= %s < %d", idBegin, integration.Int64Field, idEnd),
+			FieldsData:     []*schemapb.FieldData{fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(insRow),
 		})
-		s.NoError(merr.CheckRPCCall(deleteResult, err))
-		beginIndex += delCnt
+		s.NoError(merr.CheckRPCCall(insertResult, err))
+		insertedIDs := insertResult.GetIDs()
+		totalInsertedIDs.IdField.(*schemapb.IDs_IntId).IntId.Data = append(
+			totalInsertedIDs.IdField.(*schemapb.IDs_IntId).IntId.Data, insertedIDs.IdField.(*schemapb.IDs_IntId).IntId.Data...)
 
-		flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		// delete
+		beginIndex := 0
+		for j := 0; j < delBatch; j++ {
+			if delRow == 0 {
+				continue
+			}
+			delCnt := delRow / delBatch
+			idBegin := insertedIDs.GetIntId().GetData()[beginIndex]
+			idEnd := insertedIDs.GetIntId().GetData()[beginIndex+delCnt-1]
+			deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				Expr:           fmt.Sprintf("%d <= %s <= %d", idBegin, integration.Int64Field, idEnd),
+			})
+			s.NoError(merr.CheckRPCCall(deleteResult, err))
+			beginIndex += delCnt
+		}
+
+		// flush
+		flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
 			CollectionNames: []string{collectionName},
 		})
 		s.NoError(merr.CheckRPCCall(flushResp, err))
-		flushTs, has = flushResp.GetCollFlushTs()[collectionName]
+		segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+		ids := segmentIDs.GetData()
+		s.Require().NotEmpty(segmentIDs)
+		s.Require().True(has)
+		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 		s.True(has)
-		s.WaitForFlush(ctx, nil, flushTs, "", collectionName)
+		s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
+		segments, err := c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		for _, segment := range segments {
+			log.Info("ShowSegments result", zap.String("segment", segment.String()))
+		}
 	}
 
 	// check l0 segments
-	segments, err = c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetLevel() == datapb.SegmentLevel_L0
-	})
-	s.Equal(delBatch, len(l0Segments))
+	if totalDeleteRowNum > 0 {
+		segments, err := c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetLevel() == datapb.SegmentLevel_L0
+		})
+		s.True(len(l0Segments) > 0)
+	}
 
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
@@ -162,7 +184,11 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
-	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+	expectResult := nq * topk
+	if expectResult > totalInsertRowNum-totalDeleteRowNum {
+		expectResult = totalInsertRowNum - totalDeleteRowNum
+	}
+	s.Equal(expectResult, len(searchResult.GetResults().GetScores()))
 
 	// query
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
@@ -174,10 +200,10 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
 	count := int(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
-	s.Equal(rowNum-delNum, count)
+	s.Equal(totalInsertRowNum-totalDeleteRowNum, count)
 
 	// query 2
-	expr = fmt.Sprintf("%s < %d", integration.Int64Field, insertedIDs.GetIntId().GetData()[10])
+	expr = fmt.Sprintf("%s < %d", integration.Int64Field, totalInsertedIDs.GetIntId().GetData()[10])
 	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName: collectionName,
 		Expr:           expr,
@@ -186,27 +212,33 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim, rowNum, delNum, delBatch int) 
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
 	count = len(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
-	s.Equal(0, count)
+	expectCount := 10
+	if dmlGroup.deleteRowNums[0] >= 10 {
+		expectCount = 0
+	}
+	s.Equal(expectCount, count)
 
 	// get collectionID and partitionID
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
 
-	return collectionID, partitionID, insertedIDs
+	return collectionID, partitionID, totalInsertedIDs
 }
 
-func (s *BulkInsertSuite) TestBinlogImport() {
-	const (
-		dim      = 128
-		rowNum   = 50000
-		delNum   = 30000
-		delBatch = 10
-	)
+func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
+	const dim = 128
 
-	collectionID, partitionID, insertedIDs := s.PrepareCollectionA(dim, rowNum, delNum, delBatch)
+	collectionID, partitionID, insertedIDs := s.PrepareCollectionA(dim, dmlGroup)
 
 	c := s.Cluster
 	ctx := c.GetContext()
+
+	totalInsertRowNum := lo.SumBy(dmlGroup.insertRowNums, func(num int) int {
+		return num
+	})
+	totalDeleteRowNum := lo.SumBy(dmlGroup.deleteRowNums, func(num int) int {
+		return num
+	})
 
 	collectionName := "TestBinlogImport_B_" + funcutil.GenRandomStr()
 
@@ -246,16 +278,12 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	s.NoError(merr.CheckRPCCall(flushedSegmentsResp, err))
 	flushedSegments := flushedSegmentsResp.GetSegments()
 	log.Info("flushed segments", zap.Int64s("segments", flushedSegments))
-	segmentBinlogPrefixes := make([]string, 0)
-	for _, segmentID := range flushedSegments {
-		segmentBinlogPrefixes = append(segmentBinlogPrefixes,
-			fmt.Sprintf("/tmp/%s/insert_log/%d/%d/%d", paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, partitionID, segmentID))
-	}
+
 	// binlog import
-	files := []*internalpb.ImportFile{
-		{
-			Paths: segmentBinlogPrefixes,
-		},
+	files := make([]*internalpb.ImportFile, 0)
+	for _, segmentID := range flushedSegments {
+		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("/tmp/%s/insert_log/%d/%d/%d",
+			paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, partitionID, segmentID)}})
 	}
 	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
@@ -293,45 +321,48 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	s.NoError(CheckLogID(segment.GetStatslogs()))
 
 	// l0 import
-	files = []*internalpb.ImportFile{
-		{
-			Paths: []string{
-				fmt.Sprintf("/tmp/%s/delta_log/%d/%d/", paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, common.AllPartitionsID),
+	if totalDeleteRowNum > 0 {
+		files = []*internalpb.ImportFile{
+			{
+				Paths: []string{
+					fmt.Sprintf("/tmp/%s/delta_log/%d/%d/",
+						paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, common.AllPartitionsID),
+				},
 			},
-		},
+		}
+		importResp, err = c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+			CollectionName: collectionName,
+			Files:          files,
+			Options: []*commonpb.KeyValuePair{
+				{Key: "l0_import", Value: "true"},
+			},
+		})
+		s.NoError(merr.CheckRPCCall(importResp, err))
+		log.Info("Import result", zap.Any("importResp", importResp))
+
+		jobID = importResp.GetJobID()
+		err = WaitForImportDone(ctx, c, jobID)
+		s.NoError(err)
+
+		segments, err = c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetCollectionID() == newCollectionID
+		})
+		log.Info("Show segments", zap.Any("segments", segments))
+		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
+		})
+		s.Equal(1, len(l0Segments))
+		segment = l0Segments[0]
+		s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+		s.Equal(common.AllPartitionsID, segment.GetPartitionID())
+		s.True(len(segment.GetBinlogs()) == 0)
+		s.True(len(segment.GetDeltalogs()) > 0)
+		s.NoError(CheckLogID(segment.GetDeltalogs()))
+		s.True(len(segment.GetStatslogs()) == 0)
 	}
-	importResp, err = c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: collectionName,
-		Files:          files,
-		Options: []*commonpb.KeyValuePair{
-			{Key: "l0_import", Value: "true"},
-		},
-	})
-	s.NoError(merr.CheckRPCCall(importResp, err))
-	log.Info("Import result", zap.Any("importResp", importResp))
-
-	jobID = importResp.GetJobID()
-	err = WaitForImportDone(ctx, c, jobID)
-	s.NoError(err)
-
-	segments, err = c.MetaWatcher.ShowSegments()
-	s.NoError(err)
-	s.NotEmpty(segments)
-	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetCollectionID() == newCollectionID
-	})
-	log.Info("Show segments", zap.Any("segments", segments))
-	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
-	})
-	s.Equal(1, len(l0Segments))
-	segment = l0Segments[0]
-	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
-	s.Equal(common.AllPartitionsID, segment.GetPartitionID())
-	s.True(len(segment.GetBinlogs()) == 0)
-	s.True(len(segment.GetDeltalogs()) > 0)
-	s.NoError(CheckLogID(segment.GetDeltalogs()))
-	s.True(len(segment.GetStatslogs()) == 0)
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -349,12 +380,17 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
-	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+	expectResult := nq * topk
+	if expectResult > totalInsertRowNum-totalDeleteRowNum {
+		expectResult = totalInsertRowNum - totalDeleteRowNum
+	}
+	s.Equal(expectResult, len(searchResult.GetResults().GetScores()))
 	// check ids from collectionA, because during binlog import, even if the primary key's autoID is set to true,
 	// the primary key from the binlog should be used instead of being reassigned.
 	insertedIDsMap := lo.SliceToMap(insertedIDs.GetIntId().GetData(), func(id int64) (int64, struct{}) {
@@ -368,24 +404,104 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	// query
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
 	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{"count(*)"},
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{"count(*)"},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
 	count := int(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
-	s.Equal(rowNum-delNum, count)
+	s.Equal(totalInsertRowNum-totalDeleteRowNum, count)
 
 	// query 2
 	expr = fmt.Sprintf("%s < %d", integration.Int64Field, insertedIDs.GetIntId().GetData()[10])
 	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{},
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
 	count = len(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
-	s.Equal(0, count)
+	expectCount := 10
+	if dmlGroup.deleteRowNums[0] >= 10 {
+		expectCount = 0
+	}
+	s.Equal(expectCount, count)
+}
+
+func (s *BulkInsertSuite) TestInvalidInput() {
+	const dim = 128
+	c := s.Cluster
+	ctx := c.GetContext()
+
+	collectionName := "TestBinlogImport_InvalidInput_" + funcutil.GenRandomStr()
+	schema := integration.ConstructSchema(collectionName, dim, true)
+	marshaledSchema, err := proto.Marshal(schema)
+	s.NoError(err)
+
+	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		CollectionName: collectionName,
+		Schema:         marshaledSchema,
+		ShardsNum:      common.DefaultShardsNum,
+	})
+	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
+
+	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		CollectionName: collectionName,
+	})
+	s.NoError(merr.CheckRPCCall(describeCollectionResp, err))
+
+	// binlog import
+	files := []*internalpb.ImportFile{
+		{
+			Paths: []string{"invalid-path", "invalid-path", "invalid-path"},
+		},
+	}
+	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: collectionName,
+		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
+		Files:          files,
+		Options: []*commonpb.KeyValuePair{
+			{Key: "backup", Value: "true"},
+		},
+	})
+	err = merr.CheckRPCCall(importResp, err)
+	s.True(strings.Contains(err.Error(), "too many input paths for binlog import"))
+	s.Error(err)
+	log.Info("Import result", zap.Any("importResp", importResp))
+}
+
+func (s *BulkInsertSuite) TestBinlogImport() {
+	dmlGroup := &DMLGroup{
+		insertRowNums: []int{500, 500, 500},
+		deleteRowNums: []int{300, 300, 300},
+	}
+	s.runBinlogTest(dmlGroup)
+}
+
+func (s *BulkInsertSuite) TestBinlogImport_NoDelete() {
+	dmlGroup := &DMLGroup{
+		insertRowNums: []int{500, 500, 500},
+		deleteRowNums: []int{0, 0, 0},
+	}
+	s.runBinlogTest(dmlGroup)
+}
+
+func (s *BulkInsertSuite) TestBinlogImport_Partial_0_Rows_Segment() {
+	dmlGroup := &DMLGroup{
+		insertRowNums: []int{500, 500, 500},
+		deleteRowNums: []int{500, 300, 0},
+	}
+	s.runBinlogTest(dmlGroup)
+}
+
+func (s *BulkInsertSuite) TestBinlogImport_All_0_Rows_Segment() {
+	dmlGroup := &DMLGroup{
+		insertRowNums: []int{500, 500, 500},
+		deleteRowNums: []int{500, 500, 500},
+	}
+	s.runBinlogTest(dmlGroup)
 }

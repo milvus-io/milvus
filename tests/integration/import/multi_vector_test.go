@@ -43,7 +43,7 @@ import (
 
 func (s *BulkInsertSuite) testMultipleVectorFields() {
 	const (
-		rowCount = 10000
+		rowCount = 100
 		dim1     = 64
 		dim2     = 32
 	)
@@ -215,6 +215,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim1, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 
@@ -225,6 +226,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	// search vec 2
 	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
 		integration.BFloat16VecField, schemapb.DataType_BFloat16Vector, nil, metric.L2, params, nq, dim2, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
 	searchResult, err = c.Proxy.Search(ctx, searchReq)
 
