@@ -255,6 +255,12 @@ func combineBinaryArithExpr(op planpb.OpType, arithOp planpb.ArithOpType, arithE
 		}
 	}
 
+	if arithOp == planpb.ArithOpType_Div || arithOp == planpb.ArithOpType_Mod {
+		if (IsInteger(operand) && operand.GetInt64Val() == 0) || (IsFloating(operand) && operand.GetFloatVal() == 0) {
+			return nil, errors.New("division or modulus by zero")
+		}
+	}
+
 	return &planpb.Expr{
 		Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
 			BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
