@@ -50,6 +50,7 @@ type CheckerController struct {
 	scheduler task.Scheduler
 	checkers  map[utils.CheckerType]Checker
 
+	wg       sync.WaitGroup
 	stopOnce sync.Once
 }
 
@@ -96,7 +97,11 @@ func (controller *CheckerController) Start() {
 	controller.cancel = cancel
 
 	for checker := range controller.checkers {
-		go controller.startChecker(ctx, checker)
+		controller.wg.Add(1)
+		go func() {
+			defer controller.wg.Done()
+			controller.startChecker(ctx, checker)
+		}()
 	}
 }
 
@@ -145,6 +150,8 @@ func (controller *CheckerController) Stop() {
 		if controller.cancel != nil {
 			controller.cancel()
 		}
+
+		controller.wg.Wait()
 	})
 }
 
