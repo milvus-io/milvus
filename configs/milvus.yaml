@@ -158,11 +158,12 @@ minio:
   # 0 means using oss client by default, decrease these configration if ListObjects timeout
   listObjectsMaxKeys: 0
 
-# Milvus supports four MQ: rocksmq(based on RockDB), Pulsar and Kafka.
-# You can change your mq by setting mq.type field.
-# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported in cluster mode)
+# Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
+# You can change the MQ by setting the mq.type field.
+# If the mq.type field is not set, the following priority is used when multiple MQs are configured in this file:
+# 1. standalone (local) mode: rocksmq (default) > Pulsar > Kafka > Woodpecker
+# 2. cluster mode: Pulsar (default) > Kafka (rocksmq is unsupported in cluster mode) > Woodpecker
+# Note: These MQ priorities are compatible with existing instances. For new instances, it is recommended to explicitly use Woodpecker to achieve better performance, operational simplicity, and cost efficiency.
 mq:
   # Default value: "default"
   # Valid values: [default, pulsar, kafka, rocksmq, woodpecker]
@@ -187,7 +188,7 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 128M # Maximum entries count of a segment, default is 128M
+      maxSize: 2GB # Maximum size of a segment, default is 2GB
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
@@ -195,12 +196,12 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
-      maxBytes: 32M # Maximum size of write buffer in bytes.
+      maxBytes: 128M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
-      maxFlushSize: 8M # Maximum size of a fragment in bytes to flush, default is 8M.
-      maxFlushThreads: 4 # Maximum number of threads to flush data
+      maxFlushSize: 4M # Maximum size of a fragment in bytes to flush, default is 4M.
+      maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
       maxSize: 8M # The maximum size of the merged files, default is 8M.
   storage:

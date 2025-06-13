@@ -729,8 +729,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "128M",
-		Doc:          "Maximum entries count of a segment, default is 128M",
+		DefaultValue: "2GB",
+		Doc:          "Maximum size of a segment, default is 2GB",
 		Export:       true,
 	}
 	p.SegmentRollingMaxSize.Init(base.mgr)
@@ -783,7 +783,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "32M",
+		DefaultValue: "128M",
 		Doc:          "Maximum size of write buffer in bytes.",
 		Export:       true,
 	}
@@ -801,8 +801,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxSize = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushSize",
 		Version:      "2.6.0",
-		DefaultValue: "8M",
-		Doc:          "Maximum size of a fragment in bytes to flush, default is 8M.",
+		DefaultValue: "4M",
+		Doc:          "Maximum size of a fragment in bytes to flush, default is 4M.",
 		Export:       true,
 	}
 	p.FlushMaxSize.Init(base.mgr)
@@ -819,7 +819,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxThreads = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushThreads",
 		Version:      "2.6.0",
-		DefaultValue: "4",
+		DefaultValue: "32",
 		Doc:          "Maximum number of threads to flush data",
 		Export:       true,
 	}
