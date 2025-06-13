@@ -1168,8 +1168,8 @@ func ValidateUsername(username string) error {
 	usernameSize := len(username)
 	for i := 1; i < usernameSize; i++ {
 		c := username[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("invalid user name %s, username must contain only numbers, letters and underscores, but got %s", username, c)
+		if c != '_' && c != '-' && c != '.' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrParameterInvalidMsg("invalid user name %s, username must contain only numbers, letters, underscores, dots, and hyphens, but got %s", username, c)
 		}
 	}
 	return nil
