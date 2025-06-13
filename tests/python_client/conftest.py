@@ -52,8 +52,10 @@ def pytest_addoption(parser):
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
     # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
-    parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei endpoint")
+    parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei embedding endpoint")
 
+    parser.addoption("--tei_rerank_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei rerank endpoint")
+    parser.addoption("--vllm_rerank_endpoint", action="store", default="http://vllm-rerank-service.milvus-ci.svc.cluster.local:80", help="vllm rerank endpoint")
 
 @pytest.fixture
 def host(request):
@@ -213,6 +215,14 @@ def request_duration(request):
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
+@pytest.fixture
+def tei_rerank_endpoint(request):
+    return request.config.getoption("--tei_rerank_endpoint")
+
+@pytest.fixture
+def vllm_rerank_endpoint(request):
+    return request.config.getoption("--vllm_rerank_endpoint")
 
 """ fixture func """
 
