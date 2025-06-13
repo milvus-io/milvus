@@ -713,7 +713,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                        "pk_name": default_primary_key_field_name})[0]
         if add_field:
             self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
-                                      nullable=True, max_length=100)
+                                      nullable=True)
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
                 radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results
