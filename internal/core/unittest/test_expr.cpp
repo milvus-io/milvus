@@ -3484,7 +3484,7 @@ TEST_P(ExprTest, test_term_pk_with_sorted) {
     schema->set_primary_field_id(int64_fid);
 
     auto seg = CreateSealedSegment(
-        schema, nullptr, 1, SegcoreConfig::default_config(), false, true);
+        schema, nullptr, 1, SegcoreConfig::default_config(), true);
     int N = 100000;
     auto raw_data = DataGen(schema, N);
     LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);

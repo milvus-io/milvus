@@ -66,7 +66,7 @@ TEST(chunk, test_int64_field) {
                          false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
     auto span = fixed_chunk->Span();
     EXPECT_EQ(span.row_count(), data.size());
@@ -109,7 +109,7 @@ TEST(chunk, test_variable_field) {
                          false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto string_chunk = static_cast<StringChunk*>(chunk.get());
     auto views = string_chunk->StringViews(std::nullopt);
     for (size_t i = 0; i < data.size(); ++i) {
@@ -154,7 +154,7 @@ TEST(chunk, test_variable_field_nullable) {
                          true,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto string_chunk = static_cast<StringChunk*>(chunk.get());
     auto views = string_chunk->StringViews(std::nullopt);
     for (size_t i = 0; i < data.size(); ++i) {
@@ -211,7 +211,7 @@ TEST(chunk, test_json_field) {
                              false,
                              std::nullopt);
         arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, 1, array_vec);
+        auto chunk = create_chunk(field_meta, array_vec);
         auto json_chunk = static_cast<JSONChunk*>(chunk.get());
         {
             auto [views, valid] = json_chunk->StringViews(std::nullopt);
@@ -241,7 +241,7 @@ TEST(chunk, test_json_field) {
                              true,
                              std::nullopt);
         arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-        auto chunk = create_chunk(field_meta, 1, array_vec);
+        auto chunk = create_chunk(field_meta, array_vec);
         auto json_chunk = static_cast<JSONChunk*>(chunk.get());
         {
             auto [views, valid] = json_chunk->StringViews(std::nullopt);
@@ -319,7 +319,7 @@ TEST(chunk, test_null_int64) {
                          true,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto fixed_chunk = static_cast<FixedWidthChunk*>(chunk.get());
     auto span = fixed_chunk->Span();
     EXPECT_EQ(span.row_count(), data.size());
@@ -380,7 +380,7 @@ TEST(chunk, test_array) {
                          false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
     auto [views, valid] = array_chunk->Views(std::nullopt);
     EXPECT_EQ(views.size(), 1);
@@ -443,7 +443,7 @@ TEST(chunk, test_null_array) {
                          true,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
     auto [views, valid] = array_chunk->Views(std::nullopt);
 
@@ -517,7 +517,7 @@ TEST(chunk, test_array_views) {
                          true,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto array_chunk = static_cast<ArrayChunk*>(chunk.get());
     {
         auto [views, valid] = array_chunk->Views(std::nullopt);
@@ -599,7 +599,7 @@ TEST(chunk, test_sparse_float) {
                          false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, kTestSparseDim, array_vec);
+    auto chunk = create_chunk(field_meta, array_vec);
     auto vec_chunk = static_cast<SparseFloatVectorChunk*>(chunk.get());
     auto vec = vec_chunk->Vec();
     for (size_t i = 0; i < n_rows; ++i) {
@@ -637,7 +637,6 @@ class TempDir {
 TEST(chunk, multiple_chunk_mmap) {
     TempDir temp;
     std::string temp_dir = temp.dir();
-    auto file = File::Open(temp_dir + "/multi_chunk_mmap", O_CREAT | O_RDWR);
 
     FixedVector<int64_t> data = {1, 2, 3, 4, 5};
     auto field_data =
@@ -668,17 +667,8 @@ TEST(chunk, multiple_chunk_mmap) {
                          DataType::INT64,
                          false,
                          std::nullopt);
-    int file_offset = 0;
     auto page_size = sysconf(_SC_PAGESIZE);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    auto chunk = create_chunk(field_meta, 1, file, file_offset, array_vec);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
-    file_offset += chunk->Size();
-
-    std::shared_ptr<::arrow::RecordBatchReader> rb_reader2;
-    s = arrow_reader->GetRecordBatchReader(&rb_reader2);
-    EXPECT_TRUE(s.ok());
-    arrow::ArrayVector array_vec2 = read_single_column_batches(rb_reader2);
-    auto chunk2 = create_chunk(field_meta, 1, file, file_offset, array_vec2);
+    auto chunk = create_chunk(field_meta, array_vec, temp_dir + "/multi_chunk_mmap");
     EXPECT_TRUE(chunk->Size() % page_size == 0);
 }
