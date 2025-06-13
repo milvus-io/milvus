@@ -829,7 +829,10 @@ func (sd *shardDelegator) Close() {
 			function.Close()
 		}
 	}
-
+	// clean idf oracle
+	if sd.idfOracle != nil {
+		sd.idfOracle.Close()
+	}
 	metrics.QueryNodeDeleteBufferSize.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 	metrics.QueryNodeDeleteBufferRowNum.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), sd.vchannelName)
 }
@@ -948,8 +951,9 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	}
 
 	if len(sd.isBM25Field) > 0 {
-		sd.idfOracle = NewIDFOracle(collection.Schema().GetFunctions())
+		sd.idfOracle = NewIDFOracle(sd.collectionID, collection.Schema().GetFunctions())
 		sd.distribution.SetIDFOracle(sd.idfOracle)
+		sd.idfOracle.Start()
 	}
 
 	m := sync.Mutex{}

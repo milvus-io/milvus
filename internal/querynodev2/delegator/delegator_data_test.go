@@ -1054,6 +1054,15 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 	})
 }
 
+func (s *DelegatorDataSuite) waitTargetVersion(targetVersion int64) {
+	for {
+		if s.delegator.idfOracle.TargetVersion() >= targetVersion {
+			return
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+}
+
 func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 	s.genCollectionWithFunction()
 
@@ -1113,7 +1122,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SyncDistribution(snapshot)
+		s.delegator.idfOracle.SetNext(snapshot)
+		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
@@ -1269,7 +1279,8 @@ func (s *DelegatorDataSuite) TestBuildBM25IDF() {
 		}
 		snapshot := genSnapShot([]int64{1, 2, 3, 4}, []int64{}, 100)
 
-		s.delegator.idfOracle.SyncDistribution(snapshot)
+		s.delegator.idfOracle.SetNext(snapshot)
+		s.waitTargetVersion(snapshot.targetVersion)
 		placeholderGroupBytes, err := funcutil.FieldDataToPlaceholderGroupBytes(genStringFieldData("test bm25 data"))
 		s.NoError(err)
 
