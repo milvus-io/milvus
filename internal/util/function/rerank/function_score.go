@@ -141,7 +141,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	case weightedName:
 		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema)
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s]", rerankerName, decayFunctionName, modelFunctionName)
+		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, decayFunctionName, modelFunctionName, rrfName, weightedName)
 	}
 
 	if newRerankErr != nil {

@@ -339,6 +339,68 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 	}
 }
 
+func (s *RerankModelSuite) TestParseParams() {
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: function.EndpointParamKey, Value: "mock"},
+			{Key: queryKeyName, Value: `["q1"]`},
+		}
+		_, _, _, err := parseParams(params)
+		s.ErrorContains(err, "is not a valid http/https link")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
+			{Key: maxBatchKeyName, Value: "error"},
+		}
+		_, _, _, err := parseParams(params)
+		s.ErrorContains(err, "Rerank params error, maxBatch")
+	}
+
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
+			{Key: maxBatchKeyName, Value: "100"},
+			{Key: vllmTruncateParamName, Value: "error"},
+		}
+		_, _, _, err := parseParams(params)
+		s.ErrorContains(err, "Rerank params error")
+	}
+
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
+			{Key: maxBatchKeyName, Value: "100"},
+			{Key: vllmTruncateParamName, Value: "100"},
+			{Key: teiTruncationDirectionParamName, Value: "Left"},
+			{Key: tieTruncateParamName, Value: "error"},
+		}
+		_, _, _, err := parseParams(params)
+		s.ErrorContains(err, "Rerank params error")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
+			{Key: maxBatchKeyName, Value: "100"},
+			{Key: vllmTruncateParamName, Value: "101"},
+			{Key: teiTruncationDirectionParamName, Value: "Left"},
+			{Key: tieTruncateParamName, Value: "true"},
+		}
+		endpoint, maxBatch, truncateParams, err := parseParams(params)
+		s.NoError(err)
+		s.Equal("http://localhost:9000", endpoint)
+		s.Equal(100, maxBatch)
+		s.Equal(truncateParams[vllmTruncateParamName], int64(101))
+		s.Equal(truncateParams[teiTruncationDirectionParamName], "Left")
+		s.Equal(truncateParams[tieTruncateParamName], true)
+	}
+}
+
 func (s *RerankModelSuite) TestRerankProcess() {
 	schema := &schemapb.CollectionSchema{
 		Name: "test",

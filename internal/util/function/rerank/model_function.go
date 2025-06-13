@@ -44,6 +44,10 @@ const (
 
 	queryKeyName    string = "queries"
 	maxBatchKeyName string = "max_batch"
+
+	vllmTruncateParamName           string = "truncate_prompt_tokens"
+	tieTruncateParamName            string = "truncate"
+	teiTruncationDirectionParamName string = "truncation_direction"
 )
 
 type modelProvider interface {
@@ -58,6 +62,8 @@ type baseModel struct {
 	queryKey string
 	docKey   string
 
+	truncateParams map[string]any
+
 	parseScores func([]byte) ([]float32, error)
 }
 
@@ -66,7 +72,7 @@ func (base *baseModel) getURL() string {
 }
 
 func (base *baseModel) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	requestBodies, err := genRerankRequestBody(query, docs, base.maxBatch, base.queryKey, base.docKey)
+	requestBodies, err := genRerankRequestBody(query, docs, base.maxBatch, base.queryKey, base.docKey, base.truncateParams)
 	if err != nil {
 		return nil, err
 	}
@@ -132,17 +138,19 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string) (m
 	if !isEnable(conf, function.EnableVllmEnvStr) {
 		return nil, fmt.Errorf("Vllm rerank is disabled")
 	}
-	endpoint, maxBatch, err := parseParams(params)
+	endpoint, maxBatch, truncateParams, err := parseParams(params)
 	if err != nil {
 		return nil, err
 	}
+
 	base, _ := url.Parse(endpoint)
 	base.Path = "/v2/rerank"
 	model := baseModel{
-		url:      base.String(),
-		maxBatch: maxBatch,
-		queryKey: "query",
-		docKey:   "documents",
+		url:            base.String(),
+		maxBatch:       maxBatch,
+		queryKey:       "query",
+		docKey:         "documents",
+		truncateParams: truncateParams,
 		parseScores: func(body []byte) ([]float32, error) {
 			var rerankResp vllmRerankResponse
 			if err := json.Unmarshal(body, &rerankResp); err != nil {
@@ -177,17 +185,18 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string) (mo
 	if !isEnable(conf, function.EnableTeiEnvStr) {
 		return nil, fmt.Errorf("TEI rerank is disabled")
 	}
-	endpoint, maxBatch, err := parseParams(params)
+	endpoint, maxBatch, truncateParams, err := parseParams(params)
 	if err != nil {
 		return nil, err
 	}
 	base, _ := url.Parse(endpoint)
 	base.Path = "/rerank"
 	model := baseModel{
-		url:      base.String(),
-		maxBatch: maxBatch,
-		queryKey: "query",
-		docKey:   "texts",
+		url:            base.String(),
+		maxBatch:       maxBatch,
+		queryKey:       "query",
+		docKey:         "texts",
+		truncateParams: truncateParams,
 		parseScores: func(body []byte) ([]float32, error) {
 			var results []TEIResponse
 			if err := json.Unmarshal(body, &results); err != nil {
@@ -216,41 +225,56 @@ func isEnable(conf map[string]string, envKey string) bool {
 	}
 }
 
-func parseParams(params []*commonpb.KeyValuePair) (string, int, error) {
+func parseParams(params []*commonpb.KeyValuePair) (string, int, map[string]any, error) {
 	endpoint := ""
 	maxBatch := 32
+	truncateParams := map[string]any{}
 	for _, param := range params {
 		switch strings.ToLower(param.Key) {
 		case function.EndpointParamKey:
 			base, err := url.Parse(param.Value)
 			if err != nil {
-				return "", 0, err
+				return "", 0, nil, err
 			}
 			if base.Scheme != "http" && base.Scheme != "https" {
-				return "", 0, fmt.Errorf("Rerank endpoint: [%s] is not a valid http/https link", param.Value)
+				return "", 0, nil, fmt.Errorf("Rerank endpoint: [%s] is not a valid http/https link", param.Value)
 			}
 			if base.Host == "" {
-				return "", 0, fmt.Errorf("Rerank endpoint: [%s] is not a valid http/https link", param.Value)
+				return "", 0, nil, fmt.Errorf("Rerank endpoint: [%s] is not a valid http/https link", param.Value)
 			}
 			endpoint = base.String()
 		case maxBatchKeyName:
 			if batch, err := strconv.ParseInt(param.Value, 10, 64); err != nil {
-				return "", 0, fmt.Errorf("Rerank params error, maxBatch: %s is not a number", param.Value)
+				return "", 0, nil, fmt.Errorf("Rerank params error, maxBatch: %s is not a number", param.Value)
 			} else {
 				maxBatch = int(batch)
+			}
+		case vllmTruncateParamName:
+			if vllmTrun, err := strconv.ParseInt(param.Value, 10, 64); err != nil {
+				return "", 0, nil, fmt.Errorf("Rerank params error, %s: %s is not a number", vllmTruncateParamName, param.Value)
+			} else {
+				truncateParams[vllmTruncateParamName] = vllmTrun
+			}
+		case teiTruncationDirectionParamName:
+			truncateParams[teiTruncationDirectionParamName] = param.Value
+		case tieTruncateParamName:
+			if teiTrun, err := strconv.ParseBool(param.Value); err != nil {
+				return "", 0, nil, fmt.Errorf("Rerank params error, %s: %s is not bool type", tieTruncateParamName, param.Value)
+			} else {
+				truncateParams[tieTruncateParamName] = teiTrun
 			}
 		}
 	}
 	if endpoint == "" {
-		return "", 0, fmt.Errorf("Rerank function lost params endpoint")
+		return "", 0, nil, fmt.Errorf("Rerank function lost params endpoint")
 	}
 	if maxBatch <= 0 {
-		return "", 0, fmt.Errorf("Rerank function params max_batch must > 0, but got %d", maxBatch)
+		return "", 0, nil, fmt.Errorf("Rerank function params max_batch must > 0, but got %d", maxBatch)
 	}
-	return endpoint, maxBatch, nil
+	return endpoint, maxBatch, truncateParams, nil
 }
 
-func genRerankRequestBody(query string, documents []string, maxSize int, queryKey string, docKey string) ([][]byte, error) {
+func genRerankRequestBody(query string, documents []string, maxSize int, queryKey string, docKey string, truncateParams map[string]any) ([][]byte, error) {
 	requestBodies := [][]byte{}
 	for i := 0; i < len(documents); i += maxSize {
 		end := i + maxSize
@@ -260,6 +284,9 @@ func genRerankRequestBody(query string, documents []string, maxSize int, queryKe
 		requestBody := map[string]interface{}{
 			queryKey: query,
 			docKey:   documents[i:end],
+		}
+		for k, v := range truncateParams {
+			requestBody[k] = v
 		}
 		jsonData, err := json.Marshal(requestBody)
 		if err != nil {
