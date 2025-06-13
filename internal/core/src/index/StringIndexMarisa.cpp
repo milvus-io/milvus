@@ -264,7 +264,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
         }
     }
     // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    SetNull(bitset);
+    ResetNull(bitset);
     return bitset;
 }
 
@@ -280,6 +280,15 @@ StringIndexMarisa::SetNull(TargetBitmap& bitset) {
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] == MARISA_NULL_KEY_ID) {
             bitset.set(i);
+        }
+    }
+}
+
+void
+StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
+    for (size_t i = 0; i < bitset.size(); i++) {
+        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+            bitset.reset(i);
         }
     }
 }
