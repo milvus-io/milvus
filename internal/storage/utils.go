@@ -769,7 +769,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		if err != nil {
 			return nil, err
 		}
-		idata.Data[field.FieldID] = fieldData
+		if fieldData != nil {
+			idata.Data[field.FieldID] = fieldData
+		}
 	}
 
 	for _, structField := range collSchema.GetStructArrayFields() {
@@ -778,7 +780,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			if err != nil {
 				return nil, err
 			}
-			idata.Data[field.FieldID] = fieldData
+			if fieldData != nil {
+				idata.Data[field.FieldID] = fieldData
+			}
 		}
 	}
 
