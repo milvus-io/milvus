@@ -14,6 +14,7 @@ use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
+use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
 
 const BATCH_SIZE: usize = 4096;
@@ -105,8 +106,8 @@ impl IndexWriterWrapper {
         })
     }
 
-    pub fn create_reader(&self) -> Result<IndexReaderWrapper> {
-        IndexReaderWrapper::from_index(self.index.clone())
+    pub fn create_reader(&self, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index(self.index.clone(), set_bitset)
     }
 
     fn index_writer_add_document(&self, document: Document) -> Result<()> {

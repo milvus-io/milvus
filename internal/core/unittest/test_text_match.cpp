@@ -154,7 +154,10 @@ TEST(TextMatch, Index) {
     ASSERT_FALSE(res2[1]);
     ASSERT_TRUE(res2[2]);
     res = index->MatchQuery("nothing");
-    ASSERT_EQ(res.size(), 0);
+    ASSERT_EQ(res.size(), 3);
+    ASSERT_FALSE(res[0]);
+    ASSERT_FALSE(res[1]);
+    ASSERT_FALSE(res[2]);
 }
 
 TEST(TextMatch, GrowingNaive) {

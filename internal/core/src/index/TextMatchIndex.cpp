@@ -149,7 +149,8 @@ TextMatchIndex::Load(const Config& config) {
     disk_file_manager_->CacheTextLogToDisk(files_value);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str());
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),
+                                                     milvus::index::SetBitset);
 }
 
 void
@@ -285,16 +286,11 @@ TextMatchIndex::MatchQuery(const std::string& query) {
         Reload();
     }
 
+    TargetBitmap bitset{static_cast<size_t>(Count())};
     // The count opeartion of tantivy may be get older cnt if the index is committed with new tantivy segment.
     // So we cannot use the count operation to get the total count for bitmap.
     // Just use the maximum offset of hits to get the total count for bitmap here.
-    auto hits = wrapper_->match_query(query);
-    auto cnt = should_allocate_bitset_size(hits);
-    TargetBitmap bitset(cnt);
-    if (bitset.empty()) {
-        return bitset;
-    }
-    apply_hits(bitset, hits, true);
+    wrapper_->match_query(query, &bitset);
     return bitset;
 }
 }  // namespace milvus::index
