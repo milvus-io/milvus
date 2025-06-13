@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -256,6 +257,113 @@ func (s *DelegatorSuite) TestBasicInfo() {
 	s.False(s.delegator.Serviceable())
 	s.delegator.Start()
 	s.True(s.delegator.Serviceable())
+}
+
+// TestDelegatorStateChecks tests the state checking methods added/modified in the delegator
+func (s *DelegatorSuite) TestDelegatorStateChecks() {
+	sd := s.delegator.(*shardDelegator)
+
+	s.Run("test_state_methods_with_different_states", func() {
+		// Test Initializing state
+		sd.lifetime.SetState(lifetime.Initializing)
+
+		// NotStopped should return nil for non-stopped states
+		err := sd.NotStopped(sd.lifetime.GetState())
+		s.NoError(err)
+
+		// IsWorking should return error for non-working states
+		err = sd.IsWorking(sd.lifetime.GetState())
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+		s.Contains(err.Error(), "Initializing")
+
+		// Serviceable should return false for non-working states
+		s.False(sd.Serviceable())
+
+		// Stopped should return false for non-stopped states
+		s.False(sd.Stopped())
+
+		// Test Working state
+		sd.lifetime.SetState(lifetime.Working)
+
+		// NotStopped should return nil for non-stopped states
+		err = sd.NotStopped(sd.lifetime.GetState())
+		s.NoError(err)
+
+		// IsWorking should return nil for working state
+		err = sd.IsWorking(sd.lifetime.GetState())
+		s.NoError(err)
+
+		// Serviceable should return true for working state
+		s.True(sd.Serviceable())
+
+		// Stopped should return false for non-stopped states
+		s.False(sd.Stopped())
+
+		// Test Stopped state
+		sd.lifetime.SetState(lifetime.Stopped)
+
+		// NotStopped should return error for stopped state
+		err = sd.NotStopped(sd.lifetime.GetState())
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+		s.Contains(err.Error(), "Stopped")
+
+		// IsWorking should return error for stopped state
+		err = sd.IsWorking(sd.lifetime.GetState())
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+		s.Contains(err.Error(), "Stopped")
+
+		// Serviceable should return false for stopped state
+		s.False(sd.Serviceable())
+
+		// Stopped should return true for stopped state
+		s.True(sd.Stopped())
+	})
+
+	s.Run("test_state_methods_with_direct_state_parameter", func() {
+		// Test NotStopped with different states
+		err := sd.NotStopped(lifetime.Initializing)
+		s.NoError(err)
+
+		err = sd.NotStopped(lifetime.Working)
+		s.NoError(err)
+
+		err = sd.NotStopped(lifetime.Stopped)
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+		s.Contains(err.Error(), sd.vchannelName)
+
+		// Test IsWorking with different states
+		err = sd.IsWorking(lifetime.Initializing)
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+		s.Contains(err.Error(), sd.vchannelName)
+
+		err = sd.IsWorking(lifetime.Working)
+		s.NoError(err)
+
+		err = sd.IsWorking(lifetime.Stopped)
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+		s.Contains(err.Error(), sd.vchannelName)
+	})
+
+	s.Run("test_error_messages_contain_channel_name", func() {
+		// Verify error messages contain the channel name for better debugging
+		err := sd.NotStopped(lifetime.Stopped)
+		s.Error(err)
+		s.Contains(err.Error(), sd.vchannelName)
+
+		err = sd.IsWorking(lifetime.Initializing)
+		s.Error(err)
+		s.Contains(err.Error(), sd.vchannelName)
+
+		err = sd.IsWorking(lifetime.Stopped)
+		s.Error(err)
+		s.Contains(err.Error(), sd.vchannelName)
+	})
 }
 
 func (s *DelegatorSuite) TestGetSegmentInfo() {
@@ -1433,6 +1541,173 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 			Placeholder: [][]byte{[]byte("test doc")},
 		})
 		s.Require().Error(err)
+	})
+}
+
+// TestDelegatorLifetimeIntegration tests the integration of lifetime state checks with main delegator methods
+func (s *DelegatorSuite) TestDelegatorLifetimeIntegration() {
+	sd := s.delegator.(*shardDelegator)
+	ctx := context.Background()
+
+	s.Run("test_methods_fail_when_not_working", func() {
+		// Set delegator to Initializing state (not ready)
+		sd.lifetime.SetState(lifetime.Initializing)
+
+		// Search should fail when not ready
+		_, err := sd.Search(ctx, &querypb.SearchRequest{
+			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+
+		// Query should fail when not ready
+		_, err = sd.Query(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+
+		// GetStatistics should fail when not ready
+		_, err = sd.GetStatistics(ctx, &querypb.GetStatisticsRequest{
+			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+
+		// UpdateSchema should fail when not ready
+		err = sd.UpdateSchema(ctx, &schemapb.CollectionSchema{Name: "test"}, 1)
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+	})
+
+	s.Run("test_methods_fail_when_stopped", func() {
+		// Set delegator to Stopped state
+		sd.lifetime.SetState(lifetime.Stopped)
+
+		// Search should fail when stopped
+		_, err := sd.Search(ctx, &querypb.SearchRequest{
+			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+
+		// Query should fail when stopped
+		_, err = sd.Query(ctx, &querypb.QueryRequest{
+			Req:         &internalpb.RetrieveRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+
+		// GetStatistics should fail when stopped
+		_, err = sd.GetStatistics(ctx, &querypb.GetStatisticsRequest{
+			Req:         &internalpb.GetStatisticsRequest{Base: commonpbutil.NewMsgBase()},
+			DmlChannels: []string{s.vchannelName},
+		})
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+
+		// UpdateSchema should fail when stopped
+		err = sd.UpdateSchema(ctx, &schemapb.CollectionSchema{Name: "test"}, 1)
+		s.Error(err)
+		s.Contains(err.Error(), "delegator is not ready")
+	})
+}
+
+// TestDelegatorStateTransitions tests state transitions and edge cases
+func (s *DelegatorSuite) TestDelegatorStateTransitions() {
+	sd := s.delegator.(*shardDelegator)
+
+	s.Run("test_state_transition_sequence", func() {
+		// Test normal state transition sequence
+
+		// Start from Initializing
+		sd.lifetime.SetState(lifetime.Initializing)
+		s.False(sd.Serviceable())
+		s.False(sd.Stopped())
+
+		// Transition to Working
+		sd.Start() // This calls lifetime.SetState(lifetime.Working)
+		s.True(sd.Serviceable())
+		s.False(sd.Stopped())
+
+		// Transition to Stopped
+		sd.lifetime.SetState(lifetime.Stopped)
+		s.False(sd.Serviceable())
+		s.True(sd.Stopped())
+	})
+
+	s.Run("test_multiple_start_calls", func() {
+		// Test that multiple Start() calls don't cause issues
+		sd.lifetime.SetState(lifetime.Initializing)
+		s.False(sd.Serviceable())
+
+		// Call Start multiple times
+		sd.Start()
+		s.True(sd.Serviceable())
+
+		sd.Start()
+		sd.Start()
+		s.True(sd.Serviceable()) // Should remain serviceable
+	})
+
+	s.Run("test_start_after_stopped", func() {
+		// Test starting after being stopped
+		sd.lifetime.SetState(lifetime.Stopped)
+		s.True(sd.Stopped())
+		s.False(sd.Serviceable())
+
+		// Start again
+		sd.Start()
+		s.False(sd.Stopped())
+		s.True(sd.Serviceable())
+	})
+
+	s.Run("test_consistency_between_methods", func() {
+		// Test consistency between Serviceable() and Stopped() methods
+
+		// In Initializing state
+		sd.lifetime.SetState(lifetime.Initializing)
+		serviceable := sd.Serviceable()
+		stopped := sd.Stopped()
+		s.False(serviceable)
+		s.False(stopped)
+
+		// In Working state
+		sd.lifetime.SetState(lifetime.Working)
+		serviceable = sd.Serviceable()
+		stopped = sd.Stopped()
+		s.True(serviceable)
+		s.False(stopped)
+
+		// In Stopped state
+		sd.lifetime.SetState(lifetime.Stopped)
+		serviceable = sd.Serviceable()
+		stopped = sd.Stopped()
+		s.False(serviceable)
+		s.True(stopped)
+	})
+
+	s.Run("test_error_types_and_wrapping", func() {
+		// Test that errors are properly wrapped with channel information
+
+		// Test NotStopped error
+		err := sd.NotStopped(lifetime.Stopped)
+		s.Error(err)
+		s.True(errors.Is(err, merr.ErrChannelNotAvailable))
+
+		// Test IsWorking error
+		err = sd.IsWorking(lifetime.Initializing)
+		s.Error(err)
+		s.True(errors.Is(err, merr.ErrChannelNotAvailable))
+
+		err = sd.IsWorking(lifetime.Stopped)
+		s.Error(err)
+		s.True(errors.Is(err, merr.ErrChannelNotAvailable))
 	})
 }
 
