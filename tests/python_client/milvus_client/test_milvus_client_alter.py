@@ -170,7 +170,8 @@ class TestMilvusClientAlterCollection(TestMilvusClientV2Base):
 
 class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_alter_collection_field_default(self):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_alter_collection_field_default(self, add_field):
         """
         target: test alter collection field before load
         method: alter varchar field max length
@@ -186,6 +187,7 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         str_field_name = 'title'
         json_field_name = 'json_field'
         array_field_name = 'tags'
+        new_field_name = 'field_new'
         max_length = 16
         schema.add_field(pk_field_name, DataType.VARCHAR, max_length=max_length, is_primary=True, auto_id=False)
         schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=dim, mmap_enabled=True)
@@ -199,10 +201,15 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                index_type="IVF_FLAT", params={"nlist": 128})
         index_params.add_index(field_name=str_field_name)
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        check_items = {str_field_name: {"max_length": max_length, "mmap_enabled": True},
+                       vector_field_name: {"mmap_enabled": True},
+                       json_field_name: {"mmap_enabled": False}}
+        if add_field:
+            self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.VARCHAR,
+                                      nullable=True, max_length=max_length)
+            check_items["field_new"] = {"max_length": max_length}
         self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
-                                 check_items={str_field_name: {"max_length": max_length, "mmap_enabled": True},
-                                              vector_field_name: {"mmap_enabled": True},
-                                              json_field_name: {"mmap_enabled": False}})
+                                 check_items=check_items)
 
         rng = np.random.default_rng(seed=19530)
         rows = [{
@@ -210,7 +217,9 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
             vector_field_name: list(rng.random((1, dim))[0]),
             str_field_name: cf.gen_str_by_length(max_length),
             json_field_name: {"number": i},
-            array_field_name: [cf.gen_str_by_length(max_length) for _ in range(10)]
+            array_field_name: [cf.gen_str_by_length(max_length) for _ in range(10)],
+            # add new field data (only when add_field is True)
+            **({"field_new": cf.gen_str_by_length(max_length)} if add_field else {})
         } for i in range(ct.default_nb)]
         self.insert(client, collection_name, rows)
 
@@ -238,14 +247,21 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
         self.alter_collection_field(client, collection_name, field_name=array_field_name,
                                     field_params={"element_type": DataType.INT64},
                                     check_task=CheckTasks.err_res, check_items=error)
+        check_items_new = {str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
+                           vector_field_name: {"mmap_enabled": False},
+                           json_field_name: {"mmap_enabled": True},
+                           array_field_name: {"max_length": new_max_length, "max_capacity": 20}}
+        if add_field:
+            self.alter_collection_field(client, collection_name, field_name="field_new",
+                                        field_params={"max_length": new_max_length})
+            check_items_new["field_new"] = {"max_length": new_max_length}
         self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
-                                 check_items={str_field_name: {"max_length": new_max_length, "mmap_enabled": False},
-                                              vector_field_name: {"mmap_enabled": False},
-                                              json_field_name: {"mmap_enabled": True},
-                                              array_field_name: {"max_length": new_max_length, "max_capacity": 20}})
-
+                                 check_items=check_items_new)
         # verify that cannot insert data with the old max_length
-        for alter_field in [pk_field_name, str_field_name, array_field_name]:
+        fields_to_verify = [pk_field_name, str_field_name, array_field_name]
+        if add_field:
+            fields_to_verify.append(new_field_name)
+        for alter_field in fields_to_verify:
             error = {ct.err_code: 999, ct.err_msg: f"length of varchar field {alter_field} exceeds max length"}
             if alter_field == array_field_name:
                 error = {ct.err_code: 999,
@@ -256,7 +272,8 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                 str_field_name: cf.gen_str_by_length(max_length) if alter_field == str_field_name else f'ti_{i}',
                 json_field_name: {"number": i},
                 array_field_name: [cf.gen_str_by_length(max_length) for _ in
-                                   range(10)] if alter_field == array_field_name else [f"tags_{j}" for j in range(10)]
+                                   range(10)] if alter_field == array_field_name else [f"tags_{j}" for j in range(10)],
+                **({"field_new": cf.gen_str_by_length(max_length)} if add_field and alter_field == new_field_name else {})
             } for i in range(ct.default_nb, ct.default_nb + 10)]
             self.insert(client, collection_name, rows, check_task=CheckTasks.err_res, check_items=error)
 
@@ -266,7 +283,8 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
             vector_field_name: list(rng.random((1, dim))[0]),
             str_field_name: cf.gen_str_by_length(new_max_length),
             json_field_name: {"number": i},
-            array_field_name: [cf.gen_str_by_length(new_max_length) for _ in range(10)]
+            array_field_name: [cf.gen_str_by_length(new_max_length) for _ in range(10)],
+            **({"field_new": cf.gen_str_by_length(new_max_length)} if add_field else {})
         } for i in range(ct.default_nb, ct.default_nb + 10)]
         self.insert(client, collection_name, rows)
 
@@ -282,7 +300,9 @@ class TestMilvusClientAlterCollectionField(TestMilvusClientV2Base):
                                     check_task=CheckTasks.err_res, check_items=error)
         self.alter_collection_field(client, collection_name, field_name=pk_field_name,
                                     field_params={"max_length": max_length})
-
+        if add_field:
+            self.alter_collection_field(client, collection_name, field_name=new_field_name,
+                                        field_params={"max_length": max_length})
         res = self.query(client, collection_name, filter=f"{pk_field_name} in ['id_10', 'id_20']",
                          output_fields=["*"])[0]
         assert (len(res)) == 2

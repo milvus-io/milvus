@@ -32,7 +32,7 @@ AssembleGroupByValues(
             std::make_unique<google::protobuf::RepeatedField<bool>>();
         valid_data->Resize(group_by_vals.size(), true);
         auto group_by_field =
-            plan->schema_.operator[](group_by_field_id.value());
+            plan->schema_->operator[](group_by_field_id.value());
         auto group_by_data_type = group_by_field.get_data_type();
 
         int group_by_val_size = group_by_vals.size();

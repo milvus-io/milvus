@@ -389,6 +389,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 5, Params.BalanceSegmentBatchSize.GetAsInt())
 		assert.Equal(t, 1, Params.BalanceChannelBatchSize.GetAsInt())
 		assert.Equal(t, true, Params.EnableBalanceOnMultipleCollections.GetAsBool())
+
+		assert.Equal(t, 1, Params.QueryNodeTaskParallelismFactor.GetAsInt())
+		params.Save("queryCoord.queryNodeTaskParallelismFactor", "2")
+		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -607,8 +611,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
 		assert.Equal(t, 16, maxConcurrentImportTaskNum)
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
-		assert.Equal(t, 64, Params.ImportInsertBufferSize.GetAsInt())
-		assert.Equal(t, 16, Params.ImportDeleteBufferSize.GetAsInt())
+		assert.Equal(t, 64*1024*1024, Params.ImportInsertBufferSize.GetAsInt())
+		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 16, Params.MaxTaskSlotNum.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))

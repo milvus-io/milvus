@@ -2519,6 +2519,7 @@ def gen_json_field_expressions_all_single_operator():
 
     return expressions
 
+
 def gen_field_expressions_all_single_operator_each_field(field = ct.default_int64_field_name):
     """
     Gen a list of filter in expression-format(as a string)
@@ -2677,6 +2678,7 @@ def gen_field_expressions_all_single_operator_each_field(field = ct.default_int6
         raise Exception("Invalid field name")
 
     return expressions
+
 
 def concatenate_uneven_arrays(arr1, arr2):
     """

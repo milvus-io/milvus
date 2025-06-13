@@ -21,6 +21,7 @@
 #include "arrow/array/array_base.h"
 #include "arrow/record_batch.h"
 #include "common/Array.h"
+#include "common/VectorArray.h"
 #include "common/ChunkTarget.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
@@ -231,11 +232,11 @@ using JSONChunk = StringChunk;
 // create an ArrayChunk for these arrays. The data block might look like this:
 //
 // [null_bitmap][offsets_lens][array_data]
-// [00000000] [24, 3, 36, 2, 44, 4, 60] [1, 2, 3, 4, 5, 6, 7, 8, 9]
+// [00000000] [29, 3, 41, 2, 49, 4, 65] [1, 2, 3, 4, 5, 6, 7, 8, 9]
 //
 // For string arrays, the structure is more complex as each string element needs its own offset:
 // [null_bitmap][offsets_lens][array1_offsets][array1_data][array2_offsets][array2_data][array3_offsets][array3_data]
-// [00000000] [24, 3, 48, 2, 64, 4, 96] [0, 5, 11, 16] ["hello", "world", "!"] [0, 3, 6] ["foo", "bar"] [0, 6, 12, 18, 24] ["apple", "orange", "banana", "grape"]
+// [00000000] [29, 3, 53, 2, 69, 4, 101] [0, 5, 11, 16] ["hello", "world", "!"] [0, 3, 6] ["foo", "bar"] [0, 6, 12, 18, 24] ["apple", "orange", "banana", "grape"]
 //
 // Here, the null_bitmap is empty (indicating no nulls), the offsets_lens array contains pairs of (offset, length)
 // for each array, and the array_data contains the actual array elements.
@@ -329,6 +330,67 @@ class ArrayChunk : public Chunk {
  private:
     milvus::DataType element_type_;
     uint32_t* offsets_lens_;
+};
+
+// A VectorArrayChunk is similar to an ArrayChunk but is specialized for storing arrays of vectors.
+// Key differences and characteristics:
+// - No Nullability: VectorArrayChunk does not support null values. Unlike ArrayChunk, it does not have a null bitmap.
+// - Fixed Vector Dimensions: All vectors within a VectorArrayChunk have the same, fixed dimension, specified at creation.
+//   However, each row (array of vectors) can contain a variable number of these fixed-dimension vectors.
+//
+// Due to these characteristics, the data layout is simpler:
+// [offsets_lens][all_vector_data_concatenated]
+//
+// Example:
+// Suppose we have a data block containing arrays of vectors [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [[10, 11, 12]], and [[13, 14, 15], [16, 17, 18]], and we want to
+// create a VectorArrayChunk for these arrays. The data block might look like this:
+//
+// [offsets_lens][all_vector_data_concatenated]
+// [28, 3, 36, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+class VectorArrayChunk : public Chunk {
+ public:
+    VectorArrayChunk(int64_t dim,
+                     int32_t row_nums,
+                     char* data,
+                     uint64_t size,
+                     milvus::DataType element_type)
+        : Chunk(row_nums, data, size, false),
+          dim_(dim),
+          element_type_(element_type) {
+        offsets_lens_ = reinterpret_cast<uint32_t*>(data);
+    }
+
+    VectorArrayView
+    View(int64_t idx) const {
+        int idx_off = 2 * idx;
+        auto offset = offsets_lens_[idx_off];
+        auto len = offsets_lens_[idx_off + 1];
+        auto next_offset = offsets_lens_[idx_off + 2];
+        auto data_ptr = data_ + offset;
+        return VectorArrayView(
+            data_ptr, dim_, len, next_offset - offset, element_type_);
+    }
+
+    std::vector<VectorArrayView>
+    Views() const {
+        std::vector<VectorArrayView> views;
+        views.reserve(row_nums_);
+        for (int64_t i = 0; i < row_nums_; i++) {
+            views.emplace_back(View(i));
+        }
+        return views;
+    }
+
+    const char*
+    ValueAt(int64_t idx) const override {
+        PanicInfo(ErrorCode::Unsupported,
+                  "VectorArrayChunk::ValueAt is not supported");
+    }
+
+ private:
+    int64_t dim_;
+    uint32_t* offsets_lens_;
+    milvus::DataType element_type_;
 };
 
 class SparseFloatVectorChunk : public Chunk {

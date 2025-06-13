@@ -65,7 +65,7 @@ GenerateArrayData(proto::schema::DataType element_type,
                   int cardinality,
                   int size,
                   int array_len) {
-    std::vector<ScalarArray> data(size);
+    std::vector<ScalarFieldProto> data(size);
     switch (element_type) {
         case proto::schema::DataType::Bool: {
             for (int i = 0; i < size; i++) {

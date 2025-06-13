@@ -90,6 +90,10 @@ ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+    }
+
     if (field_meta.is_vector()) {
         LoadVecIndex(info);
     } else {
@@ -461,6 +465,11 @@ ChunkedSegmentSealedImpl::AddFieldDataInfoForSealed(
 int64_t
 ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
+
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+    }
+
     if (field_meta.is_vector()) {
         return int64_t(vector_indexings_.is_ready(field_id));
     }
@@ -794,7 +803,7 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
         // absent_fields.find_first() returns std::optional<>
         auto field_id =
             FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
-        auto& field_meta = plan->schema_.operator[](field_id);
+        auto& field_meta = plan->schema_->operator[](field_id);
         // request field may has added field
         if (!field_meta.is_nullable()) {
             PanicInfo(FieldNotLoaded,
@@ -1019,11 +1028,12 @@ ChunkedSegmentSealedImpl::bulk_subscript_ptr_impl(
     int64_t count,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if constexpr (std::is_same_v<S, Json>) {
-        for (int64_t i = 0; i < count; ++i) {
-            auto offset = seg_offsets[i];
-            Json json = column->RawJsonAt(offset);
-            dst->at(i) = std::move(std::string(json.data()));
-        }
+        column->BulkRawJsonAt(
+            [&](Json json, size_t offset, bool is_valid) {
+                dst->at(offset) = std::move(std::string(json.data()));
+            },
+            seg_offsets,
+            count);
     } else {
         static_assert(std::is_same_v<S, std::string>);
         column->BulkRawStringAt(
@@ -1042,8 +1052,23 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) {
-    column->BulkArrayAt(
-        [dst](ScalarArray&& array, size_t i) { dst->at(i) = std::move(array); },
+    column->BulkArrayAt([dst](ScalarFieldProto&& array,
+                              size_t i) { dst->at(i) = std::move(array); },
+                        seg_offsets,
+                        count);
+}
+
+template <typename T>
+void
+ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
+    const ChunkedColumnInterface* column,
+    const int64_t* seg_offsets,
+    int64_t count,
+    google::protobuf::RepeatedPtrField<T>* dst) {
+    column->BulkVectorArrayAt(
+        [dst](VectorFieldProto&& array, size_t i) {
+            dst->at(i) = std::move(array);
+        },
         seg_offsets,
         count);
 }
@@ -1089,9 +1114,9 @@ ChunkedSegmentSealedImpl::fill_with_empty(FieldId field_id,
                                           int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
     if (IsVectorDataType(field_meta.get_data_type())) {
-        return CreateVectorDataArray(count, field_meta);
+        return CreateEmptyVectorDataArray(count, field_meta);
     }
-    return CreateScalarDataArray(count, field_meta);
+    return CreateEmptyScalarDataArray(count, field_meta);
 }
 
 void
@@ -1366,6 +1391,14 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
+        case DataType::VECTOR_ARRAY: {
+            bulk_subscript_vector_array_impl(
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_vector_array()->mutable_data());
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
@@ -1443,12 +1476,13 @@ ChunkedSegmentSealedImpl::bulk_subscript(
             count);
     }
     auto dst = ret->mutable_scalars()->mutable_json_data()->mutable_data();
-    for (int64_t i = 0; i < count; ++i) {
-        auto offset = seg_offsets[i];
-        Json json = column->RawJsonAt(offset);
-        dst->at(i) =
-            ExtractSubJson(std::string(json.data()), dynamic_field_names);
-    }
+    column->BulkRawJsonAt(
+        [&](Json json, size_t offset, bool is_valid) {
+            dst->at(offset) =
+                ExtractSubJson(std::string(json.data()), dynamic_field_names);
+        },
+        seg_offsets,
+        count);
     return ret;
 }
 
@@ -1679,7 +1713,8 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 }
 
 bool
-ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
+ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
+                                                 int64_t num_rows) {
     if (col_index_meta_ == nullptr || !col_index_meta_->HasFiled(field_id)) {
         return false;
     }
@@ -1723,12 +1758,7 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         return false;
     }
     try {
-        // get binlog data and meta
-        int64_t row_count;
-        {
-            std::shared_lock lck(mutex_);
-            row_count = num_rows_.value();
-        }
+        int64_t row_count = num_rows;
 
         // generate index params
         auto field_binlog_config = std::unique_ptr<VecIndexConfig>(
@@ -1815,9 +1845,9 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 }
 
 void
-ChunkedSegmentSealedImpl::LazyCheckSchema(const Schema& sch) {
-    if (sch.get_schema_version() > schema_->get_schema_version()) {
-        Reopen(std::make_shared<Schema>(sch));
+ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
+    if (sch->get_schema_version() > schema_->get_schema_version()) {
+        Reopen(sch);
     }
 }
 
@@ -1861,7 +1891,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         insert_record_.seal_pks();
     }
 
-    bool generated_interim_index = generate_interim_index(field_id);
+    bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
     std::unique_lock lck(mutex_);
     set_bit(field_data_ready_bitset_, field_id, true);
@@ -1962,6 +1992,11 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
         case milvus::DataType::ARRAY: {
             column = std::make_shared<ChunkedArrayColumn>(std::move(translator),
                                                           field_meta);
+            break;
+        }
+        case milvus::DataType::VECTOR_ARRAY: {
+            column = std::make_shared<ChunkedVectorArrayColumn>(
+                std::move(translator), field_meta);
             break;
         }
         default: {

@@ -304,7 +304,7 @@ TEST_P(GrowingIndexTest, Correctness) {
         }
 
         auto plan = milvus::query::CreateSearchPlanByExpr(
-            *schema, plan_str.data(), plan_str.size());
+            schema, plan_str.data(), plan_str.size());
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -320,7 +320,7 @@ TEST_P(GrowingIndexTest, Correctness) {
             continue;
         }
         auto range_plan = milvus::query::CreateSearchPlanByExpr(
-            *schema, range_plan_str.data(), range_plan_str.size());
+            schema, range_plan_str.data(), range_plan_str.size());
         auto range_ph_group = ParsePlaceholderGroup(
             range_plan.get(), ph_group_raw.SerializeAsString());
         auto range_sr =

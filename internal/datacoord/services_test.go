@@ -1404,13 +1404,6 @@ func TestImportV2(t *testing.T) {
 		assert.Equal(t, int32(0), resp.GetStatus().GetCode())
 		jobs = s.importMeta.GetJobBy(context.TODO())
 		assert.Equal(t, 1, len(jobs))
-
-		// number of jobs reached the limit
-		// Params.Save(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key, "1")
-		// resp, err = s.ImportV2(ctx, &internalpb.ImportRequestInternal{})
-		// assert.NoError(t, err)
-		// assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-		// Params.Reset(paramtable.Get().DataCoordCfg.MaxImportJobNum.Key)
 	})
 
 	t.Run("GetImportProgress", func(t *testing.T) {

@@ -102,29 +102,28 @@ GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t field_id,
                    bool is_temp);
 
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
+std::string
+GenTextIndexPathPrefix(ChunkManagerPtr cm,
+                       int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id,
+                       bool is_temp);
 
 // is_temp: true for temporary path used during index building,
 // false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenTextIndexPathPrefix(
-    ChunkManagerPtr cm,
-    int64_t build_id,
-    int64_t index_version,
-    int64_t segment_id,
-    int64_t field_id,
-    bool is_temp);
+GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
+                          int64_t build_id,
+                          int64_t index_version,
+                          int64_t segment_id,
+                          int64_t field_id,
+                          bool is_temp);
 
-
-// is_temp: true for temporary path used during index building,
-// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenJsonKeyIndexPathPrefix(
-    ChunkManagerPtr cm,
-    int64_t build_id,
-    int64_t index_version,
-    int64_t segment_id,
-    int64_t field_id,
-    bool is_temp);
+GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
