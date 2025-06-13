@@ -408,6 +408,41 @@ func (s *CollectionSuite) TestGetCollectionStats() {
 	})
 }
 
+func (s *CollectionSuite) TestAddCollectionField() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("success", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		fieldName := fmt.Sprintf("field_%s", s.randString(6))
+		s.mock.EXPECT().AddCollectionField(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, acfr *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
+			fieldProto := &schemapb.FieldSchema{}
+			err := proto.Unmarshal(acfr.GetSchema(), fieldProto)
+			s.Require().NoError(err)
+			s.Equal(fieldName, fieldProto.GetName())
+			s.Equal(schemapb.DataType_Int64, fieldProto.GetDataType())
+			s.True(fieldProto.GetNullable())
+			return merr.Success(), nil
+		}).Once()
+
+		field := entity.NewField().WithName(fieldName).WithDataType(entity.FieldTypeInt64).WithNullable(true)
+
+		err := s.client.AddCollectionField(ctx, NewAddCollectionFieldOption(collName, field))
+		s.NoError(err)
+	})
+
+	s.Run("failure", func() {
+		collName := fmt.Sprintf("coll_%s", s.randString(6))
+		fieldName := fmt.Sprintf("field_%s", s.randString(6))
+		s.mock.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Status(errors.New("mocked")), nil).Once()
+
+		field := entity.NewField().WithName(fieldName).WithDataType(entity.FieldTypeInt64).WithNullable(true)
+
+		err := s.client.AddCollectionField(ctx, NewAddCollectionFieldOption(collName, field))
+		s.Error(err)
+	})
+}
+
 func TestCollection(t *testing.T) {
 	suite.Run(t, new(CollectionSuite))
 }
