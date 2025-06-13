@@ -28,8 +28,9 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.6.0rc139
-pymilvus[bulk_writer]==2.6.0rc139
+
+pymilvus==2.6.0rc143
+pymilvus[bulk_writer]==2.6.0rc143
 
 # for protobuf
 protobuf==5.27.2

@@ -460,7 +460,11 @@ class TestMilvusClientGetValid(TestMilvusClientV2Base):
         first_pk_data = self.get(client, collection_name, ids=pks[0:1])[0]
         assert len(first_pk_data) == len(pks[0:1])
         first_pk_data_1 = self.get(client, collection_name, ids=0)[0]
-        assert first_pk_data == first_pk_data_1
+        for key in first_pk_data[0]:
+            if isinstance(first_pk_data[0][key], np.ndarray):
+                assert np.allclose(first_pk_data[0][key], first_pk_data_1[0][key])
+            else:
+                assert first_pk_data[0][key] == first_pk_data_1[0][key]
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
