@@ -96,18 +96,21 @@ func (sr *ResultSet) fillPKEntry(receiver any) (err error) {
 			// pk field not found in struct, skip
 			return nil
 		}
-		for i := 0; i < sr.IDs.Len(); i++ {
-			row := rv.Index(i)
-			for row.Kind() == reflect.Ptr {
-				row = row.Elem()
-			}
+		if sr.IDs != nil {
+			for i := 0; i < sr.IDs.Len(); i++ {
+				rd := rv.Index(i)
+				for rd.Kind() == reflect.Ptr {
+					rd = rd.Elem()
+				}
 
-			val, err := sr.IDs.Get(i)
-			if err != nil {
-				return err
+				val, err := sr.IDs.Get(i)
+				if err != nil {
+					return err
+				}
+				rd.Field(candi).Set(reflect.ValueOf(val))
 			}
-			row.Field(candi).Set(reflect.ValueOf(val))
 		}
+
 		rr.Set(rv)
 	default:
 		return errors.Newf("receiver need to be slice or array but get %v", rt.Kind())
