@@ -98,17 +98,15 @@ func buildTestSegment(id int64, collId int64, level datapb.SegmentLevel, deleteR
 	}
 }
 
-func (s *SingleCompactionPolicySuite) TestIsDeltalogTooManySegment() {
-	segment := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
-	s.Equal(true, isDeltalogTooManySegment(segment))
-}
-
 func (s *SingleCompactionPolicySuite) TestIsDeleteRowsTooManySegment() {
-	segment := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 3000, 10000, 1)
-	s.Equal(true, isDeleteRowsTooManySegment(segment))
+	segment0 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 0, 10000, 201)
+	s.Equal(true, hasTooManyDeletions(segment0))
+
+	segment1 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 3000, 10000, 1)
+	s.Equal(true, hasTooManyDeletions(segment1))
 
 	segment2 := buildTestSegment(101, collID, datapb.SegmentLevel_L2, 300, 10000, 10)
-	s.Equal(true, isDeleteRowsTooManySegment(segment2))
+	s.Equal(true, hasTooManyDeletions(segment2))
 }
 
 func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
