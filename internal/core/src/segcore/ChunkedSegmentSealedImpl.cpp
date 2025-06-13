@@ -724,7 +724,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     auto metric_type = vec_index->GetMetricType();
     auto has_raw_data = vec_index->HasRawData();
 
-    if (has_raw_data && !TEST_skip_index_for_retrieve_) {
+    if (has_raw_data) {
         // If index has raw data, get vector from memory.
         auto ids_ds = GenIdsDataset(count, ids);
         if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
@@ -934,7 +934,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     IndexMetaPtr index_meta,
     const SegcoreConfig& segcore_config,
     int64_t segment_id,
-    bool TEST_skip_index_for_retrieve,
     bool is_sorted_by_pk)
     : segcore_config_(segcore_config),
       field_data_ready_bitset_(schema->size()),
@@ -945,7 +944,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
-      TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           &insert_record_,
