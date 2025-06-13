@@ -28,7 +28,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -37,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -116,22 +114,6 @@ func (job *LoadCollectionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded collection")
 	}
 
-	reqFieldIDs := req.GetLoadFields()
-	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) && len(req.GetLoadFields()) == 0 {
-		// here is a compatible logic: meta is still old, but req was sent in new version
-		// in older versions, a full load will be saved all field id, in newer version, use empty loaded list as all loaded
-		reqFieldIDs = lo.Map(job.collInfo.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
-			return field.GetFieldID()
-		})
-	}
-
-	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) {
-		log.Warn("collection with different load field list exists, release this collection first before chaning its load fields",
-			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
-			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
-		)
-		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
-	}
 	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(job.ctx, collection.GetCollectionID()).Collect()
 	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
 	if len(left) > 0 || len(right) > 0 {
@@ -326,20 +308,6 @@ func (job *LoadPartitionJob) PreExecute() error {
 		return merr.WrapErrParameterInvalid(collection.GetReplicaNumber(), req.GetReplicaNumber(), "can't change the replica number for loaded partitions")
 	}
 
-	reqFieldIDs := req.GetLoadFields()
-	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) && len(req.GetLoadFields()) == 0 {
-		// here is a compatible logic: meta is still old, but req was sent in new version
-		// in older versions, a full load will be saved all field id, in newer version, use empty loaded list as all loaded
-		reqFieldIDs = lo.Map(job.collInfo.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
-	}
-
-	if !funcutil.SliceSetEqual(collection.GetLoadFields(), reqFieldIDs) {
-		log.Warn("collection with different load field list exists, release this collection first before chaning its load fields",
-			zap.Int64s("loadedFieldIDs", collection.GetLoadFields()),
-			zap.Int64s("reqFieldIDs", req.GetLoadFields()),
-		)
-		return merr.WrapErrParameterInvalid(collection.GetLoadFields(), req.GetLoadFields(), "can't change the load field list for loaded collection")
-	}
 	collectionUsedRG := job.meta.ReplicaManager.GetResourceGroupByCollection(job.ctx, collection.GetCollectionID()).Collect()
 	left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
 	if len(left) > 0 || len(right) > 0 {
