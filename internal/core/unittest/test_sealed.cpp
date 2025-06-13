@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include "cachinglayer/Utils.h"
+#include "common/IndexMeta.h"
 #include "common/Types.h"
 #include "index/IndexFactory.h"
 #include "knowhere/version.h"
