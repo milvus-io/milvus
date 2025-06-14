@@ -46,6 +46,7 @@ services:
       MINIO_REGION: us-east-1
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      MQ_TYPE: woodpecker
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
     healthcheck:
