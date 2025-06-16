@@ -542,9 +542,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
 			}
 			log.Warn("insert msg missing field but nullable", zap.Int64("fieldID", field.GetFieldID()), zap.String("fieldName", field.GetName()))
-			continue
+			return nil, nil
 		}
-
 		var fieldData FieldData
 		switch field.DataType {
 		case schemapb.DataType_FloatVector:
@@ -753,7 +752,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 		}
 
 		fieldData, err := getFieldData(field)
-		if err != nil {
+		if err != nil || fieldData == nil {
 			return nil, err
 		}
 
