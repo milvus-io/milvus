@@ -311,7 +311,7 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 		}
 
-		future, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+		future, err := wb.syncMgr.SyncData(ctx, syncTask, nil, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
 			}
@@ -633,7 +633,7 @@ func (wb *writeBufferBase) Close(ctx context.Context, drop bool) {
 			t.WithDrop()
 		}
 
-		f, err := wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+		f, err := wb.syncMgr.SyncData(ctx, syncTask, nil, func(err error) error {
 			if wb.taskObserverCallback != nil {
 				wb.taskObserverCallback(syncTask, err)
 			}

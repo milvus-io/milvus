@@ -22,7 +22,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -214,15 +213,27 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
-
+	compactionParams, err := compaction.ParseParamsFromJSON(req.GetJsonParams())
+	if err != nil {
+		return merr.Status(err), err
+	}
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, compactionParams.StorageConfig)
+	if err != nil {
+		log.Error("create chunk manager failed",
+			zap.String("bucket", compactionParams.StorageConfig.GetBucketName()),
+			zap.String("ROOTPATH", compactionParams.StorageConfig.GetRootPath()),
+			zap.Error(err),
+		)
+		return merr.Status(err), err
+	}
 	var task compactor.Compactor
-	binlogIO := io.NewBinlogIO(node.chunkManager)
+	binlogIO := io.NewBinlogIO(cm)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.chunkManager,
+			cm,
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
@@ -274,6 +285,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 }
 
 // SyncSegments called by DataCoord, sync the compacted segments' meta between DC and DN
+// deprecated after v2.6.0
 func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
@@ -332,7 +344,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 						log.Warn("failed to DecompressBinLog", zap.Error(err))
 						return val, err
 					}
-					pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+					pks, err := compaction.LoadStats(ctx, nil, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 					if err != nil {
 						log.Warn("failed to load segment stats log", zap.Error(err))
 						return val, err
@@ -447,11 +459,20 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+			zap.Error(err),
+		)
+		return merr.Status(err), nil
+	}
+
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, node.chunkManager)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, node.chunkManager)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -476,11 +497,20 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+			zap.Error(err),
+		)
+		return merr.Status(err), nil
+	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	}
 	node.importTaskMgr.Add(task)
 

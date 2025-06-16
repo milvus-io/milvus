@@ -278,14 +278,15 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 			return fileStats.GetImportFile()
 		})
 	return &datapb.PreImportRequest{
-		JobID:        task.GetJobID(),
-		TaskID:       task.GetTaskID(),
-		CollectionID: task.GetCollectionID(),
-		PartitionIDs: job.GetPartitionIDs(),
-		Vchannels:    job.GetVchannels(),
-		Schema:       job.GetSchema(),
-		ImportFiles:  importFiles,
-		Options:      job.GetOptions(),
+		JobID:         task.GetJobID(),
+		TaskID:        task.GetTaskID(),
+		CollectionID:  task.GetCollectionID(),
+		PartitionIDs:  job.GetPartitionIDs(),
+		Vchannels:     job.GetVchannels(),
+		Schema:        job.GetSchema(),
+		ImportFiles:   importFiles,
+		Options:       job.GetOptions(),
+		StorageConfig: createStorageConfig(),
 	}
 }
 
@@ -347,6 +348,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		Ts:              ts,
 		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
+		StorageConfig:   createStorageConfig(),
 	}, nil
 }
 

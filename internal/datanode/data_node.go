@@ -47,7 +47,6 @@ import (
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -115,14 +114,13 @@ type DataNode struct {
 	broker   broker.Broker
 
 	// call once
-	initOnce     sync.Once
-	startOnce    sync.Once
-	stopOnce     sync.Once
-	sessionMu    sync.Mutex // to fix data race
-	session      *sessionutil.Session
-	watchKv      kv.WatchKV
-	chunkManager storage.ChunkManager
-	allocator    allocator.Allocator
+	initOnce  sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
+	sessionMu sync.Mutex // to fix data race
+	session   *sessionutil.Session
+	watchKv   kv.WatchKV
+	allocator allocator.Allocator
 
 	closer io.Closer
 
@@ -251,14 +249,7 @@ func (node *DataNode) Init() error {
 		node.factory.Init(Params)
 		log.Info("DataNode server init succeeded")
 
-		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-		if err != nil {
-			initError = err
-			return
-		}
-
-		node.chunkManager = chunkManager
-		syncMgr := syncmgr.NewSyncManager(node.chunkManager)
+		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
@@ -483,7 +474,7 @@ func getPipelineParams(node *DataNode) *util2.PipelineParams {
 		CompactionExecutor: node.compactionExecutor,
 		MsgStreamFactory:   node.factory,
 		DispClient:         node.dispClient,
-		ChunkManager:       node.chunkManager,
+		ChunkManager:       nil,
 		Session:            node.session,
 		WriteBufferManager: node.writeBufferManager,
 		CheckpointUpdater:  node.channelCheckpointUpdater,
