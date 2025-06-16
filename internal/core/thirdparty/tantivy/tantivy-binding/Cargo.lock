@@ -3947,6 +3947,7 @@ dependencies = [
  "tantivy 0.21.1",
  "tantivy 0.23.0",
  "tempfile",
+ "unicode-general-category",
  "whatlang",
  "zstd-sys",
 ]
@@ -4408,6 +4409,12 @@ name = "unicode-blocks"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b12e05d9e06373163a9bb6bb8c263c261b396643a99445fe6b9811fd376581b"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24adfe8311434967077a6adff125729161e6e4934d76f6b7c55318ac5c9246d3"
 
 [[package]]
 name = "unicode-ident"
