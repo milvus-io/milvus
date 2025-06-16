@@ -215,8 +215,8 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if !canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)) {
-			return fmt.Errorf("'%s' can only be used between integer or floating or json field expressions", arithNameMap[ctx.GetOp().GetTokenType()])
+		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+			return fmt.Errorf("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
 		dataType, err = calcDataType(leftExpr, rightExpr, reverse)
@@ -305,8 +305,8 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 	} else if rightExpr.expr.GetIsTemplate() {
 		dataType = leftExpr.dataType
 	} else {
-		if !canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)) {
-			return fmt.Errorf("'%s' can only be used between integer or floating or json field expressions", arithNameMap[ctx.GetOp().GetTokenType()])
+		if err := canArithmetic(leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr), reverse); err != nil {
+			return fmt.Errorf("'%s' %s", arithNameMap[ctx.GetOp().GetTokenType()], err.Error())
 		}
 
 		if err = checkValidModArith(arithExprMap[ctx.GetOp().GetTokenType()], leftExpr.dataType, getArrayElementType(leftExpr), rightExpr.dataType, getArrayElementType(rightExpr)); err != nil {

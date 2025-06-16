@@ -729,8 +729,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "128M",
-		Doc:          "Maximum entries count of a segment, default is 128M",
+		DefaultValue: "2GB",
+		Doc:          "Maximum size of a segment, default is 2GB",
 		Export:       true,
 	}
 	p.SegmentRollingMaxSize.Init(base.mgr)
@@ -783,7 +783,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "32M",
+		DefaultValue: "128M",
 		Doc:          "Maximum size of write buffer in bytes.",
 		Export:       true,
 	}
@@ -801,8 +801,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxSize = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushSize",
 		Version:      "2.6.0",
-		DefaultValue: "8M",
-		Doc:          "Maximum size of a fragment in bytes to flush, default is 8M.",
+		DefaultValue: "4M",
+		Doc:          "Maximum size of a fragment in bytes to flush, default is 4M.",
 		Export:       true,
 	}
 	p.FlushMaxSize.Init(base.mgr)
@@ -819,7 +819,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxThreads = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushThreads",
 		Version:      "2.6.0",
-		DefaultValue: "4",
+		DefaultValue: "32",
 		Doc:          "Maximum number of threads to flush data",
 		Export:       true,
 	}
@@ -875,6 +875,8 @@ type PulsarConfig struct {
 
 	// Enable Client side metrics
 	EnableClientMetrics ParamItem `refreshable:"false"`
+
+	BacklogAutoClearBytes ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -1007,6 +1009,23 @@ To share a Pulsar instance among multiple Milvus instances, you can change this 
 		Export:       true,
 	}
 	p.EnableClientMetrics.Init(base.mgr)
+
+	p.BacklogAutoClearBytes = ParamItem{
+		Key:          "pulsar.backlogAutoClearBytes",
+		Version:      "2.6.0",
+		DefaultValue: "100m",
+		Doc: `Perform a backlog cleanup every time the data of given bytes is written.
+Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
+If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
+set this option to non-zero will create a subscription seek to latest position to clear the pulsar backlog. 
+If these options is non-zero, the wal data in pulsar is fully protected by retention policy, 
+so admin of pulsar should give enough retention time to avoid the wal message lost.
+If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
+Moreover, if these option is zero, Milvus use a truncation subscriber to protect the wal data in pulsar if user disable the subscriptionExpirationTimeMinutes.
+The retention policy of pulsar can set shorter to save the storage space in this case.`,
+		Export: true,
+	}
+	p.BacklogAutoClearBytes.Init(base.mgr)
 }
 
 // --- kafka ---

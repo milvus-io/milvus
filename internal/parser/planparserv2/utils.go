@@ -560,8 +560,9 @@ func convertEscapeSingle(literal string) (string, error) {
 
 func canArithmeticDataType(left, right schemapb.DataType) bool {
 	switch left {
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
-		schemapb.DataType_Float, schemapb.DataType_Double:
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+		return typeutil.IsIntegerType(right) || typeutil.IsJSONType(right)
+	case schemapb.DataType_Float, schemapb.DataType_Double:
 		return typeutil.IsArithmetic(right) || typeutil.IsJSONType(right)
 	case schemapb.DataType_JSON:
 		return typeutil.IsArithmetic(right)
@@ -583,17 +584,20 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 //	return canArithmeticDataType(left.dataType, getArrayElementType(right))
 //}
 
-func canArithmetic(left, leftElement, right, rightElement schemapb.DataType) bool {
-	if !typeutil.IsArrayType(left) && !typeutil.IsArrayType(right) {
-		return canArithmeticDataType(left, right)
-	}
-	if typeutil.IsArrayType(left) && typeutil.IsArrayType(right) {
-		return canArithmeticDataType(leftElement, rightElement)
-	}
+func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, reverse bool) error {
 	if typeutil.IsArrayType(left) {
-		return canArithmeticDataType(leftElement, right)
+		left = leftElement
 	}
-	return canArithmeticDataType(left, rightElement)
+	if typeutil.IsArrayType(right) {
+		right = rightElement
+	}
+	if reverse {
+		left, right = right, left
+	}
+	if !canArithmeticDataType(left, right) {
+		return fmt.Errorf("cannot perform arithmetic between %s field and %s", left.String(), right.String())
+	}
+	return nil
 }
 
 func canConvertToIntegerType(dataType, elementType schemapb.DataType) bool {

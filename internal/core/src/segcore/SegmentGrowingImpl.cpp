@@ -1224,9 +1224,9 @@ SegmentGrowingImpl::BulkGetJsonData(
 }
 
 void
-SegmentGrowingImpl::LazyCheckSchema(const Schema& sch) {
-    if (sch.get_schema_version() > schema_->get_schema_version()) {
-        Reopen(std::make_shared<Schema>(sch));
+SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
+    if (sch->get_schema_version() > schema_->get_schema_version()) {
+        Reopen(sch);
     }
 }
 

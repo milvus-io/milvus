@@ -1360,6 +1360,60 @@ func TestInsertMsgToInsertData2(t *testing.T) {
 	}
 }
 
+func TestInsertMsgMissingNullableField(t *testing.T) {
+	dim := 8
+	schema := &schemapb.CollectionSchema{
+		Name:        "all_fields_schema",
+		Description: "all_fields_schema",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      common.RowIDField,
+				Name:         common.RowIDFieldName,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      common.TimeStampField,
+				Name:         common.TimeStampFieldName,
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				Name:         "pk",
+				FieldID:      100,
+			},
+			{
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(dim),
+					},
+				},
+				FieldID: 101,
+			},
+			{
+				DataType: schemapb.DataType_Int64,
+				Name:     "new_field",
+				Nullable: true,
+				FieldID:  102,
+			},
+		},
+	}
+	msg, _, _ := genColumnBasedInsertMsg(schema, 5, dim)
+	_, err := ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+	// remove the last field(nullable one)
+	msg.FieldsData = msg.FieldsData[:len(msg.FieldsData)-1]
+	_, err = ColumnBasedInsertMsgToInsertData(msg, schema)
+	assert.NoError(t, err)
+}
+
 func TestMergeInsertData(t *testing.T) {
 	t.Run("empty data in buffer", func(t *testing.T) {
 		d1 := &InsertData{

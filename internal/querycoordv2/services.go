@@ -1239,3 +1239,31 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 
 	return merr.Success(), nil
 }
+
+func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		return &querypb.ListLoadedSegmentsResponse{
+			Status: merr.Status(errors.Wrap(err, "failed to list loaded segments")),
+		}, nil
+	}
+	segmentIDs := typeutil.NewUniqueSet()
+
+	collections := s.meta.GetAllCollections(ctx)
+	for _, collection := range collections {
+		segments := s.targetMgr.GetSealedSegmentsByCollection(ctx, collection.GetCollectionID(), meta.CurrentTargetFirst)
+		for _, segment := range segments {
+			segmentIDs.Insert(segment.ID)
+		}
+	}
+
+	segments := s.dist.SegmentDistManager.GetByFilter()
+	for _, segment := range segments {
+		segmentIDs.Insert(segment.ID)
+	}
+
+	resp := &querypb.ListLoadedSegmentsResponse{
+		Status:     merr.Success(),
+		SegmentIDs: segmentIDs.Collect(),
+	}
+	return resp, nil
+}

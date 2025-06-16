@@ -60,9 +60,9 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     std::unique_ptr<DataArray> field_data;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
-        auto& field_meta = plan->schema_[field_id];
-        if (plan->schema_.get_dynamic_field_id().has_value() &&
-            plan->schema_.get_dynamic_field_id().value() == field_id &&
+        auto& field_meta = plan->schema_->operator[](field_id);
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
             field_data = bulk_subscript(field_id,
@@ -168,7 +168,7 @@ SegmentInternalInterface::FillTargetEntry(
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
-    auto pk_field_id = plan->schema_.get_primary_field_id();
+    auto pk_field_id = plan->schema_->get_primary_field_id();
 
     auto is_pk_field = [&, pk_field_id](const FieldId& field_id) -> bool {
         return pk_field_id.has_value() && pk_field_id.value() == field_id;
@@ -198,8 +198,8 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
 
-        if (plan->schema_.get_dynamic_field_id().has_value() &&
-            plan->schema_.get_dynamic_field_id().value() == field_id &&
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
             auto col =
@@ -208,7 +208,7 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
         std::unique_ptr<DataArray> col;
-        auto& field_meta = plan->schema_[field_id];
+        auto& field_meta = plan->schema_->operator[](field_id);
         if (!is_field_exist(field_id)) {
             col = std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
@@ -288,7 +288,8 @@ SegmentInternalInterface::get_real_count() const {
     mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
     return bitset_holder.size() - bitset_holder.count();
 #endif
-    auto plan = std::make_unique<query::RetrievePlan>(get_schema());
+    auto plan = std::make_unique<query::RetrievePlan>(
+        std::make_shared<Schema>(get_schema()));
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;

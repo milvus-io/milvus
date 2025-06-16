@@ -33,12 +33,12 @@ ParsePlanNodeProto(proto::plan::PlanNode& plan_node,
 
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema,
+CreateSearchPlanByExpr(SchemaPtr schema,
                        const void* serialized_expr_plan,
                        const int64_t size);
 
 std::unique_ptr<Plan>
-CreateSearchPlanFromPlanNode(const Schema& schema,
+CreateSearchPlanFromPlanNode(SchemaPtr schema,
                              const proto::plan::PlanNode& plan_node);
 
 std::unique_ptr<PlaceholderGroup>
@@ -55,7 +55,7 @@ int64_t
 GetNumOfQueries(const PlaceholderGroup*);
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema,
+CreateRetrievePlanByExpr(SchemaPtr schema,
                          const void* serialized_expr_plan,
                          const int64_t size);
 

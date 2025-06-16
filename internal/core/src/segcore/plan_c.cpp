@@ -20,11 +20,11 @@ CreateSearchPlanByExpr(CCollection c_col,
                        const void* serialized_expr_plan,
                        const int64_t size,
                        CSearchPlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(
-            *col->get_schema(), serialized_expr_plan, size);
+            col->get_schema(), serialized_expr_plan, size);
         auto col_index_meta = col->get_index_meta();
         auto field_id = milvus::query::GetFieldID(res.get());
         AssertInfo(col_index_meta != nullptr, "index meta not exist");
@@ -142,7 +142,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
 
     try {
         auto res = milvus::query::CreateRetrievePlanByExpr(
-            *col->get_schema(), serialized_expr_plan, size);
+            col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
         status.error_code = milvus::Success;
@@ -174,7 +174,7 @@ DeleteRetrievePlan(CRetrievePlan c_plan) {
 bool
 ShouldIgnoreNonPk(CRetrievePlan c_plan) {
     auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
-    auto pk_field = plan->schema_.get_primary_field_id();
+    auto pk_field = plan->schema_->get_primary_field_id();
     auto only_contain_pk = pk_field.has_value() &&
                            plan->field_ids_.size() == 1 &&
                            pk_field.value() == plan->field_ids_[0];

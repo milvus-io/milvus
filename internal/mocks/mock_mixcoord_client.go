@@ -6596,6 +6596,80 @@ func (_c *MockMixCoordClient_ListIndexes_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// ListLoadedSegments provides a mock function with given fields: ctx, in, opts
+func (_m *MockMixCoordClient) ListLoadedSegments(ctx context.Context, in *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLoadedSegments")
+	}
+
+	var r0 *querypb.ListLoadedSegmentsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListLoadedSegmentsRequest, ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListLoadedSegmentsRequest, ...grpc.CallOption) *querypb.ListLoadedSegmentsResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListLoadedSegmentsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListLoadedSegmentsRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockMixCoordClient_ListLoadedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLoadedSegments'
+type MockMixCoordClient_ListLoadedSegments_Call struct {
+	*mock.Call
+}
+
+// ListLoadedSegments is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.ListLoadedSegmentsRequest
+//   - opts ...grpc.CallOption
+func (_e *MockMixCoordClient_Expecter) ListLoadedSegments(ctx interface{}, in interface{}, opts ...interface{}) *MockMixCoordClient_ListLoadedSegments_Call {
+	return &MockMixCoordClient_ListLoadedSegments_Call{Call: _e.mock.On("ListLoadedSegments",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockMixCoordClient_ListLoadedSegments_Call) Run(run func(ctx context.Context, in *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption)) *MockMixCoordClient_ListLoadedSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ListLoadedSegmentsRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListLoadedSegments_Call) Return(_a0 *querypb.ListLoadedSegmentsResponse, _a1 error) *MockMixCoordClient_ListLoadedSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockMixCoordClient_ListLoadedSegments_Call) RunAndReturn(run func(context.Context, *querypb.ListLoadedSegmentsRequest, ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error)) *MockMixCoordClient_ListLoadedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListPolicy provides a mock function with given fields: ctx, in, opts
 func (_m *MockMixCoordClient) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest, opts ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
 	_va := make([]interface{}, len(opts))

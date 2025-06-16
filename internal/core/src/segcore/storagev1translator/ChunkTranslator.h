@@ -60,7 +60,6 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     }
 
  private:
-
     std::vector<std::pair<std::string, int64_t>> files_and_rows_;
     int64_t segment_id_;
     int64_t field_id_;

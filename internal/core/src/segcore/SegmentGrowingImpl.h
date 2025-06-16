@@ -103,7 +103,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Reopen(SchemaPtr sch) override;
 
     void
-    LazyCheckSchema(const Schema& sch) override;
+    LazyCheckSchema(SchemaPtr sch) override;
 
     void
     FinishLoad() override;

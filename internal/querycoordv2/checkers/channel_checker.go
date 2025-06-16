@@ -191,6 +191,10 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	delegatorList := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
 	for _, delegator := range delegatorList {
 		leader := c.dist.ChannelDistManager.GetShardLeader(delegator.GetChannelName(), replica)
+		if leader == nil {
+			log.Warn("channel leader does not exist, skip it", zap.String("channel", delegator.GetChannelName()))
+			continue
+		}
 		// if channel's version is smaller than shard leader's version, it means that the channel is not up to date
 		if delegator.Version < leader.Version && delegator.Node != leader.Node {
 			dupChannels = append(dupChannels, delegator)

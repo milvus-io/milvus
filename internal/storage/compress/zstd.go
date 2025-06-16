@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet/compress"
 	"github.com/klauspost/compress/zstd"
 
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -119,8 +120,8 @@ func (zstdCodec) getConcurrency() int {
 	// But most of the time, we only serialize 16MB data for one binlog generation.
 	// So 1 is enough for most cases to avoid to use too much memory.
 	concurrent := paramtable.Get().CommonCfg.StorageZstdConcurrency.GetAsInt()
-	if concurrent < 0 {
-		return 0
+	if concurrent <= 0 {
+		return hardware.GetCPUNum()
 	}
 	return concurrent
 }
