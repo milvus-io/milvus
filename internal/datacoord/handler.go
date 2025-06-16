@@ -44,6 +44,7 @@ type Handler interface {
 	FinishDropChannel(ch string, collectionID int64) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
+	ListLoadedSegments(ctx context.Context) ([]int64, error)
 }
 
 type SegmentsView struct {
@@ -604,4 +605,8 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	h.s.meta.DropCollection(collectionID)
 
 	return nil
+}
+
+func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
+	return h.s.listLoadedSegments(ctx)
 }
