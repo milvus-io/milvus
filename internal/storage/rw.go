@@ -67,8 +67,7 @@ func DefaultWriterOptions() *rwOptions {
 
 func DefaultReaderOptions() *rwOptions {
 	return &rwOptions{
-		bufferSize:          packed.DefaultReadBufferSize,
-		multiPartUploadSize: packed.DefaultMultiPartUploadSize,
+		bufferSize: packed.DefaultReadBufferSize,
 	}
 }
 
