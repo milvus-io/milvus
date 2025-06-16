@@ -388,7 +388,7 @@ void
 JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                                 const Config& config) {
     auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load json key index");
     for (auto& index_file : index_files.value()) {
@@ -402,11 +402,17 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),
-                                                     milvus::index::SetBitset);
-    LOG_INFO("load json key index done for field id:{} with dir:{}",
-             field_id_,
-             path_);
+
+    auto load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        path_.c_str(), load_in_mmap, milvus::index::SetBitset);
+
+    LOG_INFO(
+        "load json key index done for field id:{} with dir:{}, load_in_mmap:{}",
+        field_id_,
+        path_,
+        load_in_mmap);
 }
 
 void

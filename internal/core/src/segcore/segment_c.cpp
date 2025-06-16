@@ -434,7 +434,8 @@ LoadTextIndex(CSegmentInterface c_segment,
         for (const auto& f : info_proto->files()) {
             files.push_back(f);
         }
-        config["index_files"] = files;
+        config[milvus::index::INDEX_FILES] = files;
+        config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
 
         milvus::storage::FileManagerContext ctx(
             field_meta, index_meta, remote_chunk_manager);
@@ -487,7 +488,8 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         for (const auto& f : info_proto->files()) {
             files.push_back(f);
         }
-        config["index_files"] = files;
+        config[milvus::index::INDEX_FILES] = files;
+        config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
 
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
