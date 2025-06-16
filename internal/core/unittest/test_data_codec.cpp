@@ -66,7 +66,7 @@ TEST(storage, InsertDataBoolNullable) {
         milvus::storage::CreateFieldData(storage::DataType::BOOL, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
 
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -132,7 +132,7 @@ TEST(storage, InsertDataInt8Nullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT8, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -196,7 +196,7 @@ TEST(storage, InsertDataInt16Nullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT16, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -260,7 +260,7 @@ TEST(storage, InsertDataInt32Nullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT32, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -324,7 +324,7 @@ TEST(storage, InsertDataInt64Nullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::INT64, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -394,7 +394,7 @@ TEST(storage, InsertDataStringNullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::STRING, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -461,7 +461,7 @@ TEST(storage, InsertDataFloatNullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::FLOAT, true);
     std::array<uint8_t, 1> valid_data = {0xF3};
-    field_data->FillFieldData(data.data(), valid_data.data(), data.size());
+    field_data->FillFieldData(data.data(), valid_data.data(), data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -524,7 +524,7 @@ TEST(storage, InsertDataDoubleNullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::DOUBLE, true);
     uint8_t* valid_data = new uint8_t[1]{0xF3};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -775,7 +775,7 @@ TEST(storage, InsertDataStringArrayNullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::ARRAY, true);
     uint8_t* valid_data = new uint8_t[1]{0xFD};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);
@@ -813,7 +813,7 @@ TEST(storage, InsertDataJsonNullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::JSON, true);
     uint8_t* valid_data = new uint8_t[1]{0xFC};
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
 
     auto payload_reader =
         std::make_shared<milvus::storage::PayloadReader>(field_data);

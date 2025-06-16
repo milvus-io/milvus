@@ -132,7 +132,7 @@ test_run() {
                 valid_data_[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(data.data(), valid_data_, data.size());
+        field_data->FillFieldData(data.data(), valid_data_, data.size(), 0);
         delete[] valid_data_;
     } else {
         field_data->FillFieldData(data.data(), data.size());
@@ -525,7 +525,7 @@ test_string() {
                 valid_data_[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(data.data(), valid_data_, data.size());
+        field_data->FillFieldData(data.data(), valid_data_, data.size(), 0);
         delete[] valid_data_;
     } else {
         field_data->FillFieldData(data.data(), data.size());

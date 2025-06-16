@@ -1128,7 +1128,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 valid_data[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(raw_data, valid_data.data(), raw_count);
+        field_data->FillFieldData(raw_data, valid_data.data(), raw_count, 0);
     };
 
     if (field_meta.is_vector()) {

@@ -1771,7 +1771,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                     kPartitionID,
                                                     kSegmentID,
@@ -1842,7 +1842,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                     kPartitionID,
                                                     kSegmentID,
