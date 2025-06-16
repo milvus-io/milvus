@@ -40,7 +40,7 @@ func GenParams() Params {
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
 		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
 		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
-		StorageConfig:             createStorageConfig(),
+		StorageConfig:             CreateStorageConfig(),
 	}
 }
 
@@ -63,7 +63,7 @@ func ParseParamsFromJSON(jsonStr string) (Params, error) {
 	return compactionParams, err
 }
 
-func createStorageConfig() *indexpb.StorageConfig {
+func CreateStorageConfig() *indexpb.StorageConfig {
 	var storageConfig *indexpb.StorageConfig
 
 	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -41,11 +42,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -135,7 +134,6 @@ func (s *DataNodeServicesSuite) SetupTest() {
 		GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 	}
 
-	s.node.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/milvus_test/datanode"))
 	paramtable.SetNodeID(1)
 }
 
@@ -1221,12 +1219,17 @@ func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 
 func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("create pre-import task", func() {
+		preImportReq := &datapb.PreImportRequest{
+			StorageConfig: compaction.CreateStorageConfig(),
+		}
+		payload, err := proto.Marshal(preImportReq)
+		s.NoError(err)
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
 				taskcommon.ClusterIDKey: "cluster-0",
 				taskcommon.TypeKey:      taskcommon.PreImport,
 			},
-			Payload: []byte{},
+			Payload: payload,
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(merr.CheckRPCCall(status, err))
@@ -1234,7 +1237,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 
 	s.Run("create import task", func() {
 		importReq := &datapb.ImportRequest{
-			Schema: &schemapb.CollectionSchema{},
+			Schema:        &schemapb.CollectionSchema{},
+			StorageConfig: compaction.CreateStorageConfig(),
 		}
 		payload, err := proto.Marshal(importReq)
 		s.NoError(err)

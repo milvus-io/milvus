@@ -134,10 +134,7 @@ func (s *IndexServiceSuite) SetupTest() {
 		ctx     = context.TODO()
 	)
 
-	cm := mocks.NewChunkManager(s.T())
-
 	factory.EXPECT().Init(mock.Anything).Return()
-	factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(cm, nil)
 
 	s.node = NewDataNode(ctx, factory)
 

@@ -36,13 +36,11 @@ import (
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -90,7 +88,7 @@ func NewIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	node.broker = broker
 	node.timeTickSender = util2.NewTimeTickSender(broker, 0)
 
-	syncMgr := syncmgr.NewSyncManager(node.chunkManager)
+	syncMgr := syncmgr.NewSyncManager(nil)
 	node.syncMgr = syncMgr
 	node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
@@ -128,7 +126,6 @@ func TestDataNode(t *testing.T) {
 
 	defer node.Stop()
 
-	node.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/milvus_test/datanode"))
 	paramtable.SetNodeID(1)
 
 	defer cancel()
