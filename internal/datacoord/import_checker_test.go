@@ -175,9 +175,15 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkPreImportingJob
+	fileStats := []*datapb.ImportFileStats{
+		{
+			TotalRows: 100,
+		},
+	}
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	for _, t := range preimportTasks {
-		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
 		s.NoError(err)
 	}
 
@@ -292,8 +298,14 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkPreImportingJob
+	fileStats := []*datapb.ImportFileStats{
+		{
+			TotalRows: 100,
+		},
+	}
 	for _, t := range preimportTasks {
-		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
+		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
+			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
 		s.NoError(err)
 	}
 
