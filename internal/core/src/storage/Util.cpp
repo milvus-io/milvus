@@ -1,4 +1,3 @@
-
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -1006,7 +1005,7 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     for (const auto& data : data_array) {
         if (merged_data->IsNullable()) {
             merged_data->FillFieldData(
-                data->Data(), data->ValidData(), data->Length());
+                data->Data(), data->ValidData(), data->Length(), 0);
         } else {
             merged_data->FillFieldData(data->Data(), data->Length());
         }

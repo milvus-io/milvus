@@ -25,6 +25,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "log/Log.h"
 #include "Types.h"
 #include "arrow/api.h"
 #include "arrow/array/array_binary.h"
@@ -57,7 +58,8 @@ class FieldDataBase {
     virtual void
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
-                  ssize_t element_count) = 0;
+                  ssize_t element_count,
+                  ssize_t offset) = 0;
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) = 0;
@@ -164,7 +166,8 @@ class FieldBitsetImpl : public FieldDataBase {
     void
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
-                  ssize_t element_count) override {
+                  ssize_t element_count,
+                  ssize_t offset) override {
         PanicInfo(NotImplemented,
                   "FillFieldData(const void* field_data, "
                   "const uint8_t* valid_data, ssize_t element_count)"
@@ -378,7 +381,8 @@ class FieldDataImpl : public FieldDataBase {
     void
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
-                  ssize_t element_count) override;
+                  ssize_t element_count,
+                  ssize_t offset) override;
 
     void
     FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) override;
@@ -598,7 +602,11 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
             auto valid_data = array->null_bitmap_data();
             if (valid_data != nullptr) {
                 bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
-                    valid_data, 0, valid_data_.data(), length_, n);
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
             }
         }
         length_ += n;
@@ -689,7 +697,11 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
             auto valid_data = array->null_bitmap_data();
             if (valid_data != nullptr) {
                 bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
-                    valid_data, 0, valid_data_.data(), length_, n);
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
             }
         }
         length_ += n;
