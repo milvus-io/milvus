@@ -30,7 +30,8 @@ type walImpl struct {
 // initProducerAtBackground initializes the producer at background.
 func (w *walImpl) initProducerAtBackground() {
 	if w.Channel().AccessMode != types.AccessModeRW {
-		panic("producer should not be initialized on a wal that is not in read-write mode")
+		w.notifier.Finish(struct{}{})
+		return
 	}
 
 	defer w.notifier.Finish(struct{}{})
