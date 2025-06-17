@@ -1488,7 +1488,6 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 // return value.
 func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
 	var primaryFieldName string
-	var dynamicField *schemapb.FieldSchema
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
@@ -1500,9 +1499,6 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
-		}
-		if field.IsDynamic {
-			dynamicField = field
 		}
 		allFieldNameMap[field.Name] = field
 	}
@@ -1516,12 +1512,9 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		}
 		if outputFieldName == "*" {
 			userRequestedPkFieldExplicitly = true
-			for fieldName, field := range allFieldNameMap {
-				// skip Cold field and fields that can't be output
-				if schema.IsFieldLoaded(field.GetFieldID()) && schema.CanRetrieveRawFieldData(field) {
-					resultFieldNameMap[fieldName] = true
-					userOutputFieldsMap[fieldName] = true
-				}
+			for fieldName := range allFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+				userOutputFieldsMap[fieldName] = true
 			}
 			useAllDyncamicFields = true
 		} else {
@@ -1529,49 +1522,41 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 				if !schema.CanRetrieveRawFieldData(field) {
 					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
 				}
-				if schema.IsFieldLoaded(field.GetFieldID()) {
-					resultFieldNameMap[outputFieldName] = true
-					userOutputFieldsMap[outputFieldName] = true
-				} else {
-					return nil, nil, nil, false, fmt.Errorf("field %s is not loaded", outputFieldName)
-				}
+				resultFieldNameMap[outputFieldName] = true
+				userOutputFieldsMap[outputFieldName] = true
+
 			} else {
 				if schema.EnableDynamicField {
-					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
-						dynamicNestedPath := outputFieldName
-						err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
-							columnInfo := expr.GetColumnExpr().GetInfo()
-							// there must be no error here
-							dynamicField, _ := schema.schemaHelper.GetDynamicField()
-							// only $meta["xxx"] is allowed for now
-							if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
-								return errors.New("not support getting subkeys of json field yet")
-							}
-							nestedPaths := columnInfo.GetNestedPath()
-							// $meta["A"]["B"] not allowed for now
-							if len(nestedPaths) != 1 {
-								return errors.New("not support getting multiple level of dynamic field for now")
-							}
-							// $meta["dyn_field"], output field name could be:
-							// 1. "dyn_field", outputFieldName == nestedPath
-							// 2. `$meta["dyn_field"]` explicit form
-							if nestedPaths[0] != outputFieldName {
-								// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
-								dynamicNestedPath = nestedPaths[0]
-							}
-							return nil
-						})
-						if err != nil {
-							log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
-							return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+					dynamicNestedPath := outputFieldName
+					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+						columnInfo := expr.GetColumnExpr().GetInfo()
+						// there must be no error here
+						dynamicField, _ := schema.schemaHelper.GetDynamicField()
+						// only $meta["xxx"] is allowed for now
+						if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
+							return errors.New("not support getting subkeys of json field yet")
 						}
-						resultFieldNameMap[common.MetaFieldName] = true
-						userOutputFieldsMap[outputFieldName] = true
-						userDynamicFieldsMap[dynamicNestedPath] = true
-					} else {
-						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
-						return nil, nil, nil, false, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
+						nestedPaths := columnInfo.GetNestedPath()
+						// $meta["A"]["B"] not allowed for now
+						if len(nestedPaths) != 1 {
+							return errors.New("not support getting multiple level of dynamic field for now")
+						}
+						// $meta["dyn_field"], output field name could be:
+						// 1. "dyn_field", outputFieldName == nestedPath
+						// 2. `$meta["dyn_field"]` explicit form
+						if nestedPaths[0] != outputFieldName {
+							// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
+							dynamicNestedPath = nestedPaths[0]
+						}
+						return nil
+					})
+					if err != nil {
+						log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
+						return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 					}
+					resultFieldNameMap[common.MetaFieldName] = true
+					userOutputFieldsMap[outputFieldName] = true
+					userDynamicFieldsMap[dynamicNestedPath] = true
 				} else {
 					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
 				}
