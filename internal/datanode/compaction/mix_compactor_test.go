@@ -509,7 +509,7 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsMultiSegment() {
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
 				Return(dValues, nil)
 
-			got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"})
+			got, _, _, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, []string{"random"}, test.segIDA)
 			s.NoError(err)
 			s.Equal(len(got), len(test.expectedpk2ts))
 
@@ -539,12 +539,12 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsOneSegment() {
 		Return(nil, errors.New("mock_error")).Once()
 
 	invalidPaths := []string{"mock_error"}
-	got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
+	got, _, _, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths, int64(0))
 	s.Error(err)
 	s.Nil(got)
 
 	dpaths := []string{"a"}
-	got, err = mergeDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
+	got, _, _, err = mergeDeltalogs(s.task.ctx, s.task.binlogIO, dpaths, int64(0))
 	s.NoError(err)
 	s.NotNil(got)
 	s.Equal(len(expectedMap), len(got))

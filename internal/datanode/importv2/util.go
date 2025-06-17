@@ -199,8 +199,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 	return nil
 }
 
-type nullDefaultAppender[T any] struct {
-}
+type nullDefaultAppender[T any] struct{}
 
 func (h *nullDefaultAppender[T]) AppendDefault(fieldData storage.FieldData, defaultVal T, rowNum int) error {
 	values := make([]T, rowNum)

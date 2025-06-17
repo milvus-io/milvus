@@ -60,8 +60,10 @@ type mixCompactionTask struct {
 
 	bm25FieldIDs []int64
 
-	done chan struct{}
-	tr   *timerecord.TimeRecorder
+	done                       chan struct{}
+	tr                         *timerecord.TimeRecorder
+	totalDownloadDuration      time.Duration
+	totalMergeDeltalogDuration time.Duration
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -73,13 +75,15 @@ func NewMixCompactionTask(
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
-		ctx:         ctx1,
-		cancel:      cancel,
-		binlogIO:    binlogIO,
-		plan:        plan,
-		tr:          timerecord.NewTimeRecorder("mergeSplit compaction"),
-		currentTime: time.Now(),
-		done:        make(chan struct{}, 1),
+		ctx:                        ctx1,
+		cancel:                     cancel,
+		binlogIO:                   binlogIO,
+		plan:                       plan,
+		tr:                         timerecord.NewTimeRecorder("mergeSplit compaction"),
+		currentTime:                time.Now(),
+		done:                       make(chan struct{}, 1),
+		totalDownloadDuration:      time.Duration(0),
+		totalMergeDeltalogDuration: time.Duration(0),
 	}
 }
 
@@ -156,7 +160,9 @@ func (t *mixCompactionTask) mergeSplit(
 	}
 	for segId, binlogBatches := range insertPaths {
 		deltaPaths := deltaPaths[segId]
-		delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
+		delta, downloadDuration, mergeDeltalogDuration, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths, segId)
+		t.totalDownloadDuration += downloadDuration
+		t.totalMergeDeltalogDuration += mergeDeltalogDuration
 		if err != nil {
 			log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 			return nil, err
@@ -183,7 +189,11 @@ func (t *mixCompactionTask) mergeSplit(
 		zap.Int64s("mergeSplit to segments", lo.Keys(mWriter.cachedMeta)),
 		zap.Int64("deleted row count", deletedRowCount),
 		zap.Int64("expired entities", expiredRowCount),
-		zap.Duration("total elapse", totalElapse))
+		zap.Duration("total elapse", totalElapse),
+		zap.Duration("total download duration", t.totalDownloadDuration),
+		zap.Duration("total merge deltalog duration", t.totalMergeDeltalogDuration),
+		zap.Duration("total serialize duration", mWriter.serializeDuration),
+		zap.Duration("total upload duration", mWriter.uploadDuration))
 
 	return res, nil
 }
@@ -194,7 +204,10 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	mWriter *MultiSegmentWriter, pkField *schemapb.FieldSchema,
 ) (deletedRowCount, expiredRowCount int64, err error) {
 	log := log.With(zap.Strings("paths", batchPaths))
+	beforeDownload := time.Now()
 	allValues, err := t.binlogIO.Download(ctx, batchPaths)
+	downloadDuration := time.Since(beforeDownload)
+	t.totalDownloadDuration += downloadDuration
 	if err != nil {
 		log.Warn("compact wrong, fail to download insertLogs", zap.Error(err))
 		return
