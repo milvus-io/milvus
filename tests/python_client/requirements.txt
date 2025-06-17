@@ -32,7 +32,7 @@ pymilvus==2.6.0rc139
 pymilvus[bulk_writer]==2.6.0rc139
 
 # for protobuf
-protobuf==5.27.2
+protobuf==5.29.5
 
 # for customize config test
 python-benedict==0.24.3
