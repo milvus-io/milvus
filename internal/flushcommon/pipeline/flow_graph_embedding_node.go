@@ -165,7 +165,7 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 	return []Msg{fgMsg}
 }
 
-func (eNode *embeddingNode) Close() {
+func (eNode *embeddingNode) Free() {
 	for _, runner := range eNode.functionRunners {
 		runner.Close()
 	}
