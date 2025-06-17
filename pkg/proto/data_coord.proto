@@ -827,6 +827,7 @@ message PreImportRequest {
   schema.CollectionSchema schema = 7;
   repeated internal.ImportFile import_files = 8;
   repeated common.KeyValuePair options = 9;
+  index.StorageConfig storage_config = 10;
 }
 
 message IDRange {
@@ -853,6 +854,7 @@ message ImportRequest {
   uint64 ts = 10;
   IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
+  index.StorageConfig storage_config = 13;
 }
 
 message QueryPreImportRequest {
