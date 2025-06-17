@@ -5207,7 +5207,8 @@ type indexNodeConfig struct {
 	BuildParallel       ParamItem `refreshable:"false"`
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
-	WorkerSlotUnit ParamItem `refreshable:"true"`
+	WorkerSlotUnit      ParamItem `refreshable:"true"`
+	StandaloneSlotRatio ParamItem `refreshable:"false"`
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {
@@ -5234,6 +5235,14 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Doc:          "Indicates how many slots each worker occupies per 2c8g",
 	}
 	p.WorkerSlotUnit.Init(base.mgr)
+
+	p.StandaloneSlotRatio = ParamItem{
+		Key:          "indexNode.standaloneSlotFactor",
+		Version:      "2.5.14",
+		DefaultValue: "0.25",
+		Doc:          "Offline task slot ratio in standalone mode",
+	}
+	p.StandaloneSlotRatio.Init(base.mgr)
 }
 
 type streamingConfig struct {

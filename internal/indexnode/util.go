@@ -63,7 +63,7 @@ func calculateNodeSlots() int64 {
 	}
 	totalSlot := max(slot, 1) * Params.IndexNodeCfg.WorkerSlotUnit.GetAsInt64() * Params.IndexNodeCfg.BuildParallel.GetAsInt64()
 	if paramtable.GetRole() == typeutil.StandaloneRole {
-		totalSlot = max(totalSlot/4, 1)
+		totalSlot = max(int64(float64(totalSlot)*paramtable.Get().IndexNodeCfg.StandaloneSlotRatio.GetAsFloat()), 1)
 	}
 	return totalSlot
 }
