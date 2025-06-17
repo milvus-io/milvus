@@ -1,9 +1,9 @@
 use core::{option::Option::Some, result::Result::Ok};
 use jieba_rs;
-use std::io::BufReader;
 use lazy_static::lazy_static;
 use serde_json as json;
 use std::borrow::Cow;
+use std::io::BufReader;
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 
 use crate::error::{Result, TantivyBindingError};
@@ -52,7 +52,9 @@ impl TokenStream for JiebaTokenStream {
     }
 }
 
-fn get_jieba_dict(params: &json::Map<String, json::Value>) -> Result<(Vec<String>, Option<String>)> {
+fn get_jieba_dict(
+    params: &json::Map<String, json::Value>,
+) -> Result<(Vec<String>, Option<String>)> {
     match params.get("dict") {
         Some(value) => {
             if !value.is_array() {
@@ -77,15 +79,13 @@ fn get_jieba_dict(params: &json::Map<String, json::Value>) -> Result<(Vec<String
                         )));
                     }
                     system_dict = Some(text)
-                } else{
+                } else {
                     dict.push(text);
                 }
             }
             Ok((dict, system_dict))
         }
-        _ => {
-            Ok((vec![], Some("_default_".to_string())))
-        }
+        _ => Ok((vec![], Some("_default_".to_string()))),
     }
 }
 
@@ -138,21 +138,23 @@ impl<'a> JiebaTokenizer<'a> {
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<JiebaTokenizer<'a>> {
         let (dict, system_dict) = get_jieba_dict(params)?;
 
-        let mut tokenizer = system_dict.map_or(Ok(jieba_rs::Jieba::empty()), |name| {
-            match name.as_str() {
+        let mut tokenizer =
+            system_dict.map_or(Ok(jieba_rs::Jieba::empty()), |name| match name.as_str() {
                 "_default_" => Ok(jieba_rs::Jieba::new()),
                 "_extend_default_" => {
                     let mut buf = BufReader::new(EXTEND_DEFAULT_DICT.as_bytes());
-                    jieba_rs::Jieba::with_dict(&mut buf).map_err(|e|
-                        TantivyBindingError::InternalError(format!("failed to load extend default system dict: {}", e))
-                    )
-                },
+                    jieba_rs::Jieba::with_dict(&mut buf).map_err(|e| {
+                        TantivyBindingError::InternalError(format!(
+                            "failed to load extend default system dict: {}",
+                            e
+                        ))
+                    })
+                }
                 _ => Err(TantivyBindingError::InternalError(format!(
                     "invalid system dict name: {}",
                     name
-                )))
-            }
-        })?;
+                ))),
+            })?;
 
         for word in dict {
             tokenizer.add_word(word.as_str(), None, None);

@@ -1,6 +1,6 @@
 mod filter;
-mod remove_punct_filter;
 mod regex_filter;
+mod remove_punct_filter;
 pub(crate) mod stop_words;
 mod util;
 

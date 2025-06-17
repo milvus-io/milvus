@@ -1,6 +1,6 @@
 use crate::error::{Result, TantivyBindingError};
-use serde_json as json;
 use fancy_regex as regex;
+use serde_json as json;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 
 #[derive(Clone)]
@@ -74,7 +74,7 @@ pub struct RegexFilterStream<T> {
 
 impl<T> RegexFilterStream<T> {
     fn predicate(&self, token: &Token) -> bool {
-        self.regex.is_match(&token.text).map_or(true, |b|b)
+        self.regex.is_match(&token.text).map_or(true, |b| b)
     }
 }
 
