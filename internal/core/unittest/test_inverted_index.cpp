@@ -191,7 +191,8 @@ test_run() {
 
         Config config;
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
@@ -583,7 +584,8 @@ test_string() {
 
         Config config;
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);

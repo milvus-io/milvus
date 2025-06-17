@@ -43,7 +43,8 @@ class GroupChunkTranslator
         bool use_mmap,
         std::vector<milvus_storage::RowGroupMetadataVector>&
             row_group_meta_list,
-        milvus_storage::FieldIDList field_id_list);
+        milvus_storage::FieldIDList field_id_list,
+        milvus::proto::common::LoadPriority load_priority);
 
     ~GroupChunkTranslator() override;
 
@@ -90,6 +91,8 @@ class GroupChunkTranslator
     GroupCTMeta meta_;
     int64_t timestamp_offet_;
     bool use_mmap_;
+    milvus::proto::common::LoadPriority load_priority_{
+        milvus::proto::common::LoadPriority::HIGH};
 };
 
 }  // namespace milvus::segcore::storagev2translator
