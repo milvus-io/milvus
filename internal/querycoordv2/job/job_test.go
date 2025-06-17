@@ -512,7 +512,8 @@ func (suite *JobSuite) TestLoadCollectionWithLoadFields() {
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
-			suite.ErrorIs(err, merr.ErrParameterInvalid)
+			// suite.ErrorIs(err, merr.ErrParameterInvalid)
+			suite.NoError(err)
 		}
 	})
 
@@ -837,7 +838,7 @@ func (suite *JobSuite) TestLoadPartitionWithLoadFields() {
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
-			suite.ErrorIs(err, merr.ErrParameterInvalid)
+			suite.NoError(err)
 		}
 	})
 

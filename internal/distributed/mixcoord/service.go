@@ -907,3 +907,11 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.mixCoord.ListIndexes(ctx, in)
 }
+
+func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return s.mixCoord.GetQuotaMetrics(ctx, req)
+}
+
+func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	return s.mixCoord.ListLoadedSegments(ctx, req)
+}

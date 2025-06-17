@@ -12,6 +12,7 @@
 #pragma once
 #include <cstdint>
 #include "common/FieldDataInterface.h"
+#include "common/JsonCastFunction.h"
 #include "common/JsonCastType.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/ScalarIndex.h"
@@ -69,8 +70,12 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
  public:
     JsonInvertedIndex(const JsonCastType& cast_type,
                       const std::string& nested_path,
-                      const storage::FileManagerContext& ctx)
-        : nested_path_(nested_path), cast_type_(cast_type) {
+                      const storage::FileManagerContext& ctx,
+                      const JsonCastFunction& cast_function =
+                          JsonCastFunction::FromString("unknown"))
+        : nested_path_(nested_path),
+          cast_type_(cast_type),
+          cast_function_(cast_function) {
         this->schema_ = ctx.fieldDataMeta.field_schema;
         this->mem_file_manager_ =
             std::make_shared<storage::MemFileManagerImpl>(ctx);
@@ -80,10 +85,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         if (ctx.for_loading_index) {
             return;
         }
-        auto prefix = this->disk_file_manager_->GetTextIndexIdentifier();
-        constexpr const char* TMP_INVERTED_INDEX_PREFIX =
-            "/tmp/milvus/inverted-index/";
-        this->path_ = std::string(TMP_INVERTED_INDEX_PREFIX) + prefix;
+        this->path_ = this->disk_file_manager_->GetLocalTempIndexObjectPrefix();
 
         this->d_type_ = cast_type_.ToTantivyType();
         boost::filesystem::create_directories(this->path_);
@@ -111,7 +113,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     }
 
     bool
-    IsDataTypeSupported(DataType data_type) const override;
+    IsDataTypeSupported(DataType data_type, bool is_array) const override;
 
     JsonInvertedIndexParseErrorRecorder&
     GetErrorRecorder() {
@@ -127,6 +129,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     std::string nested_path_;
     JsonInvertedIndexParseErrorRecorder error_recorder_;
     JsonCastType cast_type_;
+    JsonCastFunction cast_function_;
 };
 
 }  // namespace milvus::index

@@ -189,3 +189,7 @@ func (m *GrpcQueryCoordClient) CheckQueryNodeDistribution(ctx context.Context, r
 func (m *GrpcQueryCoordClient) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcQueryCoordClient) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
+	return &querypb.ListLoadedSegmentsResponse{}, m.Err
+}

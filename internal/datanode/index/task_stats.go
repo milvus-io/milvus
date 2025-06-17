@@ -164,6 +164,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
+		zap.Any("storageConfig", st.req.StorageConfig),
 	)
 	return nil
 }
@@ -190,6 +191,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return st.binlogIO.Upload(ctx, kvs)
 		}),
 		storage.WithVersion(st.req.GetStorageVersion()),
+		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
@@ -235,6 +237,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		storage.WithVersion(st.req.StorageVersion),
 		storage.WithDownloader(st.binlogIO.Download),
 		storage.WithBucketName(st.req.StorageConfig.BucketName),
+		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))

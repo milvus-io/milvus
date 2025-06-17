@@ -115,7 +115,7 @@ func (t *L0PreImportTask) Clone() Task {
 }
 
 func (t *L0PreImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
+	bufferSize := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	log.Info("start to preimport l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", t.GetSchema()))...)
@@ -124,8 +124,12 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	fn := func() (err error) {
 		defer func() {
 			if err != nil {
-				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.Error(err))...)
-				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+				var reason string = err.Error()
+				if len(t.GetFileStats()) == 1 {
+					reason = fmt.Sprintf("error: %v, file: %s", err, t.GetFileStats()[0].GetImportFile().String())
+				}
+				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.String("err", reason))...)
+				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
 

@@ -173,13 +173,27 @@ func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
 	)
 }
 
+func (sd *shardDelegator) NotStopped(state lifetime.State) error {
+	if state != lifetime.Stopped {
+		return nil
+	}
+	return merr.WrapErrChannelNotAvailable(sd.vchannelName, fmt.Sprintf("delegator is not ready, state: %s", state.String()))
+}
+
+func (sd *shardDelegator) IsWorking(state lifetime.State) error {
+	if state == lifetime.Working {
+		return nil
+	}
+	return merr.WrapErrChannelNotAvailable(sd.vchannelName, fmt.Sprintf("delegator is not ready, state: %s", state.String()))
+}
+
 // Serviceable returns whether delegator is serviceable now.
 func (sd *shardDelegator) Serviceable() bool {
-	return lifetime.IsWorking(sd.lifetime.GetState()) == nil
+	return sd.IsWorking(sd.lifetime.GetState()) == nil
 }
 
 func (sd *shardDelegator) Stopped() bool {
-	return lifetime.NotStopped(sd.lifetime.GetState()) != nil
+	return sd.NotStopped(sd.lifetime.GetState()) != nil
 }
 
 // Start sets delegator to working state.
@@ -357,7 +371,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 // Search preforms search operation on shard.
 func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return nil, err
 	}
 	defer sd.lifetime.Done()
@@ -563,7 +577,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 // Query performs query operation on shard.
 func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return nil, err
 	}
 	defer sd.lifetime.Done()
@@ -658,7 +672,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 // GetStatistics returns statistics aggregated by delegator.
 func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error) {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return nil, err
 	}
 	defer sd.lifetime.Done()
@@ -976,7 +990,7 @@ func (sd *shardDelegator) GetTSafe() uint64 {
 
 func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.CollectionSchema, schVersion uint64) error {
 	log := sd.getLogger(ctx)
-	if err := sd.lifetime.Add(lifetime.IsWorking); err != nil {
+	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
 		return err
 	}
 	defer sd.lifetime.Done()
@@ -1041,6 +1055,12 @@ func (sd *shardDelegator) Close() {
 	// clean idf oracle
 	if sd.idfOracle != nil {
 		sd.idfOracle.Close()
+	}
+
+	if sd.functionRunners != nil {
+		for _, function := range sd.functionRunners {
+			function.Close()
+		}
 	}
 
 	// clean up l0 segment in delete buffer

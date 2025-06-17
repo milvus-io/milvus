@@ -1509,150 +1509,6 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 	}
 }
 
-func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
-	type fields struct {
-		meta          *meta
-		allocator     allocator.Allocator
-		signals       chan *compactionSignal
-		inspector     CompactionInspector
-		globalTrigger *time.Ticker
-	}
-	type args struct {
-		collectionID int64
-		compactTime  *compactTime
-	}
-	vecFieldID := int64(201)
-
-	genSegIndex := func(segID, indexID UniqueID, numRows int64) *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex] {
-		segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdx.Insert(indexID, &model.SegmentIndex{
-			SegmentID:    segID,
-			CollectionID: 2,
-			PartitionID:  1,
-			NumRows:      numRows,
-			IndexID:      indexID,
-			BuildID:      segID,
-			NodeID:       0,
-			IndexVersion: 1,
-			IndexState:   commonpb.IndexState_Finished,
-		})
-		return segIdx
-	}
-	im := &indexMeta{
-		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		indexes: map[UniqueID]map[UniqueID]*model.Index{
-			2: {
-				indexID: {
-					TenantID:     "",
-					CollectionID: 2,
-					FieldID:      vecFieldID,
-					IndexID:      indexID,
-					IndexName:    "_default_idx",
-					IsDeleted:    false,
-					CreateTime:   0,
-					TypeParams:   nil,
-					IndexParams: []*commonpb.KeyValuePair{
-						{
-							Key:   common.IndexTypeKey,
-							Value: "HNSW",
-						},
-					},
-					IsAutoIndex:     false,
-					UserIndexParams: nil,
-				},
-			},
-		},
-	}
-	im.segmentIndexes.Insert(1, genSegIndex(1, indexID, 20))
-	im.segmentIndexes.Insert(2, genSegIndex(2, indexID, 20))
-	im.segmentIndexes.Insert(3, genSegIndex(3, indexID, 20))
-	im.segmentIndexes.Insert(4, genSegIndex(4, indexID, 20))
-	im.segmentIndexes.Insert(5, genSegIndex(5, indexID, 20))
-	im.segmentIndexes.Insert(6, genSegIndex(6, indexID, 20))
-	mock0Allocator := newMockAllocator(t)
-
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(2, &collectionInfo{
-		ID: 2,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:  vecFieldID,
-					DataType: schemapb.DataType_FloatVector,
-				},
-			},
-		},
-	})
-
-	tests := []struct {
-		name      string
-		fields    fields
-		args      args
-		wantErr   bool
-		wantPlans []*datapb.CompactionPlan
-	}{
-		{
-			"test small segment",
-			fields{
-				&meta{
-					channelCPs:  newChannelCps(),
-					segments:    mockSegmentsInfo(600, 600, 600, 600, 260, 260),
-					indexMeta:   im,
-					collections: collections,
-				},
-				mock0Allocator,
-				make(chan *compactionSignal, 1),
-				&spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
-				nil,
-			},
-			args{
-				2,
-				&compactTime{},
-			},
-			false,
-			nil,
-		},
-	}
-	for _, tt := range tests {
-		(tt.fields.inspector).(*spyCompactionInspector).meta = tt.fields.meta
-		t.Run(tt.name, func(t *testing.T) {
-			tt.fields.meta.channelCPs.checkpoints["ch1"] = &msgpb.MsgPosition{
-				Timestamp: tsoutil.ComposeTSByTime(time.Now(), 0),
-				MsgID:     []byte{1, 2, 3, 4},
-			}
-			tr := &compactionTrigger{
-				meta:                         tt.fields.meta,
-				handler:                      newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                    tt.fields.allocator,
-				signals:                      make(chan *compactionSignal, 100),
-				inspector:                    tt.fields.inspector,
-				globalTrigger:                tt.fields.globalTrigger,
-				indexEngineVersionManager:    newMockVersionManager(),
-				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-				closeCh:                      lifetime.NewSafeChan(),
-				testingOnly:                  true,
-			}
-			tr.start()
-			defer tr.stop()
-			_, err := tr.TriggerCompaction(context.TODO(), NewCompactionSignal())
-			assert.Equal(t, tt.wantErr, err != nil)
-			spy := (tt.fields.inspector).(*spyCompactionInspector)
-			select {
-			case val := <-spy.spyChan:
-				// max size == 1000, expansion rate == 1.25.
-				// segment 5 and 6 are squeezed into a non-planned segment. Total size: 600 + 260 + 260 == 1120,
-				// which is greater than 1000 but smaller than 1000 * 1.25
-				assert.Equal(t, len(val.SegmentBinlogs), 3)
-				return
-			case <-time.After(3 * time.Second):
-				assert.Fail(t, "failed to get plan")
-				return
-			}
-		})
-	}
-}
-
 // Test segment compaction target size
 func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	type fields struct {
@@ -2731,7 +2587,12 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogID: 1},
+						{
+							EntriesNum:    5,
+							LogID:         1,
+							TimestampFrom: 1000,
+							TimestampTo:   2000,
+						},
 					},
 				},
 			},
@@ -2759,7 +2620,13 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogID: 2, MemorySize: 3 * 1024 * 1024 * 1024},
+						{
+							EntriesNum:    5,
+							LogID:         2,
+							MemorySize:    3 * 1024 * 1024 * 1024,
+							TimestampFrom: 2000,
+							TimestampTo:   3000,
+						},
 					},
 				},
 			},
@@ -2845,7 +2712,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 		{
 			name: "force trigger on large segments",
 			fields: fields{
-				&meta{
+				meta: &meta{
 					catalog:    catalog,
 					channelCPs: newChannelCps(),
 					segments: &SegmentsInfo{
@@ -2889,10 +2756,10 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 					},
 					collections: collections,
 				},
-				mock0Allocator,
-				nil,
-				&spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
-				nil,
+				allocator:     mock0Allocator,
+				signals:       nil,
+				inspector:     &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
+				globalTrigger: nil,
 			},
 			args: args{
 				segments:     []*SegmentInfo{seg1, seg2},
@@ -2921,6 +2788,308 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 			}
 
 			if got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("compactionTrigger.generatePlans() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	vecFieldID := int64(201)
+	indexID := int64(1001)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  vecFieldID,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
+
+	mock0Allocator := newMock0Allocator(t)
+
+	seg1 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							EntriesNum:    5,
+							LogID:         1,
+							TimestampFrom: 1000,
+							TimestampTo:   2000,
+						},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 1, MemorySize: 1 * 1024 * 1024},
+					},
+				},
+			},
+			IsSorted: true,
+		},
+	}
+
+	seg2 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             2,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							EntriesNum:    5,
+							LogID:         2,
+							TimestampFrom: 1000,
+							TimestampTo:   2000,
+						},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 2},
+					},
+				},
+			},
+			IsSorted: true,
+		},
+	}
+
+	seg3 := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             3,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							EntriesNum:    5,
+							LogID:         3,
+							TimestampFrom: 3000,
+							TimestampTo:   4000,
+						},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogID: 3},
+					},
+				},
+			},
+			IsSorted: true,
+		},
+	}
+
+	type fields struct {
+		meta          *meta
+		allocator     allocator.Allocator
+		signals       chan *compactionSignal
+		inspector     CompactionInspector
+		globalTrigger *time.Ticker
+	}
+	type args struct {
+		segments     []*SegmentInfo
+		signal       *compactionSignal
+		compactTime  *compactTime
+		expectedSize int64
+	}
+
+	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	collections.Insert(2, &collectionInfo{
+		ID:     2,
+		Schema: schema,
+		Properties: map[string]string{
+			common.CollectionTTLConfigKey: "0",
+		},
+	})
+
+	segIndexes := typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]()
+	segIdx0 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx0.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           1,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             1,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(1, segIdx0)
+	segIdx1 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx1.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           2,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             2,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(2, segIdx1)
+	segIdx2 := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	segIdx2.Insert(indexID, &model.SegmentIndex{
+		SegmentID:           3,
+		CollectionID:        2,
+		PartitionID:         1,
+		NumRows:             100,
+		IndexID:             indexID,
+		BuildID:             3,
+		NodeID:              0,
+		IndexVersion:        1,
+		IndexState:          commonpb.IndexState_Finished,
+		FailReason:          "",
+		IsDeleted:           false,
+		CreatedUTCTime:      0,
+		IndexFileKeys:       nil,
+		IndexSerializedSize: 0,
+		WriteHandoff:        false,
+	})
+	segIndexes.Insert(3, segIdx2)
+
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []*typeutil.Pair[int64, []int64]
+	}{
+		{
+			name: "test time-based compaction",
+			fields: fields{
+				meta: &meta{
+					catalog:    catalog,
+					channelCPs: newChannelCps(),
+					segments: &SegmentsInfo{
+						segments: map[int64]*SegmentInfo{
+							1: seg1,
+							2: seg2,
+							3: seg3,
+						},
+						secondaryIndexes: segmentInfoIndexes{
+							coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+								2: {
+									seg1.GetID(): seg1,
+									seg2.GetID(): seg2,
+									seg3.GetID(): seg3,
+								},
+							},
+						},
+					},
+					indexMeta: &indexMeta{
+						segmentIndexes: segIndexes,
+						indexes: map[UniqueID]map[UniqueID]*model.Index{
+							2: {
+								indexID: {
+									TenantID:     "",
+									CollectionID: 2,
+									FieldID:      vecFieldID,
+									IndexID:      indexID,
+									IndexName:    "_default_idx",
+									IsDeleted:    false,
+									CreateTime:   0,
+									TypeParams:   nil,
+									IndexParams: []*commonpb.KeyValuePair{
+										{
+											Key:   common.IndexTypeKey,
+											Value: "HNSW",
+										},
+									},
+									IsAutoIndex:     false,
+									UserIndexParams: nil,
+								},
+							},
+						},
+					},
+					collections: collections,
+				},
+				allocator:     mock0Allocator,
+				signals:       nil,
+				inspector:     &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1)},
+				globalTrigger: nil,
+			},
+			args: args{
+				segments:     []*SegmentInfo{seg1, seg2, seg3},
+				signal:       &compactionSignal{collectionID: 2, partitionID: 1, channel: "ch1", isForce: false},
+				compactTime:  &compactTime{startTime: 1000, collectionTTL: time.Hour},
+				expectedSize: 1024 * 1024 * 1024,
+			},
+			want: []*typeutil.Pair[int64, []int64]{
+				{A: 300, B: []int64{1, 2, 3}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &compactionTrigger{
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				inspector:                    tt.fields.inspector,
+				globalTrigger:                tt.fields.globalTrigger,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				closeCh:                      lifetime.NewSafeChan(),
+				testingOnly:                  true,
+			}
+
+			got := tr.generatePlans(tt.args.segments, tt.args.signal, tt.args.compactTime, tt.args.expectedSize)
+			for i, pair := range got {
+				t.Logf("got[%d]: totalRows=%d, segmentIDs=%v", i, pair.A, pair.B)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("compactionTrigger.generatePlans() = %+v, want %+v", got, tt.want)
 			}
 		})

@@ -247,7 +247,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			}
 		}
 
-		// If poped idx reaches end of segment, invalidate cache and advance to next segment
+		// If poped idx reaches end of segment, invalidate cache and advance to next record
 		if idx.i == recs[idx.ri].Len()-1 {
 			err := advanceRecord(idx.ri)
 			if err == io.EOF {

@@ -1936,7 +1936,7 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
 	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
-			isFlush(segment) && // sealed segment
+			isFlushed(segment) && // sealed segment
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() // not importing now
 	}))

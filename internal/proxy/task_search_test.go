@@ -776,6 +776,34 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("reject large num of result entries", func(t *testing.T) {
+		collName := "test_large_num_of_result_entries" + funcutil.GenRandomStr()
+		createColl(t, collName, qc)
+
+		task := getSearchTask(t, collName)
+		task.SearchRequest.Nq = 1000
+		task.SearchRequest.Topk = 1001
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		task.SearchRequest.Nq = 100
+		task.SearchRequest.Topk = 100
+		task.SearchRequest.GroupSize = 200
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		task.SearchRequest.IsAdvanced = true
+		task.SearchRequest.SubReqs = []*internalpb.SubSearchRequest{
+			{
+				Topk:      100,
+				Nq:        100,
+				GroupSize: 200,
+			},
+		}
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
 	t.Run("collection not exist", func(t *testing.T) {
 		collName := "test_collection_not_exist" + funcutil.GenRandomStr()
 		task := getSearchTask(t, collName)
@@ -972,7 +1000,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
 		enqueueTs := uint64(100000)
 		st.SetTs(enqueueTs)
-		assert.ErrorContains(t, st.PreExecute(ctx), "Current rerank does not support grouping search")
+		assert.NoError(t, st.PreExecute(ctx))
 	})
 }
 
@@ -1124,7 +1152,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
+	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
 
@@ -3624,7 +3652,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
+	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
 

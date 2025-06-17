@@ -65,7 +65,7 @@ GenerateArrayData(proto::schema::DataType element_type,
                   int cardinality,
                   int size,
                   int array_len) {
-    std::vector<ScalarArray> data(size);
+    std::vector<ScalarFieldProto> data(size);
     switch (element_type) {
         case proto::schema::DataType::Bool: {
             for (int i = 0; i < size; i++) {
@@ -201,7 +201,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     ptr[byteIndex] &= ~(1 << bitIndex);
                 }
             }
-            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            field_data->FillFieldData(data_.data(), ptr, data_.size(), 0);
             delete[] ptr;
         } else {
             field_data->FillFieldData(data_.data(), data_.size());

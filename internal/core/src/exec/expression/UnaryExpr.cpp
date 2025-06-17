@@ -16,6 +16,7 @@
 
 #include "UnaryExpr.h"
 #include <optional>
+#include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/type_c.h"
@@ -217,10 +218,6 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     case proto::plan::GenericValue::ValCase::kStringVal:
                         result = ExecRangeVisitorImplForIndex<std::string>();
-                        break;
-                    case proto::plan::GenericValue::ValCase::kArrayVal:
-                        result =
-                            ExecRangeVisitorImplForIndex<proto::plan::Array>();
                         break;
                     default:
                         PanicInfo(
@@ -1222,40 +1219,59 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                             op_type,
                             val,
                             arrayIndex,
-                            pointer](bool valid,
-                                     uint8_t type,
-                                     uint32_t row_id,
-                                     uint16_t offset,
-                                     uint16_t size,
-                                     int32_t value) {
-            if (valid) {
-                if (type == uint8_t(milvus::index::JSONType::UNKNOWN) ||
-                    !arrayIndex.empty()) {
-                    return false;
+                            pointer](const bool* valid_array,
+                                     const uint8_t* type_array,
+                                     const uint32_t* row_id_array,
+                                     const uint16_t* offset_array,
+                                     const uint16_t* size_array,
+                                     const int32_t* value_array,
+                                     TargetBitmap& bitset,
+                                     const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (!valid) {
+                    invalid_row_ids.push_back(row_id);
+                    continue;
                 }
-                ISVALIDJSONTYPE(type, GetType);
-                switch (op_type) {
-                    case proto::plan::GreaterThan:
-                        CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::GreaterEqual:
-                        CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::LessThan:
-                        CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::LessEqual:
-                        CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::Equal:
-                        CompareValueWithOpType(type, value, val, op_type);
-                    case proto::plan::NotEqual:
-                        CompareValueWithOpType(type, value, val, op_type);
-                    default:
+                auto f = [&]() {
+                    if (type == uint8_t(milvus::index::JSONType::UNKNOWN) ||
+                        !arrayIndex.empty()) {
                         return false;
-                }
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+                    }
+                    ISVALIDJSONTYPE(type, GetType);
+                    switch (op_type) {
+                        case proto::plan::GreaterThan:
+                            CompareValueWithOpType(type, value, val, op_type);
+                        case proto::plan::GreaterEqual:
+                            CompareValueWithOpType(type, value, val, op_type);
+                        case proto::plan::LessThan:
+                            CompareValueWithOpType(type, value, val, op_type);
+                        case proto::plan::LessEqual:
+                            CompareValueWithOpType(type, value, val, op_type);
+                        case proto::plan::Equal:
+                            CompareValueWithOpType(type, value, val, op_type);
+                        case proto::plan::NotEqual:
+                            CompareValueWithOpType(type, value, val, op_type);
+                        default:
+                            return false;
+                    }
+                };
+                bitset[row_id] = f();
+            }
+            auto f = [&](const milvus::Json& json,
+                         uint8_t type,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 switch (op_type) {
                     case proto::plan::GreaterThan:
                         if constexpr (std::is_same_v<GetType,
@@ -1421,7 +1437,19 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
                     default:
                         return false;
                 }
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    auto value = value_array[i];
+                    bitset[row_id] = f(json, type, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;

@@ -17,11 +17,13 @@
 #include "index/IndexFactory.h"
 #include <cstdlib>
 #include <memory>
+#include <string>
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
 #include "common/JsonCastType.h"
 #include "common/Types.h"
 #include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -384,20 +386,33 @@ IndexFactory::CreateJsonIndex(
     IndexType index_type,
     JsonCastType cast_dtype,
     const std::string& nested_path,
-    const storage::FileManagerContext& file_manager_context) {
+    const storage::FileManagerContext& file_manager_context,
+    const std::string& json_cast_function) {
     AssertInfo(index_type == INVERTED_INDEX_TYPE,
                "Invalid index type for json index");
 
     switch (cast_dtype.element_type()) {
         case JsonCastType::DataType::BOOL:
             return std::make_unique<index::JsonInvertedIndex<bool>>(
-                cast_dtype, nested_path, file_manager_context);
+                cast_dtype,
+                nested_path,
+                file_manager_context,
+                JsonCastFunction::FromString(json_cast_function));
         case JsonCastType::DataType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(
-                cast_dtype, nested_path, file_manager_context);
+                cast_dtype,
+                nested_path,
+                file_manager_context,
+                JsonCastFunction::FromString(json_cast_function));
         case JsonCastType::DataType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
-                cast_dtype, nested_path, file_manager_context);
+                cast_dtype,
+                nested_path,
+                file_manager_context,
+                JsonCastFunction::FromString(json_cast_function));
+        case JsonCastType::DataType::JSON:
+            return std::make_unique<JsonFlatIndex>(file_manager_context,
+                                                   nested_path);
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
@@ -428,7 +443,8 @@ IndexFactory::CreateScalarIndex(
             return CreateJsonIndex(create_index_info.index_type,
                                    create_index_info.json_cast_type,
                                    create_index_info.json_path,
-                                   file_manager_context);
+                                   file_manager_context,
+                                   create_index_info.json_cast_function);
         }
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", data_type);

@@ -49,11 +49,11 @@ struct ExtractedPlanInfo {
 
 struct Plan {
  public:
-    explicit Plan(const Schema& schema) : schema_(schema) {
+    explicit Plan(SchemaPtr schema) : schema_(std::move(schema)) {
     }
 
  public:
-    const Schema& schema_;
+    SchemaPtr schema_;
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     std::vector<FieldId> target_entries_;
@@ -98,11 +98,11 @@ struct Placeholder {
 
 struct RetrievePlan {
  public:
-    explicit RetrievePlan(const Schema& schema) : schema_(schema) {
+    explicit RetrievePlan(SchemaPtr schema) : schema_(std::move(schema)) {
     }
 
  public:
-    const Schema& schema_;
+    SchemaPtr schema_;
     std::unique_ptr<RetrievePlanNode> plan_node_;
     std::vector<FieldId> field_ids_;
     std::vector<std::string> target_dynamic_fields_;

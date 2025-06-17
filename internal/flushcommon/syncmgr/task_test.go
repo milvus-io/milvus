@@ -210,6 +210,12 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 		action(seg)
 	}).Return()
 
+	isDataReleased := func(task *SyncTask) bool {
+		return task.pack.insertData == nil &&
+			task.pack.deltaData == nil &&
+			task.pack.bm25Stats == nil
+	}
+
 	s.Run("without_data", func() {
 		task := s.getSuiteSyncTask(new(SyncPack).WithCheckpoint(
 			&msgpb.MsgPosition{
@@ -225,6 +231,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 
 		err := task.Run(ctx)
 		s.NoError(err)
+		s.True(isDataReleased(task)) // data should be released after task finished
 	})
 
 	s.Run("with_insert_delete_cp", func() {
@@ -244,6 +251,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 
 		err := task.Run(ctx)
 		s.NoError(err)
+		s.True(isDataReleased(task)) // data should be released after task finished
 	})
 
 	s.Run("with_flush", func() {
@@ -263,6 +271,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 		}
 		err := task.Run(ctx)
 		s.NoError(err)
+		s.True(isDataReleased(task)) // data should be released after task finished
 	})
 
 	s.Run("with_drop", func() {
@@ -282,6 +291,7 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 		}
 		err := task.Run(ctx)
 		s.NoError(err)
+		s.True(isDataReleased(task)) // data should be released after task finished
 	})
 }
 

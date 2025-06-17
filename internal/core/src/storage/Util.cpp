@@ -1,4 +1,3 @@
-
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -18,6 +17,7 @@
 #include <memory>
 
 #include "arrow/array/builder_binary.h"
+#include "arrow/array/builder_nested.h"
 #include "arrow/scalar.h"
 #include "arrow/type_fwd.h"
 #include "fmt/format.h"
@@ -54,6 +54,8 @@
 #include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
+
+constexpr const char* TEMP = "tmp";
 
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
     {"local", ChunkManagerType::Local},
@@ -283,6 +285,7 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::StringBuilder>();
         }
         case DataType::ARRAY:
+        case DataType::VECTOR_ARRAY:
         case DataType::JSON: {
             return std::make_shared<arrow::BinaryBuilder>();
         }
@@ -343,7 +346,11 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
             return std::make_shared<arrow::BooleanScalar>(
                 default_value.bool_data());
         case DataType::INT8:
+            return std::make_shared<arrow::Int8Scalar>(
+                default_value.int_data());
         case DataType::INT16:
+            return std::make_shared<arrow::Int16Scalar>(
+                default_value.int_data());
         case DataType::INT32:
             return std::make_shared<arrow::Int32Scalar>(
                 default_value.int_data());
@@ -406,6 +413,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::utf8(), nullable)});
         }
         case DataType::ARRAY:
+        case DataType::VECTOR_ARRAY:
         case DataType::JSON: {
             return arrow::schema(
                 {arrow::field("val", arrow::binary(), nullable)});
@@ -553,28 +561,31 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
 }
 
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
-}
-
-std::string
-GenTextIndexPathIdentifier(int64_t build_id,
-                           int64_t index_version,
-                           int64_t segment_id,
-                           int64_t field_id) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
+GenIndexPathIdentifier(int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id) {
+    return std::to_string(build_id) + "_" + std::to_string(index_version) +
+           "_" + std::to_string(segment_id) + "_" + std::to_string(field_id) +
            "/";
 }
 
 std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
-                   int64_t index_version) {
+                   int64_t index_version,
+                   int64_t segment_id,
+                   int64_t field_id,
+                   bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
     boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
     boost::filesystem::path path1 =
-        GenIndexPathIdentifier(build_id, index_version);
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
 }
 
@@ -583,53 +594,37 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
-                       int64_t field_id) {
+                       int64_t field_id,
+                       bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
-    boost::filesystem::path path1 = GenTextIndexPathIdentifier(
-        build_id, index_version, segment_id, field_id);
-    return (prefix / path / path1).string();
-}
 
-std::string
-GenJsonKeyIndexPathIdentifier(int64_t build_id,
-                              int64_t index_version,
-                              int64_t collection_id,
-                              int64_t partition_id,
-                              int64_t segment_id,
-                              int64_t field_id) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(collection_id) + "/" +
-           std::to_string(partition_id) + "/" + std::to_string(segment_id) +
-           "/" + std::to_string(field_id) + "/";
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
+    boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
+    return (prefix / path / path1).string();
 }
 
 std::string
 GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t build_id,
                           int64_t index_version,
-                          int64_t collection_id,
-                          int64_t partition_id,
                           int64_t segment_id,
-                          int64_t field_id) {
-    return cm->GetRootPath() + "/" + std::string(JSON_KEY_INDEX_LOG_ROOT_PATH) +
-           "/" +
-           GenJsonKeyIndexPathIdentifier(build_id,
-                                         index_version,
-                                         collection_id,
-                                         partition_id,
-                                         segment_id,
-                                         field_id);
-}
+                          int64_t field_id,
+                          bool is_temp) {
+    boost::filesystem::path prefix = cm->GetRootPath();
 
-std::string
-GenNgramIndexPathIdentifier(int64_t build_id,
-                            int64_t index_version,
-                            int64_t segment_id,
-                            int64_t field_id) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
-           "/";
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
+    boost::filesystem::path path = std::string(JSON_KEY_INDEX_LOG_ROOT_PATH);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
+    return (prefix / path / path1).string();
 }
 
 std::string
@@ -637,19 +632,17 @@ GenNgramIndexPrefix(ChunkManagerPtr cm,
                     int64_t build_id,
                     int64_t index_version,
                     int64_t segment_id,
-                    int64_t field_id) {
+                    int64_t field_id,
+                    bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
     boost::filesystem::path path = std::string(NGRAM_LOG_ROOT_PATH);
     boost::filesystem::path path1 = GenNgramIndexPathIdentifier(
         build_id, index_version, segment_id, field_id);
-    return (prefix / path / path1).string();
-}
-
-std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-    boost::filesystem::path path1 = std::to_string(build_id);
     return (prefix / path / path1).string();
 }
 
@@ -956,6 +949,9 @@ CreateFieldData(const DataType& type,
         case DataType::VECTOR_INT8:
             return std::make_shared<FieldData<Int8Vector>>(
                 dim, type, total_num_rows);
+        case DataType::VECTOR_ARRAY:
+            return std::make_shared<FieldData<VectorArray>>(type,
+                                                            total_num_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
@@ -1003,7 +999,7 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     for (const auto& data : data_array) {
         if (merged_data->IsNullable()) {
             merged_data->FillFieldData(
-                data->Data(), data->ValidData(), data->Length());
+                data->Data(), data->ValidData(), data->Length(), 0);
         } else {
             merged_data->FillFieldData(data->Data(), data->Length());
         }
@@ -1169,7 +1165,7 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
     }
 
     if (lack_binlog_rows > 0) {
-        LOG_INFO("create index lack binlog detected, lock row num: {}",
+        LOG_INFO("create index lack binlog detected, lack row num: {}",
                  lack_binlog_rows);
         auto field_schema = file_manager->GetFieldDataMeta().field_schema;
         auto default_value = [&]() -> std::optional<DefaultValueType> {

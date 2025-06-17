@@ -459,7 +459,22 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		fixedSizeSerializer,
+		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
+			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
+				if vv, ok := v.([]byte); ok {
+					builder.Append(vv)
+					return true
+				} else if vv, ok := v.([]int8); ok {
+					builder.Append(arrow.Int8Traits.CastToBytes(vv))
+					return true
+				}
+			}
+			return false
+		},
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
 		func(i int) arrow.DataType {
@@ -498,6 +513,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	m[schemapb.DataType_SparseFloatVector] = byteEntry
 	return m
 }()
+
+func IsVectorDataType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_SparseFloatVector:
+		return true
+	}
+	return false
+}
 
 // Since parquet does not support custom fallback encoding for now,
 // we disable dict encoding for primary key.

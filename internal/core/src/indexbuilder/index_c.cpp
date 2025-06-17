@@ -240,8 +240,6 @@ CreateIndex(CIndex* res_index,
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
-        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
-
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
                 field_type, config, fileManagerContext);
@@ -255,13 +253,11 @@ CreateIndex(CIndex* res_index,
         auto status = CStatus();
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
-        milvus_storage::ArrowFileSystemSingleton::GetInstance().Release();
         return status;
     }
 }

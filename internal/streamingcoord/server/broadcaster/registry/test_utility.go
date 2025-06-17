@@ -10,4 +10,5 @@ func ResetRegistration() {
 	localRegistry[AppendOperatorTypeMsgstream] = syncutil.NewFuture[AppendOperator]()
 	localRegistry[AppendOperatorTypeStreaming] = syncutil.NewFuture[AppendOperator]()
 	resetMessageAckCallbacks()
+	resetMessageCheckCallbacks()
 }

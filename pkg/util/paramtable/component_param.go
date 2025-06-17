@@ -270,6 +270,7 @@ type commonConfig struct {
 	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
 	StoragePathPrefix         ParamItem `refreshable:"false"`
+	StorageZstdConcurrency    ParamItem `refreshable:"false"`
 	TTMsgEnabled              ParamItem `refreshable:"true"`
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterSize           ParamItem `refreshable:"true"`
@@ -825,6 +826,17 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		DefaultValue: "",
 	}
 	p.StoragePathPrefix.Init(base.mgr)
+
+	p.StorageZstdConcurrency = ParamItem{
+		Key:          "common.storage.zstd.concurrency",
+		Version:      "2.6.0",
+		DefaultValue: "1",
+		Doc: `The number of concurrent zstd compress threads for one binlog generation, 0 means use all cores.
+Every concurrent zstd compress thread will use additional memory.
+The default value is 1, which is enough for most cases.`,
+		Export: false,
+	}
+	p.StorageZstdConcurrency.Init(base.mgr)
 
 	p.TTMsgEnabled = ParamItem{
 		Key:          "common.ttMsgEnabled",
@@ -1522,6 +1534,7 @@ type proxyConfig struct {
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 	MaxTextLength                ParamItem `refreshable:"false"`
+	MaxResultEntries             ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -1881,7 +1894,7 @@ please adjust in embedded Milvus: false`,
 	p.RetryTimesOnReplica = ParamItem{
 		Key:          "proxy.retryTimesOnReplica",
 		Version:      "2.3.0",
-		DefaultValue: "2",
+		DefaultValue: "5",
 		Doc:          "retry times on each replica",
 	}
 	p.RetryTimesOnReplica.Init(base.mgr)
@@ -1942,6 +1955,17 @@ please adjust in embedded Milvus: false`,
 		Doc:          "maximum number of characters for a row of the text field",
 	}
 	p.MaxTextLength.Init(base.mgr)
+
+	p.MaxResultEntries = ParamItem{
+		Key:          "proxy.maxResultEntries",
+		Version:      "2.6.0",
+		DefaultValue: strconv.Itoa(1000000),
+		Doc: `maximum number of result entries, typically Nq * TopK * GroupSize. 
+It costs additional memory and time to process a large number of result entries. 
+If the number of result entries exceeds this limit, the search will be rejected.`,
+		Export: true,
+	}
+	p.MaxResultEntries.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -2096,6 +2120,9 @@ type queryCoordConfig struct {
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
 	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
 	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
+
+	// query node task parallelism factor
+	QueryNodeTaskParallelismFactor ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2719,6 +2746,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
+
+	p.QueryNodeTaskParallelismFactor = ParamItem{
+		Key:          "queryCoord.queryNodeTaskParallelismFactor",
+		Version:      "2.5.14",
+		DefaultValue: "1",
+		Doc:          "the parallelism factor for query node task, which permit query node execute cpuNum * parallelismFactor tasks in parallel",
+		Export:       false,
+	}
+	p.QueryNodeTaskParallelismFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2795,7 +2831,8 @@ type queryNodeConfig struct {
 
 	IndexOffsetCacheEnabled ParamItem `refreshable:"true"`
 
-	ReadAheadPolicy ParamItem `refreshable:"false"`
+	ReadAheadPolicy     ParamItem `refreshable:"false"`
+	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxReceiveChanSize    ParamItem `refreshable:"false"`
 	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
@@ -2975,11 +3012,11 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 	p.TieredMemoryLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
 		Version:      "2.6.0",
-		DefaultValue: "0.6",
+		DefaultValue: "0.75",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
-				return "0.6"
+				return "0.75"
 			}
 			return fmt.Sprintf("%f", ratio)
 		},
@@ -3025,11 +3062,11 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	p.TieredDiskLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
 		Version:      "2.6.0",
-		DefaultValue: "0.6",
+		DefaultValue: "0.75",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
-				return "0.6"
+				return "0.75"
 			}
 			return fmt.Sprintf("%f", ratio)
 		},
@@ -3086,11 +3123,11 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	p.TieredEvictionIntervalMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionIntervalMs",
 		Version:      "2.6.0",
-		DefaultValue: "10000",
+		DefaultValue: "1000",
 		Formatter: func(v string) string {
 			window := getAsInt64(v)
 			if window < 0 {
-				return "10000"
+				return "1000"
 			}
 			return fmt.Sprintf("%d", window)
 		},
@@ -3465,6 +3502,15 @@ However, this optimization may come at the cost of a slight decrease in query la
 		Export:       true,
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
+
+	// this is being deprecated, thus not exported
+	p.ChunkCacheWarmingUp = ParamItem{
+		Key:          "queryNode.cache.warmup",
+		Version:      "2.3.6",
+		DefaultValue: "disable",
+		Export:       false,
+	}
+	p.ChunkCacheWarmingUp.Init(base.mgr)
 
 	p.MaxReceiveChanSize = ParamItem{
 		Key:          "queryNode.scheduler.receiveChanSize",
@@ -3967,15 +4013,16 @@ type dataCoordConfig struct {
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 
 	// import
-	FilesPerPreImportTask    ParamItem `refreshable:"true"`
-	ImportTaskRetention      ParamItem `refreshable:"true"`
-	MaxSizeInMBPerImportTask ParamItem `refreshable:"true"`
-	ImportScheduleInterval   ParamItem `refreshable:"true"`
-	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
-	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
-	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
-	MaxImportJobNum          ParamItem `refreshable:"true"`
-	WaitForIndex             ParamItem `refreshable:"true"`
+	FilesPerPreImportTask           ParamItem `refreshable:"true"`
+	ImportTaskRetention             ParamItem `refreshable:"true"`
+	MaxSizeInMBPerImportTask        ParamItem `refreshable:"true"`
+	ImportScheduleInterval          ParamItem `refreshable:"true"`
+	ImportCheckIntervalHigh         ParamItem `refreshable:"true"`
+	ImportCheckIntervalLow          ParamItem `refreshable:"true"`
+	MaxFilesPerImportReq            ParamItem `refreshable:"true"`
+	MaxImportJobNum                 ParamItem `refreshable:"true"`
+	WaitForIndex                    ParamItem `refreshable:"true"`
+	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4879,6 +4926,14 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.WaitForIndex.Init(base.mgr)
 
+	p.ImportPreAllocIDExpansionFactor = ParamItem{
+		Key:          "dataCoord.import.preAllocateIDExpansionFactor",
+		Version:      "2.5.13",
+		DefaultValue: "10",
+		Doc:          `The expansion factor for pre-allocating IDs during import.`,
+	}
+	p.ImportPreAllocIDExpansionFactor.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -5110,7 +5165,8 @@ type dataNodeConfig struct {
 	// import
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
+	ImportInsertBufferSize     ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
 	MaxTaskSlotNum             ParamItem `refreshable:"true"`
 
 	// Compaction
@@ -5416,15 +5472,33 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxImportFileSizeInGB.Init(base.mgr)
 
-	p.ReadBufferSizeInMB = ParamItem{
+	p.ImportInsertBufferSize = ParamItem{
 		Key:          "dataNode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
-		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
-		DefaultValue: "16",
+		Doc:          "The insert buffer size (in MB) during import.",
+		DefaultValue: "64",
+		Formatter: func(v string) string {
+			bufferSize := getAsFloat(v)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ReadBufferSizeInMB.Init(base.mgr)
+	p.ImportInsertBufferSize.Init(base.mgr)
+
+	p.ImportDeleteBufferSize = ParamItem{
+		Key:          "dataNode.import.readDeleteBufferSizeInMB",
+		Version:      "2.5.14",
+		Doc:          "The delete buffer size (in MB) during import.",
+		DefaultValue: "16",
+		Formatter: func(v string) string {
+			bufferSize := getAsFloat(v)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportDeleteBufferSize.Init(base.mgr)
 
 	p.MaxTaskSlotNum = ParamItem{
 		Key:          "dataNode.import.maxTaskSlotNum",
@@ -5551,6 +5625,7 @@ type streamingConfig struct {
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
+	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
 
 	// balancer Policy
 	WALBalancerPolicyName                           ParamItem `refreshable:"true"`
@@ -5584,8 +5659,9 @@ type streamingConfig struct {
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
 	WALRecoveryMaxDirtyMessage      ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout ParamItem `refreshable:"true"`
-	WALTruncateSampleInterval       ParamItem `refreshable:"true"`
-	WALTruncateRetentionInterval    ParamItem `refreshable:"true"`
+
+	WALTruncateSampleInterval    ParamItem `refreshable:"true"`
+	WALTruncateRetentionInterval ParamItem `refreshable:"true"`
 }
 
 func (p *streamingConfig) init(base *BaseTable) {
@@ -5616,6 +5692,15 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+	p.WALBalancerOperationTimeout = ParamItem{
+		Key:     "streaming.walBalancer.operationTimeout",
+		Version: "2.6.0",
+		Doc: `The timeout of wal balancer operation, 10s by default.
+If the operation exceeds this timeout, it will be canceled.`,
+		DefaultValue: "10s",
+		Export:       true,
+	}
+	p.WALBalancerOperationTimeout.Init(base.mgr)
 
 	p.WALBalancerPolicyName = ParamItem{
 		Key:          "streaming.walBalancer.balancePolicy.name",
@@ -5804,10 +5889,10 @@ If that persist operation exceeds this timeout, the wal recovery module will clo
 	p.WALTruncateSampleInterval = ParamItem{
 		Key:     "streaming.walTruncate.sampleInterval",
 		Version: "2.6.0",
-		Doc: `The interval of sampling wal checkpoint when truncate, 1m by default.
+		Doc: `The interval of sampling wal checkpoint when truncate, 30m by default.
 Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
 More samples, more frequent truncate, more memory usage.`,
-		DefaultValue: "1m",
+		DefaultValue: "30m",
 		Export:       true,
 	}
 	p.WALTruncateSampleInterval.Init(base.mgr)
@@ -5815,10 +5900,14 @@ More samples, more frequent truncate, more memory usage.`,
 	p.WALTruncateRetentionInterval = ParamItem{
 		Key:     "streaming.walTruncate.retentionInterval",
 		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 5m by default.
+		Doc: `The retention interval of wal truncate, 26h by default.
 If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
-Greater the interval, more wal storage usage, more redundant data in wal`,
-		DefaultValue: "5m",
+Greater the interval, more wal storage usage, more redundant data in wal.
+Because current query path doesn't promise the read operation not happen before the truncate point,
+retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
+If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
+because the wal truncate operation is implemented by pulsar consumer.`,
+		DefaultValue: "26h",
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)

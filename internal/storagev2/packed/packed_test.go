@@ -82,7 +82,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1, 2}}}
 	bufferSize := int64(10 * 1024 * 1024) // 10MB
 	multiPartUploadSize := int64(0)
-	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups, nil)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(suite.rec)
@@ -91,7 +91,7 @@ func (suite *PackedTestSuite) TestPackedOneFile() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	reader, err := NewPackedReader(paths, suite.schema, bufferSize)
+	reader, err := NewPackedReader(paths, suite.schema, bufferSize, nil)
 	suite.NoError(err)
 	rr, err := reader.ReadNext()
 	suite.NoError(err)
@@ -132,9 +132,9 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	defer rec.Release()
 	paths := []string{"/tmp/100", "/tmp/101"}
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{2}}, {Columns: []int{0, 1}}}
-	bufferSize := int64(10 * 1024 * 1024) // 10MB
+	bufferSize := int64(-1) // unlimited
 	multiPartUploadSize := int64(0)
-	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups)
+	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups, nil)
 	suite.NoError(err)
 	for i := 0; i < batches; i++ {
 		err = pw.WriteRecordBatch(rec)
@@ -143,7 +143,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	err = pw.Close()
 	suite.NoError(err)
 
-	reader, err := NewPackedReader(paths, suite.schema, bufferSize)
+	reader, err := NewPackedReader(paths, suite.schema, bufferSize, nil)
 	suite.NoError(err)
 	var rows int64 = 0
 	var rr arrow.Record

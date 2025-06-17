@@ -43,6 +43,13 @@ InterimSealedIndexTranslator::cell_id_of(
 milvus::cachinglayer::ResourceUsage
 InterimSealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
+    // SCANN reference the raw data and has little meta, thus we ignore its size.
+    if (index_type_ == knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
+        return milvus::cachinglayer::ResourceUsage{0, 0};
+    }
+    // IVF_FLAT_CC, SPARSE_WAND_CC and SPARSE_INVERTED_INDEX_CC basically has the same size as the
+    // raw data.
+    // TODO(tiered storage 1) cqy123456: provide a better estimation for IVF_SQ_CC once supported.
     auto size = vec_data_->DataByteSize();
     return milvus::cachinglayer::ResourceUsage{static_cast<int64_t>(size), 0};
 }

@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
@@ -143,12 +144,14 @@ type QuotaCenter struct {
 	mixCoord types.MixCoord
 	meta     IMetaTable
 
+	lock sync.RWMutex
+
 	// metrics
 	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
 	dataNodeMetrics  map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
 	proxyMetrics     map[UniqueID]*metricsinfo.ProxyQuotaMetrics
-	diskMu           sync.Mutex // guards dataCoordMetrics and totalBinlogSize
 	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
+	diskMu           sync.Mutex // guards dataCoordMetrics and totalBinlogSize
 	totalBinlogSize  int64
 
 	readableCollections map[int64]map[int64][]int64            // db id -> collection id -> partition id
@@ -180,6 +183,7 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 		ctx:                  ctx,
 		cancel:               cancel,
 		proxies:              proxies,
+		lock:                 sync.RWMutex{},
 		mixCoord:             mixCoord,
 		tsoAllocator:         tsoAllocator,
 		meta:                 meta,
@@ -388,6 +392,9 @@ func SplitCollectionKey(key string) (dbID int64, collectionName string) {
 
 // collectMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) collectMetrics() error {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
 	oldDataNodes := typeutil.NewSet(lo.Keys(q.dataNodeMetrics)...)
 	oldQueryNodes := typeutil.NewSet(lo.Keys(q.queryNodeMetrics)...)
 	q.clearMetrics()
@@ -1593,4 +1600,28 @@ func (q *QuotaCenter) diskAllowance(collection UniqueID) float64 {
 	}
 	allowance = math.Min(allowance, totalDiskQuota-float64(q.totalBinlogSize))
 	return allowance
+}
+
+func (q *QuotaCenter) getQuotaMetrics() *internalpb.GetQuotaMetricsResponse {
+	q.lock.RLock()
+	defer q.lock.RUnlock()
+
+	quotaCenterMetrics := &metricsinfo.QuotaCenterMetrics{
+		QueryNodeMetrics: q.queryNodeMetrics,
+		DataNodeMetrics:  q.dataNodeMetrics,
+		ProxyMetrics:     q.proxyMetrics,
+		DataCoordMetrics: q.dataCoordMetrics,
+	}
+
+	responseString, err := metricsinfo.MarshalComponentInfos(quotaCenterMetrics)
+	if err != nil {
+		log.Warn("failed to marshal quota center metrics", zap.Error(err))
+		return &internalpb.GetQuotaMetricsResponse{
+			Status: merr.Status(err),
+		}
+	}
+	return &internalpb.GetQuotaMetricsResponse{
+		Status:      merr.Status(nil),
+		MetricsInfo: responseString,
+	}
 }

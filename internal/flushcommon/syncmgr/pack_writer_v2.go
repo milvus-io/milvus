@@ -139,7 +139,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups)
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,10 @@ func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, sp
 		if _, ok := memorySizes[field.FieldID]; !ok {
 			return nil, fmt.Errorf("field %d not found in insert data", field.FieldID)
 		}
-		if rowNums[field.FieldID] != 0 && memorySizes[field.FieldID]/rowNums[field.FieldID] >= splitThresHold {
+		// Check if the field is a vector type
+		if storage.IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+		} else if rowNums[field.FieldID] != 0 && memorySizes[field.FieldID]/rowNums[field.FieldID] >= splitThresHold {
 			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
 		} else {
 			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)

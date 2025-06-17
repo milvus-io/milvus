@@ -127,8 +127,10 @@ func (st *statsTask) UpdateTaskVersion(nodeID int64) error {
 
 func (st *statsTask) resetTask(ctx context.Context, reason string) {
 	// reset isCompacting
-	st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
-	st.meta.SetSegmentStating(st.GetSegmentID(), false)
+	if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
+		st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
+		st.meta.SetSegmentStating(st.GetSegmentID(), false)
+	}
 
 	// reset state to init
 	st.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
@@ -153,24 +155,26 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	)
 
 	// Check segment compaction state
-	if exist, canCompact := st.meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}); !exist || !canCompact {
-		log.Warn("segment is not exist or is compacting, skip stats and remove stats task",
-			zap.Bool("exist", exist), zap.Bool("canCompact", canCompact))
+	if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
+		if exist, canCompact := st.meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}); !exist || !canCompact {
+			log.Warn("segment is not exist or is compacting, skip stats and remove stats task",
+				zap.Bool("exist", exist), zap.Bool("canCompact", canCompact))
 
-		if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
-			log.Warn("remove stats task failed, will retry later", zap.Error(err))
+			if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
+				log.Warn("remove stats task failed, will retry later", zap.Error(err))
+				return
+			}
+			st.SetState(indexpb.JobState_JobStateNone, "segment is not exist or is compacting")
 			return
 		}
-		st.SetState(indexpb.JobState_JobStateNone, "segment is not exist or is compacting")
-		return
-	}
 
-	// Check if segment is part of L0 compaction
-	if !st.compactionInspector.checkAndSetSegmentStating(st.GetInsertChannel(), st.GetSegmentID()) {
-		log.Warn("segment is contained by L0 compaction, skipping stats task")
-		// Reset isCompacting flag
-		st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
-		return
+		// Check if segment is part of L0 compaction
+		if !st.compactionInspector.checkAndSetSegmentStating(st.GetInsertChannel(), st.GetSegmentID()) {
+			log.Warn("segment is contained by L0 compaction, skipping stats task")
+			// Reset isCompacting flag
+			st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
+			return
+		}
 	}
 
 	var err error
@@ -383,14 +387,16 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 }
 
 func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResult) error {
+	var err error
 	switch st.GetSubJobType() {
 	case indexpb.StatsSubJob_Sort:
 		// first update segment, failed state cannot generate new segment
-		metricMutation, err := st.meta.SaveStatsResultSegment(st.GetSegmentID(), result)
+		var metricMutation *segMetricMutation
+		metricMutation, err = st.meta.SaveStatsResultSegment(st.GetSegmentID(), result)
 		if err != nil {
 			log.Ctx(ctx).Warn("save sort stats result failed", zap.Int64("taskID", st.GetTaskID()),
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
-			return err
+			break
 		}
 		metricMutation.commit()
 
@@ -399,18 +405,18 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		default:
 		}
 	case indexpb.StatsSubJob_TextIndexJob:
-		err := st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
+		err = st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
 		if err != nil {
 			log.Ctx(ctx).Warn("save text index stats result failed", zap.Int64("taskID", st.GetTaskID()),
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
-			return err
+			break
 		}
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
-		err := st.meta.UpdateSegment(st.GetSegmentID(), SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
+		err = st.meta.UpdateSegment(st.GetSegmentID(), SetJsonKeyIndexLogs(result.GetJsonKeyStatsLogs()))
 		if err != nil {
 			log.Ctx(ctx).Warn("save json key index stats result failed", zap.Int64("taskId", st.GetTaskID()),
 				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
-			return err
+			break
 		}
 	case indexpb.StatsSubJob_NgramIndexJob:
 		err := st.meta.UpdateSegment(st.GetSegmentID(), SetNgramIndexLogs(result.GetNgramIndexStatsLogs()))
@@ -423,8 +429,16 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 		// bm25 logs are generated during with segment flush.
 	}
 
+	// if segment is not found, it means the segment is already dropped,
+	// so we can ignore the error and mark task as finished.
+	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
+		return err
+	}
 	// Reset isCompacting flag after stats task is finished
-	st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
+	if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
+		st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
+		st.meta.SetSegmentStating(st.GetSegmentID(), false)
+	}
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		zap.String("subJobType", st.GetSubJobType().String()), zap.String("state", st.GetState().String()))

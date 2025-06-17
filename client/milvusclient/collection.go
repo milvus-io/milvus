@@ -167,10 +167,6 @@ func (c *Client) AlterCollectionFieldProperty(ctx context.Context, option AlterC
 	})
 }
 
-type GetCollectionOption interface {
-	Request() *milvuspb.GetCollectionStatisticsRequest
-}
-
 func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption) (map[string]string, error) {
 	var stats map[string]string
 	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
@@ -185,4 +181,15 @@ func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption
 		return nil, err
 	}
 	return stats, nil
+}
+
+// AddCollectionField adds a field to a collection.
+func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldOption, callOpts ...grpc.CallOption) error {
+	req := opt.Request()
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		resp, err := milvusService.AddCollectionField(ctx, req, callOpts...)
+		return merr.CheckRPCCall(resp, err)
+	})
+	return err
 }

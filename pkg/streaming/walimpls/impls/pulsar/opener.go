@@ -8,6 +8,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/helper"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
 const (
@@ -26,36 +28,40 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 	if err := opt.Validate(); err != nil {
 		return nil, err
 	}
-	var p pulsar.Producer
-	if opt.Channel.AccessMode == types.AccessModeRW {
-		var err error
-		p, err = o.c.CreateProducer(pulsar.ProducerOptions{
-			Topic: opt.Channel.Name,
-			// TODO: current go pulsar client does not support fencing, we should enable it after go pulsar client supports it.
-			// ProducerAccessMode: pulsar.ProducerAccessModeExclusiveWithFencing,
-		})
-		if err != nil {
-			return nil, err
-		}
 
-		// Initialize a persistent cursor to protect the topic from being retention.
-		cursor, err := o.c.Subscribe(pulsar.ConsumerOptions{
-			Topic:                       opt.Channel.Name,
-			SubscriptionName:            truncateCursorSubscriptionName,
-			Type:                        pulsar.Exclusive,
-			MaxPendingChunkedMessage:    1,
-			SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
-		})
-		if err != nil {
-			return nil, err
+	var backlogClearHelper *backlogClearHelper
+	if opt.Channel.AccessMode == types.AccessModeRW {
+		backlogAutoClearBytes := paramtable.Get().PulsarCfg.BacklogAutoClearBytes.GetAsSize()
+		if backlogAutoClearBytes > 0 {
+			backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes)
+		} else {
+			// Initialize a persistent cursor to protect the topic from being retention.
+			cursor, err := o.c.Subscribe(pulsar.ConsumerOptions{
+				Topic:                       opt.Channel.Name,
+				SubscriptionName:            truncateCursorSubscriptionName,
+				Type:                        pulsar.Exclusive,
+				MaxPendingChunkedMessage:    0,
+				SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
+			})
+			if err != nil {
+				return nil, err
+			}
+			cursor.Close()
 		}
-		cursor.Close()
 	}
-	return &walImpl{
-		WALHelper: helper.NewWALHelper(opt),
-		p:         p,
-		c:         o.c,
-	}, nil
+	w := &walImpl{
+		WALHelper:          helper.NewWALHelper(opt),
+		c:                  o.c,
+		p:                  syncutil.NewFuture[pulsar.Producer](),
+		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
+		backlogClearHelper: backlogClearHelper,
+	}
+	if opt.Channel.AccessMode == types.AccessModeRW {
+		// because the producer of pulsar cannot be created if the topic is backlog exceeded,
+		// so we need to set the producer at background with backoff retry.
+		w.initProducerAtBackground()
+	}
+	return w, nil
 }
 
 // Close closes the opener resources.

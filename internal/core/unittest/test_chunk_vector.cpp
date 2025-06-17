@@ -290,7 +290,7 @@ TEST_P(ChunkVectorTest, SearchWithMmap) {
                       : CreatePlaceholderGroup(num_queries, 128, 1024);
 
         auto plan = milvus::query::CreateSearchPlanByExpr(
-            *schema, plan_str.data(), plan_str.size());
+            schema, plan_str.data(), plan_str.size());
         auto ph_group =
             ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
         Timestamp timestamp = 1000000;
@@ -350,7 +350,7 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan = milvus::query::CreateSearchPlanByExpr(
-        *schema, plan_str.data(), plan_str.size());
+        schema, plan_str.data(), plan_str.size());
     auto num_queries = 3;
     auto ph_group_raw =
         milvus::segcore::CreatePlaceholderGroup(num_queries, 16, 1024);
@@ -380,16 +380,16 @@ TEST_F(ChunkVectorTest, QueryWithMmap) {
 
 //     auto seg = CreateGrowingSegment(schema, empty_index_meta, 22, config);
 //     int N = 1000;
-//     std::map<std::string, std::vector<ScalarArray>> array_cols;
+//     std::map<std::string, std::vector<ScalarFieldProto>> array_cols;
 //     int num_iters = 1;
 //     for (int iter = 0; iter < num_iters; ++iter) {
 //         auto raw_data = DataGen(schema, N, iter);
-//         auto new_long_array_col = raw_data.get_col<ScalarArray>(long_array_fid);
-//         auto new_bool_array_col = raw_data.get_col<ScalarArray>(bool_array_fid);
+//         auto new_long_array_col = raw_data.get_col<ScalarFieldProto>(long_array_fid);
+//         auto new_bool_array_col = raw_data.get_col<ScalarFieldProto>(bool_array_fid);
 //         auto new_float_array_col =
-//             raw_data.get_col<ScalarArray>(float_array_fid);
+//             raw_data.get_col<ScalarFieldProto>(float_array_fid);
 //         auto new_string_array_col =
-//             raw_data.get_col<ScalarArray>(string_array_fid);
+//             raw_data.get_col<ScalarFieldProto>(string_array_fid);
 //         array_cols["long"].insert(array_cols["long"].end(),
 //                                   new_long_array_col.begin(),
 //                                   new_long_array_col.end());

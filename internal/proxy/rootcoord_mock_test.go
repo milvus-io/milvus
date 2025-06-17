@@ -1615,6 +1615,14 @@ func (coord *MixCoordMock) GetRecoveryInfoV2(ctx context.Context, in *datapb.Get
 func (coord *MixCoordMock) Search() {
 }
 
+func (coord *MixCoordMock) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+	return &internalpb.GetQuotaMetricsResponse{}, nil
+}
+
+func (coord *MixCoordMock) ListLoadedSegments(ctx context.Context, in *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
+	return &querypb.ListLoadedSegmentsResponse{}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)

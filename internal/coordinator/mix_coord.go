@@ -165,6 +165,11 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 
+	if err := s.streamingCoord.Start(s.ctx); err != nil {
+		log.Error("streamCoord start failed", zap.Error(err))
+		return err
+	}
+
 	if err := s.rootcoordServer.Init(); err != nil {
 		log.Error("rootCoord init failed", zap.Error(err))
 		return err
@@ -172,11 +177,6 @@ func (s *mixCoordImpl) initInternal() error {
 
 	if err := s.rootcoordServer.Start(); err != nil {
 		log.Error("rootCoord start failed", zap.Error(err))
-		return err
-	}
-
-	if err := s.streamingCoord.Start(s.ctx); err != nil {
-		log.Error("streamCoord start failed", zap.Error(err))
 		return err
 	}
 
@@ -1058,4 +1058,12 @@ func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, 
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
+}
+
+func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return s.rootcoordServer.GetQuotaMetrics(ctx, req)
+}
+
+func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	return s.queryCoordServer.ListLoadedSegments(ctx, req)
 }

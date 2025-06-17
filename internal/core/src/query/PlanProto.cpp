@@ -302,7 +302,7 @@ ProtoParser::CreatePlan(const proto::plan::PlanNode& plan_node_proto) {
     auto plan_node = PlanNodeFromProto(plan_node_proto);
     plan->tag2field_["$0"] = plan_node->search_info_.field_id_;
     plan->plan_node_ = std::move(plan_node);
-    ExtractedPlanInfo extra_info(schema.size());
+    ExtractedPlanInfo extra_info(schema->size());
     extra_info.add_involved_field(plan->plan_node_->search_info_.field_id_);
     plan->extra_info_opt_ = std::move(extra_info);
 
@@ -341,7 +341,7 @@ expr::TypedExprPtr
 ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
     std::vector<::milvus::proto::plan::GenericValue> extra_values;
     for (auto val : expr_pb.extra_values()) {
@@ -358,7 +358,7 @@ expr::TypedExprPtr
 ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
     return std::make_shared<milvus::expr::NullExpr>(
         expr::ColumnInfo(column_info), expr_pb.op());
@@ -369,7 +369,7 @@ ProtoParser::ParseBinaryRangeExprs(
     const proto::plan::BinaryRangeExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == (DataType)columnInfo.data_type());
     return std::make_shared<expr::BinaryRangeFilterExpr>(
         columnInfo,
@@ -406,13 +406,13 @@ expr::TypedExprPtr
 ProtoParser::ParseCompareExprs(const proto::plan::CompareExpr& expr_pb) {
     auto& left_column_info = expr_pb.left_column_info();
     auto left_field_id = FieldId(left_column_info.field_id());
-    auto left_data_type = schema[left_field_id].get_data_type();
+    auto left_data_type = schema->operator[](left_field_id).get_data_type();
     Assert(left_data_type ==
            static_cast<DataType>(left_column_info.data_type()));
 
     auto& right_column_info = expr_pb.right_column_info();
     auto right_field_id = FieldId(right_column_info.field_id());
-    auto right_data_type = schema[right_field_id].get_data_type();
+    auto right_data_type = schema->operator[](right_field_id).get_data_type();
     Assert(right_data_type ==
            static_cast<DataType>(right_column_info.data_type()));
 
@@ -427,7 +427,7 @@ expr::TypedExprPtr
 ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == (DataType)columnInfo.data_type());
     std::vector<::milvus::proto::plan::GenericValue> values;
     for (size_t i = 0; i < expr_pb.values_size(); i++) {
@@ -458,7 +458,7 @@ ProtoParser::ParseBinaryArithOpEvalRangeExprs(
     const proto::plan::BinaryArithOpEvalRangeExpr& expr_pb) {
     auto& column_info = expr_pb.column_info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
     return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
         column_info,
@@ -472,7 +472,7 @@ expr::TypedExprPtr
 ProtoParser::ParseExistExprs(const proto::plan::ExistsExpr& expr_pb) {
     auto& column_info = expr_pb.info();
     auto field_id = FieldId(column_info.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
     return std::make_shared<expr::ExistsExpr>(column_info);
 }
@@ -482,7 +482,7 @@ ProtoParser::ParseJsonContainsExprs(
     const proto::plan::JSONContainsExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
     auto field_id = FieldId(columnInfo.field_id());
-    auto data_type = schema[field_id].get_data_type();
+    auto data_type = schema->operator[](field_id).get_data_type();
     Assert(data_type == (DataType)columnInfo.data_type());
     std::vector<::milvus::proto::plan::GenericValue> values;
     for (size_t i = 0; i < expr_pb.elements_size(); i++) {

@@ -19,6 +19,7 @@ package querynodev2
 /*
 #cgo pkg-config: milvus_core
 
+#include "common/type_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/segcore_init_c.h"
@@ -70,6 +71,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
@@ -295,6 +297,15 @@ func (node *QueryNode) InitSegcore() error {
 	if err != nil {
 		return err
 	}
+	deprecatedCacheWarmupPolicy := paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue()
+	if deprecatedCacheWarmupPolicy == "sync" {
+		log.Warn("queryNode.cache.warmup is being deprecated, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+		log.Warn("for now, if queryNode.cache.warmup is set to sync, it will override queryNode.segcore.tieredStorage.warmup.vectorField to sync.")
+		log.Warn("otherwise, queryNode.cache.warmup will be ignored")
+		vectorFieldCacheWarmupPolicy = C.CacheWarmupPolicy_Sync
+	} else if deprecatedCacheWarmupPolicy == "async" {
+		log.Warn("queryNode.cache.warmup is being deprecated and ignored, use queryNode.segcore.tieredStorage.warmup.vectorField instead.")
+	}
 	scalarIndexCacheWarmupPolicy, err := segcore.ConvertCacheWarmupPolicy(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.GetValue())
 	if err != nil {
 		return err
@@ -476,7 +487,7 @@ func (node *QueryNode) Init() error {
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
 		if streamingutil.IsStreamingServiceEnabled() {
-			node.dispClient = msgdispatcher.NewClient(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
+			node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
 		} else {
 			node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		}
@@ -555,11 +566,14 @@ func (node *QueryNode) Stop() error {
 					channelNum      = 0
 				)
 				if node.manager != nil {
-					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
-					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
+					sealedSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed), segments.WithoutLevel(datapb.SegmentLevel_L0))
+					growingSegments = node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing), segments.WithoutLevel(datapb.SegmentLevel_L0))
 				}
 				if node.pipelineManager != nil {
 					channelNum = node.pipelineManager.Num()
+				}
+				if len(sealedSegments) == 0 && len(growingSegments) == 0 && channelNum == 0 {
+					break outer
 				}
 
 				select {
