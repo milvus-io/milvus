@@ -30,8 +30,6 @@
 const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
 
 namespace milvus::index {
-constexpr const char* TMP_INVERTED_INDEX_PREFIX = "/tmp/milvus/inverted-index/";
-
 inline TantivyDataType
 get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
     switch (schema.data_type()) {
@@ -47,8 +45,7 @@ void
 InvertedIndexTantivy<T>::InitForBuildIndex() {
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
-    auto prefix = disk_file_manager_->GetIndexIdentifier();
-    path_ = std::string(TMP_INVERTED_INDEX_PREFIX) + prefix;
+    path_ = disk_file_manager_->GetLocalTempIndexObjectPrefix();
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {

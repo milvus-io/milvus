@@ -19,8 +19,6 @@
 #include "storage/ThreadPools.h"
 
 namespace milvus::index {
-constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
-
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* tokenizer_name,
@@ -68,8 +66,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    auto prefix = disk_file_manager_->GetTextIndexIdentifier();
-    path_ = std::string(TMP_TEXT_LOG_PREFIX) + prefix;
+    path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
     boost::filesystem::create_directories(path_);
     d_type_ = TantivyDataType::Text;
