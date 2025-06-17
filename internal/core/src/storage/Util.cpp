@@ -629,19 +629,6 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
-GenTempJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                              int64_t build_id,
-                              int64_t index_version,
-                              int64_t segment_id,
-                              int64_t field_id) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(JSON_KEY_INDEX_LOG_ROOT_PATH);
-    boost::filesystem::path path1 =
-        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
-    return (prefix / TEMP / path / path1).string();
-}
-
-std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
                           int64_t segment_id,
                           int64_t field_id) {
