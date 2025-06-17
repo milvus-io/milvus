@@ -488,6 +488,10 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`Int64Field >= 2.1`,
 		`3 > Int64Field >= 2.1`,
 		`Int64Field + (2**-1) > 0`,
+		`Int64Field / 0 == 1`,
+		`Int64Field % 0 == 1`,
+		`FloatField / 0 == 1`,
+		`FloatField % 0 == 1`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
