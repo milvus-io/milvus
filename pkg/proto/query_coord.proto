@@ -217,6 +217,7 @@ message LoadCollectionRequest {
     // resource group names
     repeated string resource_groups = 8;
     repeated int64 load_fields = 9;
+    common.LoadPriority priority = 10;
 }
 
 message ReleaseCollectionRequest {
@@ -248,6 +249,7 @@ message LoadPartitionsRequest {
     repeated string resource_groups = 9;
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
+    common.LoadPriority priority = 12;
 }
 
 message ReleasePartitionsRequest {
@@ -373,7 +375,8 @@ message SegmentLoadInfo {
     map<int64, data.TextIndexStats> textStatsLogs = 20;
     repeated data.FieldBinlog bm25logs = 21;
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
-    map<int64, data.NgramIndexStats> ngramStatsLogs = 23;
+    common.LoadPriority priority = 23;
+    map<int64, data.NgramIndexStats> ngramStatsLogs = 24;
 }
 
 message FieldIndexInfo {

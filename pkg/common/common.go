@@ -213,6 +213,7 @@ const (
 const (
 	MmapEnabledKey             = "mmap.enabled"
 	LazyLoadEnableKey          = "lazyload.enabled"
+	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"
