@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -42,9 +43,11 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -134,6 +137,7 @@ func (s *DataNodeServicesSuite) SetupTest() {
 		GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 	}
 
+	s.node.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/milvus_test/datanode"))
 	paramtable.SetNodeID(1)
 }
 
@@ -563,6 +567,7 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 }
 
 func (s *DataNodeServicesSuite) TestRPCWatch() {
+	os.Setenv("MILVUS_STREAMING_SERVICE_ENABLED", "0")
 	s.Run("node not healthy", func() {
 		s.SetupTest()
 		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)

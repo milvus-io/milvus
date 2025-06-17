@@ -70,8 +70,82 @@ func (_c *MockSyncManager_Close_Call) RunAndReturn(run func() error) *MockSyncMa
 	return _c
 }
 
-// SyncData provides a mock function with given fields: ctx, task, chunkManager, callbacks
-func (_m *MockSyncManager) SyncData(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+// SyncData provides a mock function with given fields: ctx, task, callbacks
+func (_m *MockSyncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	_va := make([]interface{}, len(callbacks))
+	for _i := range callbacks {
+		_va[_i] = callbacks[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, task)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncData")
+	}
+
+	var r0 *conc.Future[struct{}]
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, Task, ...func(error) error) (*conc.Future[struct{}], error)); ok {
+		return rf(ctx, task, callbacks...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, Task, ...func(error) error) *conc.Future[struct{}]); ok {
+		r0 = rf(ctx, task, callbacks...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*conc.Future[struct{}])
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, Task, ...func(error) error) error); ok {
+		r1 = rf(ctx, task, callbacks...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSyncManager_SyncData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncData'
+type MockSyncManager_SyncData_Call struct {
+	*mock.Call
+}
+
+// SyncData is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task Task
+//   - callbacks ...func(error) error
+func (_e *MockSyncManager_Expecter) SyncData(ctx interface{}, task interface{}, callbacks ...interface{}) *MockSyncManager_SyncData_Call {
+	return &MockSyncManager_SyncData_Call{Call: _e.mock.On("SyncData",
+		append([]interface{}{ctx, task}, callbacks...)...)}
+}
+
+func (_c *MockSyncManager_SyncData_Call) Run(run func(ctx context.Context, task Task, callbacks ...func(error) error)) *MockSyncManager_SyncData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]func(error) error, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(func(error) error)
+			}
+		}
+		run(args[0].(context.Context), args[1].(Task), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockSyncManager_SyncData_Call) Return(_a0 *conc.Future[struct{}], _a1 error) *MockSyncManager_SyncData_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSyncManager_SyncData_Call) RunAndReturn(run func(context.Context, Task, ...func(error) error) (*conc.Future[struct{}], error)) *MockSyncManager_SyncData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SyncDataWithChunkManager provides a mock function with given fields: ctx, task, chunkManager, callbacks
+func (_m *MockSyncManager) SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	_va := make([]interface{}, len(callbacks))
 	for _i := range callbacks {
 		_va[_i] = callbacks[_i]
@@ -82,7 +156,7 @@ func (_m *MockSyncManager) SyncData(ctx context.Context, task Task, chunkManager
 	ret := _m.Called(_ca...)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SyncData")
+		panic("no return value specified for SyncDataWithChunkManager")
 	}
 
 	var r0 *conc.Future[struct{}]
@@ -107,22 +181,22 @@ func (_m *MockSyncManager) SyncData(ctx context.Context, task Task, chunkManager
 	return r0, r1
 }
 
-// MockSyncManager_SyncData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncData'
-type MockSyncManager_SyncData_Call struct {
+// MockSyncManager_SyncDataWithChunkManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncDataWithChunkManager'
+type MockSyncManager_SyncDataWithChunkManager_Call struct {
 	*mock.Call
 }
 
-// SyncData is a helper method to define mock.On call
+// SyncDataWithChunkManager is a helper method to define mock.On call
 //   - ctx context.Context
 //   - task Task
 //   - chunkManager storage.ChunkManager
 //   - callbacks ...func(error) error
-func (_e *MockSyncManager_Expecter) SyncData(ctx interface{}, task interface{}, chunkManager interface{}, callbacks ...interface{}) *MockSyncManager_SyncData_Call {
-	return &MockSyncManager_SyncData_Call{Call: _e.mock.On("SyncData",
+func (_e *MockSyncManager_Expecter) SyncDataWithChunkManager(ctx interface{}, task interface{}, chunkManager interface{}, callbacks ...interface{}) *MockSyncManager_SyncDataWithChunkManager_Call {
+	return &MockSyncManager_SyncDataWithChunkManager_Call{Call: _e.mock.On("SyncDataWithChunkManager",
 		append([]interface{}{ctx, task, chunkManager}, callbacks...)...)}
 }
 
-func (_c *MockSyncManager_SyncData_Call) Run(run func(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error)) *MockSyncManager_SyncData_Call {
+func (_c *MockSyncManager_SyncDataWithChunkManager_Call) Run(run func(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error)) *MockSyncManager_SyncDataWithChunkManager_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]func(error) error, len(args)-3)
 		for i, a := range args[3:] {
@@ -135,12 +209,12 @@ func (_c *MockSyncManager_SyncData_Call) Run(run func(ctx context.Context, task 
 	return _c
 }
 
-func (_c *MockSyncManager_SyncData_Call) Return(_a0 *conc.Future[struct{}], _a1 error) *MockSyncManager_SyncData_Call {
+func (_c *MockSyncManager_SyncDataWithChunkManager_Call) Return(_a0 *conc.Future[struct{}], _a1 error) *MockSyncManager_SyncDataWithChunkManager_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockSyncManager_SyncData_Call) RunAndReturn(run func(context.Context, Task, storage.ChunkManager, ...func(error) error) (*conc.Future[struct{}], error)) *MockSyncManager_SyncData_Call {
+func (_c *MockSyncManager_SyncDataWithChunkManager_Call) RunAndReturn(run func(context.Context, Task, storage.ChunkManager, ...func(error) error) (*conc.Future[struct{}], error)) *MockSyncManager_SyncDataWithChunkManager_Call {
 	_c.Call.Return(run)
 	return _c
 }

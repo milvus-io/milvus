@@ -48,7 +48,8 @@ type SyncMeta struct {
 //go:generate mockery --name=SyncManager --structname=MockSyncManager --output=./  --filename=mock_sync_manager.go --with-expecter --inpackage
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error)
+	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
+	SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 
 	// Close waits for the task to finish and then shuts down the sync manager.
 	Close() error
@@ -103,13 +104,22 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	}
 }
 
-func (mgr *syncManager) SyncData(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 	if mgr.workerPool.IsClosed() {
 		return nil, errors.New("sync manager is closed")
 	}
 
-	if chunkManager == nil {
-		chunkManager = mgr.chunkManager
+	switch t := task.(type) {
+	case *SyncTask:
+		t.WithChunkManager(mgr.chunkManager)
+	}
+
+	return mgr.safeSubmitTask(ctx, task, callbacks...), nil
+}
+
+func (mgr *syncManager) SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	if mgr.workerPool.IsClosed() {
+		return nil, errors.New("sync manager is closed")
 	}
 
 	switch t := task.(type) {

@@ -344,7 +344,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 						log.Warn("failed to DecompressBinLog", zap.Error(err))
 						return val, err
 					}
-					pks, err := compaction.LoadStats(ctx, nil, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+					pks, err := compaction.LoadStats(ctx, node.chunkManager, ds.GetMetaCache().Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 					if err != nil {
 						log.Warn("failed to load segment stats log", zap.Error(err))
 						return val, err
