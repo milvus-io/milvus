@@ -436,13 +436,16 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		}
 	}
 
-	droppedCompactTo := make(map[*SegmentInfo]struct{})
+	droppedCompactTo := make(map[int64]*SegmentInfo)
 	for id := range drops {
 		if to, ok := compactTo[id]; ok {
-			droppedCompactTo[to] = struct{}{}
+			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, false, lo.Keys(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Values(droppedCompactTo)...)
+	if ctx.Err() != nil {
+		return
+	}
 	indexedSet := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexedSet.Insert(segment.GetID())
@@ -525,9 +528,13 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 
 		_, ok := collectionID2GcStatus[collectionID]
 		if !ok {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if ctx.Err() != nil {
+				// process canceled, stop.
+				return
+			}
+			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
-			has, err := gc.option.broker.HasCollection(ctx, collectionID)
+			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
 			if err == nil && !has {
 				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
 			} else {

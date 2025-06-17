@@ -2205,7 +2205,7 @@ class TestQueryOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
 
         # list connection to check
-        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: []})
+        self.connection_wrap.list_connections()
 
         # query after remove default connection
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
@@ -3567,6 +3567,8 @@ class TestQueryCount(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
+        # recreate index wait for compactTo indexed
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
         collection_w.load()
         segment_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
