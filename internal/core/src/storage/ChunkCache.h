@@ -65,6 +65,9 @@ class ChunkCache {
     void
     Prefetch(const std::string& filepath);
 
+    std::shared_ptr<ColumnBase>
+    GetColumn(const std::string& filepath);
+
  private:
     std::string
     CachePath(const std::string& filepath);

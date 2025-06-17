@@ -151,6 +151,19 @@ ChunkCache::Read(const std::string& filepath,
 }
 
 std::shared_ptr<ColumnBase>
+ChunkCache::GetColumn(const std::string& filepath) {
+    std::shared_lock lck(mutex_);
+    auto it = columns_.find(filepath);
+    std::shared_ptr<ColumnBase> result = nullptr;
+    if (it != columns_.end()) {
+        lck.unlock();
+        result = it->second.second.get();
+        AssertInfo(result, "unexpected null column, file={}", filepath);
+    }
+    return result;
+}
+
+std::shared_ptr<ColumnBase>
 ChunkCache::Read(const std::string& filepath,
                  const MmapChunkDescriptorPtr& descriptor,
                  const FieldMeta& field_meta,
@@ -170,7 +183,7 @@ ChunkCache::Read(const std::string& filepath,
 
     // lock for mutation
     std::unique_lock lck(mutex_);
-    // double check no-futurn
+    // double check no-future
     auto it = columns_.find(filepath);
     if (it != columns_.end()) {
         lck.unlock();

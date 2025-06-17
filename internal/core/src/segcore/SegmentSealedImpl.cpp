@@ -1063,8 +1063,13 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     futures.reserve(path_to_column.size());
     for (const auto& iter : path_to_column) {
         const auto& data_path = iter.first;
-        futures.emplace_back(
-            pool.Submit(ReadFromChunkCache, cc, data_path, mmap_descriptor_));
+        auto column = std::dynamic_pointer_cast<SingleChunkColumnBase>(
+            cc->GetColumn(data_path));
+        if (!column) {
+            futures.emplace_back(pool.Submit(
+                ReadFromChunkCache, cc, data_path, mmap_descriptor_));
+        }
+        path_to_column[data_path] = column;
     }
 
     for (int i = 0; i < futures.size(); ++i) {

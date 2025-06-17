@@ -994,17 +994,23 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     }
 
     // read and prefetch
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     std::vector<std::future<
         std::tuple<std::string, std::shared_ptr<ChunkedColumnBase>>>>
         futures;
-    futures.reserve(path_to_column.size());
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
     for (const auto& iter : path_to_column) {
         const auto& data_path = iter.first;
-        futures.emplace_back(pool.Submit(
-            ReadFromChunkCache, cc, data_path, mmap_descriptor_, field_meta));
+        auto column = std::dynamic_pointer_cast<ChunkedColumnBase>(
+            cc->GetColumn(data_path));
+        if (!column) {
+            futures.emplace_back(pool.Submit(ReadFromChunkCache,
+                                             cc,
+                                             data_path,
+                                             mmap_descriptor_,
+                                             field_meta));
+        }
+        path_to_column[data_path] = column;
     }
-
     for (auto& future : futures) {
         const auto& [data_path, column] = future.get();
         path_to_column[data_path] = column;
