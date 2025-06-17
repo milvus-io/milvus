@@ -81,7 +81,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 				deltalogPaths = append(deltalogPaths, l.GetLogPath())
 			}
 		}
-		delta, err := mergeDeltalogs(ctx, binlogIO, deltalogPaths)
+		delta, _, _, err := mergeDeltalogs(ctx, binlogIO, deltalogPaths, s.GetSegmentID())
 		if err != nil {
 			return nil, err
 		}

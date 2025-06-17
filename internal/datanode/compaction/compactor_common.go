@@ -118,31 +118,34 @@ func (filter *EntityFilter) isEntityExpired(entityTs typeutil.Timestamp) bool {
 	return filter.ttl/int64(time.Millisecond) <= dur
 }
 
-func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[interface{}]typeutil.Timestamp, error) {
+func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string, segmentID typeutil.UniqueID) (map[interface{}]typeutil.Timestamp, time.Duration, time.Duration, error) {
 	pk2Ts := make(map[interface{}]typeutil.Timestamp)
 
 	log := log.Ctx(ctx)
 	if len(paths) == 0 {
 		log.Debug("compact with no deltalogs, skip merge deltalogs")
-		return pk2Ts, nil
+		return pk2Ts, 0, 0, nil
 	}
 
 	blobs := make([]*storage.Blob, 0)
+	beforeDownload := time.Now()
 	binaries, err := io.Download(ctx, paths)
+	downloadDuration := time.Since(beforeDownload)
 	if err != nil {
 		log.Warn("compact wrong, fail to download deltalogs",
 			zap.Strings("path", paths),
 			zap.Error(err))
-		return nil, err
+		return nil, 0, 0, err
 	}
 
 	for i := range binaries {
 		blobs = append(blobs, &storage.Blob{Value: binaries[i]})
 	}
+	beforeMergeDeltalog := time.Now()
 	reader, err := storage.CreateDeltalogReader(blobs)
 	if err != nil {
 		log.Error("malformed delta file", zap.Error(err))
-		return nil, err
+		return nil, 0, 0, err
 	}
 	defer reader.Close()
 
@@ -153,7 +156,7 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 				break
 			}
 			log.Error("compact wrong, fail to read deltalogs", zap.Error(err))
-			return nil, err
+			return nil, 0, 0, err
 		}
 
 		dl := reader.Value()
@@ -162,10 +165,14 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, paths []string) (map[in
 		}
 		pk2Ts[dl.Pk.GetValue()] = dl.Ts
 	}
+	mergeDeltalogDuration := time.Since(beforeMergeDeltalog)
 
-	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)))
+	log.Info("compact mergeDeltalogs end", zap.Int("delete entries counts", len(pk2Ts)),
+		zap.Duration("downloadDuration", downloadDuration),
+		zap.Duration("mergeDeltalogDuration", mergeDeltalogDuration),
+		zap.Int64("segmentID", segmentID))
 
-	return pk2Ts, nil
+	return pk2Ts, downloadDuration, mergeDeltalogDuration, nil
 }
 
 func composePaths(segments []*datapb.CompactionSegmentBinlogs) (
@@ -297,18 +304,19 @@ func mergeFieldBinlogs(base, paths map[typeutil.UniqueID]*datapb.FieldBinlog) {
 	}
 }
 
-func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) ([]*datapb.FieldBinlog, error) {
+func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator.Interface, writer *SegmentWriter) ([]*datapb.FieldBinlog, time.Duration, time.Duration, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "bm25 stats log serializeWrite")
 	defer span.End()
-
+	beforeGetBm25StatsBlob := time.Now()
 	stats, err := writer.GetBm25StatsBlob()
+	serializeDuration := time.Since(beforeGetBm25StatsBlob)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 
 	logID, _, err := allocator.Alloc(uint32(len(stats)))
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 
 	kvs := make(map[string][]byte)
@@ -330,11 +338,11 @@ func bm25SerializeWrite(ctx context.Context, io io.BinlogIO, allocator allocator
 
 		binlogs = append(binlogs, fieldLog)
 	}
-
+	beforeUpload := time.Now()
 	if err := io.Upload(ctx, kvs); err != nil {
 		log.Warn("failed to upload bm25 log", zap.Error(err))
-		return nil, err
+		return nil, 0, 0, err
 	}
-
-	return binlogs, nil
+	uploadDuration := time.Since(beforeUpload)
+	return binlogs, serializeDuration, uploadDuration, nil
 }

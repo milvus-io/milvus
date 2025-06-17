@@ -571,7 +571,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			deltaPaths = append(deltaPaths, l.GetLogPath())
 		}
 	}
-	delta, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths)
+	delta, _, _, err := mergeDeltalogs(ctx, t.binlogIO, deltaPaths, segment.GetSegmentID())
 	if err != nil {
 		return err
 	}
