@@ -1251,7 +1251,7 @@ SegmentGrowingImpl::FinishLoad() {
         }
         // append_data is called according to schema before
         // so we must check data empty here
-        if (insert_record_.get_data_base(field_id)->empty()) {
+        if (!IsVectorDataType(field_meta.get_data_type()) &&insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
         }
     }
