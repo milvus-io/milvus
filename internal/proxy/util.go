@@ -1524,7 +1524,6 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 				}
 				resultFieldNameMap[outputFieldName] = true
 				userOutputFieldsMap[outputFieldName] = true
-
 			} else {
 				if schema.EnableDynamicField {
 					dynamicNestedPath := outputFieldName
