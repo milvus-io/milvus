@@ -275,6 +275,12 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	)
 
 	ctx := task.Context()
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+	}()
 
 	dstNode := action.Node()
 
@@ -305,14 +311,15 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
 				if view == nil {
 					msg := "no shard leader for the segment to execute releasing"
-					err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+					err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 					log.Warn(msg, zap.Error(err))
 					return
 				}
 				// NOTE: for balance segment task, expected load and release execution on the same shard leader
 				if GetTaskType(task) == TaskTypeMove && task.ShardLeaderID() != view.Node {
 					msg := "shard leader changed, skip release"
-					log.Warn(msg)
+					err = merr.WrapErrServiceInternal(fmt.Sprintf("shard leader changed from %d to %d", task.ShardLeaderID(), view.Node))
+					log.Warn(msg, zap.Error(err))
 					return
 				}
 				dstNode = view.Node
