@@ -174,7 +174,7 @@ class ChunkedColumnInterface {
  protected:
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
-        AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
+        // AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
         std::vector<milvus::cachinglayer::cid_t> cids;
         cids.reserve(count);
         std::vector<int64_t> offsets_in_chunk;
