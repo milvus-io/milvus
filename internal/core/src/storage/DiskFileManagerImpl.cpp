@@ -57,12 +57,9 @@ DiskFileManagerImpl::DiskFileManagerImpl(
 DiskFileManagerImpl::~DiskFileManagerImpl() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetIndexPathPrefixWithBuildID(
-        local_chunk_manager, index_meta_.build_id));
-    local_chunk_manager->RemoveDir(GetTextIndexPathPrefixWithBuildID(
-        local_chunk_manager, index_meta_.build_id));
-    local_chunk_manager->RemoveDir(GetJsonKeyIndexPathPrefixWithBuildID(
-        local_chunk_manager, index_meta_.build_id));
+    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
+    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
+    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
 }
 
 bool
@@ -693,25 +690,38 @@ DiskFileManagerImpl::GetFileName(const std::string& localfile) {
 std::string
 DiskFileManagerImpl::GetIndexIdentifier() {
     return GenIndexPathIdentifier(index_meta_.build_id,
-                                  index_meta_.index_version);
+                                  index_meta_.index_version,
+                                  index_meta_.segment_id,
+                                  index_meta_.field_id);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenIndexPathPrefix(
-        local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
+    return GenIndexPathPrefix(local_chunk_manager,
+                              index_meta_.build_id,
+                              index_meta_.index_version,
+                              index_meta_.segment_id,
+                              index_meta_.field_id,
+                              false);
 }
 
+// temporary path used during index building
 std::string
-DiskFileManagerImpl::GetTextIndexIdentifier() {
-    return std::to_string(index_meta_.build_id) + "/" +
-           std::to_string(index_meta_.index_version) + "/" +
-           std::to_string(field_meta_.segment_id) + "/" +
-           std::to_string(field_meta_.field_id);
+DiskFileManagerImpl::GetLocalTempIndexObjectPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenIndexPathPrefix(local_chunk_manager,
+                              index_meta_.build_id,
+                              index_meta_.index_version,
+                              index_meta_.segment_id,
+                              index_meta_.field_id,
+                              true);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalTextIndexPrefix() {
     auto local_chunk_manager =
@@ -720,19 +730,24 @@ DiskFileManagerImpl::GetLocalTextIndexPrefix() {
                                   index_meta_.build_id,
                                   index_meta_.index_version,
                                   field_meta_.segment_id,
-                                  field_meta_.field_id);
+                                  field_meta_.field_id,
+                                  false);
 }
 
+// temporary path used during index building
 std::string
-DiskFileManagerImpl::GetJsonKeyIndexIdentifier() {
-    return GenJsonKeyIndexPathIdentifier(index_meta_.build_id,
-                                         index_meta_.index_version,
-                                         field_meta_.collection_id,
-                                         field_meta_.partition_id,
-                                         field_meta_.segment_id,
-                                         field_meta_.field_id);
+DiskFileManagerImpl::GetLocalTempTextIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenIndexPathPrefix(local_chunk_manager,
+                              index_meta_.build_id,
+                              index_meta_.index_version,
+                              field_meta_.segment_id,
+                              field_meta_.field_id,
+                              true);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     auto local_chunk_manager =
@@ -740,10 +755,22 @@ DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     return GenJsonKeyIndexPathPrefix(local_chunk_manager,
                                      index_meta_.build_id,
                                      index_meta_.index_version,
-                                     field_meta_.collection_id,
-                                     field_meta_.partition_id,
                                      field_meta_.segment_id,
-                                     field_meta_.field_id);
+                                     field_meta_.field_id,
+                                     false);
+}
+
+// temporary path used during index building
+std::string
+DiskFileManagerImpl::GetLocalTempJsonKeyIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenJsonKeyIndexPathPrefix(local_chunk_manager,
+                                     index_meta_.build_id,
+                                     index_meta_.index_version,
+                                     field_meta_.segment_id,
+                                     field_meta_.field_id,
+                                     true);
 }
 
 std::string
@@ -751,10 +778,9 @@ DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
     return GenJsonKeyIndexPathPrefix(rcm_,
                                      index_meta_.build_id,
                                      index_meta_.index_version,
-                                     field_meta_.collection_id,
-                                     field_meta_.partition_id,
                                      field_meta_.segment_id,
-                                     field_meta_.field_id);
+                                     field_meta_.field_id,
+                                     false);
 }
 
 std::string
