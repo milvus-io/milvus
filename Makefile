@@ -145,6 +145,10 @@ cppcheck:
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
 
+rustcheck:
+	@echo  "Running cargo format"
+	@env bash ${PWD}/scripts/run_cargo_format.sh ${PWD}/internal/core/thirdparty/tantivy/tantivy-binding/
+
 
 fmt:
 ifdef GO_DIFF_FILES
@@ -201,7 +205,7 @@ static-check: getdeps
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
 
-verifiers: build-cpp getdeps cppcheck fmt static-check
+verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
 # Build various components locally.
 binlog:
