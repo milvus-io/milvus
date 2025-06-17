@@ -94,7 +94,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // Used for loading index, using this index prefix dir to store index.
     std::string
-    GetNgramIndexIdentifier();
+    GetLocalTempNgramIndexPrefix();
 
     std::string
     GetLocalRawDataObjectPrefix();
@@ -122,7 +122,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
                             milvus::proto::common::LoadPriority priority);
 
     void
-    CacheNgramIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheNgramIndexToDisk(const std::vector<std::string>& remote_files,
+                          milvus::proto::common::LoadPriority priority);
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,

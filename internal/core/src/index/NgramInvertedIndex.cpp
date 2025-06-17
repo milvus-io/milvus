@@ -13,9 +13,6 @@
 #include "exec/expression/Expr.h"
 
 namespace milvus::index {
-constexpr const char* TMP_NGRAM_INVERTED_LOG_PREFIX =
-    "/tmp/milvus/ngram-inverted-index-log/";
-
 NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
                                        bool for_loading_index,
                                        uintptr_t min_gram,
@@ -29,8 +26,7 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
     if (for_loading_index) {
         path_ = disk_file_manager_->GetLocalNgramIndexPrefix();
     } else {
-        auto prefix = disk_file_manager_->GetNgramIndexIdentifier();
-        path_ = std::string(TMP_NGRAM_INVERTED_LOG_PREFIX) + prefix;
+        path_ = disk_file_manager_->GetLocalTempNgramIndexPrefix();
         boost::filesystem::create_directories(path_);
         d_type_ = TantivyDataType::Keyword;
         std::string field_name =
@@ -81,7 +77,8 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            file, config[milvus::LOAD_PRIORITY]);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         auto index_valid_data = binary_set.GetByName("index_null_offset");
@@ -92,7 +89,8 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                (size_t)index_valid_data->size);
     }
 
-    disk_file_manager_->CacheNgramIndexToDisk(files_value);
+    disk_file_manager_->CacheNgramIndexToDisk(files_value,
+                                              config[milvus::LOAD_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),
