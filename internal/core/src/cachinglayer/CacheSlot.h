@@ -16,6 +16,7 @@
 #include <exception>
 #include <memory>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <folly/futures/Future.h>
@@ -105,10 +106,12 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
-    PinCells(std::vector<uid_t> uids) {
+    PinCells(const std::vector<uid_t>& uids) {
         return folly::makeSemiFuture().deferValue([this,
                                                    uids = std::vector<uid_t>(
-                                                       uids)](auto&&) {
+                                                       uids)](auto&&)
+                                                      -> std::shared_ptr<
+                                                          CellAccessor<CellT>> {
             auto count = uids.size();
             std::unordered_set<cid_t> involved_cids;
             involved_cids.reserve(count);
@@ -116,15 +119,12 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 auto uid = uids[i];
                 auto cid = translator_->cell_id_of(uid);
                 if (cid >= cells_.size()) {
-                    return folly::makeSemiFuture<
-                        std::shared_ptr<CellAccessor<CellT>>>(
-                        folly::make_exception_wrapper<std::invalid_argument>(
-                            fmt::format(
-                                "CacheSlot {}: translator returned cell_id {} "
-                                "for uid {} which is out of range",
-                                translator_->key(),
-                                cid,
-                                uid)));
+                    throw std::invalid_argument(fmt::format(
+                        "CacheSlot {}: translator returned cell_id {} "
+                        "for uid {} which is out of range",
+                        translator_->key(),
+                        cid,
+                        uid));
                 }
                 involved_cids.insert(cid);
             }
@@ -203,7 +203,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     friend class CellAccessor<CellT>;
 
     template <typename Fn>
-    folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
+    std::shared_ptr<CellAccessor<CellT>>
     PinInternal(Fn&& cid_iterator, size_t reserve_size) {
         std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
         std::unordered_set<cid_t> need_load_cids;
@@ -218,22 +218,13 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             }
             std::tie(cid, end) = cid_iterator();
         }
-        auto load_future = folly::makeSemiFuture();
         if (!need_load_cids.empty()) {
-            load_future = RunLoad(std::move(need_load_cids));
+            RunLoad(std::move(need_load_cids));
         }
-        return std::move(load_future)
-            .deferValue(
-                [this, futures = std::move(futures)](auto&&) mutable
-                -> folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>> {
-                    return folly::collect(futures).deferValue(
-                        [this](std::vector<internal::ListNode::NodePin>&&
-                                   pins) mutable
-                        -> std::shared_ptr<CellAccessor<CellT>> {
-                            return std::make_shared<CellAccessor<CellT>>(
-                                this->shared_from_this(), std::move(pins));
-                        });
-                });
+
+        auto pins = SemiInlineGet(folly::collect(futures));
+        return std::make_shared<CellAccessor<CellT>>(this->shared_from_this(),
+                                                     std::move(pins));
     }
 
     cid_t
@@ -241,45 +232,35 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         return translator_->cell_id_of(uid);
     }
 
-    folly::SemiFuture<folly::Unit>
+    void
     RunLoad(std::unordered_set<cid_t>&& cids) {
-        return folly::makeSemiFuture().deferValue(
-            [this,
-             cids = std::move(cids)](auto&&) -> folly::SemiFuture<folly::Unit> {
-                try {
-                    auto start = std::chrono::high_resolution_clock::now();
-                    std::vector<cid_t> cids_vec(cids.begin(), cids.end());
-                    auto results = translator_->get_cells(cids_vec);
-                    auto latency =
-                        std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::high_resolution_clock::now() - start);
-                    for (auto& result : results) {
-                        cells_[result.first].set_cell(
-                            std::move(result.second),
-                            cids.count(result.first) > 0);
-                        internal::cache_load_latency(
-                            translator_->meta()->storage_type)
-                            .Observe(latency.count());
-                    }
-                    internal::cache_cell_loaded_count(
-                        translator_->meta()->storage_type)
-                        .Increment(results.size());
-                    internal::cache_load_count_success(
-                        translator_->meta()->storage_type)
-                        .Increment(results.size());
-                } catch (...) {
-                    auto exception = std::current_exception();
-                    auto ew = folly::exception_wrapper(exception);
-                    internal::cache_load_count_fail(
-                        translator_->meta()->storage_type)
-                        .Increment(cids.size());
-                    for (auto cid : cids) {
-                        cells_[cid].set_error(ew);
-                    }
-                    return folly::makeSemiFuture<folly::Unit>(ew);
-                }
-                return folly::Unit();
-            });
+        try {
+            auto start = std::chrono::high_resolution_clock::now();
+            std::vector<cid_t> cids_vec(cids.begin(), cids.end());
+            auto results = translator_->get_cells(cids_vec);
+            auto latency =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - start);
+            for (auto& result : results) {
+                cells_[result.first].set_cell(std::move(result.second),
+                                              cids.count(result.first) > 0);
+                internal::cache_load_latency(translator_->meta()->storage_type)
+                    .Observe(latency.count());
+            }
+            internal::cache_cell_loaded_count(translator_->meta()->storage_type)
+                .Increment(results.size());
+            internal::cache_load_count_success(
+                translator_->meta()->storage_type)
+                .Increment(results.size());
+        } catch (...) {
+            auto exception = std::current_exception();
+            auto ew = folly::exception_wrapper(exception);
+            internal::cache_load_count_fail(translator_->meta()->storage_type)
+                .Increment(cids.size());
+            for (auto cid : cids) {
+                cells_[cid].set_error(ew);
+            }
+        }
     }
 
     struct CacheCell : internal::ListNode {
