@@ -18,8 +18,9 @@ package merr
 
 import (
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/samber/lo"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
 const (
