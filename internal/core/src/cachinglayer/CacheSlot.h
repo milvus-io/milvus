@@ -35,6 +35,13 @@
 
 namespace milvus::cachinglayer {
 
+enum class CellIdMappingMode : uint8_t {
+    CUSTOMIZED = 0,  // the cell id should be parsed from the uid by the translator
+    IDENTICAL = 1,  // the cell id is identical to the uid
+    UID_WITH_OFFSET = 2,  // the cell id is the uid + offset
+    ALWAYS_ZERO = 3,  // the cell id is always 0
+};
+
 template <typename CellT>
 class CellAccessor;
 
@@ -51,8 +58,11 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         "representing the memory consumption of the cell");
 
     CacheSlot(std::unique_ptr<Translator<CellT>> translator,
-              internal::DList* dlist)
+              internal::DList* dlist,
+              CellIdMappingMode cell_id_mapping_mode =
+                  CellIdMappingMode::CUSTOMIZED)
         : translator_(std::move(translator)),
+          cell_id_mapping_mode_(cell_id_mapping_mode),
           cells_(translator_->num_cells()),
           dlist_(dlist) {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
@@ -221,7 +231,14 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     cid_t
     cell_id_of(uid_t uid) const {
-        return translator_->cell_id_of(uid);
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL:
+                return uid;
+            case CellIdMappingMode::ALWAYS_ZERO:
+                return 0;
+            default:
+                return translator_->cell_id_of(uid);
+        }
     }
 
     void
@@ -342,6 +359,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     // Each CacheCell's cid_t is its index in vector
     // Once initialized, cells_ should never be resized.
     std::vector<CacheCell> cells_;
+    CellIdMappingMode cell_id_mapping_mode_;
     internal::DList* dlist_;
 };
 

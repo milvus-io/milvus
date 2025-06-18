@@ -275,7 +275,8 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                 load_index_info, (knowhere::BinarySet*)c_binary_set);
         load_index_info->cache_index =
             milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                std::move(translator));
+                std::move(translator),
+                milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO);
         auto status = CStatus();
         status.error_code = milvus::Success;
         status.error_msg = "";
@@ -411,7 +412,8 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
             load_index_info->cache_index =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                    std::move(translator));
+                    std::move(translator),
+                    milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO);
         }
         span->End();
         milvus::tracer::CloseRootSpan();

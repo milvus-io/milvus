@@ -398,7 +398,7 @@ class VectorArrayChunk : public CRTPChunk<VectorArrayChunk> {
     }
 
     const char*
-    ValueAt(int64_t idx) const override {
+    ValueAtImpl(int64_t idx) const {
         PanicInfo(ErrorCode::Unsupported,
                   "VectorArrayChunk::ValueAt is not supported");
     }
