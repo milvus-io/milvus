@@ -758,6 +758,7 @@ DiskFileManagerImpl::GetLocalTempTextIndexPrefix() {
                               true);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     auto local_chunk_manager =
