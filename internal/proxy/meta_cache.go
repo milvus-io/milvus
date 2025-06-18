@@ -106,6 +106,12 @@ type collectionInfo struct {
 	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
+	numPartitions         int64
+	vChannels             []string
+	pChannels             []string
+	shardsNum             int32
+	aliases               []string
+	properties            []*commonpb.KeyValuePair
 }
 
 type databaseInfo struct {
@@ -491,6 +497,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
 		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+		vChannels:             collection.VirtualChannelNames,
+		pChannels:             collection.PhysicalChannelNames,
+		numPartitions:         collection.NumPartitions,
+		shardsNum:             collection.ShardsNum,
+		aliases:               collection.Aliases,
+		properties:            collection.Properties,
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),

@@ -1573,6 +1573,7 @@ type proxyConfig struct {
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 	MaxTextLength                ParamItem `refreshable:"false"`
 	MaxResultEntries             ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider  ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2006,6 +2007,13 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.MaxResultEntries.Init(base.mgr)
 
+	p.EnableCachedServiceProvider = ParamItem{
+		Key:          "proxy.enableCachedServiceProvider",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "enable cached service provider",
+	}
+	p.EnableCachedServiceProvider.Init(base.mgr)
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
