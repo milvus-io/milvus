@@ -104,7 +104,15 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		DbName:         request.DbName,
 	}
 
-	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, 0)
+	// validate collection name, ref describeCollectionTask.PreExecute
+	if request.CollectionID == 0 {
+		if err := validateCollectionName(request.CollectionName); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+	}
+
+	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, request.CollectionID)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			// nolint
