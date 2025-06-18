@@ -17,7 +17,6 @@
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
 #include "storage/ThreadPools.h"
-#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::index {
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
@@ -172,10 +171,7 @@ TextMatchIndex::Load(const Config& config) {
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
-        auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
-        disk_file_manager_->RemoveTextLogFiles(local_chunk_manager);
+        disk_file_manager_->RemoveTextLogFiles();
     }
 }
 

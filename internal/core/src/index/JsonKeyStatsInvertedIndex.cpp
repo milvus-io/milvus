@@ -16,7 +16,6 @@
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
 #include "storage/MmapManager.h"
-#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::index {
 constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
@@ -411,10 +410,7 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
-        auto local_chunk_manager =
-            milvus::storage::LocalChunkManagerSingleton::GetInstance()
-                .GetChunkManager();
-        disk_file_manager_->RemoveJsonKeyIndexFiles(local_chunk_manager);
+        disk_file_manager_->RemoveJsonKeyIndexFiles();
     }
 
     LOG_INFO(

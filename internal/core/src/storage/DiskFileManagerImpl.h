@@ -114,13 +114,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
                             milvus::proto::common::LoadPriority priority);
 
     void
-    RemoveIndexFiles(LocalChunkManagerSPtr cm);
+    RemoveIndexFiles();
 
     void
-    RemoveTextLogFiles(LocalChunkManagerSPtr cm);
+    RemoveTextLogFiles();
 
     void
-    RemoveJsonKeyIndexFiles(LocalChunkManagerSPtr cm);
+    RemoveJsonKeyIndexFiles();
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
