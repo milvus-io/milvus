@@ -25,10 +25,13 @@ namespace milvus::segcore::storagev1translator {
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
     CTMeta(milvus::cachinglayer::StorageType storage_type,
+           milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
            CacheWarmupPolicy cache_warmup_policy,
            bool support_eviction)
-        : milvus::cachinglayer::Meta(
-              storage_type, cache_warmup_policy, support_eviction) {
+        : milvus::cachinglayer::Meta(storage_type,
+                                     cell_id_mapping_mode,
+                                     cache_warmup_policy,
+                                     support_eviction) {
     }
 };
 

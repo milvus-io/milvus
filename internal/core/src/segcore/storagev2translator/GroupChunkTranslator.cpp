@@ -58,6 +58,7 @@ GroupChunkTranslator::GroupChunkTranslator(
           num_fields,
           use_mmap ? milvus::cachinglayer::StorageType::DISK
                    : milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
           // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it
           // to use the warm up policy of scalar field?
           milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,

@@ -28,6 +28,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
       field_meta_(field_meta),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,

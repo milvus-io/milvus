@@ -51,9 +51,11 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         "CellT must have a CellByteSize() method that returns a size_t "
         "representing the memory consumption of the cell");
 
-    CacheSlot(std::unique_ptr<Translator<CellT>> translator,
-              internal::DList* dlist)
+    CacheSlot(
+        std::unique_ptr<Translator<CellT>> translator,
+        internal::DList* dlist)
         : translator_(std::move(translator)),
+          cell_id_mapping_mode_(translator_->meta()->cell_id_mapping_mode),
           cells_(translator_->num_cells()),
           dlist_(dlist) {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
@@ -61,8 +63,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 CacheCell(this, i, translator_->estimated_byte_size_of_cell(i));
         }
         auto storage_type = translator_->meta()->storage_type;
-        internal::cache_slot_count(storage_type)
-            .Increment();
+        internal::cache_slot_count(storage_type).Increment();
         internal::cache_cell_count(storage_type)
             .Increment(translator_->num_cells());
         internal::cache_memory_overhead_bytes(storage_type)
@@ -112,18 +113,43 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             auto count = uids.size();
             ska::flat_hash_set<cid_t> involved_cids;
             involved_cids.reserve(count);
-            for (size_t i = 0; i < count; ++i) {
-                auto uid = uids[i];
-                auto cid = translator_->cell_id_of(uid);
-                if (cid >= cells_.size()) {
-                    throw std::invalid_argument(fmt::format(
-                        "CacheSlot {}: translator returned cell_id {} "
-                        "for uid {} which is out of range",
-                        translator_->key(),
-                        cid,
-                        uid));
+            switch (cell_id_mapping_mode_) {
+                case CellIdMappingMode::IDENTICAL: {
+                    for (auto& uid : uids) {
+                        if (uid >= cells_.size()) {
+                            throw std::invalid_argument(
+                                fmt::format("CacheSlot {}: identical mode, "
+                                            "translator returned cell_id {} "
+                                            "for uid {} which is out of range",
+                                            translator_->key(),
+                                            uid,
+                                            uid));
+                        }
+                        involved_cids.insert(uid);
+                    }
+                    break;
                 }
-                involved_cids.insert(cid);
+                case CellIdMappingMode::ALWAYS_ZERO: {
+                    if (uids.size() > 0) {
+                        involved_cids.insert(0);
+                    }
+                    break;
+                }
+                default: {
+                    for (auto& uid : uids) {
+                        auto cid = cell_id_of(uid);
+                        if (cid >= cells_.size()) {
+                            throw std::invalid_argument(
+                                fmt::format("CacheSlot {}: customized mode, "
+                                            "translator returned cell_id {} "
+                                            "for uid {} which is out of range",
+                                            translator_->key(),
+                                            cid,
+                                            uid));
+                        }
+                        involved_cids.insert(cid);
+                    }
+                }
             }
             auto reserve_size = involved_cids.size();
 
@@ -174,8 +200,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     ~CacheSlot() {
         auto storage_type = translator_->meta()->storage_type;
-        internal::cache_slot_count(storage_type)
-            .Decrement();
+        internal::cache_slot_count(storage_type).Decrement();
         internal::cache_cell_count(storage_type)
             .Decrement(translator_->num_cells());
         internal::cache_memory_overhead_bytes(storage_type)
@@ -210,7 +235,14 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     cid_t
     cell_id_of(uid_t uid) const {
-        return translator_->cell_id_of(uid);
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL:
+                return uid;
+            case CellIdMappingMode::ALWAYS_ZERO:
+                return 0;
+            default:
+                return translator_->cell_id_of(uid);
+        }
     }
 
     void
@@ -231,8 +263,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             }
             internal::cache_cell_loaded_count(storage_type)
                 .Increment(results.size());
-            internal::cache_load_count_success(
-                storage_type)
+            internal::cache_load_count_success(storage_type)
                 .Increment(results.size());
         } catch (...) {
             auto exception = std::current_exception();
@@ -292,15 +323,12 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         unload() override {
             if (cell_) {
                 auto storage_type = slot_->translator_->meta()->storage_type;
-                internal::cache_cell_loaded_count(
-                    storage_type)
-                    .Decrement();
+                internal::cache_cell_loaded_count(storage_type).Decrement();
                 auto life_time = std::chrono::steady_clock::now() - life_start_;
                 auto seconds =
                     std::chrono::duration_cast<std::chrono::seconds>(life_time)
                         .count();
-                internal::cache_item_lifetime_seconds(
-                    storage_type)
+                internal::cache_item_lifetime_seconds(storage_type)
                     .Observe(seconds);
                 cell_ = nullptr;
                 milvus::monitor::internal_cache_used_bytes_memory.Decrement(
@@ -330,6 +358,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     // Each CacheCell's cid_t is its index in vector
     // Once initialized, cells_ should never be resized.
     std::vector<CacheCell> cells_;
+    CellIdMappingMode cell_id_mapping_mode_;
     internal::DList* dlist_;
 };
 

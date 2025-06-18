@@ -78,6 +78,7 @@ class FieldChunkMetricsTranslator
           data_type_(data_type),
           column_(column),
           meta_(cachinglayer::StorageType::MEMORY,
+                milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
                 CacheWarmupPolicy::CacheWarmupPolicy_Disable,
                 false) {
     }
