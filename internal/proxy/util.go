@@ -1512,9 +1512,11 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		}
 		if outputFieldName == "*" {
 			userRequestedPkFieldExplicitly = true
-			for fieldName := range allFieldNameMap {
-				resultFieldNameMap[fieldName] = true
-				userOutputFieldsMap[fieldName] = true
+			for fieldName, field := range allFieldNameMap {
+				if schema.CanRetrieveRawFieldData(field) {
+					resultFieldNameMap[fieldName] = true
+					userOutputFieldsMap[fieldName] = true
+				}
 			}
 			useAllDyncamicFields = true
 		} else {
