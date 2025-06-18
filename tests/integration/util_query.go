@@ -25,12 +25,14 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
@@ -129,6 +131,30 @@ func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, colle
 		default:
 			time.Sleep(500 * time.Millisecond)
 		}
+	}
+}
+
+func (s *MiniClusterSuite) Flush(ctx context.Context, dbName, collectionName string) {
+	cluster := s.Cluster
+
+	flushResp, err := cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	ids := segmentIDs.GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+	segments, err := cluster.MetaWatcher.ShowSegments()
+	s.NoError(err)
+	s.NotEmpty(segments)
+	for _, segment := range segments {
+		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
 }
 
