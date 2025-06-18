@@ -641,8 +641,8 @@ GenNgramIndexPrefix(ChunkManagerPtr cm,
     }
 
     boost::filesystem::path path = std::string(NGRAM_LOG_ROOT_PATH);
-    boost::filesystem::path path1 = GenNgramIndexPathIdentifier(
-        build_id, index_version, segment_id, field_id);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
 }
 
