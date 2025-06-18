@@ -16,6 +16,7 @@
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::index {
 constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
@@ -168,6 +169,14 @@ TextMatchIndex::Load(const Config& config) {
 
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitset);
+
+    if (!load_in_mmap) {
+        // the index is loaded in ram, so we can remove files in advance
+        auto local_chunk_manager =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager();
+        disk_file_manager_->RemoveTextLogFiles(local_chunk_manager);
+    }
 }
 
 void

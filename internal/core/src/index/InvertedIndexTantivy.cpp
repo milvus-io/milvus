@@ -18,6 +18,7 @@
 #include "log/Log.h"
 #include "index/Utils.h"
 #include "storage/Util.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 #include <boost/filesystem.hpp>
 #include <boost/uuid/random_generator.hpp>
@@ -266,6 +267,14 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         prefix.c_str(), load_in_mmap, milvus::index::SetBitset);
+
+    if (!load_in_mmap) {
+        // the index is loaded in ram, so we can remove files in advance
+        auto local_chunk_manager =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager();
+        disk_file_manager_->RemoveIndexFiles(local_chunk_manager);
+    }
 }
 
 template <typename T>

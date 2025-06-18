@@ -112,6 +112,15 @@ class DiskFileManagerImpl : public FileManagerImpl {
     CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files);
 
     void
+    RemoveIndexFiles(LocalChunkManagerSPtr cm);
+
+    void
+    RemoveTextLogFiles(LocalChunkManagerSPtr cm);
+
+    void
+    RemoveJsonKeyIndexFiles(LocalChunkManagerSPtr cm);
+
+    void
     AddBatchIndexFiles(const std::string& local_file_name,
                        const std::vector<int64_t>& local_file_offsets,
                        const std::vector<std::string>& remote_files,
