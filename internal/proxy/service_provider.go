@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -97,9 +98,19 @@ type CachedProxyServiceProvider struct {
 func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (*milvuspb.DescribeCollectionResponse, error) {
+	resp := &milvuspb.DescribeCollectionResponse{}
+
 	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, 0)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			// nolint
+			resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			// nolint
+			resp.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", request.DbName, request.CollectionName)
+			resp.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
+		}
+
+		return resp, nil
 	}
 
 	// skip dynamic fields, see describeCollectionTask.Execute
@@ -107,7 +118,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Name:        c.schema.CollectionSchema.Name,
 		Description: c.schema.CollectionSchema.Description,
 		AutoID:      c.schema.CollectionSchema.AutoID,
-		Fields: lo.Filter(c.schema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
+		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.IsDynamic
 		}),
 		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,
@@ -116,24 +127,22 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		DbName:             c.schema.CollectionSchema.DbName,
 	}
 
-	resp := &milvuspb.DescribeCollectionResponse{
-		Status:               merr.Success(),
-		Schema:               schema,
-		CollectionID:         c.collID,
-		CollectionName:       request.CollectionName,
-		DbName:               request.DbName,
-		UpdateTimestamp:      c.updateTimestamp,
-		UpdateTimestampStr:   fmt.Sprintf("%d", c.updateTimestamp),
-		CreatedTimestamp:     c.createdTimestamp,
-		CreatedUtcTimestamp:  c.createdUtcTimestamp,
-		ConsistencyLevel:     c.consistencyLevel,
-		VirtualChannelNames:  c.vChannels,
-		PhysicalChannelNames: c.pChannels,
-		NumPartitions:        c.numPartitions,
-		ShardsNum:            c.shardsNum,
-		Aliases:              c.aliases,
-		Properties:           c.properties,
-	}
+	resp.Status = merr.Success()
+	resp.Schema = schema
+	resp.CollectionID = c.collID
+	resp.CollectionName = request.CollectionName
+	resp.DbName = request.DbName
+	resp.UpdateTimestamp = c.updateTimestamp
+	resp.UpdateTimestampStr = fmt.Sprintf("%d", c.updateTimestamp)
+	resp.CreatedTimestamp = c.createdTimestamp
+	resp.CreatedUtcTimestamp = c.createdUtcTimestamp
+	resp.ConsistencyLevel = c.consistencyLevel
+	resp.VirtualChannelNames = c.vChannels
+	resp.PhysicalChannelNames = c.pChannels
+	resp.NumPartitions = c.numPartitions
+	resp.ShardsNum = c.shardsNum
+	resp.Aliases = c.aliases
+	resp.Properties = c.properties
 
 	return resp, nil
 }
