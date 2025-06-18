@@ -1173,6 +1173,7 @@ func TestProxyDescribeCollection(t *testing.T) {
 			CollectionName: "test_collection",
 		})
 		assert.NoError(t, err)
+		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=test_1][collection=test_collection]")
 		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
 	})
 }

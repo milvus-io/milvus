@@ -98,13 +98,17 @@ type CachedProxyServiceProvider struct {
 func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
 ) (*milvuspb.DescribeCollectionResponse, error) {
-	resp := &milvuspb.DescribeCollectionResponse{}
+	resp := &milvuspb.DescribeCollectionResponse{
+		Status:         merr.Success(),
+		CollectionName: request.CollectionName,
+		DbName:         request.DbName,
+	}
 
 	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, 0)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			// nolint
-			resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+			resp.Status.ErrorCode = commonpb.ErrorCode_CollectionNotExists
 			// nolint
 			resp.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", request.DbName, request.CollectionName)
 			resp.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
@@ -114,7 +118,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	}
 
 	// skip dynamic fields, see describeCollectionTask.Execute
-	schema := &schemapb.CollectionSchema{
+	resp.Schema = &schemapb.CollectionSchema{
 		Name:        c.schema.CollectionSchema.Name,
 		Description: c.schema.CollectionSchema.Description,
 		AutoID:      c.schema.CollectionSchema.AutoID,
@@ -126,12 +130,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Functions:          c.schema.CollectionSchema.Functions,
 		DbName:             c.schema.CollectionSchema.DbName,
 	}
-
-	resp.Status = merr.Success()
-	resp.Schema = schema
 	resp.CollectionID = c.collID
-	resp.CollectionName = request.CollectionName
-	resp.DbName = request.DbName
 	resp.UpdateTimestamp = c.updateTimestamp
 	resp.UpdateTimestampStr = fmt.Sprintf("%d", c.updateTimestamp)
 	resp.CreatedTimestamp = c.createdTimestamp
