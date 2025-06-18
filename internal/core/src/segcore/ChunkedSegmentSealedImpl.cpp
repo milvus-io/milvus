@@ -598,7 +598,7 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                "Cannot find scalar_indexing with field_id: " +
                    std::to_string(field_id.get()));
     auto slot = scalar_indexings_.at(field_id);
-    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto ca = slot->PinCells({0});
     auto index = ca->get_cell_of(0);
     return PinWrapper<const index::IndexBase*>(ca, index);
 }
@@ -717,10 +717,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
     auto vec_index = dynamic_cast<index::VectorIndex*>(
-        cache_index->PinCells({0})
-            .via(&folly::InlineExecutor::instance())
-            .get()
-            ->get_cell_of(0));
+        cache_index->PinCells({0})->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
     auto index_type = vec_index->GetIndexType();
@@ -1161,8 +1158,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             AssertInfo(field_index_iter != scalar_indexings_.end(),
                        "failed to create text index, neither raw data nor "
                        "index are found");
-            auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells({0}));
+            auto accessor = field_index_iter->second->PinCells({0});
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
