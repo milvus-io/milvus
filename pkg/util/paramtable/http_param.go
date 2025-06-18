@@ -23,6 +23,7 @@ type httpConfig struct {
 	AcceptTypeAllowInt64 ParamItem `refreshable:"true"`
 	EnablePprof          ParamItem `refreshable:"false"`
 	RequestTimeoutMs     ParamItem `refreshable:"true"`
+	EnableWebUI          ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -80,4 +81,13 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       false,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.EnableWebUI = ParamItem{
+		Key:          "proxy.http.enableWebUI",
+		DefaultValue: "true",
+		Version:      "v2.5.14",
+		Doc:          "Whether to enable setting the WebUI middleware on the metrics port",
+		Export:       true,
+	}
+	p.EnableWebUI.Init(base.mgr)
 }
