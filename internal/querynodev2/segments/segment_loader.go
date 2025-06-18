@@ -1752,6 +1752,10 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
 	}
 
+	if len(loadInfo.GetJsonKeyStatsLogs()) == 0 {
+		return nil
+	}
+
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 
@@ -1779,6 +1783,10 @@ func (loader *segmentLoader) LoadNgramIndex(ctx context.Context,
 	segment, ok := seg.(*LocalSegment)
 	if !ok {
 		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
+
+	if len(loadInfo.GetNgramStatsLogs()) == 0 {
+		return nil
 	}
 
 	collection := segment.GetCollection()

@@ -205,7 +205,7 @@ struct ParsedResult {
     MatchType type;
 };
 
-// Not used now, but may be used in the future for other match for ngram index
+// Not used now, but may be used in the future for other type of match for ngram index
 inline std::optional<ParsedResult>
 parse_ngram_pattern(const std::string& pattern) {
     if (pattern.empty()) {
