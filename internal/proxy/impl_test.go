@@ -1149,6 +1149,34 @@ func TestProxyDescribeDatabase(t *testing.T) {
 	})
 }
 
+func TestProxyDescribeCollection(t *testing.T) {
+	paramtable.Init()
+	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+	ctx := context.Background()
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.On("DescribeCollection", mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+	var err error
+	globalMetaCache, err = NewMetaCache(mixCoord, nil)
+	assert.NoError(t, err)
+
+	t.Run("not healthy", func(t *testing.T) {
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := node.DescribeCollection(context.TODO(), &milvuspb.DescribeCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("collection not exists", func(t *testing.T) {
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			DbName:         "test_1",
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+	})
+}
+
 func TestProxy_AllocTimestamp(t *testing.T) {
 	t.Run("proxy unhealthy", func(t *testing.T) {
 		node := &Proxy{}
