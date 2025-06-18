@@ -99,6 +99,10 @@ type Loader interface {
 	LoadJSONIndex(ctx context.Context,
 		segment Segment,
 		info *querypb.SegmentLoadInfo) error
+
+	LoadNgramIndex(ctx context.Context,
+		segment Segment,
+		info *querypb.SegmentLoadInfo) error
 }
 
 type ResourceEstimate struct {
@@ -707,6 +711,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	map[int64]*datapb.TextIndexStats, // text indexed info
 	map[int64]struct{}, // unindexed text fields
 	map[int64]*datapb.JsonKeyStats, // json key stats info
+	map[int64]*datapb.NgramIndexStats, // ngram indexed info
 ) {
 	fieldID2IndexInfo := make(map[int64][]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
@@ -755,6 +760,16 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
+	ngramIndexInfo := make(map[int64]*datapb.NgramIndexStats, len(loadInfo.GetNgramStatsLogs()))
+	for _, fieldStatsLog := range loadInfo.GetNgramStatsLogs() {
+		ngramLog, ok := ngramIndexInfo[fieldStatsLog.FieldID]
+		if !ok {
+			ngramIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		} else if fieldStatsLog.GetVersion() > ngramLog.GetVersion() {
+			ngramIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		}
+	}
+
 	unindexedTextFields := make(map[int64]struct{})
 	for _, field := range schema.GetFields() {
 		h := typeutil.CreateFieldSchemaHelper(field)
@@ -764,7 +779,7 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 		}
 	}
 
-	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields, jsonKeyIndexInfo
+	return indexedFieldInfos, fieldBinlogs, textIndexedInfo, unindexedTextFields, jsonKeyIndexInfo, ngramIndexInfo
 }
 
 func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) (err error) {
@@ -788,7 +803,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-	indexedFieldInfos, fieldBinlogs, textIndexes, unindexedTextFields, jsonKeyStats := separateLoadInfoV2(loadInfo, collection.Schema())
+	indexedFieldInfos, fieldBinlogs, textIndexes, unindexedTextFields, jsonKeyStats, ngramStats := separateLoadInfoV2(loadInfo, collection.Schema())
 	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 		return err
 	}
@@ -800,6 +815,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Int64s("indexed text fields", lo.Keys(textIndexes)),
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
+		zap.Int64s("indexed ngram fields", lo.Keys(ngramStats)),
 	)
 	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 		return err
@@ -854,6 +870,13 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	loadJSONKeyIndexesSpan := tr.RecordSpan()
 
+	for _, info := range ngramStats {
+		if err := segment.LoadNgramIndex(ctx, info, schemaHelper); err != nil {
+			return err
+		}
+	}
+	loadNgramIndexesSpan := tr.RecordSpan()
+
 	// 4. rectify entries number for binlog in very rare cases
 	// https://github.com/milvus-io/milvus/23654
 	// legacy entry num = 0
@@ -868,6 +891,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
 		zap.Duration("loadTextIndexesSpan", loadTextIndexesSpan),
 		zap.Duration("loadJsonKeyIndexSpan", loadJSONKeyIndexesSpan),
+		zap.Duration("loadNgramIndexesSpan", loadNgramIndexesSpan),
 	)
 	return nil
 }
@@ -1728,6 +1752,10 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
 	}
 
+	if len(loadInfo.GetJsonKeyStatsLogs()) == 0 {
+		return nil
+	}
+
 	collection := segment.GetCollection()
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
 
@@ -1742,6 +1770,39 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 	}
 	for _, info := range jsonKeyIndexInfo {
 		if err := segment.LoadJSONKeyIndex(ctx, info, schemaHelper); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (loader *segmentLoader) LoadNgramIndex(ctx context.Context,
+	seg Segment,
+	loadInfo *querypb.SegmentLoadInfo,
+) error {
+	segment, ok := seg.(*LocalSegment)
+	if !ok {
+		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
+
+	if len(loadInfo.GetNgramStatsLogs()) == 0 {
+		return nil
+	}
+
+	collection := segment.GetCollection()
+	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+
+	ngramIndexInfo := make(map[int64]*datapb.NgramIndexStats, len(loadInfo.GetNgramStatsLogs()))
+	for _, fieldStatsLog := range loadInfo.GetNgramStatsLogs() {
+		ngramIndex, ok := ngramIndexInfo[fieldStatsLog.FieldID]
+		if !ok {
+			ngramIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		} else if fieldStatsLog.GetVersion() > ngramIndex.GetVersion() {
+			ngramIndexInfo[fieldStatsLog.FieldID] = fieldStatsLog
+		}
+	}
+	for _, info := range ngramIndexInfo {
+		if err := segment.LoadNgramIndex(ctx, info, schemaHelper); err != nil {
 			return err
 		}
 	}

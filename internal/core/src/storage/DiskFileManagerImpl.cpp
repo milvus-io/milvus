@@ -60,6 +60,7 @@ DiskFileManagerImpl::~DiskFileManagerImpl() {
     local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
     local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
     local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
+    local_chunk_manager->RemoveDir(GetLocalNgramIndexPrefix());
 }
 
 bool
@@ -316,6 +317,16 @@ DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
     return CacheIndexToDiskInternal(
         remote_files,
         [this]() { return GetLocalJsonKeyIndexPrefix(); },
+        priority);
+}
+
+void
+DiskFileManagerImpl::CacheNgramIndexToDisk(
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
+    return CacheIndexToDiskInternal(
+        remote_files,
+        [this]() { return GetLocalNgramIndexPrefix(); },
         priority);
 }
 
@@ -781,6 +792,30 @@ DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
                                      field_meta_.segment_id,
                                      field_meta_.field_id,
                                      false);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id,
+                               false);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalTempNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id,
+                               true);
 }
 
 std::string

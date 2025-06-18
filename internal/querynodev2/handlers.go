@@ -210,6 +210,13 @@ func (node *QueryNode) loadStats(ctx context.Context, req *querypb.LoadSegmentsR
 			status = merr.Status(err)
 			break
 		}
+
+		err = node.loader.LoadNgramIndex(ctx, localSegment, info)
+		if err != nil {
+			log.Warn("failed to load ngram index", zap.Error(err))
+			status = merr.Status(err)
+			break
+		}
 	}
 
 	return status
