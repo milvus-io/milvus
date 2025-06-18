@@ -43,6 +43,7 @@ ChunkTranslator::ChunkTranslator(
       mmap_dir_path_(field_data_info.mmap_dir_path),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
@@ -71,6 +72,8 @@ ChunkTranslator::num_cells() const {
 
 milvus::cachinglayer::cid_t
 ChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
+    // For now, the cell id is identical to the uid, so the meta_.cell_id_mapping_mode is IDENTICAL.
+    // Note: if you want to use a customized cell id mapping mode, don't forget to change the meta_.cell_id_mapping_mode to CUSTOMIZED.
     return uid;
 }
 
