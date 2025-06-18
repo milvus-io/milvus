@@ -42,7 +42,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     std::vector<std::string> insert_files,
     bool use_mmap,
     std::vector<milvus_storage::RowGroupMetadataVector>& row_group_meta_list,
-    milvus_storage::FieldIDList field_id_list)
+    milvus_storage::FieldIDList field_id_list,
+    milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
       field_metas_(field_metas),
@@ -51,6 +52,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       use_mmap_(use_mmap),
       row_group_meta_list_(row_group_meta_list),
       field_id_list_(field_id_list),
+      load_priority_(load_priority),
       meta_(
           field_id_list.size(),
           use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -156,7 +158,9 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 column_group_info_.arrow_reader_channel,
                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                 std::move(strategy),
-                                row_group_lists);
+                                row_group_lists,
+                                nullptr,
+                                load_priority_);
     });
     LOG_INFO("segment {} submits load fields {} task to thread pool",
              segment_id_,
@@ -228,7 +232,7 @@ GroupChunkTranslator::load_group_chunk(
 
             auto file =
                 File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-            auto chunk = create_chunk(field_meta, dim, file, 0, array_vec);
+            chunk = create_chunk(field_meta, dim, file, 0, array_vec);
             auto ok = unlink(filepath.c_str());
             AssertInfo(
                 ok == 0,

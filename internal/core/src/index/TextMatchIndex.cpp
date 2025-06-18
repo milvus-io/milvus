@@ -16,10 +16,9 @@
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
-constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
-
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* tokenizer_name,
@@ -67,8 +66,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    auto prefix = disk_file_manager_->GetTextIndexIdentifier();
-    path_ = std::string(TMP_TEXT_LOG_PREFIX) + prefix;
+    path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
     boost::filesystem::create_directories(path_);
     d_type_ = TantivyDataType::Text;
@@ -149,7 +147,8 @@ TextMatchIndex::Load(const Config& config) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            file, config[milvus::LOAD_PRIORITY]);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         auto index_valid_data = binary_set.GetByName("index_null_offset");
@@ -159,7 +158,8 @@ TextMatchIndex::Load(const Config& config) {
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
     }
-    disk_file_manager_->CacheTextLogToDisk(files_value);
+    disk_file_manager_->CacheTextLogToDisk(files_value,
+                                           config[milvus::LOAD_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),

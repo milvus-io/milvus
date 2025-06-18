@@ -145,6 +145,7 @@ func NewDispatcher(
 		pchannel:             pchannel,
 		targets:              typeutil.NewConcurrentMap[string, *target](),
 		stream:               stream,
+		includeSkipWhenSplit: includeSkipWhenSplit,
 	}
 
 	metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Inc()
@@ -271,7 +272,6 @@ func (d *Dispatcher) work() {
 						log.Debug("skip msg info",
 							zap.String("vchannel", vchannel),
 							zap.String("msgType", msg.Type().String()),
-							zap.Int64("msgID", msg.ID()),
 							zap.Uint64("msgBeginTs", msg.BeginTs()),
 							zap.Uint64("msgEndTs", msg.EndTs()),
 							zap.Uint64("packBeginTs", p.BeginTs),

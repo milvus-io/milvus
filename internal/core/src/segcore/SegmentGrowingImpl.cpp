@@ -314,8 +314,10 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
-        auto load_future =
-            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+        auto load_future = pool.Submit(LoadFieldDatasFromRemote,
+                                       insert_files,
+                                       channel,
+                                       infos.load_priority);
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -468,7 +470,9 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     column_group_info.arrow_reader_channel,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
-                                    row_group_lists);
+                                    row_group_lists,
+                                    nullptr,
+                                    infos.load_priority);
         });
 
         LOG_INFO("segment {} submits load fields {} task to thread pool",
@@ -1249,7 +1253,9 @@ SegmentGrowingImpl::FinishLoad() {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
-        if (!insert_record_.is_data_exist(field_id)) {
+        // append_data is called according to schema before
+        // so we must check data empty here
+        if (!IsVectorDataType(field_meta.get_data_type()) &&insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
         }
     }
@@ -1258,7 +1264,12 @@ SegmentGrowingImpl::FinishLoad() {
 void
 SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
-    insert_record_.append_field_meta(field_id, field_meta, size_per_chunk());
+    // append meta only needed when schema is old
+    // loading old segment with new schema will have meta appended
+    if (!insert_record_.is_data_exist(field_id)) {
+        insert_record_.append_field_meta(
+            field_id, field_meta, size_per_chunk());
+    }
 
     auto total_row_num = insert_record_.size();
 
@@ -1267,6 +1278,9 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
         0, total_row_num, data.get(), field_meta);
     insert_record_.get_valid_data(field_id)->set_data_raw(
         total_row_num, data.get(), field_meta);
+    LOG_INFO("Growing segment {} fill empty field {} done",
+             this->get_segment_id(),
+             field_meta.get_id().get());
 }
 
 }  // namespace milvus::segcore

@@ -85,10 +85,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         if (ctx.for_loading_index) {
             return;
         }
-        auto prefix = this->disk_file_manager_->GetTextIndexIdentifier();
-        constexpr const char* TMP_INVERTED_INDEX_PREFIX =
-            "/tmp/milvus/inverted-index/";
-        this->path_ = std::string(TMP_INVERTED_INDEX_PREFIX) + prefix;
+        this->path_ = this->disk_file_manager_->GetLocalTempIndexObjectPrefix();
 
         this->d_type_ = cast_type_.ToTantivyType();
         boost::filesystem::create_directories(this->path_);

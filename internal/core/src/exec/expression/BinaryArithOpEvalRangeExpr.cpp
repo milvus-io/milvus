@@ -250,8 +250,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                fmod(x.value(), right_operand)) == val);
+                            safe_mod(x.value(), right_operand) == val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -292,8 +291,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompareNotEqual(
-                            static_cast<ValueType>(
-                                fmod(x.value(), right_operand)) != val);
+                            safe_mod(x.value(), right_operand) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -334,8 +332,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                fmod(x.value(), right_operand)) > val);
+                            safe_mod(x.value(), right_operand) > val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -376,8 +373,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                fmod(x.value(), right_operand)) >= val);
+                            safe_mod(x.value(), right_operand) >= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -418,8 +414,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                fmod(x.value(), right_operand)) < val);
+                            safe_mod(x.value(), right_operand) < val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -460,8 +455,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeJSONCompare(
-                            static_cast<ValueType>(
-                                fmod(x.value(), right_operand)) <= val);
+                            safe_mod(x.value(), right_operand) <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -624,8 +618,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                fmod(value, right_operand)) == val);
+                            safe_mod(value, right_operand) == val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -666,8 +659,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                fmod(value, right_operand)) != val);
+                            safe_mod(value, right_operand) != val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -708,8 +700,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(fmod(value, right_operand)) >
-                            val);
+                            safe_mod(value, right_operand) > val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -750,8 +741,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                fmod(value, right_operand)) >= val);
+                            safe_mod(value, right_operand) >= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -792,8 +782,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(fmod(value, right_operand)) <
-                            val);
+                            safe_mod(value, right_operand) < val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {
@@ -834,8 +823,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForArray(
                     }
                     case proto::plan::ArithOpType::Mod: {
                         BinaryArithRangeArrayCompare(
-                            static_cast<ValueType>(
-                                fmod(value, right_operand)) <= val);
+                            safe_mod(value, right_operand) <= val);
                         break;
                     }
                     case proto::plan::ArithOpType::ArrayLength: {

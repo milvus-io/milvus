@@ -757,29 +757,29 @@ func (_c *MockCache_GetPrivilegeInfo_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// GetShards provides a mock function with given fields: ctx, withCache, database, collectionName, collectionID
-func (_m *MockCache) GetShards(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64) (map[string][]nodeInfo, error) {
-	ret := _m.Called(ctx, withCache, database, collectionName, collectionID)
+// GetShard provides a mock function with given fields: ctx, withCache, database, collectionName, collectionID, channel
+func (_m *MockCache) GetShard(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64, channel string) ([]nodeInfo, error) {
+	ret := _m.Called(ctx, withCache, database, collectionName, collectionID, channel)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetShards")
+		panic("no return value specified for GetShard")
 	}
 
-	var r0 map[string][]nodeInfo
+	var r0 []nodeInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64) (map[string][]nodeInfo, error)); ok {
-		return rf(ctx, withCache, database, collectionName, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64, string) ([]nodeInfo, error)); ok {
+		return rf(ctx, withCache, database, collectionName, collectionID, channel)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64) map[string][]nodeInfo); ok {
-		r0 = rf(ctx, withCache, database, collectionName, collectionID)
+	if rf, ok := ret.Get(0).(func(context.Context, bool, string, string, int64, string) []nodeInfo); ok {
+		r0 = rf(ctx, withCache, database, collectionName, collectionID, channel)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][]nodeInfo)
+			r0 = ret.Get(0).([]nodeInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, bool, string, string, int64) error); ok {
-		r1 = rf(ctx, withCache, database, collectionName, collectionID)
+	if rf, ok := ret.Get(1).(func(context.Context, bool, string, string, int64, string) error); ok {
+		r1 = rf(ctx, withCache, database, collectionName, collectionID, channel)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -787,34 +787,97 @@ func (_m *MockCache) GetShards(ctx context.Context, withCache bool, database str
 	return r0, r1
 }
 
-// MockCache_GetShards_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetShards'
-type MockCache_GetShards_Call struct {
+// MockCache_GetShard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetShard'
+type MockCache_GetShard_Call struct {
 	*mock.Call
 }
 
-// GetShards is a helper method to define mock.On call
+// GetShard is a helper method to define mock.On call
 //   - ctx context.Context
 //   - withCache bool
 //   - database string
 //   - collectionName string
 //   - collectionID int64
-func (_e *MockCache_Expecter) GetShards(ctx interface{}, withCache interface{}, database interface{}, collectionName interface{}, collectionID interface{}) *MockCache_GetShards_Call {
-	return &MockCache_GetShards_Call{Call: _e.mock.On("GetShards", ctx, withCache, database, collectionName, collectionID)}
+//   - channel string
+func (_e *MockCache_Expecter) GetShard(ctx interface{}, withCache interface{}, database interface{}, collectionName interface{}, collectionID interface{}, channel interface{}) *MockCache_GetShard_Call {
+	return &MockCache_GetShard_Call{Call: _e.mock.On("GetShard", ctx, withCache, database, collectionName, collectionID, channel)}
 }
 
-func (_c *MockCache_GetShards_Call) Run(run func(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64)) *MockCache_GetShards_Call {
+func (_c *MockCache_GetShard_Call) Run(run func(ctx context.Context, withCache bool, database string, collectionName string, collectionID int64, channel string)) *MockCache_GetShard_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(bool), args[2].(string), args[3].(string), args[4].(int64))
+		run(args[0].(context.Context), args[1].(bool), args[2].(string), args[3].(string), args[4].(int64), args[5].(string))
 	})
 	return _c
 }
 
-func (_c *MockCache_GetShards_Call) Return(_a0 map[string][]nodeInfo, _a1 error) *MockCache_GetShards_Call {
+func (_c *MockCache_GetShard_Call) Return(_a0 []nodeInfo, _a1 error) *MockCache_GetShard_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCache_GetShards_Call) RunAndReturn(run func(context.Context, bool, string, string, int64) (map[string][]nodeInfo, error)) *MockCache_GetShards_Call {
+func (_c *MockCache_GetShard_Call) RunAndReturn(run func(context.Context, bool, string, string, int64, string) ([]nodeInfo, error)) *MockCache_GetShard_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetShardLeaderList provides a mock function with given fields: ctx, database, collectionName, collectionID, withCache
+func (_m *MockCache) GetShardLeaderList(ctx context.Context, database string, collectionName string, collectionID int64, withCache bool) ([]string, error) {
+	ret := _m.Called(ctx, database, collectionName, collectionID, withCache)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetShardLeaderList")
+	}
+
+	var r0 []string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, bool) ([]string, error)); ok {
+		return rf(ctx, database, collectionName, collectionID, withCache)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, int64, bool) []string); ok {
+		r0 = rf(ctx, database, collectionName, collectionID, withCache)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, int64, bool) error); ok {
+		r1 = rf(ctx, database, collectionName, collectionID, withCache)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCache_GetShardLeaderList_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetShardLeaderList'
+type MockCache_GetShardLeaderList_Call struct {
+	*mock.Call
+}
+
+// GetShardLeaderList is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+//   - collectionName string
+//   - collectionID int64
+//   - withCache bool
+func (_e *MockCache_Expecter) GetShardLeaderList(ctx interface{}, database interface{}, collectionName interface{}, collectionID interface{}, withCache interface{}) *MockCache_GetShardLeaderList_Call {
+	return &MockCache_GetShardLeaderList_Call{Call: _e.mock.On("GetShardLeaderList", ctx, database, collectionName, collectionID, withCache)}
+}
+
+func (_c *MockCache_GetShardLeaderList_Call) Run(run func(ctx context.Context, database string, collectionName string, collectionID int64, withCache bool)) *MockCache_GetShardLeaderList_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(int64), args[4].(bool))
+	})
+	return _c
+}
+
+func (_c *MockCache_GetShardLeaderList_Call) Return(_a0 []string, _a1 error) *MockCache_GetShardLeaderList_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCache_GetShardLeaderList_Call) RunAndReturn(run func(context.Context, string, string, int64, bool) ([]string, error)) *MockCache_GetShardLeaderList_Call {
 	_c.Call.Return(run)
 	return _c
 }
