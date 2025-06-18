@@ -47,7 +47,9 @@ class ChunkedColumnGroup {
  public:
     explicit ChunkedColumnGroup(
         std::unique_ptr<Translator<GroupChunk>> translator)
-        : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+        : slot_(Manager::GetInstance().CreateCacheSlot(
+              std::move(translator),
+              CellIdMappingMode::IDENTICAL)) {
         num_chunks_ = slot_->num_cells();
         num_rows_ = GetNumRowsUntilChunk().back();
     }

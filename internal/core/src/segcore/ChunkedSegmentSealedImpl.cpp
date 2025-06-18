@@ -1840,7 +1840,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
 
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                    std::move(translator));
+                    std::move(translator),
+                    milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO);
             // TODO: how to handle the binlog index?
             vector_indexings_.append_field_indexing(
                 field_id, index_metric, std::move(interim_index_cache_slot));

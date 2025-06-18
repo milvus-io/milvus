@@ -80,7 +80,9 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                                const FieldMeta& field_meta)
         : nullable_(field_meta.is_nullable()),
           num_chunks_(translator->num_cells()),
-          slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+          slot_(Manager::GetInstance().CreateCacheSlot(
+              std::move(translator),
+              CellIdMappingMode::IDENTICAL)) {
         num_rows_ = GetNumRowsUntilChunk().back();
     }
 
@@ -441,7 +443,7 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
                       const int64_t* offsets,
                       int64_t count) const override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(cids));
+        auto ca = slot_->PinCells(cids);
         for (int64_t i = 0; i < count; i++) {
             auto array =
                 static_cast<VectorArrayChunk*>(ca->get_cell_of(cids[i]))
@@ -453,8 +455,7 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
 
     PinWrapper<std::vector<VectorArrayView>>
     VectorArrayViews(int64_t chunk_id) const override {
-        auto ca =
-            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto ca = slot_->PinCells({static_cast<cid_t>(chunk_id)});
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::vector<VectorArrayView>>(
             ca, static_cast<VectorArrayChunk*>(chunk)->Views());
