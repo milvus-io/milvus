@@ -76,7 +76,11 @@ TEST_F(StorageTest, GetLocalUsedSize) {
     int64_t size = 0;
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     EXPECT_EQ(lcm->GetRootPath(), "/tmp/milvus/local_data/");
-    string test_dir = lcm->GetRootPath() + "tmp";
+    string test_dir =
+        lcm->GetRootPath() + "tmp" +
+        // add random number to avoid dir conflict
+        std::to_string(
+            std::chrono::system_clock::now().time_since_epoch().count());
     string test_file = test_dir + "/test.txt";
 
     auto status = GetLocalUsedSize(test_dir.c_str(), &size);

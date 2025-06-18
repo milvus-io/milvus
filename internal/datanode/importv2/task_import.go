@@ -267,7 +267,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			if err != nil {
 				return nil, nil, err
 			}
-			future, err := t.syncMgr.SyncData(t.ctx, syncTask)
+			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
 			if err != nil {
 				log.Ctx(context.TODO()).Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
 				return nil, nil, err

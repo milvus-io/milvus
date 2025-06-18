@@ -34,6 +34,7 @@
 #include "storage/DataCodec.h"
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -87,46 +88,40 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
                            DataType data_type);
 
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
+GenIndexPathIdentifier(int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id);
 
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
+GenIndexPathPrefix(ChunkManagerPtr cm,
+                   int64_t build_id,
+                   int64_t index_version,
+                   int64_t segment_id,
+                   int64_t field_id,
+                   bool is_temp);
 
-std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
-
-std::string
-GenTextIndexPathIdentifier(int64_t build_id,
-                           int64_t index_version,
-                           int64_t segment_id,
-                           int64_t field_id);
-
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
 GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
-                       int64_t field_id);
+                       int64_t field_id,
+                       bool is_temp);
 
-std::string
-GetTextIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
-
-std::string
-GenJsonKeyIndexPathIdentifier(int64_t build_id,
-                              int64_t index_version,
-                              int64_t collection_id,
-                              int64_t partition_id,
-                              int64_t segment_id,
-                              int64_t field_id);
-
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
 GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t build_id,
                           int64_t index_version,
-                          int64_t collection_id,
-                          int64_t partition_id,
                           int64_t segment_id,
-                          int64_t field_id);
+                          int64_t field_id,
+                          bool is_temp);
 
 std::string
 GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
@@ -153,8 +148,10 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           std::string object_key);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
-GetObjectData(ChunkManager* remote_chunk_manager,
-              const std::vector<std::string>& remote_files);
+GetObjectData(
+    ChunkManager* remote_chunk_manager,
+    const std::vector<std::string>& remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,

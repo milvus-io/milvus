@@ -125,7 +125,7 @@ TEST(chunk, test_variable_field_nullable) {
     auto field_data =
         milvus::storage::CreateFieldData(storage::DataType::VARCHAR, true);
     uint8_t* valid_data = new uint8_t[1]{0x15};  // 10101 in binary
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
     delete[] valid_data;
 
     storage::InsertEventData event_data;
@@ -290,7 +290,7 @@ TEST(chunk, test_null_int64) {
 
     // Set up validity bitmap: 10011 (1st, 4th, and 5th are valid)
     uint8_t* valid_data = new uint8_t[1]{0x13};  // 10011 in binary
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
     delete[] valid_data;
 
     storage::InsertEventData event_data;
@@ -413,7 +413,7 @@ TEST(chunk, test_null_array) {
 
     // Set up validity bitmap: 10101 (1st, 3rd, and 5th are valid)
     uint8_t* valid_data = new uint8_t[1]{0x15};  // 10101 in binary
-    field_data->FillFieldData(data.data(), valid_data, data.size());
+    field_data->FillFieldData(data.data(), valid_data, data.size(), 0);
     delete[] valid_data;
 
     storage::InsertEventData event_data;

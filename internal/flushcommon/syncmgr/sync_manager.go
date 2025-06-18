@@ -49,6 +49,7 @@ type SyncMeta struct {
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
 	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) (*conc.Future[struct{}], error)
+	SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error)
 
 	// Close waits for the task to finish and then shuts down the sync manager.
 	Close() error
@@ -111,6 +112,19 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithChunkManager(mgr.chunkManager)
+	}
+
+	return mgr.safeSubmitTask(ctx, task, callbacks...), nil
+}
+
+func (mgr *syncManager) SyncDataWithChunkManager(ctx context.Context, task Task, chunkManager storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	if mgr.workerPool.IsClosed() {
+		return nil, errors.New("sync manager is closed")
+	}
+
+	switch t := task.(type) {
+	case *SyncTask:
+		t.WithChunkManager(chunkManager)
 	}
 
 	return mgr.safeSubmitTask(ctx, task, callbacks...), nil

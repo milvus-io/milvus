@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -127,8 +128,8 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret := make([]task.Task, 0)
 
 	// compare with targets to find the lack and redundancy of segments
-	lacks, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
-	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
+	lacks, loadPriorities, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
+	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, loadPriorities, replica)
 	task.SetReason("lacks of segment", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
@@ -224,7 +225,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	ctx context.Context,
 	collectionID int64,
 	replicaID int64,
-) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+) (toLoad []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, toRelease []*meta.Segment) {
 	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
@@ -247,10 +248,15 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
-
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
 		if isSegmentLack(segment) {
+			_, existOnCurrent := currentTargetMap[segment.GetID()]
+			if existOnCurrent {
+				loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+			} else {
+				loadPriorities = append(loadPriorities, replica.LoadPriority())
+			}
 			toLoad = append(toLoad, segment)
 		}
 	}
@@ -359,9 +365,13 @@ func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *met
 	return notUsed
 }
 
-func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, replica *meta.Replica) []task.Task {
 	if len(segments) == 0 {
 		return nil
+	}
+	priorityMap := make(map[int64]commonpb.LoadPriority)
+	for i, s := range segments {
+		priorityMap[s.GetID()] = loadPriorities[i]
 	}
 
 	shardSegments := lo.GroupBy(segments, func(s *datapb.SegmentInfo) string {
@@ -389,6 +399,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
+			shardPlans[i].LoadPriority = priorityMap[shardPlans[i].Segment.GetID()]
 		}
 		plans = append(plans, shardPlans...)
 	}
@@ -406,6 +417,7 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 			c.ID(),
 			s.GetCollectionID(),
 			replica,
+			replica.LoadPriority(),
 			action,
 		)
 		if err != nil {

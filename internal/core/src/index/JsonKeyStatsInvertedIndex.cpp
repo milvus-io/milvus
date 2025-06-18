@@ -288,11 +288,9 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     if (is_load) {
-        auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
-        path_ = prefix;
+        path_ = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
     } else {
-        auto prefix = disk_file_manager_->GetJsonKeyIndexIdentifier();
-        path_ = std::string(TMP_JSON_INVERTED_LOG_PREFIX) + prefix;
+        path_ = disk_file_manager_->GetLocalTempJsonKeyIndexPrefix();
         boost::filesystem::create_directories(path_);
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
@@ -401,7 +399,8 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             index_file = remote_prefix + "/" + index_file;
         }
     }
-    disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
+    disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value(),
+                                                config[milvus::LOAD_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
 
