@@ -221,20 +221,10 @@ func (s *deleteCollectionDataStep) Execute(ctx context.Context) ([]nestedStep, e
 	if s.isSkip {
 		return nil, nil
 	}
-	ddlTs, err := s.core.garbageCollector.GcCollectionData(ctx, s.coll)
-	if err != nil {
+	if _, err := s.core.garbageCollector.GcCollectionData(ctx, s.coll); err != nil {
 		return nil, err
 	}
-	// wait for ts synced.
-	children := make([]nestedStep, 0, len(s.coll.PhysicalChannelNames))
-	for _, channel := range s.coll.PhysicalChannelNames {
-		children = append(children, &waitForTsSyncedStep{
-			baseStep: baseStep{core: s.core},
-			ts:       ddlTs,
-			channel:  channel,
-		})
-	}
-	return children, nil
+	return nil, nil
 }
 
 func (s *deleteCollectionDataStep) Desc() string {
@@ -243,31 +233,6 @@ func (s *deleteCollectionDataStep) Desc() string {
 
 func (s *deleteCollectionDataStep) Weight() stepPriority {
 	return stepPriorityImportant
-}
-
-// waitForTsSyncedStep child step of deleteCollectionDataStep.
-type waitForTsSyncedStep struct {
-	baseStep
-	ts      Timestamp
-	channel string
-}
-
-func (s *waitForTsSyncedStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	syncedTs := s.core.chanTimeTick.getSyncedTimeTick(s.channel)
-	if syncedTs < s.ts {
-		// TODO: there may be frequent log here.
-		// time.Sleep(Params.ProxyCfg.TimeTickInterval)
-		return nil, fmt.Errorf("ts not synced yet, channel: %s, synced: %d, want: %d", s.channel, syncedTs, s.ts)
-	}
-	return nil, nil
-}
-
-func (s *waitForTsSyncedStep) Desc() string {
-	return fmt.Sprintf("wait for ts synced, channel: %s, want: %d", s.channel, s.ts)
-}
-
-func (s *waitForTsSyncedStep) Weight() stepPriority {
-	return stepPriorityNormal
 }
 
 type deletePartitionDataStep struct {

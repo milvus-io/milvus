@@ -208,14 +208,9 @@ func (s *DBPropertiesSuite) TestDenyWringDB() {
 }
 
 func (s *DBPropertiesSuite) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
 	s.MiniClusterSuite.SetupSuite()
-}
-
-func (s *DBPropertiesSuite) TearDownSuite() {
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key)
-	s.MiniClusterSuite.TearDownSuite()
 }
 
 func TestLimitWithDBProperties(t *testing.T) {

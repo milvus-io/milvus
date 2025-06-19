@@ -32,17 +32,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
 func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key, "10")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.GrowingSegmentsMemSizeInMB.Key)
-
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.SyncPeriod.Key, "5")
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.SyncPeriod.Key)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
@@ -68,7 +61,7 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 	s.NoError(err)
 
 	// create collection
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
 		CollectionName:   collectionName,
 		Schema:           marshaledSchema,
@@ -80,7 +73,7 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 
 	// show collection
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -89,7 +82,7 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	partitionKeyColumn := integration.NewInt64FieldDataWithStart("pid", rowNum, 0)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn, partitionKeyColumn},
@@ -103,7 +96,7 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 	// wait for segment seal and flush
 	showSegments := func() bool {
 		var segments []*datapb.SegmentInfo
-		segments, err = c.MetaWatcher.ShowSegments()
+		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 		flushedSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
@@ -123,14 +116,14 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 	}
 
 	// release collection
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
 	// drop collection
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
