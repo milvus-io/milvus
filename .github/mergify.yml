@@ -30,9 +30,13 @@ misc:
   - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
       - 'status-success=go-unit-test'
       - 'status-success=UT for Go'
+      - 'status-success=ut-go'
   - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=integration-test'
       - 'status-success=Integration Test'
+  - when_e2e_test_success: $WHEN_E2E_TEST_SUCCESS
+      - 'status-success=cpu-e2e'
+      - 'status-success=e2e-default'
   
   # Branch configurations
   - branch: &BRANCHES
