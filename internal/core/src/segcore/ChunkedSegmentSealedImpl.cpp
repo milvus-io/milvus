@@ -248,6 +248,23 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
 
+    auto field_ids = schema_->get_field_ids();
+
+    std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
+    for (auto& [id, info] : load_info.field_infos) {
+        int64_t group_id =
+            storage::ExtractGroupIdFromPath(info.insert_files[0]);
+        column_group_files[group_id] = info.insert_files;
+    }
+
+    std::vector<FieldId> narrow_column_field_ids;
+    for (auto& field_id : field_ids) {
+        if (column_group_files.find(field_id.get()) ==
+            column_group_files.end()) {
+            narrow_column_field_ids.push_back(field_id);
+        }
+    }
+
     for (auto& [id, info] : load_info.field_infos) {
         AssertInfo(info.row_count > 0, "The row count of field data is 0");
 
@@ -269,26 +286,20 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 reader->file_metadata()->GetRowGroupMetadataVector());
         }
 
-        milvus_storage::FieldIDList field_id_list;
-        if (column_group_id == FieldId(DEFAULT_SHORT_COLUMN_GROUP_ID)) {
-            field_id_list =
-                metadata->GetGroupFieldIDList().GetFieldIDList(
-                column_group_id.get());
-        } else {
-            field_id_list.Add(milvus_storage::FieldID(column_group_id.get()));
-        }
-        
         std::vector<FieldId> milvus_field_ids;
+        if (column_group_id == FieldId(DEFAULT_SHORT_COLUMN_GROUP_ID)) {
+            milvus_field_ids = narrow_column_field_ids;
+        } else {
+            milvus_field_ids.push_back(column_group_id);
+        }
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
         // warmup will be disabled only when all columns are not in load list
         bool merged_in_load_list = false;
-        for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.emplace_back(field_id_list.Get(i));
-            merged_in_load_list =
-                merged_in_load_list ||
-                schema_->ShallLoadField(FieldId(field_id_list.Get(i)));
+        for (int i = 0; i < milvus_field_ids.size(); ++i) {
+            merged_in_load_list = merged_in_load_list ||
+                                  schema_->ShallLoadField(milvus_field_ids[i]);
         }
 
         auto column_group_info = FieldDataInfo(column_group_id.get(),
@@ -310,7 +321,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 insert_files,
                 info.enable_mmap,
                 row_group_meta_list,
-                field_id_list,
+                schema_->size(),
                 load_info.load_priority);
 
         auto chunked_column_group =
