@@ -100,28 +100,37 @@ func (s *PackedBinlogRecordSuite) SetupTest() {
 	s.chunkSize = uint64(1024)
 }
 
-func genTestColumnGroups(schema *schemapb.CollectionSchema) []storagecommon.ColumnGroup {
-	fieldBinlogs := make([]*datapb.FieldBinlog, 0)
-	for i, field := range schema.Fields {
-		fieldBinlogs = append(fieldBinlogs, &datapb.FieldBinlog{
-			FieldID: field.FieldID,
-			Binlogs: []*datapb.Binlog{
-				{
-					EntriesNum: int64(10 * (i + 1)),
-					LogSize:    int64(1000 / (i + 1)),
-				},
-			},
-		})
-	}
-	return storagecommon.SplitByFieldSize(fieldBinlogs, 10)
-}
-
 func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	rows := 10000
 	readBatchSize := 1024
-	columnGroups := genTestColumnGroups(s.schema)
+	columnGroups := []storagecommon.ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			GroupID: 102,
+			Columns: []int{13},
+		},
+		{
+			GroupID: 103,
+			Columns: []int{14},
+		},
+		{
+			GroupID: 104,
+			Columns: []int{15},
+		},
+		{
+			GroupID: 105,
+			Columns: []int{16},
+		},
+		{
+			GroupID: 106,
+			Columns: []int{17},
+		},
+	}
 	wOption := []RwOption{
 		WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return s.mockBinlogIO.Upload(ctx, kvs)
@@ -197,7 +206,20 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 	s.schema = genCollectionSchemaWithBM25()
-	columnGroups := genTestColumnGroups(s.schema)
+	columnGroups := []storagecommon.ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0, 1, 2},
+		},
+		{
+			GroupID: 101,
+			Columns: []int{3},
+		},
+		{
+			GroupID: 102,
+			Columns: []int{4},
+		},
+	}
 	wOption := []RwOption{
 		WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return s.mockBinlogIO.Upload(ctx, kvs)
@@ -251,7 +273,12 @@ func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
 	s.schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
 	}}
-	columnGroups := genTestColumnGroups(s.schema)
+	columnGroups := []storagecommon.ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0},
+		},
+	}
 	wOption := []RwOption{
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
@@ -264,7 +291,12 @@ func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {
 	s.schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{}},
 	}}
-	columnGroups := genTestColumnGroups(s.schema)
+	columnGroups := []storagecommon.ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0},
+		},
+	}
 	wOption := []RwOption{
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
@@ -282,7 +314,12 @@ func (s *PackedBinlogRecordSuite) TestEmptyBinlog() {
 }
 
 func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
-	columnGroups := genTestColumnGroups(s.schema)
+	columnGroups := []storagecommon.ColumnGroup{
+		{
+			GroupID: 0,
+			Columns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17},
+		},
+	}
 	wOption := []RwOption{
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
