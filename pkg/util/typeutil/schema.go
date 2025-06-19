@@ -302,12 +302,12 @@ type SchemaHelper struct {
 	partitionKeyOffset  int
 	clusteringKeyOffset int
 	dynamicFieldOffset  int
-	loadFields          Set[int64]
 	// include sub fields in StructArrayField
 	allFields []*schemapb.FieldSchema
 }
 
-func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) (*SchemaHelper, error) {
+// CreateSchemaHelper returns a new SchemaHelper object
+func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error) {
 	if schema == nil {
 		return nil, errors.New("schema is nil")
 	}
@@ -327,7 +327,6 @@ func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFie
 		partitionKeyOffset:  -1,
 		clusteringKeyOffset: -1,
 		dynamicFieldOffset:  -1,
-		loadFields:          NewSet(loadFields...),
 	}
 	for offset, field := range allFields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
@@ -367,11 +366,6 @@ func CreateSchemaHelperWithLoadFields(schema *schemapb.CollectionSchema, loadFie
 		}
 	}
 	return &schemaHelper, nil
-}
-
-// CreateSchemaHelper returns a new SchemaHelper object
-func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error) {
-	return CreateSchemaHelperWithLoadFields(schema, nil)
 }
 
 // GetPrimaryKeyField returns the schema of the primary key
@@ -433,19 +427,7 @@ func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*sche
 		return helper.getDefaultJSONField(fieldName)
 	}
 	fieldSchema := helper.allFields[offset]
-	if !helper.IsFieldLoaded(fieldSchema.GetFieldID()) {
-		return nil, errors.Newf("field %s is not loaded", fieldSchema)
-	}
 	return fieldSchema, nil
-}
-
-// GetFieldFromNameDefaultJSON returns whether is field loaded.
-// If load fields is not provided, treated as loaded
-func (helper *SchemaHelper) IsFieldLoaded(fieldID int64) bool {
-	if len(helper.loadFields) == 0 {
-		return true
-	}
-	return helper.loadFields.Contain(fieldID)
 }
 
 func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
@@ -459,9 +441,6 @@ func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
 func (helper *SchemaHelper) getDefaultJSONField(fieldName string) (*schemapb.FieldSchema, error) {
 	for _, f := range helper.schema.GetFields() {
 		if f.DataType == schemapb.DataType_JSON && f.IsDynamic {
-			if !helper.IsFieldLoaded(f.GetFieldID()) {
-				return nil, errors.Newf("field %s is dynamic but dynamic field is not loaded", fieldName)
-			}
 			return f, nil
 		}
 	}

@@ -124,7 +124,7 @@ type schemaInfo struct {
 	schemaHelper         *typeutil.SchemaHelper
 }
 
-func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields []int64) *schemaInfo {
+func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 	fieldMap := typeutil.NewConcurrentMap[string, int64]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
@@ -145,7 +145,7 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 	}
 	// skip load fields logic for now
 	// partial load shall be processed as hint after tiered storage feature
-	schemaHelper, _ := typeutil.CreateSchemaHelperWithLoadFields(schema, nil)
+	schemaHelper, _ := typeutil.CreateSchemaHelper(schema)
 	return &schemaInfo{
 		CollectionSchema:     schema,
 		fieldMap:             fieldMap,
@@ -153,10 +153,6 @@ func newSchemaInfoWithLoadFields(schema *schemapb.CollectionSchema, loadFields [
 		pkField:              pkField,
 		schemaHelper:         schemaHelper,
 	}
-}
-
-func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
-	return newSchemaInfoWithLoadFields(schema, nil)
 }
 
 func (s *schemaInfo) MapFieldID(name string) (int64, bool) {
@@ -257,10 +253,6 @@ func (s *schemaInfo) validateLoadFields(names []string, fields []*schemapb.Field
 		return merr.WrapErrParameterInvalidMsg("load field list %v does not contain clustering key field %s", names, clusteringKeyField.GetName())
 	}
 	return nil
-}
-
-func (s *schemaInfo) IsFieldLoaded(fieldID int64) bool {
-	return s.schemaHelper.IsFieldLoaded(fieldID)
 }
 
 func (s *schemaInfo) CanRetrieveRawFieldData(field *schemapb.FieldSchema) bool {
@@ -444,16 +436,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	loadFields, err := m.getCollectionLoadFields(ctx, collection.CollectionID)
-	if err != nil {
-		return nil, err
-	}
-
-	// loadStructFields, err := m.getCollectionLoadStructFields(ctx, collection.CollectionID)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	// check partitionID, createdTimestamp and utcstamp has sam element numbers
 	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
 		return nil, merr.WrapErrParameterInvalidMsg("partition names and timestamps number is not aligned, response: %s", partitions.String())
@@ -481,7 +463,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		return nil, err
 	}
 
-	schemaInfo := newSchemaInfoWithLoadFields(collection.Schema, loadFields)
+	schemaInfo := newSchemaInfo(collection.Schema)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -801,28 +783,6 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 	}
 
 	return partitions, nil
-}
-
-func (m *MetaCache) getCollectionLoadFields(ctx context.Context, collectionID UniqueID) ([]int64, error) {
-	req := &querypb.ShowCollectionsRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		CollectionIDs: []int64{collectionID},
-	}
-
-	resp, err := m.mixCoord.ShowLoadCollections(ctx, req)
-	if err != nil {
-		if errors.Is(err, merr.ErrCollectionNotLoaded) {
-			return []int64{}, nil
-		}
-		return nil, err
-	}
-	// backward compatility, ignore HPL logic
-	if len(resp.GetLoadFields()) < 1 {
-		return []int64{}, nil
-	}
-	return resp.GetLoadFields()[0].GetData(), nil
 }
 
 func (m *MetaCache) describeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
