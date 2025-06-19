@@ -1083,7 +1083,6 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			CreatedTimestamps:    []uint64{11},
 			CreatedUtcTimestamps: []uint64{11},
 		}, nil).Once()
-		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, c.collID, int64(1))
@@ -1118,7 +1117,6 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			CreatedTimestamps:    []uint64{11},
 			CreatedUtcTimestamps: []uint64{11},
 		}, nil).Once()
-		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
 		assert.Equal(t, c.collID, int64(1))
