@@ -102,15 +102,32 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     std::shared_ptr<CellAccessor<CellT>>
     PinAllCells() {
-        size_t index = 0;
-        return PinInternal(
-            [this, index]() mutable -> std::pair<cid_t, bool> {
-                if (index >= cells_.size()) {
-                    return std::make_pair(cells_.size(), true);
-                }
-                return std::make_pair(index++, false);
-            },
-            cells_.size());
+        size_t nr_cells = cells_.size();
+        std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
+        std::unordered_set<cid_t> need_load_cids;
+        std::vector<internal::ListNode::NodePin> pins;
+        futures.reserve(nr_cells);
+        need_load_cids.reserve(nr_cells);
+        pins.reserve(nr_cells);
+        for (cid_t cid = 0; cid < nr_cells; ++cid) {
+            auto [need_load, result] = cells_[cid].pin();
+            if (std::holds_alternative<internal::ListNode::NodePin>(result)) {
+                pins.push_back(std::move(std::get<0>(result)));
+            } else {
+                futures.push_back(std::move(std::get<1>(result)));
+            }
+            if (need_load) {
+                need_load_cids.insert(cid);
+            }
+        }
+        if (!need_load_cids.empty()) {
+            RunLoad(std::move(need_load_cids));
+            auto future_pins = SemiInlineGet(folly::collect(futures));
+            std::move(future_pins.begin(), future_pins.end(), std::back_inserter(pins));
+        }
+
+        return std::make_shared<CellAccessor<CellT>>(
+            this->shared_from_this(), std::move(pins));
     }
 
     std::shared_ptr<CellAccessor<CellT>>
@@ -118,44 +135,29 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         auto count = uids.size();
         std::unordered_set<cid_t> involved_cids;
         involved_cids.reserve(count);
-        for (size_t i = 0; i < count; ++i) {
-            auto uid = uids[i];
-            auto cid = translator_->cell_id_of(uid);
-            if (cid >= cells_.size()) {
-                throw std::invalid_argument(fmt::format(
-                    "CacheSlot {}: translator returned cell_id {} "
-                    "for uid {} which is out of range",
-                    translator_->key(),
-                    cid,
-                    uid));
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL: {
+                for (auto& uid : uids) {
+                    auto cid = cell_id_of(uid);
+                    involved_cids.insert(cid);
+                }
+                return PinInternal(involved_cids);
             }
-            involved_cids.insert(cid);
+            case CellIdMappingMode::ALWAYS_ZERO: {
+                if (uids.size() > 0) {
+                    return PinInternal(std::vector<cid_t>{0});
+                }
+                return PinInternal(std::vector<cid_t>{});
+            }
+            default: {
+                for (auto& uid : uids) {
+                    auto cid = cell_id_of(uid);
+                    involved_cids.insert(cid);
+                }
+                return PinInternal(involved_cids);
+            }
         }
-        auto reserve_size = involved_cids.size();
 
-        // must be captured by value.
-        // theoretically, we can initialize it outside, and it will not be invalidated
-        // even though we moved involved_cids afterwards, but for safety we initialize it
-        // inside the lambda.
-        decltype(involved_cids.begin()) it;
-        bool initialized = false;
-
-        return PinInternal(
-            [this,
-             cids = std::move(involved_cids),
-             it,
-             initialized]() mutable -> std::pair<cid_t, bool> {
-                if (!initialized) {
-                    it = cids.begin();
-                    initialized = true;
-                }
-                if (it == cids.end()) {
-                    return std::make_pair(0, true);
-                }
-                auto cid = *it++;
-                return std::make_pair(cid, false);
-            },
-            reserve_size);
     }
 
     // Manually evicts the cell if it is not pinned.
@@ -204,27 +206,34 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
  private:
     friend class CellAccessor<CellT>;
 
-    template <typename Fn>
+    template <typename CidsT>
     std::shared_ptr<CellAccessor<CellT>>
-    PinInternal(Fn&& cid_iterator, size_t reserve_size) {
+    PinInternal(const CidsT& cids) {
+        size_t nr_cells = cids.size();
         std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
+        std::vector<internal::ListNode::NodePin> pins;
         std::unordered_set<cid_t> need_load_cids;
-        futures.reserve(reserve_size);
-        need_load_cids.reserve(reserve_size);
-        auto [cid, end] = cid_iterator();
-        while (!end) {
-            auto [need_load, future] = cells_[cid].pin();
-            futures.push_back(std::move(future));
+        pins.reserve(nr_cells);
+        futures.reserve(nr_cells);
+        need_load_cids.reserve(nr_cells);
+        for (auto& cid : cids) {
+            auto [need_load, result] = cells_[cid].pin();
+            if (std::holds_alternative<internal::ListNode::NodePin>(result)) {
+                pins.push_back(std::move(std::get<0>(result)));
+            } else {
+                futures.push_back(std::move(std::get<1>(result)));
+            }
             if (need_load) {
                 need_load_cids.insert(cid);
             }
-            std::tie(cid, end) = cid_iterator();
-        }
-        if (!need_load_cids.empty()) {
-            RunLoad(std::move(need_load_cids));
         }
 
-        auto pins = SemiInlineGet(folly::collect(futures));
+        if (!need_load_cids.empty()) {
+            RunLoad(std::move(need_load_cids));
+            auto future_pins = SemiInlineGet(folly::collect(futures));
+            std::move(future_pins.begin(), future_pins.end(), std::back_inserter(pins));
+        }
+
         return std::make_shared<CellAccessor<CellT>>(
             this->shared_from_this(), std::move(pins));
     }

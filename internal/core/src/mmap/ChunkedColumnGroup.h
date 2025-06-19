@@ -347,6 +347,14 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     void
+    BulkValueAt(void* dst,
+                const int64_t* offsets,
+                int64_t count) override {
+        PanicInfo(ErrorCode::Unsupported, "BulkValueAt not supported for "
+                                          "ProxyChunkColumn");
+    }
+
+    void
     BulkRawStringAt(std::function<void(std::string_view, size_t, bool)> fn,
                     const int64_t* offsets = nullptr,
                     int64_t count = 0) const override {

@@ -112,6 +112,11 @@ class ChunkedColumnInterface {
                 const int64_t* offsets,
                 int64_t count) = 0;
 
+    virtual void
+    BulkValueAt(void* dst,
+                const int64_t* offsets,
+                int64_t count) = 0;
+
     // fn: (std::string_view value, size_t offset, bool is_valid) -> void
     // If offsets is nullptr, this function will iterate over all rows.
     // Only BulkRawStringAt and BulkIsValid allow offsets to be nullptr.
