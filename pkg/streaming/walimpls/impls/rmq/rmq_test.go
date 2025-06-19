@@ -25,11 +25,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestRegistry(t *testing.T) {
-	registeredB := registry.MustGetBuilder(walName)
+	registeredB := registry.MustGetBuilder(WALName)
 	assert.NotNil(t, registeredB)
-	assert.Equal(t, walName, registeredB.Name())
+	assert.Equal(t, WALName, registeredB.Name())
 
-	id, err := message.UnmarshalMessageID(walName, rmqID(1).Marshal())
+	id, err := message.UnmarshalMessageID(WALName, rmqID(1).Marshal())
 	assert.NoError(t, err)
 	assert.True(t, id.EQ(rmqID(1)))
 }
