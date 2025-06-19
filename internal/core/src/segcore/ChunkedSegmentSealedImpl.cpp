@@ -261,8 +261,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
             file_reader->file_metadata();
 
-        auto field_id_mapping = metadata->GetFieldIDMapping();
-
         std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
         for (const auto& file : insert_files) {
             auto reader =
@@ -271,9 +269,15 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 reader->file_metadata()->GetRowGroupMetadataVector());
         }
 
-        milvus_storage::FieldIDList field_id_list =
-            metadata->GetGroupFieldIDList().GetFieldIDList(
+        milvus_storage::FieldIDList field_id_list;
+        if (column_group_id == FieldId(DEFAULT_SHORT_COLUMN_GROUP_ID)) {
+            field_id_list =
+                metadata->GetGroupFieldIDList().GetFieldIDList(
                 column_group_id.get());
+        } else {
+            field_id_list.Add(milvus_storage::FieldID(column_group_id.get()));
+        }
+        
         std::vector<FieldId> milvus_field_ids;
 
         // if multiple fields share same column group

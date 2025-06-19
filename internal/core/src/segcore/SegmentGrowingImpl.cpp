@@ -430,11 +430,14 @@ SegmentGrowingImpl::load_column_group_data_internal(
         std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
             file_reader->file_metadata();
 
-        auto field_id_mapping = metadata->GetFieldIDMapping();
-
-        milvus_storage::FieldIDList field_ids =
-            metadata->GetGroupFieldIDList().GetFieldIDList(
+        milvus_storage::FieldIDList field_id_list;
+        if (column_group_id == FieldId(DEFAULT_SHORT_COLUMN_GROUP_ID)) {
+            field_id_list =
+                metadata->GetGroupFieldIDList().GetFieldIDList(
                 column_group_id.get());
+        } else {
+            field_id_list.Add(milvus_storage::FieldID(column_group_id.get()));
+        };
 
         auto column_group_info =
             FieldDataInfo(column_group_id.get(), num_rows, infos.mmap_dir_path);
@@ -477,7 +480,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
 
         LOG_INFO("segment {} submits load fields {} task to thread pool",
                  this->get_segment_id(),
-                 field_ids.ToString());
+                 field_id_list.ToString());
 
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
@@ -485,8 +488,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
         while (column_group_info.arrow_reader_channel->pop(r)) {
             for (const auto& table : r->arrow_tables) {
                 size_t batch_num_rows = table->num_rows();
-                for (int i = 0; i < field_ids.size(); ++i) {
-                    auto field_id = FieldId(field_ids.Get(i));
+                for (int i = 0; i < field_id_list.size(); ++i) {
+                    auto field_id = FieldId(field_id_list.Get(i));
                     for (auto& field : schema_->get_fields()) {
                         if (field.second.get_id().get() != field_id.get()) {
                             continue;
