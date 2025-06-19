@@ -104,15 +104,21 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		DbName:         request.DbName,
 	}
 
-	// validate collection name, ref describeCollectionTask.PreExecute
-	if request.CollectionID == 0 {
-		if err := validateCollectionName(request.CollectionName); err != nil {
+	if request.CollectionName == "" && request.CollectionID > 0 {
+		collName, err := globalMetaCache.GetCollectionName(ctx, request.DbName, request.CollectionID)
+		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
+		request.CollectionName = collName
 	}
 
-	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, request.CollectionID)
+	// validate collection name, ref describeCollectionTask.PreExecute
+	if err := validateCollectionName(request.CollectionName); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, 0)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			// nolint
@@ -120,6 +126,8 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 			// nolint
 			resp.Status.Reason = fmt.Sprintf("can't find collection[database=%s][collection=%s]", request.DbName, request.CollectionName)
 			resp.Status.ExtraInfo = map[string]string{merr.InputErrorFlagKey: "true"}
+		} else {
+			resp.Status = merr.Status(err)
 		}
 
 		return resp, nil
