@@ -288,6 +288,8 @@ func isIndexMmapEnable(fieldSchema *schemapb.FieldSchema, indexInfo *querypb.Fie
 	return indexSupportMmap && enableMmap
 }
 
+// Except accepting whether the raw data is loaded in mmap or not, it also affects the stats index such as
+// text match index and json key stats index.
 func isDataMmapEnable(fieldSchema *schemapb.FieldSchema) bool {
 	enableMmap, exist := common.IsMmapDataEnabled(fieldSchema.GetTypeParams()...)
 	if exist {

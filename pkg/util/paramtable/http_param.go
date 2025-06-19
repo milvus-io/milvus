@@ -26,6 +26,7 @@ type httpConfig struct {
 	HSTSMaxAge            ParamItem `refreshable:"false"`
 	HSTSIncludeSubDomains ParamItem `refreshable:"false"`
 	EnableHSTS            ParamItem `refreshable:"false"`
+	EnableWebUI           ParamItem `refreshable:"false"`
 }
 
 func (p *httpConfig) init(base *BaseTable) {
@@ -110,4 +111,13 @@ func (p *httpConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableHSTS.Init(base.mgr)
+
+	p.EnableWebUI = ParamItem{
+		Key:          "proxy.http.enableWebUI",
+		DefaultValue: "true",
+		Version:      "v2.5.14",
+		Doc:          "Whether to enable setting the WebUI middleware on the metrics port",
+		Export:       true,
+	}
+	p.EnableWebUI.Init(base.mgr)
 }

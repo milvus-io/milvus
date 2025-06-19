@@ -401,6 +401,26 @@ CreateTestSchema() {
     return schema;
 }
 
+template <typename T>
+void
+InsertCol(InsertRecordProto* insert_data,
+          const std::vector<T>& data,
+          const FieldMeta& field_meta,
+          bool random_valid = false) {
+    FixedVector<bool> valid_data(data.size());
+    if (field_meta.is_nullable()) {
+        for (int i = 0; i < data.size(); ++i) {
+            int x = i;
+            if (random_valid)
+                x = rand();
+            valid_data[i] = x % 2 == 0 ? true : false;
+        }
+    }
+    auto array = milvus::segcore::CreateDataArrayFrom(
+        data.data(), valid_data.data(), data.size(), field_meta);
+    insert_data->mutable_fields_data()->AddAllocated(array.release());
+}
+
 inline GeneratedData
 DataGen(SchemaPtr schema,
         int64_t N,
@@ -1129,7 +1149,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 valid_data[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(raw_data, valid_data.data(), raw_count);
+        field_data->FillFieldData(raw_data, valid_data.data(), raw_count, 0);
     };
 
     if (field_meta.is_vector()) {
@@ -1353,6 +1373,7 @@ GenVecIndexing(int64_t N,
     auto create_index_result = indexing->Upload();
     auto index_files = create_index_result->GetIndexFiles();
     conf["index_files"] = index_files;
+    conf[milvus::LOAD_PRIORITY] = milvus::proto::common::LoadPriority::HIGH;
     // we need a load stage to use index as the producation does
     // knowhere would do some data preparation in this stage
     indexing->Load(milvus::tracer::TraceContext{}, conf);

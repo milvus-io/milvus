@@ -32,7 +32,8 @@ ChunkTranslator::ChunkTranslator(
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
     std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
-    bool use_mmap)
+    bool use_mmap,
+    milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -46,7 +47,8 @@ ChunkTranslator::ChunkTranslator(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list*/ field_data_info.in_load_list),
-            /* support_eviction */ false) {
+            /* support_eviction */ false),
+      load_priority_(load_priority) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
                "ChunkTranslator not supported for system field");
     meta_.num_rows_until_chunk_.push_back(0);
@@ -104,7 +106,8 @@ ChunkTranslator::get_cells(
              segment_id_,
              field_id_,
              fmt::format("{}", fmt::join(cids, " ")));
-    pool.Submit(LoadArrowReaderFromRemote, remote_files, channel);
+    pool.Submit(
+        LoadArrowReaderFromRemote, remote_files, channel, load_priority_);
 
     auto data_type = field_meta_.get_data_type();
 

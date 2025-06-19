@@ -132,7 +132,7 @@ func (suite *PackedTestSuite) TestPackedMultiFiles() {
 	defer rec.Release()
 	paths := []string{"/tmp/100", "/tmp/101"}
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{2}}, {Columns: []int{0, 1}}}
-	bufferSize := int64(10 * 1024 * 1024) // 10MB
+	bufferSize := int64(-1) // unlimited
 	multiPartUploadSize := int64(0)
 	pw, err := NewPackedWriter(paths, suite.schema, bufferSize, multiPartUploadSize, columnGroups, nil)
 	suite.NoError(err)

@@ -58,10 +58,16 @@ type rwOptions struct {
 
 type RwOption func(*rwOptions)
 
-func DefaultRwOptions() *rwOptions {
+func DefaultWriterOptions() *rwOptions {
 	return &rwOptions{
 		bufferSize:          packed.DefaultWriteBufferSize,
 		multiPartUploadSize: packed.DefaultMultiPartUploadSize,
+	}
+}
+
+func DefaultReaderOptions() *rwOptions {
+	return &rwOptions{
+		bufferSize: packed.DefaultReadBufferSize,
 	}
 }
 
@@ -192,7 +198,7 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 }
 
 func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (RecordReader, error) {
-	rwOptions := DefaultRwOptions()
+	rwOptions := DefaultReaderOptions()
 	for _, opt := range option {
 		opt(rwOptions)
 	}
@@ -229,7 +235,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	schema *schemapb.CollectionSchema, allocator allocator.Interface, chunkSize uint64, bucketName, rootPath string, maxRowNum int64,
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
-	rwOptions := DefaultRwOptions()
+	rwOptions := DefaultWriterOptions()
 	for _, opt := range option {
 		opt(rwOptions)
 	}

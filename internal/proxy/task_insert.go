@@ -149,7 +149,11 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if it.schemaTimestamp != 0 {
 		if it.schemaTimestamp != colInfo.updateTimestamp {
 			err := merr.WrapErrCollectionSchemaMisMatch(collectionName)
-			log.Ctx(ctx).Info("collection schema mismatch", zap.String("collectionName", collectionName), zap.Error(err))
+			log.Ctx(ctx).Info("collection schema mismatch",
+				zap.String("collectionName", collectionName),
+				zap.Uint64("requestSchemaTs", it.schemaTimestamp),
+				zap.Uint64("collectionSchemaTs", colInfo.updateTimestamp),
+				zap.Error(err))
 			return err
 		}
 	}

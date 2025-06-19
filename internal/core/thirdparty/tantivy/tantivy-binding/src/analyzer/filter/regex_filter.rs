@@ -1,11 +1,12 @@
 use crate::error::{Result, TantivyBindingError};
-use serde_json as json;
 use fancy_regex as regex;
+use serde_json as json;
+use std::sync::Arc;
 use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 
 #[derive(Clone)]
 pub struct RegexFilter {
-    regex: regex::Regex,
+    regex: Arc<regex::Regex>,
 }
 
 impl RegexFilter {
@@ -18,7 +19,11 @@ impl RegexFilter {
                     expr, e
                 )))
             },
-            |regex| Ok(RegexFilter { regex }),
+            |regex| {
+                Ok(RegexFilter {
+                    regex: Arc::new(regex),
+                })
+            },
         )
     }
 
@@ -52,7 +57,7 @@ impl TokenFilter for RegexFilter {
 
 #[derive(Clone)]
 pub struct RegexFilterWrapper<T> {
-    regex: regex::Regex,
+    regex: Arc<regex::Regex>,
     inner: T,
 }
 
@@ -68,13 +73,13 @@ impl<T: Tokenizer> Tokenizer for RegexFilterWrapper<T> {
 }
 
 pub struct RegexFilterStream<T> {
-    regex: regex::Regex,
+    regex: Arc<regex::Regex>,
     tail: T,
 }
 
 impl<T> RegexFilterStream<T> {
     fn predicate(&self, token: &Token) -> bool {
-        self.regex.is_match(&token.text).map_or(true, |b|b)
+        self.regex.is_match(&token.text).map_or(true, |b| b)
     }
 }
 

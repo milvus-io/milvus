@@ -70,7 +70,8 @@ type Cache interface {
 	GetPartitionsIndex(ctx context.Context, database, collectionName string) ([]string, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error)
-	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
+	GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]nodeInfo, error)
+	GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
 	DeprecateShardCache(database, collectionName string)
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]nodeInfo
@@ -292,6 +293,14 @@ type shardLeaders struct {
 	idx          *atomic.Int64
 	collectionID int64
 	shardLeaders map[string][]nodeInfo
+}
+
+func (sl *shardLeaders) Get(channel string) []nodeInfo {
+	return sl.shardLeaders[channel]
+}
+
+func (sl *shardLeaders) GetShardLeaderList() []string {
+	return lo.Keys(sl.shardLeaders)
 }
 
 type shardLeadersReader struct {
@@ -960,15 +969,39 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 	m.credMap[username].Sha256Password = credInfo.Sha256Password
 }
 
-// GetShards update cache if withCache == false
-func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error) {
-	method := "GetShards"
-	log := log.Ctx(ctx).With(
-		zap.String("db", database),
-		zap.String("collectionName", collectionName),
-		zap.Int64("collectionID", collectionID))
-
+func (m *MetaCache) GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]nodeInfo, error) {
+	method := "GetShard"
 	// check cache first
+	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
+	if cacheShardLeaders == nil || !withCache {
+		// refresh shard leader cache
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		cacheShardLeaders = newShardLeaders
+	}
+
+	return cacheShardLeaders.Get(channel), nil
+}
+
+func (m *MetaCache) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
+	method := "GetShardLeaderList"
+	// check cache first
+	cacheShardLeaders := m.getCachedShardLeaders(database, collectionName, method)
+	if cacheShardLeaders == nil || !withCache {
+		// refresh shard leader cache
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		cacheShardLeaders = newShardLeaders
+	}
+
+	return cacheShardLeaders.GetShardLeaderList(), nil
+}
+
+func (m *MetaCache) getCachedShardLeaders(database, collectionName, caller string) *shardLeaders {
 	m.leaderMut.RLock()
 	var cacheShardLeaders *shardLeaders
 	db, ok := m.collLeader[database]
@@ -978,45 +1011,44 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		cacheShardLeaders = db[collectionName]
 	}
 	m.leaderMut.RUnlock()
-	if withCache {
-		if cacheShardLeaders != nil {
-			metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
-			iterator := cacheShardLeaders.GetReader()
-			return iterator.Shuffle(), nil
-		}
 
-		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheMissLabel).Inc()
+	if cacheShardLeaders != nil {
+		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheHitLabel).Inc()
+	} else {
+		metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), caller, metrics.CacheMissLabel).Inc()
 	}
 
-	info, err := m.getFullCollectionInfo(ctx, database, collectionName, collectionID)
-	if err != nil {
-		return nil, err
-	}
+	return cacheShardLeaders
+}
+
+func (m *MetaCache) updateShardLocationCache(ctx context.Context, database, collectionName string, collectionID int64) (*shardLeaders, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("db", database),
+		zap.String("collectionName", collectionName),
+		zap.Int64("collectionID", collectionID))
+
+	method := "updateShardLocationCache"
+	tr := timerecord.NewTimeRecorder(method)
+	defer metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	req := &querypb.GetShardLeadersRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID:            info.collID,
+		CollectionID:            collectionID,
 		WithUnserviceableShards: true,
 	}
-
-	tr := timerecord.NewTimeRecorder("UpdateShardCache")
 	resp, err := m.mixCoord.GetShardLeaders(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	if err = merr.Error(resp.GetStatus()); err != nil {
+	if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+		log.Error("failed to get shard locations",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
 		return nil, err
 	}
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
-	newShardLeaders := &shardLeaders{
-		collectionID: info.collID,
-		shardLeaders: shards,
-		idx:          atomic.NewInt64(0),
-	}
 
 	// convert shards map to string for logging
 	if log.Logger.Level() == zap.DebugLevel {
@@ -1031,23 +1063,20 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 		log.Debug("update shard leader cache", zap.String("newShardLeaders", strings.Join(shardStr, ", ")))
 	}
 
+	newShardLeaders := &shardLeaders{
+		collectionID: collectionID,
+		shardLeaders: shards,
+		idx:          atomic.NewInt64(0),
+	}
+
 	m.leaderMut.Lock()
 	if _, ok := m.collLeader[database]; !ok {
 		m.collLeader[database] = make(map[string]*shardLeaders)
 	}
 	m.collLeader[database][collectionName] = newShardLeaders
-	iterator := newShardLeaders.GetReader()
-	ret := iterator.Shuffle()
 	m.leaderMut.Unlock()
-	nodeInfos := make([]string, 0)
-	for ch, shardLeader := range newShardLeaders.shardLeaders {
-		for _, nodeInfo := range shardLeader {
-			nodeInfos = append(nodeInfos, fmt.Sprintf("channel %s, nodeID: %d, nodeAddr: %s", ch, nodeInfo.nodeID, nodeInfo.address))
-		}
-	}
-	log.Debug("fill new collection shard leader", zap.Strings("nodeInfos", nodeInfos))
-	metrics.ProxyUpdateCacheLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return ret, nil
+
+	return newShardLeaders, nil
 }
 
 func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]nodeInfo {

@@ -132,7 +132,7 @@ class BitmapIndexTest : public testing::Test {
                     ptr[byteIndex] &= ~(1 << bitIndex);
                 }
             }
-            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            field_data->FillFieldData(data_.data(), ptr, data_.size(), 0);
             delete[] ptr;
         } else {
             field_data->FillFieldData(data_.data(), data_.size());
@@ -193,6 +193,8 @@ class BitmapIndexTest : public testing::Test {
                                                   field_id);
             ;
         }
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);
