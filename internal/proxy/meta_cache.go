@@ -478,6 +478,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			partitionKeyIsolation: isolation,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+			vChannels:             collection.VirtualChannelNames,
+			pChannels:             collection.PhysicalChannelNames,
+			numPartitions:         collection.NumPartitions,
+			shardsNum:             collection.ShardsNum,
+			aliases:               collection.Aliases,
+			properties:            collection.Properties,
 		}, nil
 	}
 	_, dbOk := m.collInfo[database]
@@ -508,7 +514,7 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
 		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
 		zap.Strings("partition", partitions.PartitionNames), zap.Uint64("currentVersion", curVersion),
-		zap.Uint64("version", collection.GetRequestTime()),
+		zap.Uint64("version", collection.GetRequestTime()), zap.Any("aliases", collection.Aliases),
 	)
 
 	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()
