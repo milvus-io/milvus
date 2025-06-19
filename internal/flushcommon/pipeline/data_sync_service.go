@@ -235,6 +235,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	serverID := paramtable.GetNodeID()
 	if params.Session != nil {
 		serverID = params.Session.ServerID
+		log.Debug("XXXXXXXXXXXX debug1", zap.Int64("nodeID", serverID), zap.Int64("sessionID", params.Session.GetServerID()))
 	}
 
 	config := &nodeConfig{

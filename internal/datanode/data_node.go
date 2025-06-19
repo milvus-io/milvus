@@ -35,33 +35,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/channel"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
-	"github.com/milvus-io/milvus/internal/datanode/msghandlerimpl"
-	"github.com/milvus-io/milvus/internal/flushcommon/broker"
-	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
-	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -86,47 +72,33 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`dataCoord` is a grpc client of data service.
 //	`stateCode` is current statement of this data node, indicating whether it's healthy.
 type DataNode struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	Role             string
-	lifetime         lifetime.Lifetime[commonpb.StateCode]
-	flowgraphManager pipeline.FlowgraphManager
+	ctx      context.Context
+	cancel   context.CancelFunc
+	Role     string
+	lifetime lifetime.Lifetime[commonpb.StateCode]
 
-	channelManager channel.ChannelManager
-
-	syncMgr            syncmgr.SyncManager
-	writeBufferManager writebuffer.BufferManager
-	importTaskMgr      importv2.TaskManager
-	importScheduler    importv2.Scheduler
+	syncMgr         syncmgr.SyncManager
+	importTaskMgr   importv2.TaskManager
+	importScheduler importv2.Scheduler
 
 	// indexnode related
 	storageFactory StorageFactory
 	taskScheduler  *index.TaskScheduler
 	taskManager    *index.TaskManager
 
-	compactionExecutor       compactor.Executor
-	timeTickSender           *util2.TimeTickSender
-	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
+	compactionExecutor compactor.Executor
 
-	etcdCli  *clientv3.Client
-	address  string
-	mixCoord types.MixCoordClient
-	broker   broker.Broker
+	etcdCli *clientv3.Client
+	address string
 
 	// call once
-	initOnce     sync.Once
-	startOnce    sync.Once
-	stopOnce     sync.Once
-	sessionMu    sync.Mutex // to fix data race
-	session      *sessionutil.Session
-	watchKv      kv.WatchKV
-	chunkManager storage.ChunkManager
-	allocator    allocator.Allocator
+	initOnce  sync.Once
+	startOnce sync.Once
+	stopOnce  sync.Once
+	sessionMu sync.Mutex // to fix data race
+	session   *sessionutil.Session
 
 	closer io.Closer
-
-	dispClient msgdispatcher.Client
-	factory    dependency.Factory
 
 	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
 	pool                   *conc.Pool[any]
@@ -137,17 +109,14 @@ type DataNode struct {
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
+func NewDataNode(ctx context.Context) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
-		ctx:      ctx2,
-		cancel:   cancel2,
-		Role:     typeutil.DataNodeRole,
-		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
-
-		mixCoord:               nil,
-		factory:                factory,
+		ctx:                    ctx2,
+		cancel:                 cancel2,
+		Role:                   typeutil.DataNodeRole,
+		lifetime:               lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 		compactionExecutor:     compactor.NewExecutor(),
 		reportImportRetryTimes: 10,
 		metricsRequest:         metricsinfo.NewMetricsRequest(),
@@ -177,13 +146,7 @@ func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 
 // SetRootCoordClient sets RootCoord's grpc client, error is returned if repeatedly set.
 func (node *DataNode) SetMixCoordClient(mixc types.MixCoordClient) error {
-	switch {
-	case mixc == nil, node.mixCoord != nil:
-		return errors.New("nil parameter or repeatedly set")
-	default:
-		node.mixCoord = mixc
-		return nil
-	}
+	return nil
 }
 
 // Register register datanode to etcd
@@ -233,40 +196,13 @@ func (node *DataNode) Init() error {
 
 		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
-
-		node.broker = broker.NewCoordBroker(node.mixCoord, serverID)
-
-		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
-		log.Info("DataNode server init dispatcher client done")
-
-		alloc, err := allocator.New(context.Background(), node.mixCoord, serverID)
-		if err != nil {
-			log.Error("failed to create id allocator", zap.Error(err))
-			initError = err
-			return
-		}
-		node.allocator = alloc
-
-		node.factory.Init(Params)
 		log.Info("DataNode server init succeeded")
 
-		if !streamingutil.IsStreamingServiceEnabled() {
-			chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-			if err != nil {
-				initError = err
-				return
-			}
-			node.chunkManager = chunkManager
-		}
-		syncMgr := syncmgr.NewSyncManager(node.chunkManager)
+		syncMgr := syncmgr.NewSyncManager(nil)
 		node.syncMgr = syncMgr
-
-		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
-		node.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(node.broker)
-		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
 		index.InitSegcore()
 
@@ -285,33 +221,7 @@ func (node *DataNode) registerMetricsRequest() {
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return node.syncMgr.TaskStatsJSON(), nil
 		})
-
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.SegmentKey,
-		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
-			return node.flowgraphManager.GetSegmentsJSON(collectionID), nil
-		})
-
-	node.metricsRequest.RegisterMetricsRequest(metricsinfo.ChannelKey,
-		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
-			collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
-			return node.flowgraphManager.GetChannelsJSON(collectionID), nil
-		})
 	log.Ctx(node.ctx).Info("register metrics actions finished")
-}
-
-// tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(channel string) {
-	log.Ctx(node.ctx).Info("try to release flowgraph", zap.String("channel", channel))
-	if node.compactionExecutor != nil {
-		node.compactionExecutor.DiscardPlan(channel)
-	}
-	if node.flowgraphManager != nil {
-		node.flowgraphManager.RemoveFlowgraph(channel)
-	}
-	if node.writeBufferManager != nil {
-		node.writeBufferManager.RemoveChannel(channel)
-	}
 }
 
 // Start will update DataNode state to HEALTHY
@@ -319,49 +229,18 @@ func (node *DataNode) Start() error {
 	log := log.Ctx(node.ctx)
 	var startErr error
 	node.startOnce.Do(func() {
-		if err := node.allocator.Start(); err != nil {
-			log.Error("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.DataNodeRole))
-			startErr = err
-			return
-		}
-		log.Info("start id allocator done", zap.String("role", typeutil.DataNodeRole))
-
-		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
-				etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
-			node.watchKv = etcdKV
-			return nil
-		}
-		err := retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
-		if err != nil {
-			startErr = errors.New("DataNode fail to connect etcd")
-			return
-		}
-
-		if !streamingutil.IsStreamingServiceEnabled() {
-			node.writeBufferManager.Start()
-
-			node.timeTickSender = util2.NewTimeTickSender(node.broker, node.session.ServerID,
-				retry.Attempts(20), retry.Sleep(time.Millisecond*100))
-			node.timeTickSender.Start()
-
-			node.channelManager = channel.NewChannelManager(getPipelineParams(node), node.flowgraphManager)
-			node.channelManager.Start()
-
-			go node.channelCheckpointUpdater.Start()
-		}
-
 		go node.compactionExecutor.Start(node.ctx)
 
 		go node.importScheduler.Start()
 
-		err = node.taskScheduler.Start()
+		err := node.taskScheduler.Start()
 		if err != nil {
 			startErr = err
 			return
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		log.Info("datanode start successfully")
 	})
 	return startErr
 }
@@ -394,18 +273,6 @@ func (node *DataNode) Stop() error {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
-		if node.channelManager != nil {
-			node.channelManager.Close()
-		}
-
-		if node.flowgraphManager != nil {
-			node.flowgraphManager.ClearFlowgraphs()
-			node.flowgraphManager.Close()
-		}
-
-		if node.writeBufferManager != nil {
-			node.writeBufferManager.Stop()
-		}
 
 		if node.syncMgr != nil {
 			err := node.syncMgr.Close()
@@ -414,25 +281,12 @@ func (node *DataNode) Stop() error {
 			}
 		}
 
-		if node.allocator != nil {
-			log.Ctx(node.ctx).Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
-			node.allocator.Close()
-		}
-
 		if node.closer != nil {
 			node.closer.Close()
 		}
 
 		if node.session != nil {
 			node.session.Stop()
-		}
-
-		if node.timeTickSender != nil {
-			node.timeTickSender.Stop()
-		}
-
-		if node.channelCheckpointUpdater != nil {
-			node.channelCheckpointUpdater.Close()
 		}
 
 		if node.importScheduler != nil {
@@ -466,22 +320,4 @@ func (node *DataNode) GetSession() *sessionutil.Session {
 	node.sessionMu.Lock()
 	defer node.sessionMu.Unlock()
 	return node.session
-}
-
-func getPipelineParams(node *DataNode) *util2.PipelineParams {
-	return &util2.PipelineParams{
-		Ctx:                node.ctx,
-		Broker:             node.broker,
-		SyncMgr:            node.syncMgr,
-		TimeTickSender:     node.timeTickSender,
-		CompactionExecutor: node.compactionExecutor,
-		MsgStreamFactory:   node.factory,
-		DispClient:         node.dispClient,
-		ChunkManager:       node.chunkManager,
-		Session:            node.session,
-		WriteBufferManager: node.writeBufferManager,
-		CheckpointUpdater:  node.channelCheckpointUpdater,
-		Allocator:          node.allocator,
-		MsgHandler:         msghandlerimpl.NewMsgHandlerImpl(node.broker),
-	}
 }

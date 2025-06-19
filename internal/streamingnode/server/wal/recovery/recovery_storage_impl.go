@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"sync"
 
 	"github.com/samber/lo"
@@ -44,6 +45,7 @@ func RecoverRecoveryStorage(
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("state", recoveryStorageStateWorking)))

@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -62,6 +64,8 @@ func (s *BalanceTestSuit) SetupSuite() {
 }
 
 func (s *BalanceTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int, segmentDeleteNum int) {
+	fmt.Println("================= stream enable =============== ", streamingutil.IsStreamingServiceEnabled())
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -207,6 +211,7 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	ctx := context.Background()
 
+	s.Cluster.AddStreamingNode()
 	// init collection with 2 channel, each channel has 4 segment, each segment has 2000 row
 	// and load it with 2 replicas on 2 nodes.
 	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
