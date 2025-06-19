@@ -167,6 +167,9 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
 	Body() (B, error)
 
+	// MustBody return the message body, panic if error occurs.
+	MustBody() B
+
 	// OverwriteHeader overwrites the message header.
 	OverwriteHeader(header H)
 }

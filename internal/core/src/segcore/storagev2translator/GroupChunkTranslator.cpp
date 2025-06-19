@@ -99,6 +99,7 @@ GroupChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
     auto& row_group_meta = row_group_meta_list_[file_idx].Get(row_group_idx);
+    // TODO(tiered storage 1): should take into consideration of mmap or not.
     return {static_cast<int64_t>(row_group_meta.memory_size()), 0};
 }
 
@@ -227,7 +228,7 @@ GroupChunkTranslator::load_group_chunk(
 
             auto file =
                 File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-            auto chunk = create_chunk(field_meta, dim, file, 0, array_vec);
+            chunk = create_chunk(field_meta, dim, file, 0, array_vec);
             auto ok = unlink(filepath.c_str());
             AssertInfo(
                 ok == 0,

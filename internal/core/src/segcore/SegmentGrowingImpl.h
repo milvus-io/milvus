@@ -103,7 +103,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Reopen(SchemaPtr sch) override;
 
     void
-    LazyCheckSchema(const Schema& sch) override;
+    LazyCheckSchema(SchemaPtr sch) override;
 
     void
     FinishLoad() override;
@@ -262,8 +262,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const override;
 
-    virtual std::pair<milvus::Json, bool>
-    GetJsonData(FieldId field_id, size_t offset) const override;
+    virtual void
+    BulkGetJsonData(FieldId field_id,
+                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const int64_t* offsets,
+                    int64_t count) const override;
 
  public:
     friend std::unique_ptr<SegmentGrowing>
@@ -344,7 +347,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     HasIndex(FieldId field_id,
              const std::string& nested_path,
              DataType data_type,
-             bool any_type = false) const override {
+             bool any_type = false,
+             bool is_array = false) const override {
         return false;
     };
 

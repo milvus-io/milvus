@@ -53,8 +53,8 @@ func TestConvertArrowSchema(t *testing.T) {
 	}
 
 	schema := &schemapb.CollectionSchema{
-		Fields:       fieldSchemas,
-		StructFields: StructArrayFieldSchemas,
+		Fields:            fieldSchemas,
+		StructArrayFields: StructArrayFieldSchemas,
 	}
 	arrowSchema, err := ConvertToArrowSchema(schema)
 	assert.NoError(t, err)

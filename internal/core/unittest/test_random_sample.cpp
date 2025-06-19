@@ -53,7 +53,7 @@ TEST_P(RandomSampleTest, SampleOnly) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ =
         milvus::test::CreateRetrievePlanForRandomSample(sample_factor);
@@ -108,7 +108,7 @@ TEST_P(RandomSampleTest, SampleWithUnaryFiler) {
         OpType::Equal,
         val,
         std::vector<proto::plan::GenericValue>{});
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ =
         milvus::test::CreateRetrievePlanForRandomSample(sample_factor, expr);
@@ -152,7 +152,7 @@ TEST(RandomSampleTest, SampleWithEmptyInput) {
         OpType::LessThan,
         val,
         std::vector<proto::plan::GenericValue>{});
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->plannodes_ =
         milvus::test::CreateRetrievePlanForRandomSample(sample_factor, expr);

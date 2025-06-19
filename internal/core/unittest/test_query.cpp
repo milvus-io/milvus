@@ -43,7 +43,7 @@ TEST(Query, ParsePlaceholderGroup) {
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t num_queries = 100000;
     int dim = 16;
     auto raw_group = CreatePlaceholderGroup(num_queries, dim);
@@ -96,7 +96,7 @@ TEST(Query, ExecWithPredicateLoader) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -178,7 +178,7 @@ TEST(Query, ExecWithPredicateSmallN) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 7, 1024);
     auto ph_group =
@@ -237,7 +237,7 @@ TEST(Query, ExecWithPredicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -317,7 +317,7 @@ TEST(Query, ExecTerm) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 3;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -350,7 +350,7 @@ TEST(Query, ExecEmpty) {
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -388,7 +388,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -429,7 +429,7 @@ TEST(Query, ExecWithoutPredicate) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
@@ -501,7 +501,7 @@ TEST(Query, InnerProduct) {
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     segment->PreInsert(N);
     segment->Insert(0,
                     N,
@@ -688,7 +688,7 @@ TEST(Query, DISABLED_FillSegment) {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto ph_proto = CreatePlaceholderGroup(10, 16, 443);
     auto ph = ParsePlaceholderGroup(plan.get(), ph_proto.SerializeAsString());
     Timestamp ts = N * 2UL;
@@ -902,7 +902,7 @@ TEST(Query, ExecWithPredicateBinary) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroupFromBlob<milvus::BinaryVector>(
         num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);

@@ -29,6 +29,8 @@
 #include "exec/expression/Utils.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
+#include "index/Index.h"
+#include "index/JsonFlatIndex.h"
 #include "log/Log.h"
 #include "query/PlanProto.h"
 #include "segcore/SegmentSealed.h"
@@ -139,8 +141,8 @@ class SegmentExpr : public Expr {
                 int64_t active_count,
                 int64_t batch_size,
                 int32_t consistency_level,
-                bool allow_any_json_cast_type = false)
-
+                bool allow_any_json_cast_type = false,
+                bool is_json_contains = false)
         : Expr(DataType::BOOL, std::move(input), name),
           segment_(const_cast<segcore::SegmentInternalInterface*>(segment)),
           field_id_(field_id),
@@ -149,7 +151,8 @@ class SegmentExpr : public Expr {
           allow_any_json_cast_type_(allow_any_json_cast_type),
           active_count_(active_count),
           batch_size_(batch_size),
-          consistency_level_(consistency_level) {
+          consistency_level_(consistency_level),
+          is_json_contains_(is_json_contains) {
         size_per_chunk_ = segment_->size_per_chunk();
         AssertInfo(
             batch_size_ > 0,
@@ -173,11 +176,11 @@ class SegmentExpr : public Expr {
 
         if (field_meta.get_data_type() == DataType::JSON) {
             auto pointer = milvus::Json::pointer(nested_path_);
-            if (is_index_mode_ =
-                    segment_->HasIndex(field_id_,
-                                       pointer,
-                                       value_type_,
-                                       allow_any_json_cast_type_)) {
+            if (is_index_mode_ = segment_->HasIndex(field_id_,
+                                                    pointer,
+                                                    value_type_,
+                                                    allow_any_json_cast_type_,
+                                                    is_json_contains_)) {
                 num_index_chunk_ = 1;
             }
         } else {
@@ -823,14 +826,34 @@ class SegmentExpr : public Expr {
             // executing costs quite much time.
             if (cached_index_chunk_id_ != i) {
                 Index* index_ptr = nullptr;
+                PinWrapper<const index::IndexBase*> json_pw;
                 PinWrapper<const Index*> pw;
+                // Executor for JsonFlatIndex. Must outlive index_ptr. Only used for JSON type.
+                std::shared_ptr<
+                    index::JsonFlatIndexQueryExecutor<IndexInnerType>>
+                    executor;
 
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
+                    json_pw = segment_->chunk_json_index(field_id_, pointer, i);
 
-                    pw = segment_->chunk_scalar_index<IndexInnerType>(
-                        field_id_, pointer, i);
-                    index_ptr = const_cast<Index*>(pw.get());
+                    // check if it is a json flat index, if so, create a json flat index query executor
+                    auto json_flat_index =
+                        dynamic_cast<const index::JsonFlatIndex*>(
+                            json_pw.get());
+
+                    if (json_flat_index) {
+                        auto index_path = json_flat_index->GetNestedPath();
+                        executor =
+                            json_flat_index
+                                ->template create_executor<IndexInnerType>(
+                                    pointer.substr(index_path.size()));
+                        index_ptr = executor.get();
+                    } else {
+                        auto json_index =
+                            const_cast<index::IndexBase*>(json_pw.get());
+                        index_ptr = dynamic_cast<Index*>(json_index);
+                    }
                 } else {
                     pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_,
                                                                       i);
@@ -1254,6 +1277,7 @@ class SegmentExpr : public Expr {
     DataType field_type_;
     DataType value_type_;
     bool allow_any_json_cast_type_{false};
+    bool is_json_contains_{false};
     bool is_index_mode_{false};
     bool is_data_mode_{false};
     // sometimes need to skip index and using raw data

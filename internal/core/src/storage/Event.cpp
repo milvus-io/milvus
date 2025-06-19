@@ -321,6 +321,7 @@ BaseEventData::Serialize() {
                         array->output_data().SerializeAsString();
                     auto size = array_string.size();
 
+                    // todo(SapdeA): it maybe better to serialize vectors one by one
                     payload_writer->add_one_binary_payload(
                         reinterpret_cast<const uint8_t*>(array_string.c_str()),
                         size);

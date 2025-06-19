@@ -154,7 +154,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
     auto expr = test::GenExpr();
     expr->set_allocated_json_contains_expr(contains_expr.release());
 
-    auto parser = ProtoParser(*this->schema_);
+    auto parser = ProtoParser(this->schema_);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -206,7 +206,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAll) {
     auto expr = test::GenExpr();
     expr->set_allocated_json_contains_expr(contains_expr.release());
 
-    auto parser = ProtoParser(*this->schema_);
+    auto parser = ProtoParser(this->schema_);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -266,7 +266,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayEqual) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr.release());
 
-    auto parser = ProtoParser(*this->schema_);
+    auto parser = ProtoParser(this->schema_);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);

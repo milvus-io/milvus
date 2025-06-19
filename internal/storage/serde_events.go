@@ -438,7 +438,8 @@ func (bsw *BinlogStreamWriter) writeBinlogHeaders(w io.Writer) error {
 }
 
 func newBinlogWriter(collectionID, partitionID, segmentID UniqueID,
-	field *schemapb.FieldSchema) *BinlogStreamWriter {
+	field *schemapb.FieldSchema,
+) *BinlogStreamWriter {
 	return &BinlogStreamWriter{
 		collectionID: collectionID,
 		partitionID:  partitionID,

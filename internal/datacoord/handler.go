@@ -44,6 +44,7 @@ type Handler interface {
 	FinishDropChannel(ch string, collectionID int64) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
+	ListLoadedSegments(ctx context.Context) ([]int64, error)
 }
 
 type SegmentsView struct {
@@ -142,7 +143,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.meta, false, segments...)
+	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 
 	for _, s := range segments {
@@ -200,7 +201,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// ================================================
 
 	segmentIndexed := func(segID UniqueID) bool {
-		return indexed.Contain(segID) || validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64()
+		return indexed.Contain(segID) || (validSegmentInfos[segID].GetIsSorted() && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed)
@@ -604,4 +605,8 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	h.s.meta.DropCollection(collectionID)
 
 	return nil
+}
+
+func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
+	return h.s.listLoadedSegments(ctx)
 }

@@ -27,6 +27,6 @@ TEST(PlanProto, NotSetUnsupported) {
     schema->set_primary_field_id(i64_fid);
 
     proto::plan::Expr expr_pb;
-    ProtoParser parser(*schema);
+    ProtoParser parser(schema);
     ASSERT_ANY_THROW(parser.ParseExprs(expr_pb));
 }

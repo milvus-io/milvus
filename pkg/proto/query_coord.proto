@@ -79,6 +79,7 @@ service QueryCoord {
     rpc DescribeResourceGroup(DescribeResourceGroupRequest)
         returns (DescribeResourceGroupResponse) {
     }
+    rpc ListLoadedSegments(ListLoadedSegmentsRequest) returns (ListLoadedSegmentsResponse){}
 
 
   // ops interfaces
@@ -616,6 +617,7 @@ message GetDataDistributionResponse {
     repeated LeaderView leader_views = 5;
     int64 lastModifyTs = 6;
     double memCapacityInMB = 7;
+    int64 cpu_num = 8;
 }
 
 message LeaderView {
@@ -974,4 +976,13 @@ message RunAnalyzerRequest{
 
     bool with_detail = 6;
     bool with_hash = 7;
+}
+
+message ListLoadedSegmentsRequest {
+    common.MsgBase base = 1;
+}
+
+message ListLoadedSegmentsResponse {
+    common.Status status = 1;
+    repeated int64 segmentIDs = 2;
 }

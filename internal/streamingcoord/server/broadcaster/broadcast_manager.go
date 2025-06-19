@@ -78,21 +78,6 @@ func (bm *broadcastTaskManager) AddTask(ctx context.Context, msg message.Broadca
 
 // assignID assigns the broadcast id to the message.
 func (bm *broadcastTaskManager) assignID(ctx context.Context, msg message.BroadcastMutableMessage) (message.BroadcastMutableMessage, error) {
-	// TODO: current implementation the header cannot be seen at flusher itself.
-	// only import message use it, so temporarily set the broadcast id here.
-	// need to refactor the message to make the broadcast header visible to flusher.
-	if msg.MessageType() == message.MessageTypeImport {
-		importMsg, err := message.AsMutableImportMessageV1(msg)
-		if err != nil {
-			return nil, err
-		}
-		body, err := importMsg.Body()
-		if err != nil {
-			return nil, err
-		}
-		return msg.WithBroadcastID(uint64(body.JobID)), nil
-	}
-
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "allocate new id failed")

@@ -17,9 +17,24 @@ class TestMilvusClientTTL(TestMilvusClientV2Base):
     @pytest.mark.parametrize("on_insert", [True, False])
     def test_milvus_client_ttl_default(self, flush_enable, on_insert):
         """
-        target: verify that data is invisible after ttl
-        method: create collection with ttl, insert data, wait for ttl, search data
-        expected: data is invisible
+        Test case for verifying TTL (Time To Live) functionality in Milvus client.
+        
+        This test verifies that:
+        1. Data becomes invisible after the specified TTL period
+        2. Different operations (search, query, hybrid search) correctly handle expired data
+        3. TTL can be altered and the changes take effect
+        4. Newly inserted data is not affected by previous TTL settings
+        
+        The test performs the following steps:
+        1. Create a collection with TTL enabled
+        2. Insert test data
+        3. Wait for TTL to expire and verifies data becomes invisible
+        4. Insert new data and verify new inserted data are visible
+        5. Alter TTL and verify the changes
+        
+        Parameters:
+        - flush_enable: Whether to flush collection during testing
+        - on_insert: Whether to use insert or upsert operation
         """
         client = self._client()
         dim = 65

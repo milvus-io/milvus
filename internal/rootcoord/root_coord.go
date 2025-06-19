@@ -70,7 +70,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
-	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -218,15 +217,15 @@ func (c *Core) startTimeTickLoop() {
 	log := log.Ctx(c.ctx)
 	defer c.wg.Done()
 
-	streamingNotifier := syncutil.NewAsyncTaskNotifier[struct{}]()
-	defer streamingNotifier.Finish(struct{}{})
+	streamingNotifier := snmanager.NewStreamingReadyNotifier()
+	defer streamingNotifier.Release()
 
 	if streamingutil.IsStreamingServiceEnabled() {
 		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(c.ctx, streamingNotifier); err != nil {
 			log.Info("register streaming enabled listener failed", zap.Error(err))
 			return
 		}
-		if streamingNotifier.Context().Err() != nil {
+		if streamingNotifier.IsReady() {
 			log.Info("streaming service has been enabled, ddl timetick from rootcoord should not start")
 			return
 		}
@@ -236,7 +235,7 @@ func (c *Core) startTimeTickLoop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-streamingNotifier.Context().Done():
+		case <-streamingNotifier.Ready():
 			log.Info("streaming service has been enabled, ddl timetick from rootcoord should stop")
 			return
 		case <-c.ctx.Done():

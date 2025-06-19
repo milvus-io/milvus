@@ -119,21 +119,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     // TODO(tiered storage 1): should return a PinWrapper
-    std::pair<milvus::Json, bool>
-    GetJsonData(FieldId field_id, size_t offset) const override {
+    void
+    BulkGetJsonData(FieldId field_id,
+                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const int64_t* offsets,
+                    int64_t count) const override {
         auto column = fields_.at(field_id);
-        bool is_valid = column->IsValid(offset);
-        if (!is_valid) {
-            return std::make_pair(milvus::Json(), false);
-        }
-        return std::make_pair(column->RawJsonAt(offset), is_valid);
+        column->BulkRawJsonAt(fn, offsets, count);
     }
 
     void
     Reopen(SchemaPtr sch) override;
 
     void
-    LazyCheckSchema(const Schema& sch) override;
+    LazyCheckSchema(SchemaPtr sch) override;
 
     void
     FinishLoad() override;
@@ -382,7 +381,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     bool
-    generate_interim_index(const FieldId field_id);
+    generate_interim_index(const FieldId field_id, int64_t num_rows);
 
     void
     fill_empty_field(const FieldMeta& field_meta);
