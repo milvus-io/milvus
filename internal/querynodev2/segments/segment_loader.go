@@ -1517,6 +1517,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			if err != nil {
 				return nil, err
 			}
+			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
 			var estimateResult ResourceEstimate
 			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
@@ -1546,9 +1547,15 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 				continue
 			}
 
+			// BM25 only checks vector datatype
+			// scalar index does not have metrics type key
+			if !isVectorType {
+				continue
+			}
+
 			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.IndexParams)
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to estimate resource usage of index, metric type nout found, collection %d, segment %d, indexBuildID %d",
+				return nil, errors.Wrapf(err, "failed to estimate resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
