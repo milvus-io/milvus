@@ -1049,12 +1049,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               int64_t count,
                                               T* dst) {
     static_assert(IsScalar<T>);
-    field->BulkValueAt(
-        [dst](const char* value, size_t i) {
-            dst[i] = *static_cast<const S*>(static_cast<const void*>(value));
-        },
-        seg_offsets,
-        count);
+    field->BulkValueAt(static_cast<void*>(dst), seg_offsets, count);
 }
 
 template <typename S>
@@ -2012,33 +2007,37 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(), field_meta, field_data_info, false);
-    std::shared_ptr<milvus::ChunkedColumnBase> column{};
+    std::shared_ptr<milvus::ChunkedColumnInterface> column{};
     switch (field_meta.get_data_type()) {
         case milvus::DataType::STRING:
         case milvus::DataType::VARCHAR:
         case milvus::DataType::TEXT: {
-            column = std::make_shared<ChunkedVariableColumn<std::string>>(
-                std::move(translator), field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedVariableColumn<std::string>>(
+                    std::move(translator), field_meta));
             break;
         }
         case milvus::DataType::JSON: {
-            column = std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                std::move(translator), field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedVariableColumn<milvus::Json>>(
+                    std::move(translator), field_meta));
             break;
         }
         case milvus::DataType::ARRAY: {
-            column = std::make_shared<ChunkedArrayColumn>(std::move(translator),
-                                                          field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedArrayColumn>(std::move(translator),
+                                                     field_meta));
             break;
         }
         case milvus::DataType::VECTOR_ARRAY: {
-            column = std::make_shared<ChunkedVectorArrayColumn>(
-                std::move(translator), field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedVectorArrayColumn>(
+                    std::move(translator), field_meta));
             break;
         }
         default: {
-            column = std::make_shared<ChunkedColumn>(std::move(translator),
-                                                     field_meta);
+            column = MakeChunkedColumnBase(field_meta.get_data_type(),
+                                           std::move(translator), field_meta);
             break;
         }
     }
