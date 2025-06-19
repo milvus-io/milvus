@@ -55,11 +55,9 @@ DiskFileManagerImpl::DiskFileManagerImpl(
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
-    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
-    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
+    RemoveIndexFiles();
+    RemoveTextLogFiles();
+    RemoveJsonKeyIndexFiles();
 }
 
 bool
@@ -506,6 +504,27 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         local_data_path, write_offset, &var_dim, sizeof(var_dim));
 
     return local_data_path;
+}
+
+void
+DiskFileManagerImpl::RemoveIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveTextLogFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveJsonKeyIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
 }
 
 template <DataType T>

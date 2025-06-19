@@ -113,7 +113,7 @@ RustResult tantivy_create_json_key_stats_writer(const char *field_name,
                                                 uintptr_t overall_memory_budget_in_bytes,
                                                 bool in_ram);
 
-RustResult tantivy_load_index(const char *path, SetBitsetFn set_bitset);
+RustResult tantivy_load_index(const char *path, bool load_in_mmap, SetBitsetFn set_bitset);
 
 void tantivy_free_index_reader(void *ptr);
 

@@ -175,7 +175,7 @@ void
 InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
                               const Config& config) {
     auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
 
@@ -260,8 +260,16 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     disk_file_manager_->CacheIndexToDisk(inverted_index_files,
                                          config[milvus::LOAD_PRIORITY]);
     path_ = prefix;
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),
-                                                     milvus::index::SetBitset);
+
+    auto load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        prefix.c_str(), load_in_mmap, milvus::index::SetBitset);
+
+    if (!load_in_mmap) {
+        // the index is loaded in ram, so we can remove files in advance
+        disk_file_manager_->RemoveIndexFiles();
+    }
 }
 
 template <typename T>

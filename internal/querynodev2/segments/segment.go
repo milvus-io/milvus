@@ -1091,6 +1091,8 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		return err
 	}
 
+	// Text match index mmap config is based on the raw data mmap.
+	enableMmap := isDataMmapEnable(f)
 	cgoProto := &indexcgopb.LoadTextIndexInfo{
 		FieldID:      textLogs.GetFieldID(),
 		Version:      textLogs.GetVersion(),
@@ -1100,6 +1102,7 @@ func (s *LocalSegment) LoadTextIndex(ctx context.Context, textLogs *datapb.TextI
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
 		LoadPriority: s.LoadInfo().GetPriority(),
+		EnableMmap:   enableMmap,
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)
@@ -1138,6 +1141,8 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		return err
 	}
 
+	// Json key stats index mmap config is based on the raw data mmap.
+	enableMmap := isDataMmapEnable(f)
 	cgoProto := &indexcgopb.LoadJsonKeyIndexInfo{
 		FieldID:      jsonKeyStats.GetFieldID(),
 		Version:      jsonKeyStats.GetVersion(),
@@ -1147,6 +1152,7 @@ func (s *LocalSegment) LoadJSONKeyIndex(ctx context.Context, jsonKeyStats *datap
 		CollectionID: s.Collection(),
 		PartitionID:  s.Partition(),
 		LoadPriority: s.loadInfo.Load().GetPriority(),
+		EnableMmap:   enableMmap,
 	}
 
 	marshaled, err := proto.Marshal(cgoProto)

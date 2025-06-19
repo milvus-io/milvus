@@ -115,9 +115,13 @@ struct TantivyIndexWrapper {
     }
 
     // load index. create index reader.
-    explicit TantivyIndexWrapper(const char* path, SetBitsetFn set_bitset) {
+    explicit TantivyIndexWrapper(const char* path,
+                                 bool load_in_mmap,
+                                 SetBitsetFn set_bitset)
+        : load_in_mmap_(load_in_mmap) {
         assert(tantivy_index_exist(path));
-        auto res = RustResultWrapper(tantivy_load_index(path, set_bitset));
+        auto res = RustResultWrapper(
+            tantivy_load_index(path, load_in_mmap_, set_bitset));
         AssertInfo(res.result_->success,
                    "failed to load index: {}",
                    res.result_->error);
@@ -185,8 +189,8 @@ struct TantivyIndexWrapper {
             reader_ = res.result_->value.ptr._0;
         } else if (!path_.empty()) {
             assert(tantivy_index_exist(path_.c_str()));
-            auto res = RustResultWrapper(
-                tantivy_load_index(path_.c_str(), milvus::index::SetBitset));
+            auto res = RustResultWrapper(tantivy_load_index(
+                path_.c_str(), load_in_mmap_, milvus::index::SetBitset));
             AssertInfo(res.result_->success,
                        "failed to load index: {}",
                        res.result_->error);
@@ -1107,5 +1111,6 @@ struct TantivyIndexWrapper {
     IndexWriter writer_ = nullptr;
     IndexReader reader_ = nullptr;
     std::string path_;
+    bool load_in_mmap_ = true;
 };
 }  // namespace milvus::tantivy
