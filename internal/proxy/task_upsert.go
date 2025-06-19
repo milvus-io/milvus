@@ -198,16 +198,16 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
-	err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
-	if err != nil {
-		return err
-	}
-
 	if it.schema.EnableDynamicField {
 		err := checkDynamicFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 		if err != nil {
 			return err
 		}
+	}
+
+	err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		return err
 	}
 
 	allFields := make([]*schemapb.FieldSchema, 0, len(it.schema.Fields)+5)

@@ -206,16 +206,16 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 	it.result.SuccIndex = sliceIndex
 
-	err = checkAndFlattenStructFieldData(it.schema, it.insertMsg)
-	if err != nil {
-		return err
-	}
-
 	if it.schema.EnableDynamicField {
 		err = checkDynamicFieldData(it.schema, it.insertMsg)
 		if err != nil {
 			return err
 		}
+	}
+
+	err = checkAndFlattenStructFieldData(it.schema, it.insertMsg)
+	if err != nil {
+		return err
 	}
 
 	allFields := make([]*schemapb.FieldSchema, 0, len(it.schema.Fields)+5)

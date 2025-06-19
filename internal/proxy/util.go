@@ -1831,7 +1831,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 
 		structSchema, ok := structSchemaMap[fieldData.FieldName]
 		if !ok {
-			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
+			return fmt.Errorf("fieldName %v not exist in collection schema, fieldType %v, fieldId %v", fieldData.FieldName, fieldData.Type, fieldData.FieldId)
 		}
 
 		structFieldCount++
