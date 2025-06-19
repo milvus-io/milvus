@@ -26,6 +26,7 @@ func TestNewInterceptor(t *testing.T) {
 	mixCoord.On("DescribeCollection", mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 	var err error
 	globalMetaCache, err = NewMetaCache(mixCoord, nil)
+	assert.NoError(t, err)
 	interceptor, err := NewInterceptor[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse](node, "DescribeCollection")
 	assert.NoError(t, err)
 	resp, err := interceptor.Call(context.Background(), &milvuspb.DescribeCollectionRequest{
