@@ -552,6 +552,10 @@ func (t *queryTask) Execute(ctx context.Context) error {
 
 // FieldsData in results are flattened, so we need to reconstruct the struct fields
 func reconstructStructFieldData(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
+	if len(results.OutputFields) == 1 && results.OutputFields[0] == "count(*)" {
+		return
+	}
+
 	if len(schema.StructArrayFields) == 0 {
 		return
 	}
