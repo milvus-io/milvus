@@ -624,6 +624,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("indexnode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, 16, Params.WorkerSlotUnit.GetAsInt())
+		assert.Equal(t, 0.25, Params.StandaloneSlotRatio.GetAsFloat())
 	})
 
 	t.Run("test streamingConfig", func(t *testing.T) {
