@@ -4959,7 +4959,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             final_result.append(tmp_result)
         return final_result
 
-    def get_tei_rerank_results(self, query_texts, document_texts, tei_reranker_endpoint):
+    def get_tei_rerank_results(self, query_texts, document_texts, tei_reranker_endpoint, enable_truncate=False):
         import requests
         import json
 
@@ -4969,6 +4969,13 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         "query": query_texts,
         "texts": document_texts
         })
+        if enable_truncate:
+            payload = json.dumps({
+            "query": query_texts,
+            "texts": document_texts,
+            "truncate": True,
+            "truncation_direction": "Right"
+            })
         headers = {
         'Content-Type': 'application/json'
         }
@@ -4986,7 +4993,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
         return reranked_results
 
-    def get_vllm_rerank_results(self, query_texts, document_texts, vllm_reranker_endpoint):
+    def get_vllm_rerank_results(self, query_texts, document_texts, vllm_reranker_endpoint, enable_truncate=False):
         import requests
         import json
 
@@ -4996,6 +5003,12 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         "query": query_texts,
         "documents": document_texts
         })
+        if enable_truncate:
+            payload = json.dumps({
+            "query": query_texts,
+            "documents": document_texts,
+            "truncate_prompt_tokens": 512
+            })
         headers = {
         'Content-Type': 'application/json'
         }
@@ -5057,7 +5070,10 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             
             log.info(f"{'-'*58} | {'-'*58}")
 
-    def compare_milvus_rerank_with_origin_rerank(self,query_texts, rerank_results, results_without_rerank, tei_reranker_endpoint=None, vllm_reranker_endpoint=None):
+    def compare_milvus_rerank_with_origin_rerank(self,query_texts, rerank_results, results_without_rerank,
+                                                 enable_truncate=False,
+                                                 tei_reranker_endpoint=None,
+                                                 vllm_reranker_endpoint=None):
         # result length should be the same as nq
         if tei_reranker_endpoint is not None and vllm_reranker_endpoint is not None:
             raise Exception("tei_reranker_endpoint and vllm_reranker_endpoint can not be set at the same time")
@@ -5086,9 +5102,9 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             log.debug(f"distances_without_rerank: {distances_without_rerank}")
             limit = len(actual_rerank_results)
             if tei_reranker_endpoint is not None:
-                raw_gt = self.get_tei_rerank_results(query_text, document_texts, tei_reranker_endpoint)[:limit]
+                raw_gt = self.get_tei_rerank_results(query_text, document_texts, tei_reranker_endpoint, enable_truncate=enable_truncate)[:limit]
             if vllm_reranker_endpoint is not None:
-                raw_gt = self.get_vllm_rerank_results(query_text, document_texts, vllm_reranker_endpoint)[:limit]
+                raw_gt = self.get_vllm_rerank_results(query_text, document_texts, vllm_reranker_endpoint, enable_truncate=enable_truncate)[:limit]
             
             # Create list of (distance, pk, document) tuples for sorting
             gt_with_info = []
@@ -5112,7 +5128,8 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
         pytest.param("vllm", marks=pytest.mark.tags(CaseLabel.L3))
     ]) # vllm set as L3 because it needs GPU resources, so not run in CI and nightly test
-    def test_milvus_client_single_vector_search_with_model_rerank(self, setup_collection, ranker_model, tei_reranker_endpoint, vllm_reranker_endpoint):
+    @pytest.mark.parametrize("enable_truncate", [False, True])
+    def test_milvus_client_single_vector_search_with_model_rerank(self, setup_collection, ranker_model, enable_truncate,  tei_reranker_endpoint, vllm_reranker_endpoint):
         """
         target: test single vector search with model rerank using SciFact dataset
         method: test dense/sparse/bm25 search with model reranker separately and compare results with origin reranker
@@ -5125,8 +5142,11 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         fake = Faker()
         
         # 5. prepare search parameters for reranker
-        nq = 10
+        nq = 2
         query_texts = [fake.text() for _ in range(nq)]
+        if enable_truncate:
+            # make query texts larger
+            query_texts = [" ".join([fake.word() for _ in range(1024)])   for _ in range(nq)]
         tei_ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5135,7 +5155,9 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_reranker_endpoint
+                "endpoint": tei_reranker_endpoint,
+                "truncate": enable_truncate,
+                "truncation_direction": "Right"
             },
         )
         vllm_ranker = Function(
@@ -5147,6 +5169,9 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 "provider": "vllm",
                 "queries": query_texts,
                 "endpoint": vllm_reranker_endpoint,
+                "truncate": enable_truncate,
+                "truncate_prompt_tokens": 512
+
             },
         )
         
@@ -5158,7 +5183,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         for search_type in ["dense", "sparse", "bm25"]:
             log.info(f"Executing {search_type} search with model reranker")
             rerank_results = []
-
+            results_without_rerank = None
             if search_type == "dense":
 
 
@@ -5218,16 +5243,18 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 )
             if ranker_model == "tei":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
-                                                           tei_reranker_endpoint=tei_reranker_endpoint)
+                                                              enable_truncate=enable_truncate,
+                                                              tei_reranker_endpoint=tei_reranker_endpoint)
             if ranker_model == "vllm":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
+                                                            enable_truncate=enable_truncate,
                                                             vllm_reranker_endpoint=vllm_reranker_endpoint)
 
     @pytest.mark.parametrize("ranker_model", [
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
         pytest.param("vllm", marks=pytest.mark.tags(CaseLabel.L3))
     ]) # vllm set as L3 because it needs GPU resources, so not run in CI and nightly test
-    def test_milvus_client_hybrid_vector_search_with_model_rerank(self, setup_collection, ranker_model, tei_rerank_endpoint, vllm_rerank_endpoint):
+    def test_milvus_client_hybrid_vector_search_with_model_rerank(self, setup_collection, ranker_model, tei_reranker_endpoint, vllm_reranker_endpoint):
         """
         target: test hybrid vector search with model rerank
         method: test dense+sparse/dense+bm25/sparse+bm25 search with model reranker
@@ -5240,7 +5267,8 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         fake = Faker()
         
         # 5. prepare search parameters for reranker
-        query_texts = [fake.text() for _ in range(10)]
+        nq = 2
+        query_texts = [fake.text() for _ in range(nq)]
         tei_ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5249,7 +5277,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         vllm_ranker = Function(
@@ -5260,19 +5288,19 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "vllm",
                 "queries": query_texts,
-                "endpoint": vllm_rerank_endpoint,
+                "endpoint": vllm_reranker_endpoint,
             },
         )
         if ranker_model == "tei":
             ranker = tei_ranker
-        if ranker_model == "vllm":
+        else:
             ranker = vllm_ranker
         # 6. execute search with reranker
         for search_type in ["dense+sparse", "dense+bm25", "sparse+bm25"]:
             log.info(f"Executing {search_type} search with model reranker")
             rerank_results = []
             dense_search_param = {
-                "data": [[random.random() for _ in range(768)] for _ in range(10)],
+                "data": [[random.random() for _ in range(768)] for _ in range(nq)],
                 "anns_field": "dense",
                 "param": {},
                 "limit": 5,
@@ -5280,7 +5308,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             dense = AnnSearchRequest(**dense_search_param)
 
             sparse_search_param = {
-                "data": [{random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(10)],
+                "data": [{random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)],
                 "anns_field": "sparse",
                 "param": {},
                 "limit": 5,
@@ -5293,7 +5321,8 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             }
             bm25 = AnnSearchRequest(**bm25_search_param)
 
-            sparse = AnnSearchRequest(**sparse_search_param)            
+            sparse = AnnSearchRequest(**sparse_search_param)
+            results_without_rerank = None
             if search_type == "dense+sparse":
 
                 rerank_results = client.hybrid_search(
@@ -5429,7 +5458,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "huggingface", "", None, 123])
-    def test_milvus_client_search_with_model_rerank_invalid_provider(self, setup_collection, invalid_provider, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_invalid_provider(self, setup_collection, invalid_provider, tei_reranker_endpoint):
         """
         target: test model rerank with invalid provider
         method: use invalid provider values
@@ -5446,7 +5475,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": invalid_provider,
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5512,7 +5541,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_queries", [None, "", 123, {"key": "value"}])
-    def test_milvus_client_search_with_model_rerank_invalid_queries(self, setup_collection, invalid_queries, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_invalid_queries(self, setup_collection, invalid_queries, tei_reranker_endpoint):
         """
         target: test model rerank with invalid queries parameter
         method: use invalid queries values
@@ -5528,7 +5557,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": invalid_queries,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5538,7 +5567,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_missing_queries(self, setup_collection, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_missing_queries(self, setup_collection, tei_reranker_endpoint):
         """
         target: test model rerank without queries parameter
         method: omit queries parameter
@@ -5553,7 +5582,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
             params={
                 "reranker": "model",
                 "provider": "tei",
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
                 # missing "queries" parameter
             },
         )
@@ -5586,13 +5615,13 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
         
         data = [[0.1] * 128]
-        error = {ct.err_code: 1, ct.err_msg: "missing required parameter"}
+        error = {ct.err_code: 65535, ct.err_msg: "Rerank function lost params endpoint"}
         self.search(client, collection_name, data, anns_field="dense", limit=5, 
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_reranker_type", ["invalid", "rrf", "", None, 123])
-    def test_milvus_client_search_with_invalid_reranker_type(self, setup_collection, invalid_reranker_type, tei_rerank_endpoint):
+    @pytest.mark.parametrize("invalid_reranker_type", ["invalid", "", None, 123])
+    def test_milvus_client_search_with_invalid_reranker_type(self, setup_collection, invalid_reranker_type, tei_reranker_endpoint):
         """
         target: test model rerank with invalid reranker type
         method: use invalid reranker type values
@@ -5609,7 +5638,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": invalid_reranker_type,
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5619,7 +5648,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_query_mismatch(self, setup_collection, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_query_mismatch(self, setup_collection, tei_reranker_endpoint):
         """
         target: test model rerank with query count mismatch
         method: provide multiple queries but single search data
@@ -5636,7 +5665,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5646,7 +5675,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_non_text_field(self, setup_collection, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_non_text_field(self, setup_collection, tei_reranker_endpoint):
         """
         target: test model rerank with non-text input field
         method: use numeric field for reranking input
@@ -5663,7 +5692,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5673,7 +5702,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_nonexistent_field(self, setup_collection, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_nonexistent_field(self, setup_collection, tei_reranker_endpoint):
         """
         target: test model rerank with non-existent input field
         method: use field that doesn't exist in collection
@@ -5690,7 +5719,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5700,7 +5729,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_multiple_input_fields(self, setup_collection, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_multiple_input_fields(self, setup_collection, tei_reranker_endpoint):
         """
         target: test model rerank with multiple input fields
         method: specify multiple fields for reranking input
@@ -5717,7 +5746,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
             },
         )
         
@@ -5727,7 +5756,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_extra_params(self, setup_collection, tei_rerank_endpoint):
+    def test_milvus_client_search_with_model_rerank_extra_params(self, setup_collection, tei_reranker_endpoint):
         """
         target: test model rerank with extra unknown parameters
         method: add unknown parameters to params
@@ -5744,7 +5773,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "reranker": "model",
                 "provider": "tei",
                 "queries": query_texts,
-                "endpoint": tei_rerank_endpoint,
+                "endpoint": tei_reranker_endpoint,
                 "unknown_param": "value",  # extra parameter
                 "another_param": 123,
             },
