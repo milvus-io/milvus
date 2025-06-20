@@ -491,15 +491,23 @@ LoadJsonKeyIndex(CTraceContext c_trace,
         config[milvus::index::INDEX_FILES] = files;
         config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
         config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
+        if (info_proto->enable_mmap()) {
+            config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
+        }
+
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
 
-        auto index = std::make_unique<milvus::index::JsonKeyStatsInvertedIndex>(
-            file_ctx, true);
+        auto index =
+            std::make_unique<milvus::index::JsonKeyStats>(file_ctx, true);
         index->Load(ctx, config);
 
-        segment->LoadJsonKeyIndex(milvus::FieldId(info_proto->fieldid()),
-                                  std::move(index));
+        segment->LoadJsonStats(milvus::FieldId(info_proto->fieldid()),
+                               std::move(index));
+
+        LOG_INFO("load json stats success for field:{} of segment:{}",
+                 info_proto->fieldid(),
+                 segment->get_segment_id());
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

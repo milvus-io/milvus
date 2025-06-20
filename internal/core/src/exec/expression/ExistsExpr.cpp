@@ -20,6 +20,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "index/JsonInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus {
 namespace exec {
@@ -179,43 +180,34 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         return nullptr;
     }
 
-    auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    if (cached_index_chunk_id_ != 0) {
+    auto pointer = milvus::index::JsonPointer(expr_->column_.nested_path_);
+    if (cached_index_chunk_id_ != 0 &&
+        segment_->type() == SegmentType::Sealed) {
         cached_index_chunk_id_ = 0;
-        const segcore::SegmentInternalInterface* segment = nullptr;
-        if (segment_->type() == SegmentType::Growing) {
-            segment =
-                dynamic_cast<const segcore::SegmentGrowingImpl*>(segment_);
-        } else if (segment_->type() == SegmentType::Sealed) {
-            segment = dynamic_cast<const segcore::SegmentSealed*>(segment_);
-        }
+        auto segment = static_cast<const segcore::SegmentSealed*>(segment_);
         auto field_id = expr_->column_.field_id_;
-        auto* index = segment->GetJsonKeyIndex(field_id);
+        auto* index = segment->GetJsonStats(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, field_id, pointer](
-                               const bool* valid_array,
-                               const uint8_t* type_array,
-                               const uint32_t* row_id_array,
-                               const uint16_t* offset_array,
-                               const uint16_t* size_array,
-                               const int32_t* value_array,
-                               TargetBitmap& bitset,
-                               const size_t n) {
-            for (size_t i = 0; i < n; i++) {
-                auto row_id = row_id_array[i];
-                bitset[row_id] = true;
-            }
-        };
-        bool is_growing = segment_->type() == SegmentType::Growing;
-        bool is_strong_consistency = consistency_level_ == 0;
-        cached_index_chunk_res_ = index
-                                      ->FilterByPath(pointer,
-                                                     active_count_,
-                                                     is_growing,
-                                                     is_strong_consistency,
-                                                     filter_func)
-                                      .clone();
+
+        cached_index_chunk_res_.resize(active_count_, false);
+        TargetBitmap valid_res(active_count_, true);
+        TargetBitmapView res_view(cached_index_chunk_res_);
+        TargetBitmapView valid_res_view(valid_res);
+
+        // process shredding data
+        auto shredding_fields = index->GetShreddingFields(pointer);
+        for (const auto& field : shredding_fields) {
+            index->ExecutorForGettingValid(field, valid_res_view);
+            res_view |= valid_res_view;
+        }
+
+        if (!index->CanSkipShared(pointer)) {
+            // process shared data
+            index->ExecuteExistsPathForSharedData(pointer, res_view);
+        }
+        cached_index_chunk_id_ = 0;
     }
+
     TargetBitmap result;
     result.append(
         cached_index_chunk_res_, current_data_global_pos_, real_batch_size);

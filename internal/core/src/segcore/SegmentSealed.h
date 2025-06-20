@@ -96,6 +96,10 @@ class SegmentSealed : public SegmentInternalInterface {
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
 
+    virtual void
+    LoadJsonStats(FieldId field_id,
+                  std::unique_ptr<index::JsonKeyStats> stats) = 0;
+
     SegmentType
     type() const override {
         return SegmentType::Sealed;

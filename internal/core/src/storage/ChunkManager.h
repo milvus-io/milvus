@@ -121,6 +121,15 @@ class ChunkManager {
      */
     virtual std::string
     GetRootPath() const = 0;
+
+    /**
+     * @brief Get the bucket name
+     * @return std::string
+     * Note: only for remote storage like minio, azure, etc.
+     *       when using local storage, return empty string
+     */
+    virtual std::string
+    GetBucketName() const = 0;
 };
 
 using ChunkManagerPtr = std::shared_ptr<ChunkManager>;
