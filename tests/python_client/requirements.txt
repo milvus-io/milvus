@@ -28,8 +28,8 @@ pytest-parallel
 pytest-random-order
 
 # pymilvus
-pymilvus==2.6.0rc139
-pymilvus[bulk_writer]==2.6.0rc139
+
+pymilvus[bulk_writer] @ git+https://github.com/MrPresent-Han/pymilvus.git@fix-json-field-master
 
 # for protobuf
 protobuf==5.27.2
