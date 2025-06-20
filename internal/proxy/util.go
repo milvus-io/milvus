@@ -1584,11 +1584,10 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 				}
 			}
 			useAllDyncamicFields = true
-			break
 		} else {
 			if structArrayField, ok := structArrayNameToFields[outputFieldName]; ok {
 				for _, field := range structArrayField {
-					if schema.IsFieldLoaded(field.GetFieldID()) {
+					if schema.CanRetrieveRawFieldData(field) {
 						resultFieldNameMap[field.Name] = true
 						userOutputFieldsMap[field.Name] = true
 					}
@@ -1866,7 +1865,6 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 
 			flattenedFields = append(flattenedFields, subField)
 		}
-
 	}
 
 	if len(schema.GetStructArrayFields()) != structFieldCount {
