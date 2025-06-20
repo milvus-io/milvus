@@ -809,12 +809,12 @@ func (mt *MetaTable) ListCollectionPhysicalChannels(ctx context.Context) map[typ
 	return chanMap
 }
 
-func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, ignoreField bool) error {
+func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
-	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts, ignoreField); err != nil {
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, ts, fieldModify); err != nil {
 		return err
 	}
 	mt.collID2Meta[oldColl.CollectionID] = newColl
