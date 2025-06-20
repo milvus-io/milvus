@@ -59,7 +59,7 @@ func (m *MmapMigration) MigrateRootCoordCollection(ctx context.Context) {
 			newColl.Properties = updateOrAddMmapKey(newColl.Properties, common.MmapEnabledKey, "true")
 			fmt.Printf("migrate collection %v, %s\n", collection.CollectionID, collection.Name)
 
-			if err := m.rootcoordMeta.AlterCollection(ctx, collection, newColl, ts); err != nil {
+			if err := m.rootcoordMeta.AlterCollection(ctx, collection, newColl, ts, false); err != nil {
 				panic(err)
 			}
 		}
