@@ -41,7 +41,7 @@ class GroupChunkTranslator
         FieldDataInfo column_group_info,
         std::vector<std::string> insert_files,
         bool use_mmap,
-        std::vector<milvus_storage::RowGroupMetadataVector>&
+        const std::vector<milvus_storage::RowGroupMetadataVector>&
             row_group_meta_list,
         milvus_storage::FieldIDList field_id_list,
         milvus::proto::common::LoadPriority load_priority);
@@ -82,7 +82,7 @@ class GroupChunkTranslator
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     FieldDataInfo column_group_info_;
     std::vector<std::string> insert_files_;
-    std::vector<milvus_storage::RowGroupMetadataVector>& row_group_meta_list_;
+    std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
     milvus_storage::FieldIDList field_id_list_;
     SchemaPtr schema_;
     bool is_sorted_by_pk_;
