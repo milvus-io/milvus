@@ -80,9 +80,11 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                       .GetArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"/tmp/0.parquet", "/tmp/1.parquet"};
+        std::vector<std::string> paths = {"/tmp/0/10000.parquet",
+                                          "/tmp/102/10001.parquet",
+                                          "/tmp/103/10002.parquet"};
         std::vector<std::vector<int>> column_groups = {
-            {0, 1, 2}, {3, 4}};  // short columns and long columns
+            {0, 4, 3}, {2}, {1}};  // narrow columns and wide columns
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
 
@@ -162,12 +164,19 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                             false,
                             std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
-            int64_t(1),
-            FieldBinlogInfo{int64_t(1),
+            int64_t(102),
+            FieldBinlogInfo{int64_t(102),
                             static_cast<int64_t>(row_count),
                             std::vector<int64_t>(chunk_num * test_data_count),
                             false,
                             std::vector<std::string>({paths[1]})});
+        load_info.field_infos.emplace(
+            int64_t(103),
+            FieldBinlogInfo{int64_t(103),
+                            static_cast<int64_t>(row_count),
+                            std::vector<int64_t>(chunk_num * test_data_count),
+                            false,
+                            std::vector<std::string>({paths[2]})});
         load_info.mmap_dir_path = "";
         load_info.storage_version = 2;
         segment->LoadFieldData(load_info);
