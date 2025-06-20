@@ -62,7 +62,7 @@ var binaryLogicalNameMap = map[int]string{
 	parser.PlanParserOR:  "or",
 }
 
-func Add(a, b *planpb.GenericValue) *ExprWithType {
+func Add(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	ret := &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ValueExpr{
@@ -72,11 +72,11 @@ func Add(a, b *planpb.GenericValue) *ExprWithType {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil
+		return nil, errors.New("add cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil
+		return nil, errors.New("add cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
@@ -96,10 +96,10 @@ func Add(a, b *planpb.GenericValue) *ExprWithType {
 		ret.expr.GetValueExpr().Value = NewInt(a.GetInt64Val() + b.GetInt64Val())
 	}
 
-	return ret
+	return ret, nil
 }
 
-func Subtract(a, b *planpb.GenericValue) *ExprWithType {
+func Subtract(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	ret := &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ValueExpr{
@@ -109,11 +109,11 @@ func Subtract(a, b *planpb.GenericValue) *ExprWithType {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil
+		return nil, errors.New("subtract cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil
+		return nil, errors.New("subtract cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
@@ -133,10 +133,10 @@ func Subtract(a, b *planpb.GenericValue) *ExprWithType {
 		ret.expr.GetValueExpr().Value = NewInt(a.GetInt64Val() - b.GetInt64Val())
 	}
 
-	return ret
+	return ret, nil
 }
 
-func Multiply(a, b *planpb.GenericValue) *ExprWithType {
+func Multiply(a, b *planpb.GenericValue) (*ExprWithType, error) {
 	ret := &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_ValueExpr{
@@ -146,11 +146,11 @@ func Multiply(a, b *planpb.GenericValue) *ExprWithType {
 	}
 
 	if IsBool(a) || IsBool(b) {
-		return nil
+		return nil, errors.New("multiply cannot apply on bool field")
 	}
 
 	if IsString(a) || IsString(b) {
-		return nil
+		return nil, errors.New("multiply cannot apply on string field")
 	}
 
 	aFloat, bFloat, aInt, bInt := IsFloating(a), IsFloating(b), IsInteger(a), IsInteger(b)
@@ -170,7 +170,7 @@ func Multiply(a, b *planpb.GenericValue) *ExprWithType {
 		ret.expr.GetValueExpr().Value = NewInt(a.GetInt64Val() * b.GetInt64Val())
 	}
 
-	return ret
+	return ret, nil
 }
 
 func Divide(a, b *planpb.GenericValue) (*ExprWithType, error) {
@@ -373,9 +373,9 @@ func Negative(a *planpb.GenericValue) *ExprWithType {
 	return nil
 }
 
-func Not(a *planpb.GenericValue) *ExprWithType {
+func Not(a *planpb.GenericValue) (*ExprWithType, error) {
 	if !IsBool(a) {
-		return nil
+		return nil, errors.New("not can only apply on boolean")
 	}
 	return &ExprWithType{
 		dataType: schemapb.DataType_Bool,
@@ -386,7 +386,7 @@ func Not(a *planpb.GenericValue) *ExprWithType {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 /*
