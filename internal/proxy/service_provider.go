@@ -97,8 +97,8 @@ type CachedProxyServiceProvider struct {
 
 func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	request *milvuspb.DescribeCollectionRequest,
-) (*milvuspb.DescribeCollectionResponse, error) {
-	resp := &milvuspb.DescribeCollectionResponse{
+) (resp *milvuspb.DescribeCollectionResponse, err error) {
+	resp = &milvuspb.DescribeCollectionResponse{
 		Status:         merr.Success(),
 		CollectionName: request.CollectionName,
 		DbName:         request.DbName,
@@ -114,11 +114,18 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	}
 
 	// validate collection name, ref describeCollectionTask.PreExecute
-	if err := validateCollectionName(request.CollectionName); err != nil {
+	if err = validateCollectionName(request.CollectionName); err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, 0)
+
+	request.CollectionID, err = globalMetaCache.GetCollectionID(ctx, request.DbName, request.CollectionName)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	c, err := globalMetaCache.GetCollectionInfo(ctx, request.DbName, request.CollectionName, request.CollectionID)
 	if err != nil {
 		if errors.Is(err, merr.ErrCollectionNotFound) {
 			// nolint
