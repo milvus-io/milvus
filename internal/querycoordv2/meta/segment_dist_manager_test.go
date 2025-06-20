@@ -145,6 +145,91 @@ func (suite *SegmentDistManagerSuite) TestGetBy() {
 	suite.Len(segments, 2)
 }
 
+func (suite *SegmentDistManagerSuite) TestGetByLevel() {
+	// Create a fresh SegmentDistManager for this test to avoid interference from existing segments
+	dist := NewSegmentDistManager()
+
+	// Add segments with different levels
+	l0Segment := SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            100,
+		CollectionID:  suite.collection,
+		PartitionID:   suite.partitions[0],
+		InsertChannel: "dmc0",
+		Level:         datapb.SegmentLevel_L0,
+	})
+
+	l1Segment := SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            101,
+		CollectionID:  suite.collection,
+		PartitionID:   suite.partitions[0],
+		InsertChannel: "dmc0",
+		Level:         datapb.SegmentLevel_L1,
+	})
+
+	l2Segment := SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            102,
+		CollectionID:  suite.collection,
+		PartitionID:   suite.partitions[0],
+		InsertChannel: "dmc0",
+		Level:         datapb.SegmentLevel_L2,
+	})
+
+	legacySegment := SegmentFromInfo(&datapb.SegmentInfo{
+		ID:            103,
+		CollectionID:  suite.collection,
+		PartitionID:   suite.partitions[0],
+		InsertChannel: "dmc0",
+		Level:         datapb.SegmentLevel_Legacy,
+	})
+
+	// Update distribution with different level segments
+	dist.Update(suite.nodes[0], l0Segment, l1Segment, l2Segment, legacySegment)
+
+	// Test WithLevel filter
+	l0Segments := dist.GetByFilter(WithLevel(datapb.SegmentLevel_L0))
+	suite.Len(l0Segments, 1)
+	suite.Equal(datapb.SegmentLevel_L0, l0Segments[0].GetLevel())
+	suite.Equal(int64(100), l0Segments[0].GetID())
+
+	l1Segments := dist.GetByFilter(WithLevel(datapb.SegmentLevel_L1))
+	suite.Len(l1Segments, 1)
+	suite.Equal(datapb.SegmentLevel_L1, l1Segments[0].GetLevel())
+	suite.Equal(int64(101), l1Segments[0].GetID())
+
+	l2Segments := dist.GetByFilter(WithLevel(datapb.SegmentLevel_L2))
+	suite.Len(l2Segments, 1)
+	suite.Equal(datapb.SegmentLevel_L2, l2Segments[0].GetLevel())
+	suite.Equal(int64(102), l2Segments[0].GetID())
+
+	legacySegments := dist.GetByFilter(WithLevel(datapb.SegmentLevel_Legacy))
+	suite.Len(legacySegments, 1)
+	suite.Equal(datapb.SegmentLevel_Legacy, legacySegments[0].GetLevel())
+	suite.Equal(int64(103), legacySegments[0].GetID())
+
+	// Test WithoutLevel filter
+	nonL0Segments := dist.GetByFilter(WithoutLevel(datapb.SegmentLevel_L0))
+	suite.Len(nonL0Segments, 3)
+	for _, segment := range nonL0Segments {
+		suite.NotEqual(datapb.SegmentLevel_L0, segment.GetLevel(), "Should not contain L0 segments")
+	}
+
+	nonL1Segments := dist.GetByFilter(WithoutLevel(datapb.SegmentLevel_L1))
+	suite.Len(nonL1Segments, 3)
+	for _, segment := range nonL1Segments {
+		suite.NotEqual(datapb.SegmentLevel_L1, segment.GetLevel(), "Should not contain L1 segments")
+	}
+
+	// Test combining filters
+	l0OnNode0 := dist.GetByFilter(WithLevel(datapb.SegmentLevel_L0), WithNodeID(suite.nodes[0]))
+	suite.Len(l0OnNode0, 1)
+	suite.Equal(datapb.SegmentLevel_L0, l0OnNode0[0].GetLevel())
+	suite.Equal(suite.nodes[0], l0OnNode0[0].Node)
+
+	// Test non-existent level (should use a level that doesn't exist in our test data)
+	nonExistentLevel := dist.GetByFilter(WithLevel(datapb.SegmentLevel(999)))
+	suite.Len(nonExistentLevel, 0)
+}
+
 func (suite *SegmentDistManagerSuite) AssertIDs(segments []*Segment, ids ...int64) bool {
 	for _, segment := range segments {
 		hasSegment := false
