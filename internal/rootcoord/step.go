@@ -464,13 +464,14 @@ func (s *nullStep) Weight() stepPriority {
 
 type AlterCollectionStep struct {
 	baseStep
-	oldColl *model.Collection
-	newColl *model.Collection
-	ts      Timestamp
+	oldColl     *model.Collection
+	newColl     *model.Collection
+	ts          Timestamp
+	fieldModify bool
 }
 
 func (a *AlterCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts, a.fieldModify)
 	return nil, err
 }
 

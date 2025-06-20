@@ -79,7 +79,7 @@ type mockMetaTable struct {
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
 	GetCollectionVirtualChannelsFunc func(ctx context.Context, colID int64) []string
-	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
+	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error
 	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
 	AddCredentialFunc                func(ctx context.Context, credInfo *internalpb.CredentialInfo) error
 	GetCredentialFunc                func(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
@@ -177,8 +177,8 @@ func (m mockMetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []s
 	return m.ListAliasesByIDFunc(ctx, collID)
 }
 
-func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
-	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts)
+func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp, fieldModify bool) error {
+	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts, fieldModify)
 }
 
 func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
