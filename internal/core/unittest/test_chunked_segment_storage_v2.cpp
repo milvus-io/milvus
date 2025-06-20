@@ -74,15 +74,24 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         // Initialize file system
         auto conf = milvus_storage::ArrowFileSystemConfig();
         conf.storage_type = "local";
-        conf.root_path = "/tmp";
+        conf.root_path = "test_data";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"/tmp/0/10000.parquet",
-                                          "/tmp/102/10001.parquet",
-                                          "/tmp/103/10002.parquet"};
+        std::vector<std::string> paths = {"test_data/0/10000.parquet",
+                                          "test_data/102/10001.parquet",
+                                          "test_data/103/10002.parquet"};
+
+        // Create directories for the parquet files
+        for (const auto& path : paths) {
+            auto dir_path = path.substr(0, path.find_last_of('/'));
+            auto status = fs->CreateDir(dir_path);
+            EXPECT_TRUE(status.ok())
+                << "Failed to create directory: " << dir_path;
+        }
+
         std::vector<std::vector<int>> column_groups = {
             {0, 4, 3}, {2}, {1}};  // narrow columns and wide columns
         auto writer_memory = 16 * 1024 * 1024;
@@ -180,6 +189,15 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         load_info.mmap_dir_path = "";
         load_info.storage_version = 2;
         segment->LoadFieldData(load_info);
+    }
+
+    void
+    TearDown() override {
+        // Clean up test data directory
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        auto status = fs->DeleteDir("test_data");
+        ASSERT_TRUE(status.ok());
     }
 
     segcore::SegmentSealedUPtr segment;
