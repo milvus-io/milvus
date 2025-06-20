@@ -561,8 +561,7 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	}
 
 	if field.DataType == schemapb.DataType_ArrayOfVector {
-		// todo(SpadeA):
-		panic("array of vector")
+		return fmt.Errorf("array of vector can only be in the struct array field, field name: %s", field.Name)
 	}
 
 	// TODO should remove the index params in the field schema

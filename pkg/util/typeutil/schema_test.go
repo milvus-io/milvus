@@ -247,6 +247,7 @@ func TestSchema(t *testing.T) {
 		assert.True(t, IsVectorType(schemapb.DataType_BFloat16Vector))
 		assert.True(t, IsVectorType(schemapb.DataType_SparseFloatVector))
 		assert.True(t, IsVectorType(schemapb.DataType_Int8Vector))
+		assert.True(t, IsVectorType(schemapb.DataType_ArrayOfVector))
 
 		assert.False(t, IsIntegerType(schemapb.DataType_Bool))
 		assert.True(t, IsIntegerType(schemapb.DataType_Int8))
@@ -292,6 +293,8 @@ func TestSchema(t *testing.T) {
 		assert.False(t, IsSparseFloatVectorType(schemapb.DataType_BFloat16Vector))
 		assert.True(t, IsSparseFloatVectorType(schemapb.DataType_SparseFloatVector))
 		assert.False(t, IsSparseFloatVectorType(schemapb.DataType_Int8Vector))
+
+		assert.True(t, IsVectorArrayType(schemapb.DataType_ArrayOfVector))
 	})
 }
 

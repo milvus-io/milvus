@@ -3846,3 +3846,7 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 		assert.Equal(t, "single_field", insertMsg.FieldsData[0].FieldName)
 	})
 }
+
+func TestValidateFieldsInStruct(t *testing.T) {
+	// todo(SpadeA): add test cases
+}

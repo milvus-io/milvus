@@ -412,7 +412,7 @@ func GetCollectionLoadFields(schema *schemapb.CollectionSchema, skipDynamicField
 	}
 	fields := lo.FilterMap(schema.GetFields(), filter)
 
-	fieldsNum := len(fields)
+	fieldsNum := len(schema.GetFields())
 	for _, structField := range schema.GetStructArrayFields() {
 		fields = append(fields, lo.FilterMap(structField.GetFields(), filter)...)
 		fieldsNum += len(structField.GetFields())

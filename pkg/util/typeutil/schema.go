@@ -411,15 +411,6 @@ func (helper *SchemaHelper) GetFieldFromName(fieldName string) (*schemapb.FieldS
 	return helper.allFields[offset], nil
 }
 
-func (helper *SchemaHelper) IsStructArrayField(fieldName string) bool {
-	for _, field := range helper.schema.StructArrayFields {
-		if field.Name == fieldName {
-			return true
-		}
-	}
-	return false
-}
-
 // GetFieldFromNameDefaultJSON is used to find the schema by field name, if not exist, use json field
 func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*schemapb.FieldSchema, error) {
 	offset, ok := helper.nameOffset[fieldName]
@@ -428,6 +419,15 @@ func (helper *SchemaHelper) GetFieldFromNameDefaultJSON(fieldName string) (*sche
 	}
 	fieldSchema := helper.allFields[offset]
 	return fieldSchema, nil
+}
+
+func (helper *SchemaHelper) GetStructArrayFieldFromName(fieldName string) *schemapb.StructArrayFieldSchema {
+	for _, field := range helper.schema.StructArrayFields {
+		if field.Name == fieldName {
+			return field
+		}
+	}
+	return nil
 }
 
 func (helper *SchemaHelper) IsFieldTextMatchEnabled(fieldId int64) bool {
@@ -555,7 +555,11 @@ func IsFixDimVectorType(dataType schemapb.DataType) bool {
 
 // IsVectorType returns true if input is a vector type, otherwise false
 func IsVectorType(dataType schemapb.DataType) bool {
-	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType) || IsIntVectorType(dataType)
+	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType) || IsIntVectorType(dataType) || IsVectorArrayType(dataType)
+}
+
+func IsVectorArrayType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_ArrayOfVector
 }
 
 // IsIntegerType returns true if input is an integer type, otherwise false
@@ -1268,7 +1272,7 @@ func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldS
 	}
 	for _, structArrayField := range schema.GetStructArrayFields() {
 		for _, fieldSchema := range structArrayField.GetFields() {
-			if IsVectorType(fieldSchema.ElementType) {
+			if IsVectorType(fieldSchema.DataType) {
 				ret = append(ret, fieldSchema)
 			}
 		}

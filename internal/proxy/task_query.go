@@ -410,7 +410,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	if t.ids != nil {
 		pkField := ""
-		// todo(SpadeA): consider struct fields
 		for _, field := range schema.Fields {
 			if field.IsPrimaryKey {
 				pkField = field.Name

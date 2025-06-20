@@ -871,9 +871,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 
 	for i, structArrayField := range result.Schema.StructArrayFields {
 		t.result.Schema.StructArrayFields = append(t.result.Schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
-			FieldID: structArrayField.FieldID,
-			Name:    structArrayField.Name,
-			Fields:  make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
+			FieldID:     structArrayField.FieldID,
+			Name:        structArrayField.Name,
+			Description: structArrayField.Description,
+			Fields:      make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
 		})
 		for _, field := range structArrayField.Fields {
 			t.result.Schema.StructArrayFields[i].Fields = append(t.result.Schema.StructArrayFields[i].Fields, copyFieldSchema(field))

@@ -207,8 +207,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
-	// todo(SpadeA): consider struct fields
-
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
 	if t.SearchRequest.GetIsAdvanced() {
@@ -1116,10 +1114,16 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 }
 
 func (t *searchTask) estimateResultSize(nq int64, topK int64) (int64, error) {
-	// todo(SpadeA): consider struct fields
 	vectorOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
+	for _, structArrayField := range t.schema.GetStructArrayFields() {
+		for _, field := range structArrayField.GetFields() {
+			if lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType()) {
+				vectorOutputFields = append(vectorOutputFields, field)
+			}
+		}
+	}
 	// Currently, we get vectors by requery. Once we support getting vectors from search,
 	// searches with small result size could no longer need requery.
 	if len(vectorOutputFields) > 0 {
@@ -1283,7 +1287,7 @@ func (t *searchTask) pickFieldData(ids *schemapb.IDs, pkOffset map[any]int, fiel
 
 func (t *searchTask) fillInFieldInfo() {
 	for _, retField := range t.result.Results.FieldsData {
-		// todo(SpadeA): consider struct fields
+		// todo(SpadeA): consider struct fields as well as reconstruction struct fields
 		for _, schemaField := range t.schema.Fields {
 			if retField != nil && retField.FieldId == schemaField.FieldID {
 				retField.FieldName = schemaField.Name

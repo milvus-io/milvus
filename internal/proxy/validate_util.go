@@ -130,7 +130,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			}
 
 		case schemapb.DataType_ArrayOfStruct:
-			panic("unreachable")
+			panic("unreachable, array of struct should have been flattened")
 
 		default:
 		}

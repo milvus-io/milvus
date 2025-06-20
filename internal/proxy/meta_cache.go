@@ -184,8 +184,12 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
 	for _, name := range loadFields {
 		// todo(SpadeA): check struct field
-		if s.schemaHelper.IsStructArrayField(name) {
-			panic("not implemented")
+		if structArrayField := s.schemaHelper.GetStructArrayFieldFromName(name); structArrayField != nil {
+			for _, field := range structArrayField.GetFields() {
+				fields = append(fields, field)
+				fieldIDs.Insert(field.GetFieldID())
+			}
+			continue
 		}
 
 		fieldSchema, err := s.schemaHelper.GetFieldFromName(name)
