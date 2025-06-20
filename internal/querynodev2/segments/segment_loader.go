@@ -1498,36 +1498,29 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 	var mmapFieldCount int
 	var fieldGpuMemorySize []uint64
 
-	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
-	for _, fieldIndexInfo := range loadInfo.IndexInfos {
-		fieldID := fieldIndexInfo.FieldID
-		fieldID2IndexInfo[fieldID] = fieldIndexInfo
-	}
+	id2Binlogs := lo.SliceToMap(loadInfo.BinlogPaths, func(fieldBinlog *datapb.FieldBinlog) (int64, *datapb.FieldBinlog) {
+		return fieldBinlog.GetFieldID(), fieldBinlog
+	})
 
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
 		log.Warn("failed to create schema helper", zap.String("name", schema.GetName()), zap.Error(err))
 		return nil, err
 	}
-	calculateDataSizeCount := 0
 	ctx := context.Background()
 
-	for _, fieldBinlog := range loadInfo.BinlogPaths {
-		fieldID := fieldBinlog.FieldID
-		var mmapEnabled bool
-		// TODO retrieve_enable should be considered
-		fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
-		if err != nil {
-			log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
-			return nil, err
-		}
-		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
-		isVectorType := typeutil.IsVectorType(fieldSchema.DataType)
-		shouldCalculateDataSize := false
+	// calculate data size
+	for _, fieldIndexInfo := range loadInfo.IndexInfos {
+		fieldID := fieldIndexInfo.GetFieldID()
+		if len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
+			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				return nil, err
+			}
+			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
-		if fieldIndexInfo, ok := fieldID2IndexInfo[fieldID]; ok && len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
 			var estimateResult ResourceEstimate
-			err := GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
+			err = GetCLoadInfoWithFunc(ctx, fieldSchema, loadInfo, fieldIndexInfo, func(c *LoadIndexInfo) error {
 				GetDynamicPool().Submit(func() (any, error) {
 					loadResourceRequest := C.EstimateLoadIndexResource(c.cLoadIndexInfo)
 					estimateResult = GetResourceEstimate(&loadResourceRequest)
@@ -1546,52 +1539,75 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(common.GetIndexType(fieldIndexInfo.IndexParams)) {
 				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
 			}
-			if !estimateResult.HasRawData && !isVectorType {
-				shouldCalculateDataSize = true
+
+			// could skip binlog or
+			// could be missing for new field or storage v2 group 0
+			if estimateResult.HasRawData {
+				delete(id2Binlogs, fieldID)
+				continue
 			}
 
-			if !estimateResult.HasRawData && isVectorType {
-				metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.IndexParams)
-				if err != nil {
-					return nil, errors.Wrapf(err, "failed to estimate resource usage of index, metric type nout found, collection %d, segment %d, indexBuildID %d",
-						loadInfo.GetCollectionID(),
-						loadInfo.GetSegmentID(),
-						fieldIndexInfo.GetBuildID())
-				}
-				if metricType != metric.BM25 {
-					mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
-					if mmapVectorField {
-						segmentDiskSize += binlogSize
-					} else {
-						segmentMemorySize += binlogSize
-					}
-				}
+			// BM25 only checks vector datatype
+			// scalar index does not have metrics type key
+			if !isVectorType {
+				continue
 			}
-		} else {
-			shouldCalculateDataSize = true
-			// querynode will generate a (memory type) intermin index for vector type
+
+			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.IndexParams)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to estimate resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
+					loadInfo.GetCollectionID(),
+					loadInfo.GetSegmentID(),
+					fieldIndexInfo.GetBuildID())
+			}
+			// skip raw data for BM25 index
+			if metricType == metric.BM25 {
+				delete(id2Binlogs, fieldID)
+			}
+		}
+	}
+
+	for fieldID, fieldBinlog := range id2Binlogs {
+		binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
+		var isVectorType bool
+		var fieldSchema *schemapb.FieldSchema
+		if fieldID >= common.StartOfUserFieldID {
+			var err error
+			fieldSchema, err = schemaHelper.GetFieldFromID(fieldID)
+			if err != nil {
+				log.Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return nil, err
+			}
+			isVectorType = typeutil.IsVectorType(fieldSchema.GetDataType())
 			interimIndexEnable := multiplyFactor.EnableInterminSegmentIndex && !isGrowingMmapEnable() && SupportInterimIndexDataType(fieldSchema.GetDataType())
 			if interimIndexEnable {
 				segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 			}
 		}
 
-		if shouldCalculateDataSize {
-			calculateDataSizeCount += 1
-			mmapEnabled = isDataMmapEnable(fieldSchema)
-
-			if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
-				segmentMemorySize += binlogSize
-				if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
-					segmentMemorySize += binlogSize
-				}
+		if isVectorType {
+			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
+			if mmapVectorField {
+				segmentDiskSize += binlogSize
 			} else {
-				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+				segmentMemorySize += binlogSize
 			}
+			continue
 		}
 
-		if mmapEnabled {
-			mmapFieldCount++
+		// missing mapping, shall be "0" group for storage v2
+		if fieldSchema == nil {
+			segmentMemorySize += binlogSize
+			continue
+		}
+		mmapEnabled := isDataMmapEnable(fieldSchema)
+		if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
+			segmentMemorySize += binlogSize
+			if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
+				segmentMemorySize += binlogSize
+			}
+		} else {
+			segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
 		}
 	}
 

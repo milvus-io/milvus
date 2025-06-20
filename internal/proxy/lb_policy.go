@@ -144,7 +144,7 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 
 		// if all available delegator has been excluded even after refresh shard leader cache
 		// we should clear excludeNodes and try to select node again instead of failing the request at selectNode
-		if len(shardLeaders) > 0 && len(shardLeaders) == excludeNodes.Len() {
+		if len(shardLeaders) > 0 && len(shardLeaders) <= excludeNodes.Len() {
 			allReplicaExcluded := true
 			for _, node := range shardLeaders {
 				if !excludeNodes.Contain(node.nodeID) {

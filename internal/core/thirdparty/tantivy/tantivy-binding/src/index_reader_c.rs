@@ -11,10 +11,14 @@ use crate::{
 pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, *const u32, usize);
 
 #[no_mangle]
-pub extern "C" fn tantivy_load_index(path: *const c_char, set_bitset: SetBitsetFn) -> RustResult {
+pub extern "C" fn tantivy_load_index(
+    path: *const c_char,
+    load_in_mmap: bool,
+    set_bitset: SetBitsetFn,
+) -> RustResult {
     assert!(tantivy_index_exist(path));
     let path_str = cstr_to_str!(path);
-    match IndexReaderWrapper::load(path_str, set_bitset) {
+    match IndexReaderWrapper::load(path_str, load_in_mmap, set_bitset) {
         Ok(w) => RustResult::from_ptr(create_binding(w)),
         Err(e) => RustResult::from_error(e.to_string()),
     }

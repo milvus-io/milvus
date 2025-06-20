@@ -415,7 +415,6 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
 func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
-
 	start := time.Now()
 	log := log.With(zap.String("gcName", "recycleDroppedSegments"), zap.Time("startAt", start))
 	log.Info("start clear dropped segments...")

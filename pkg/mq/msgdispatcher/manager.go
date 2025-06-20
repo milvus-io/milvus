@@ -84,7 +84,7 @@ func NewDispatcherManager(pchannel string, role string, nodeID int64, factory ms
 }
 
 func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
-	t := newTarget(streamConfig)
+	t := newTarget(streamConfig, c.includeSkipWhenSplit)
 	if _, ok := c.registeredTargets.GetOrInsert(t.vchannel, t); ok {
 		return nil, fmt.Errorf("vchannel %s already exists in the dispatcher", t.vchannel)
 	}

@@ -56,11 +56,9 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
 		backlogClearHelper: backlogClearHelper,
 	}
-	if opt.Channel.AccessMode == types.AccessModeRW {
-		// because the producer of pulsar cannot be created if the topic is backlog exceeded,
-		// so we need to set the producer at background with backoff retry.
-		w.initProducerAtBackground()
-	}
+	// because the producer of pulsar cannot be created if the topic is backlog exceeded,
+	// so we need to set the producer at background with backoff retry.
+	w.initProducerAtBackground()
 	return w, nil
 }
 
