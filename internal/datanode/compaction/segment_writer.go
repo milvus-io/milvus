@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/cockroachdb/errors"
@@ -65,6 +66,9 @@ type MultiSegmentWriter struct {
 	res []*datapb.CompactionSegment
 	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 	bm25Fields []int64
+
+	uploadDuration    time.Duration
+	serializeDuration time.Duration
 }
 
 type compactionAlloactor struct {
@@ -106,6 +110,9 @@ func NewMultiSegmentWriter(binlogIO io.BinlogIO, allocator *compactionAlloactor,
 		cachedMeta: make(map[typeutil.UniqueID]map[typeutil.UniqueID]*datapb.FieldBinlog),
 		res:        make([]*datapb.CompactionSegment, 0),
 		bm25Fields: bm25Fields,
+
+		uploadDuration:    time.Duration(0),
+		serializeDuration: time.Duration(0),
 	}
 }
 
@@ -117,19 +124,23 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 	}
 
 	if !writer.FlushAndIsEmpty() {
+		beforeSerialize := time.Now()
 		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
+		w.serializeDuration += time.Since(beforeSerialize)
 		if err != nil {
 			return err
 		}
 
+		beforeUpload := time.Now()
 		if err := w.binlogIO.Upload(context.TODO(), kvs); err != nil {
 			return err
 		}
-
+		w.uploadDuration += time.Since(beforeUpload)
 		mergeFieldBinlogs(allBinlogs, partialBinlogs)
 	}
-
+	beforeStatSerialize := time.Now()
 	sPath, err := statSerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
+	w.serializeDuration += time.Since(beforeStatSerialize)
 	if err != nil {
 		return err
 	}
@@ -143,7 +154,9 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 	}
 
 	if len(w.bm25Fields) > 0 {
-		bmBinlogs, err := bm25SerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
+		bmBinlogs, serializeDuration, uploadDuration, err := bm25SerializeWrite(context.TODO(), w.binlogIO, w.allocator.getLogIDAllocator(), writer)
+		w.serializeDuration += serializeDuration
+		w.uploadDuration += uploadDuration
 		if err != nil {
 			log.Warn("compact wrong, failed to serialize write segment bm25 stats", zap.Error(err))
 			return err
@@ -157,7 +170,9 @@ func (w *MultiSegmentWriter) finishCurrent() error {
 		zap.Int64("segmentID", writer.GetSegmentID()),
 		zap.String("channel", w.channel),
 		zap.Int64("totalRows", writer.GetRowNum()),
-		zap.Int64("totalSize", writer.GetTotalSize()))
+		zap.Int64("totalSize", writer.GetTotalSize()),
+		zap.Duration("serializeDuration", w.serializeDuration),
+		zap.Duration("uploadDuration", w.uploadDuration))
 
 	w.cachedMeta[writer.segmentID] = nil
 	return nil
@@ -204,15 +219,18 @@ func (w *MultiSegmentWriter) writeInternal(writer *SegmentWriter) error {
 		if _, ok := w.cachedMeta[writer.segmentID]; !ok {
 			w.cachedMeta[writer.segmentID] = make(map[typeutil.UniqueID]*datapb.FieldBinlog)
 		}
-
+		beforeSerialize := time.Now()
 		kvs, partialBinlogs, err := serializeWrite(context.TODO(), w.allocator.getLogIDAllocator(), writer)
+		w.serializeDuration += time.Since(beforeSerialize)
 		if err != nil {
 			return err
 		}
 
+		beforeUpload := time.Now()
 		if err := w.binlogIO.Upload(context.TODO(), kvs); err != nil {
 			return err
 		}
+		w.uploadDuration += time.Since(beforeUpload)
 
 		mergeFieldBinlogs(w.cachedMeta[writer.segmentID], partialBinlogs)
 	}
