@@ -10,17 +10,17 @@ use crate::{
 };
 
 #[repr(C)]
-pub struct TantivyToken{
+pub struct TantivyToken {
     pub token: *const c_char,
     pub start_offset: i64,
-    pub end_offset:i64,
-    pub position:i64,
-    pub position_length:i64,
+    pub end_offset: i64,
+    pub position: i64,
+    pub position_length: i64,
 }
 
-impl TantivyToken{
-    pub fn from_token(token: &Token) -> Self{
-        TantivyToken{
+impl TantivyToken {
+    pub fn from_token(token: &Token) -> Self {
+        TantivyToken {
             token: create_string(&token.text),
             start_offset: token.offset_from as i64,
             end_offset: token.offset_to as i64,
@@ -29,7 +29,6 @@ impl TantivyToken{
         }
     }
 }
-
 
 // Note: the tokenizer and text must be released after the token_stream.
 #[no_mangle]
@@ -62,7 +61,9 @@ pub extern "C" fn tantivy_token_stream_get_token(token_stream: *mut c_void) -> *
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_token_stream_get_detailed_token(token_stream: *mut c_void) -> TantivyToken {
+pub extern "C" fn tantivy_token_stream_get_detailed_token(
+    token_stream: *mut c_void,
+) -> TantivyToken {
     let real = token_stream as *mut BoxTokenStream<'_>;
-    TantivyToken::from_token(unsafe { (*real).token()})
+    TantivyToken::from_token(unsafe { (*real).token() })
 }
