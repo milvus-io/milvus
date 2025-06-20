@@ -625,6 +625,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
+		assert.Equal(t, 16, Params.WorkerSlotUnit.GetAsInt())
+		assert.Equal(t, 0.25, Params.StandaloneSlotRatio.GetAsFloat())
 	})
 
 	t.Run("test streamingConfig", func(t *testing.T) {
