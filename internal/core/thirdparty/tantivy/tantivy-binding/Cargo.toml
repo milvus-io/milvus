@@ -13,6 +13,15 @@ lindera-unidic = ["lindera/unidic"]
 lindera-ko-dic = ["lindera/ko-dic"]
 lindera-cc-cedict = ["lindera/cc-cedict"]
 
+[profile.release]
+opt-level = 3
+debug = true
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = "unwind"
+overflow-checks = false
+
 [dependencies]
 tantivy = { git = "https://github.com/zilliztech/tantivy", tag = "0.21.2-fix3" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
 lindera = "0.40.1"
