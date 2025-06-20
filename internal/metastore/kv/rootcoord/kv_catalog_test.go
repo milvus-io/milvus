@@ -1100,20 +1100,14 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		kc := NewCatalog(nil, snapshot).(*Catalog)
 		ctx := context.Background()
 		// 2 system fields + 64 user fields
-		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated,
-			Fields: make([]*model.Field, 66)}
-		for i := range oldC.Fields {
-			oldC.Fields[i] = &model.Field{
+		fields := make([]*model.Field, 66)
+		for i := range fields {
+			fields[i] = &model.Field{
 				FieldID: int64(i),
 			}
 		}
-		newC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated,
-			Fields: make([]*model.Field, 66)}
-		for i := range newC.Fields {
-			newC.Fields[i] = &model.Field{
-				FieldID: int64(i),
-			}
-		}
+		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Fields: fields}
+		newC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Fields: fields}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 	})
