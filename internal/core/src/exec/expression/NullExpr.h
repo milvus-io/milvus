@@ -77,7 +77,6 @@ class PhyNullExpr : public SegmentExpr {
 
  private:
     std::shared_ptr<const milvus::expr::NullExpr> expr_;
-    ColumnVectorPtr cached_precheck_res_{nullptr};
     int64_t precheck_pos_{0};
 };
 }  //namespace exec
