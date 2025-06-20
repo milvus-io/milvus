@@ -147,10 +147,4 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input,
                     int64_t length,
                     bool is_field_data = true);
 
-std::unique_ptr<DataCodec>
-DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data);
-
-std::unique_ptr<DataCodec>
-DeserializeLocalFileData(BinlogReaderPtr reader);
-
 }  // namespace milvus::storage
