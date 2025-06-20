@@ -1199,6 +1199,16 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("collection id not exists", func(t *testing.T) {
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			DbName:       "test_1",
+			CollectionID: 1000,
+		})
+		assert.NoError(t, err)
+		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=test_1][collection=]")
+		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+	})
+
 	t.Run("db not exists", func(t *testing.T) {
 		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 			DbName:         "db_not_exists",
