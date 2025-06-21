@@ -141,6 +141,7 @@ func packLoadSegmentRequest(
 	if task.Source() == utils.LeaderChecker {
 		loadScope = querypb.LoadScope_Delta
 	}
+	// todo(SpadeA): consider struct fields
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
 	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {

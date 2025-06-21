@@ -49,10 +49,9 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 
 		indexType  = integration.IndexFaissIvfFlat
 		metricType = metric.L2
-		vecType    = schemapb.DataType_FloatVector
 	)
 
-	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, vecType)
+	schema := integration.ConstructSchemaOfVecDataTypeWithStruct(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -88,11 +87,12 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	for i := 0; i < rowNum/batch; i++ {
 		// insert
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, batch, dim)
+		structArrayField := integration.NewStructArrayFieldData(schema.StructArrayFields[0], integration.StructArrayField, batch, dim)
 		hashKeys := integration.GenerateHashKeys(batch)
 		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn},
+			FieldsData:     []*schemapb.FieldData{fVecColumn, structArrayField},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(batch),
 		})

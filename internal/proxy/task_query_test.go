@@ -1292,3 +1292,7 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 	})
 }
+
+func Test_reconstructStructFieldData(t *testing.T) {
+	// todo(SpadeA): add test
+}
