@@ -122,13 +122,12 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 				// If the field is not in the current batch, fill with null array
 				// Note that we're intentionally not filling default value here, because the
 				// deserializer will fill them later.
-				if !f.Nullable {
-					return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", f.Name))
+				numRows := int(crr.rrs[0].Record().NumRows())
+				arr, err := GenerateEmptyArrayFromSchema(f, numRows)
+				if err != nil {
+					return nil, err
 				}
-				dim, _ := typeutil.GetDim(f)
-				builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
-				builder.AppendNulls(int(crr.rrs[0].Record().NumRows()))
-				recs[i] = builder.NewArray()
+				recs[i] = arr
 			}
 		}
 		return &compositeRecord{

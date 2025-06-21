@@ -22,8 +22,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -233,6 +235,69 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *
 	default:
 		return 0, fmt.Errorf("unsupported builder type: %T", builder)
 	}
+}
+
+// GenerateEmptyArrayFromSchema generate empty array from schema
+// If schema has default value, the array will bef filled with it.
+// Otherwise, null will be used instead.
+// If input schema is not nullable, an error will be returned.
+func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (arrow.Array, error) {
+	// if not nullable, return error
+	if !schema.GetNullable() {
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("missing field data %s", schema.Name))
+	}
+	dim, _ := typeutil.GetDim(schema)
+	builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[schema.GetDataType()].arrowType(int(dim))) // serdeEntry[schema.GetDataType()].newBuilder()
+	if schema.GetDefaultValue() != nil {
+		switch schema.GetDataType() {
+		case schemapb.DataType_Bool:
+			bd := builder.(*array.BooleanBuilder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) bool { return schema.GetDefaultValue().GetBoolData() }),
+				nil)
+		case schemapb.DataType_Int8:
+			bd := builder.(*array.Int8Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) int8 { return int8(schema.GetDefaultValue().GetIntData()) }),
+				nil)
+		case schemapb.DataType_Int16:
+			bd := builder.(*array.Int16Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) int16 { return int16(schema.GetDefaultValue().GetIntData()) }),
+				nil)
+		case schemapb.DataType_Int32:
+			bd := builder.(*array.Int32Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) int32 { return schema.GetDefaultValue().GetIntData() }),
+				nil)
+		case schemapb.DataType_Int64:
+			bd := builder.(*array.Int64Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) int64 { return schema.GetDefaultValue().GetLongData() }),
+				nil)
+		case schemapb.DataType_Float:
+			bd := builder.(*array.Float32Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) float32 { return schema.GetDefaultValue().GetFloatData() }),
+				nil)
+		case schemapb.DataType_Double:
+			bd := builder.(*array.Float64Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) float64 { return schema.GetDefaultValue().GetDoubleData() }),
+				nil)
+		case schemapb.DataType_VarChar, schemapb.DataType_String:
+			bd := builder.(*array.StringBuilder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) string { return schema.GetDefaultValue().GetStringData() }),
+				nil)
+		default:
+			return nil, merr.WrapErrServiceInternal(fmt.Sprintf("Unexpected default value type: %s", schema.GetDataType().String()))
+		}
+	} else {
+		builder.AppendNulls(numRows)
+	}
+
+	return builder.NewArray(), nil
 }
 
 // RecordBuilder is a helper to build arrow record.
