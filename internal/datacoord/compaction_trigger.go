@@ -623,12 +623,8 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
-func isDeltalogTooManySegment(segment *SegmentInfo) bool {
-	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	return deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
-}
-
-func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
+func hasTooManyDeletions(segment *SegmentInfo) bool {
+	deltaLogCount := 0
 	totalDeletedRows := 0
 	totalDeleteLogSize := int64(0)
 	for _, deltaLogs := range segment.GetDeltalogs() {
@@ -636,19 +632,42 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 			totalDeletedRows += int(l.GetEntriesNum())
 			totalDeleteLogSize += l.GetMemorySize()
 		}
+		deltaLogCount += len(deltaLogs.GetBinlogs())
 	}
 
-	// currently delta log size and delete ratio policy is applied
-	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
-		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
-	if is {
-		log.Ctx(context.TODO()).Info("total delete entities is too much",
+	// Too many deltalog files, accumulates IO count.
+	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+		log.Ctx(context.TODO()).Info("delta logs file count exceeds threshold",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int("delta log count", deltaLogCount),
+			zap.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
+		)
+		return true
+	}
+
+	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
+	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
+		log.Ctx(context.TODO()).Info("deleted entities rows proportion exceeds threshold",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int64("number of rows", segment.GetNumOfRows()),
+			zap.Int("deleted rows", totalDeletedRows),
+			zap.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
+		)
+		return true
+	}
+
+	// Delete size is too large, varchar PK tends to accumulates deltalog size.
+	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
+		log.Ctx(context.TODO()).Info("total delete entries size exceeds threshold",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int64("numRows", segment.GetNumOfRows()),
-			zap.Int("deleted rows", totalDeletedRows),
-			zap.Int64("delete log size", totalDeleteLogSize))
+			zap.Int64("delete entries size", totalDeleteLogSize),
+			zap.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
+		)
+		return true
 	}
-	return is
+
+	return false
 }
 
 func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *compactTime, segment *SegmentInfo) bool {
@@ -675,14 +694,7 @@ func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *comp
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
-
 	log := log.Ctx(context.TODO())
-	binlogCount := GetBinlogCount(segment.GetBinlogs())
-	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	if isDeltalogTooManySegment(segment) {
-		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Delta logs", deltaLogCount))
-		return true
-	}
 
 	// if expire time is enabled, put segment into compaction candidate
 	totalExpiredSize := int64(0)
@@ -715,8 +727,8 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		return true
 	}
 
-	// currently delta log size and delete ratio policy is applied
-	if isDeleteRowsTooManySegment(segment) {
+	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold
+	if hasTooManyDeletions(segment) {
 		return true
 	}
 

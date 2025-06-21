@@ -108,7 +108,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		}
 
 		for _, segment := range group.segments {
-			if isDeltalogTooManySegment(segment) || isDeleteRowsTooManySegment(segment) {
+			if hasTooManyDeletions(segment) {
 				segmentViews := GetViewsByInfo(segment)
 				view := &MixSegmentView{
 					label:         segmentViews[0].label,
