@@ -103,12 +103,18 @@ func TestComponentParam(t *testing.T) {
 		params.Save("common.security.superUsers", "super1,super2,super3")
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers.GetAsStrings())
 
+		params.Save("common.security.superUsersSkipRateLimit", "super1,super2,super3")
+		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsersSkipRateLimit.GetAsStrings())
+
 		assert.Equal(t, "Milvus", Params.DefaultRootPassword.GetValue())
 		params.Save("common.security.defaultRootPassword", "defaultMilvus")
 		assert.Equal(t, "defaultMilvus", Params.DefaultRootPassword.GetValue())
 
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{}, Params.SuperUsers.GetAsStrings())
+
+		params.Save("common.security.superUsersSkipRateLimit", "")
+		assert.Equal(t, []string{}, Params.SuperUsersSkipRateLimit.GetAsStrings())
 
 		assert.Equal(t, false, Params.PreCreatedTopicEnabled.GetAsBool())
 
