@@ -339,10 +339,11 @@ func executeAlterCollectionFieldTaskSteps(ctx context.Context,
 
 	redoTask := newBaseRedoTask(core.stepExecutor)
 	redoTask.AddSyncStep(&AlterCollectionStep{
-		baseStep: baseStep{core: core},
-		oldColl:  oldColl,
-		newColl:  newColl,
-		ts:       ts,
+		baseStep:    baseStep{core: core},
+		oldColl:     oldColl,
+		newColl:     newColl,
+		ts:          ts,
+		fieldModify: true,
 	})
 
 	redoTask.AddSyncStep(&BroadcastAlteredCollectionStep{
