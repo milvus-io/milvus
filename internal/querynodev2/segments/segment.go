@@ -843,9 +843,10 @@ func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fie
 	)
 
 	req := &segcore.AddFieldDataInfoRequest{
-		Fields:       make([]segcore.LoadFieldDataInfo, 0, len(fields)),
-		RowCount:     rowCount,
-		LoadPriority: s.loadInfo.Load().GetPriority(),
+		Fields:         make([]segcore.LoadFieldDataInfo, 0, len(fields)),
+		RowCount:       rowCount,
+		LoadPriority:   s.loadInfo.Load().GetPriority(),
+		StorageVersion: s.loadInfo.Load().GetStorageVersion(),
 	}
 	for _, field := range fields {
 		req.Fields = append(req.Fields, segcore.LoadFieldDataInfo{
