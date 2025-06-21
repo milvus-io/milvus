@@ -68,7 +68,7 @@ create_chunk(const FixedVector<int64_t>& data) {
                          false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    return create_chunk(field_meta, 1, array_vec);
+    return create_chunk(field_meta, array_vec);
 }
 
 // Helper function to create chunks for string data
@@ -104,7 +104,7 @@ create_chunk(const FixedVector<std::string>& data) {
                          false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
-    return create_chunk(field_meta, 1, array_vec);
+    return create_chunk(field_meta, array_vec);
 }
 
 // Test fixture for chunk tests

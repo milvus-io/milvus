@@ -23,7 +23,6 @@
 #include "common/FieldData.h"
 #include "common/Types.h"
 #include "index/ScalarIndex.h"
-#include "mmap/Utils.h"
 #include "log/Log.h"
 #include "storage/DataCodec.h"
 #include "storage/RemoteChunkManagerSingleton.h"

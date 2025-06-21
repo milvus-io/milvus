@@ -85,13 +85,7 @@ DefaultValueChunkTranslator::get_cells(
                ast.ToString());
     arrow::ArrayVector array_vec;
     array_vec.emplace_back(builder->Finish().ValueOrDie());
-    auto chunk = create_chunk(
-        field_meta_,
-        IsVectorDataType(field_meta_.get_data_type()) &&
-                !IsSparseFloatVectorDataType(field_meta_.get_data_type())
-            ? field_meta_.get_dim()
-            : 1,
-        array_vec);
+    auto chunk = create_chunk(field_meta_, array_vec);
 
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
