@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Utils.h"
@@ -250,21 +251,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
     auto field_ids = schema_->get_field_ids();
 
-    std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
-    for (auto& [id, info] : load_info.field_infos) {
-        int64_t group_id =
-            storage::ExtractGroupIdFromPath(info.insert_files[0]);
-        column_group_files[group_id] = info.insert_files;
-    }
-
-    std::vector<FieldId> narrow_column_field_ids;
-    for (auto& field_id : field_ids) {
-        if (column_group_files.find(field_id.get()) ==
-            column_group_files.end()) {
-            narrow_column_field_ids.push_back(field_id);
-        }
-    }
-
     for (auto& [id, info] : load_info.field_infos) {
         AssertInfo(info.row_count > 0, "The row count of field data is 0");
 
@@ -288,7 +274,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         std::vector<FieldId> milvus_field_ids;
         if (column_group_id == FieldId(DEFAULT_SHORT_COLUMN_GROUP_ID)) {
-            milvus_field_ids = narrow_column_field_ids;
+            milvus_field_ids = narrow_column_field_ids_;
         } else {
             milvus_field_ids.push_back(column_group_id);
         }
@@ -477,6 +463,9 @@ ChunkedSegmentSealedImpl::AddFieldDataInfoForSealed(
     const LoadFieldDataInfo& field_data_info) {
     // copy assignment
     field_data_info_ = field_data_info;
+    if (field_data_info_.storage_version == 2) {
+        init_narrow_column_field_ids(field_data_info);
+    }
 }
 
 // internal API: support scalar index only
@@ -2026,6 +2015,25 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
     fields_.emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
+}
+
+void
+ChunkedSegmentSealedImpl::init_narrow_column_field_ids(
+    const LoadFieldDataInfo& field_data_info) {
+    std::unordered_set<int64_t> column_group_ids;
+    for (auto& [id, info] : field_data_info.field_infos) {
+        int64_t group_id =
+            storage::ExtractGroupIdFromPath(info.insert_files[0]);
+        column_group_ids.insert(group_id);
+    }
+
+    std::vector<FieldId> narrow_column_field_ids;
+    for (auto& field_id : schema_->get_field_ids()) {
+        if (column_group_ids.find(field_id.get()) == column_group_ids.end()) {
+            narrow_column_field_ids.push_back(field_id);
+        }
+    }
+    narrow_column_field_ids_ = narrow_column_field_ids;
 }
 
 }  // namespace milvus::segcore

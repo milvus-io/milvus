@@ -188,7 +188,14 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                             std::vector<std::string>({paths[2]})});
         load_info.mmap_dir_path = "";
         load_info.storage_version = 2;
-        segment->LoadFieldData(load_info);
+        segment->AddFieldDataInfoForSealed(load_info);
+        for (auto& [id, info] : load_info.field_infos) {
+            LoadFieldDataInfo load_field_info;
+            load_field_info.storage_version = 2;
+            load_field_info.mmap_dir_path = "";
+            load_field_info.field_infos.emplace(id, info);
+            segment->LoadFieldData(load_field_info);
+        }
     }
 
     void
