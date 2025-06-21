@@ -60,6 +60,9 @@ func (sr *ResultSet) Unmarshal(receiver any) (err error) {
 	if err != nil {
 		return err
 	}
+	if sr.IDs == nil {
+		return nil
+	}
 	return sr.fillPKEntry(receiver)
 }
 
