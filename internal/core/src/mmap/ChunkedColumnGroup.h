@@ -47,7 +47,9 @@ class ChunkedColumnGroup {
  public:
     explicit ChunkedColumnGroup(
         std::unique_ptr<Translator<GroupChunk>> translator)
-        : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+        : slot_(Manager::GetInstance().CreateCacheSlot(
+              std::move(translator),
+              CellIdMappingMode::IDENTICAL)) {
         num_chunks_ = slot_->num_cells();
         num_rows_ = GetNumRowsUntilChunk().back();
     }
@@ -67,14 +69,14 @@ class ChunkedColumnGroup {
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(int64_t chunk_id) const {
-        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto ca = slot_->PinCells({chunk_id});
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
     }
 
     std::shared_ptr<CellAccessor<GroupChunk>>
     GetGroupChunks(std::vector<int64_t> chunk_ids) {
-        return SemiInlineGet(slot_->PinCells(chunk_ids));
+        return slot_->PinCells(std::move(chunk_ids));
     }
 
     int64_t
@@ -173,7 +175,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 current_offset += chunk_rows;
             }
         } else {
-            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+            auto [cids, offsets_in_chunk] = GetChunkIDsByOffsets(offsets, count);
             auto ca = group_->GetGroupChunks(cids);
             for (int64_t i = 0; i < count; i++) {
                 auto* group_chunk = ca->get_cell_of(cids[i]);
@@ -302,6 +304,18 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return {num_chunks() - 1, chunk_row_nums(num_chunks() - 1) - 1};
     }
 
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
+        std::vector<milvus::cachinglayer::cid_t> cids(count);
+        std::vector<int64_t> offsets_in_chunk(count);
+        for (int64_t i = 0; i < count; i++) {
+            auto [chunk_idx, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
+            cids[i] = chunk_idx;
+            offsets_in_chunk[i] = offset_in_chunk;
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    }
+
     PinWrapper<Chunk*>
     GetChunk(int64_t chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(chunk_id);
@@ -330,6 +344,14 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto chunk = group_chunk->GetChunk(field_id_);
             fn(chunk->ValueAt(offsets_in_chunk[i]), i);
         }
+    }
+
+    void
+    BulkValueAt(void* dst,
+                const int64_t* offsets,
+                int64_t count) override {
+        PanicInfo(ErrorCode::Unsupported, "BulkValueAt not supported for "
+                                          "ProxyChunkColumn");
     }
 
     void
