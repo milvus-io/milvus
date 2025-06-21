@@ -128,6 +128,8 @@ if (LINUX OR MSYS)
                   "-fopenmp"
                   "-Wno-error"
                   "-Wno-all"
+                  "-Werror=terminate"
+                  "-Werror=exceptions"
                   )
     if (USE_ASAN STREQUAL "ON") 
         message( STATUS "Building Milvus Core Using AddressSanitizer")
