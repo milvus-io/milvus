@@ -150,6 +150,10 @@ func TestGrpcClientParams(t *testing.T) {
 	base.Save(clientConfig.CompressionEnabled.Key, "true")
 	assert.Equal(t, true, clientConfig.CompressionEnabled.GetAsBool())
 
+	assert.Equal(t, clientConfig.CompressionAlgo.GetValue(), "zstd")
+	base.Save(clientConfig.CompressionAlgo.Key, "gzip")
+	assert.Equal(t, clientConfig.CompressionAlgo.GetValue(), "gzip")
+
 	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "1000")
 	base.Save("grpc.client.minResetInterval", "abc")
 	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "1000")
