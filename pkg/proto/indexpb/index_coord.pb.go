@@ -137,7 +137,8 @@ func (JobState) EnumDescriptor() ([]byte, []int) {
 type StatsSubJob int32
 
 const (
-	StatsSubJob_None            StatsSubJob = 0
+	StatsSubJob_None StatsSubJob = 0
+	// deprecated, after v2.6.0, move to compaction
 	StatsSubJob_Sort            StatsSubJob = 1
 	StatsSubJob_TextIndexJob    StatsSubJob = 2
 	StatsSubJob_BM25Job         StatsSubJob = 3

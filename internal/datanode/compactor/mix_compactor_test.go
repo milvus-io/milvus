@@ -93,7 +93,7 @@ func (s *MixCompactionTaskSuite) setupTest() {
 		JsonParams:             params,
 	}
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
 }
 
 func (s *MixCompactionTaskSuite) SetupTest() {
@@ -125,7 +125,7 @@ func (s *MixCompactionTaskSuite) SetupBM25() {
 		JsonParams:             params,
 	}
 
-	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan)
+	s.task = NewMixCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
 }
 
 func (s *MixCompactionTaskSuite) SetupSubTest() {
@@ -335,7 +335,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegment() {
 	s.prepareCompactSortedSegment()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
-	refreshPlanParams(s.task.plan)
+	s.task.compactionParams = compaction.GenParams()
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -415,7 +415,7 @@ func (s *MixCompactionTaskSuite) TestCompactSortedSegmentLackBinlog() {
 	s.prepareCompactSortedSegmentLackBinlog()
 	paramtable.Get().Save("dataNode.compaction.useMergeSort", "true")
 	defer paramtable.Get().Reset("dataNode.compaction.useMergeSort")
-	refreshPlanParams(s.task.plan)
+	s.task.compactionParams = compaction.GenParams()
 
 	result, err := s.task.Compact()
 	s.NoError(err)
@@ -818,11 +818,13 @@ func (s *MixCompactionTaskSuite) TestCompactFail() {
 	})
 }
 
-func getRow(magic int64) map[int64]interface{} {
-	ts := tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)
+func getRow(magic int64, ts int64) map[int64]interface{} {
+	if ts == 0 {
+		ts = int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))
+	}
 	return map[int64]interface{}{
 		common.RowIDField:      magic,
-		common.TimeStampField:  int64(ts), // should be int64 here
+		common.TimeStampField:  ts, // should be int64 here
 		BoolField:              true,
 		Int8Field:              int8(magic),
 		Int16Field:             int16(magic),
@@ -863,7 +865,7 @@ func (s *MixCompactionTaskSuite) initMultiRowsSegBuffer(magic, numRows, step int
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(magic + i*step),
 			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
-			Value:     getRow(magic + i*step),
+			Value:     getRow(magic+i*step, 0),
 		}
 		err = segWriter.Write(&v)
 		s.Require().NoError(err)
@@ -898,7 +900,7 @@ func (s *MixCompactionTaskSuite) initSegBuffer(size int, seed int64) {
 		v := storage.Value{
 			PK:        storage.NewInt64PrimaryKey(seed),
 			Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
-			Value:     getRow(seed),
+			Value:     getRow(seed, int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0))),
 		}
 		err = segWriter.Write(&v)
 		s.Require().NoError(err)

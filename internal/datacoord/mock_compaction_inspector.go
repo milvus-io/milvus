@@ -22,53 +22,6 @@ func (_m *MockCompactionInspector) EXPECT() *MockCompactionInspector_Expecter {
 	return &MockCompactionInspector_Expecter{mock: &_m.Mock}
 }
 
-// checkAndSetSegmentStating provides a mock function with given fields: channel, segmentID
-func (_m *MockCompactionInspector) checkAndSetSegmentStating(channel string, segmentID int64) bool {
-	ret := _m.Called(channel, segmentID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for checkAndSetSegmentStating")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(string, int64) bool); ok {
-		r0 = rf(channel, segmentID)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockCompactionInspector_checkAndSetSegmentStating_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'checkAndSetSegmentStating'
-type MockCompactionInspector_checkAndSetSegmentStating_Call struct {
-	*mock.Call
-}
-
-// checkAndSetSegmentStating is a helper method to define mock.On call
-//   - channel string
-//   - segmentID int64
-func (_e *MockCompactionInspector_Expecter) checkAndSetSegmentStating(channel interface{}, segmentID interface{}) *MockCompactionInspector_checkAndSetSegmentStating_Call {
-	return &MockCompactionInspector_checkAndSetSegmentStating_Call{Call: _e.mock.On("checkAndSetSegmentStating", channel, segmentID)}
-}
-
-func (_c *MockCompactionInspector_checkAndSetSegmentStating_Call) Run(run func(channel string, segmentID int64)) *MockCompactionInspector_checkAndSetSegmentStating_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(int64))
-	})
-	return _c
-}
-
-func (_c *MockCompactionInspector_checkAndSetSegmentStating_Call) Return(_a0 bool) *MockCompactionInspector_checkAndSetSegmentStating_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCompactionInspector_checkAndSetSegmentStating_Call) RunAndReturn(run func(string, int64) bool) *MockCompactionInspector_checkAndSetSegmentStating_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // enqueueCompaction provides a mock function with given fields: task
 func (_m *MockCompactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	ret := _m.Called(task)
