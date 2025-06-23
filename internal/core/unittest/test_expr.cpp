@@ -16617,7 +16617,7 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
@@ -16745,7 +16745,7 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
 
     json_index->BuildWithFieldData({json_field, json_field2});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
@@ -16845,7 +16845,7 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
@@ -17021,7 +17021,7 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;

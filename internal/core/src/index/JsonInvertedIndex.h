@@ -108,8 +108,8 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     }
 
     void
-    create_reader() {
-        this->wrapper_->create_reader();
+    create_reader(SetBitsetFn set_bitset) {
+        this->wrapper_->create_reader(set_bitset);
     }
 
     bool

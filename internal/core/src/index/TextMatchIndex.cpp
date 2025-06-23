@@ -150,7 +150,7 @@ TextMatchIndex::Load(const Config& config) {
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),
-                                                     milvus::index::SetBitset);
+                                                     milvus::index::SetBitsetSealed);
 }
 
 void
@@ -269,8 +269,8 @@ TextMatchIndex::Reload() {
 }
 
 void
-TextMatchIndex::CreateReader() {
-    wrapper_->create_reader();
+TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
+    wrapper_->create_reader(set_bitset);
 }
 
 void
