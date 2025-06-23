@@ -66,6 +66,7 @@ type PayloadReaderInterface interface {
 	GetDoubleFromPayload() ([]float64, []bool, error)
 	GetStringFromPayload() ([]string, []bool, error)
 	GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error)
+	GetVectorArrayFromPayload() ([]*schemapb.VectorField, error)
 	GetJSONFromPayload() ([][]byte, []bool, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloat16VectorFromPayload() ([]byte, int, error)

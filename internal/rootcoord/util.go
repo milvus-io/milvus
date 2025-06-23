@@ -389,7 +389,7 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
 		if fieldSchema.GetDataType() == schemapb.DataType_ArrayOfVector {
-			msg := fmt.Sprintf("array of vector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
+			msg := fmt.Sprintf("ArrayOfVector is only supported in struct array field, type:%s, name:%s", fieldSchema.GetDataType().String(), fieldSchema.GetName())
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
 		if fieldSchema.GetNullable() && typeutil.IsVectorType(fieldSchema.GetDataType()) {

@@ -635,6 +635,12 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 							Description: "float_vector",
 							DataType:    schemapb.DataType_ArrayOfVector,
 							ElementType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.DimKey,
+									Value: "2",
+								},
+							},
 						},
 					},
 				},

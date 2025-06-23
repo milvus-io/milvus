@@ -158,13 +158,6 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 			return true
 		}
 	}
-	for _, f := range schema.GetStructArrayFields() {
-		for _, field := range f.GetFields() {
-			if funcutil.SliceContain(systemFields, field.GetName()) {
-				return true
-			}
-		}
-	}
 	return false
 }
 
