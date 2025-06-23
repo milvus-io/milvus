@@ -20,8 +20,9 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
 func TestGenerateEmptyArray(t *testing.T) {
