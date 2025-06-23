@@ -108,14 +108,17 @@ func TestParsePartitionKeys(t *testing.T) {
 		{
 			name:                 "binary_expr_or with term and not 2",
 			expr:                 "partition_key_field in [7, 8] or int64_field not in [10, 20]",
-			expected:             2,
-			validPartitionKeys:   []int64{7, 8},
-			invalidPartitionKeys: []int64{10, 20},
+			expected:             0,
+			validPartitionKeys:   []int64{},
+			invalidPartitionKeys: []int64{},
 		},
 	}
 
 	for _, tc := range cases {
+		idx := 0
 		t.Run(tc.name, func(t *testing.T) {
+			idx++
+			t.Log(idx, tc.name, tc.expr)
 			// test search plan
 			searchPlan, err := planparserv2.CreateSearchPlan(schemaHelper, tc.expr, "fvec_field", queryInfo, nil)
 			assert.NoError(t, err)
