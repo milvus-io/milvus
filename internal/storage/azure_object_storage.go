@@ -96,6 +96,7 @@ type BlobReader struct {
 	client          *blockblob.Client
 	position        int64
 	body            io.ReadCloser
+	contentLength   int64
 	needResetStream bool
 }
 
@@ -117,6 +118,7 @@ func (b *BlobReader) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 		b.body = object.Body
+		b.contentLength = *object.ContentLength
 	}
 
 	n, err = b.body.Read(p)
@@ -173,6 +175,10 @@ func (b *BlobReader) Seek(offset int64, whence int) (int64, error) {
 	return newOffset, nil
 }
 
+func (b *BlobReader) Size() (int64, error) {
+	return b.contentLength, nil
+}
+
 func (AzureObjectStorage *AzureObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
 	return NewBlobReader(AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName), offset)
 }
@@ -195,7 +201,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
 			Prefix: &prefix,
 		})
-		if pager.More() {
+		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
 				return err
@@ -210,7 +216,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsHierarchyPager("/", &container.ListBlobsHierarchyOptions{
 			Prefix: &prefix,
 		})
-		if pager.More() {
+		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
 				return err
