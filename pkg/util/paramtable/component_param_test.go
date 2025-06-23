@@ -631,7 +631,8 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test streamingConfig", func(t *testing.T) {
 		assert.Equal(t, 1*time.Minute, params.StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse())
-		assert.Equal(t, 50*time.Millisecond, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 10*time.Millisecond, params.StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse())
+		assert.Equal(t, 5*time.Second, params.StreamingCfg.WALBalancerBackoffMaxInterval.GetAsDurationByParse())
 		assert.Equal(t, 2.0, params.StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat())
 		assert.Equal(t, "vchannelFair", params.StreamingCfg.WALBalancerPolicyName.GetValue())
 		assert.Equal(t, 0.4, params.StreamingCfg.WALBalancerPolicyVChannelFairPChannelWeight.GetAsFloat())
@@ -639,7 +640,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairAntiAffinityWeight.GetAsFloat())
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
 		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
-		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
+		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
 		assert.Equal(t, 1.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.TxnDefaultKeepaliveTimeout.GetAsDurationByParse())
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALWriteAheadBufferKeepalive.GetAsDurationByParse())
