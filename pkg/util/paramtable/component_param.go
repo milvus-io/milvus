@@ -44,6 +44,7 @@ const (
 	DefaultHighPriorityThreadCoreCoefficient   = 10
 	DefaultMiddlePriorityThreadCoreCoefficient = 5
 	DefaultLowPriorityThreadCoreCoefficient    = 1
+	DefaultChunkCacheThreadCoreCoefficient     = 10
 
 	DefaultSessionTTL        = 30 // s
 	DefaultSessionRetryTimes = 30
@@ -225,6 +226,7 @@ type commonConfig struct {
 	HighPriorityThreadCoreCoefficient   ParamItem `refreshable:"true"`
 	MiddlePriorityThreadCoreCoefficient ParamItem `refreshable:"true"`
 	LowPriorityThreadCoreCoefficient    ParamItem `refreshable:"true"`
+	ChunkCacheThreadCoreCoefficient     ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
 	BuildIndexThreadPoolRatio           ParamItem `refreshable:"false"`
 	MaxDegree                           ParamItem `refreshable:"true"`
@@ -645,6 +647,16 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.ChunkCacheThreadCoreCoefficient = ParamItem{
+		Key:          "common.threadCoreCoefficient.chunkCache",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(DefaultChunkCacheThreadCoreCoefficient),
+		Doc: "This parameter specify how many times the number of threads " +
+			"is the number of cores in chunk cache pool",
+		Export: true,
+	}
+	p.ChunkCacheThreadCoreCoefficient.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",

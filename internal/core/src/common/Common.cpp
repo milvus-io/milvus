@@ -26,6 +26,9 @@ float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 float LOW_PRIORITY_THREAD_CORE_COEFFICIENT =
     DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+float CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT =
+    DEFAULT_CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT;
+
 int CPU_NUM = DEFAULT_CPU_NUM;
 int64_t EXEC_EVAL_EXPR_BATCH_SIZE = DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE;
 
@@ -59,6 +62,13 @@ SetLowPriorityThreadCoreCoefficient(const float coefficient) {
     LOW_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
     LOG_INFO("set low priority thread pool core coefficient: {}",
              LOW_PRIORITY_THREAD_CORE_COEFFICIENT);
+}
+
+void
+SetChunkCacheThreadCoreCoefficient(const float coefficient) {
+    CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT = coefficient;
+    LOG_INFO("set chunk cache thread pool core coefficient: {}",
+             CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT);
 }
 
 void

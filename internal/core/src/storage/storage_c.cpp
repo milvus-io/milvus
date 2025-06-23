@@ -123,3 +123,8 @@ ResizeTheadPool(int64_t priority, float ratio) {
     milvus::ThreadPools::ResizeThreadPool(
         static_cast<milvus::ThreadPoolPriority>(priority), ratio);
 }
+
+void
+ShutDownThreadPools() {
+    milvus::ThreadPools::ShutDown();
+}

@@ -27,6 +27,7 @@ extern int64_t FILE_SLICE_SIZE;
 extern float HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern float LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern float CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 extern int64_t JSON_KEY_STATS_COMMIT_INTERVAL;
@@ -45,6 +46,9 @@ SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
 
 void
 SetLowPriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetChunkCacheThreadCoreCoefficient(const float coefficient);
 
 void
 SetCpuNum(const int core);

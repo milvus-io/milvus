@@ -25,9 +25,11 @@ std::shared_mutex ThreadPools::mutex_;
 void
 ThreadPools::ShutDown() {
     for (auto& itr : thread_pool_map) {
-        LOG_INFO("Start shutting down threadPool with priority:", itr.first);
+        LOG_INFO("Start shutting down threadPool with priority:{}",
+                 static_cast<int>(itr.first));
         itr.second->ShutDown();
-        LOG_INFO("Finish shutting down threadPool with priority:", itr.first);
+        LOG_INFO("Finish shutting down threadPool with priority:{}",
+                 static_cast<int>(itr.first));
     }
 }
 
@@ -45,6 +47,9 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
                 break;
             case milvus::ThreadPoolPriority::MIDDLE:
                 coefficient = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+                break;
+            case milvus::ThreadPoolPriority::CHUNKCACHE:
+                coefficient = CHUNKCACHE_PRIORITY_THREAD_CORE_COEFFICIENT;
                 break;
             default:
                 coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
@@ -65,6 +70,7 @@ ThreadPools::ResizeThreadPool(milvus::ThreadPoolPriority priority,
         LOG_ERROR("Failed to resize threadPool, size:{}", size);
         return;
     }
+
     std::unique_lock<std::shared_mutex> lock(mutex_);
     auto iter = thread_pool_map.find(priority);
     if (iter == thread_pool_map.end()) {

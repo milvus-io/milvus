@@ -37,6 +37,9 @@ void
 InitLowPriorityThreadCoreCoefficient(const float);
 
 void
+InitChunkCacheThreadCoreCoefficient(const float);
+
+void
 InitDefaultExprEvalBatchSize(int64_t val);
 
 void

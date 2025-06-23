@@ -18,7 +18,6 @@
 #define MILVUS_THREADPOOLS_H
 
 #include "ThreadPool.h"
-#include "common/Common.h"
 
 namespace milvus {
 
@@ -26,6 +25,7 @@ enum ThreadPoolPriority {
     HIGH = 0,
     MIDDLE = 1,
     LOW = 2,
+    CHUNKCACHE = 3,
 };
 
 class ThreadPools {
@@ -36,20 +36,17 @@ class ThreadPools {
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
-    ~ThreadPools() {
-        ShutDown();
-    }
-
- private:
-    void
+    static void
     ShutDown();
 
+ private:
     static std::map<ThreadPoolPriority, std::string>
     name_map() {
         static std::map<ThreadPoolPriority, std::string> name_map = {
             {HIGH, "HIGH_SEGC_POOL"},
             {MIDDLE, "MIDD_SEGC_POOL"},
-            {LOW, "LOW_SEGC_POOL"}};
+            {LOW, "LOW_SEGC_POOL"},
+            {CHUNKCACHE, "CHUNKCACHE_SEGC_POOL"}};
         return name_map;
     }
 

@@ -839,6 +839,7 @@ common:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
     middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
+    chunkCache: 10 # This parameter specify how many times the number of threads is the number of cores in chunk cache pool
   buildIndexThreadPoolRatio: 0.75
   DiskIndex:
     MaxDegree: 56
