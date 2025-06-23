@@ -1213,6 +1213,275 @@ func (x *LoadJsonKeyIndexInfo) GetMmapDirPath() string {
 	return ""
 }
 
+type SegmentPrimaryKeys struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	SegmentId      int64    `protobuf:"varint,1,opt,name=segment_id,json=segmentId,proto3" json:"segment_id,omitempty"`
+	PrimaryKeys    []string `protobuf:"bytes,2,rep,name=primary_keys,json=primaryKeys,proto3" json:"primary_keys,omitempty"`
+	IntprimaryKeys []int64  `protobuf:"varint,3,rep,packed,name=intprimary_keys,json=intprimaryKeys,proto3" json:"intprimary_keys,omitempty"`
+}
+
+func (x *SegmentPrimaryKeys) Reset() {
+	*x = SegmentPrimaryKeys{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_index_cgo_msg_proto_msgTypes[14]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SegmentPrimaryKeys) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SegmentPrimaryKeys) ProtoMessage() {}
+
+func (x *SegmentPrimaryKeys) ProtoReflect() protoreflect.Message {
+	mi := &file_index_cgo_msg_proto_msgTypes[14]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SegmentPrimaryKeys.ProtoReflect.Descriptor instead.
+func (*SegmentPrimaryKeys) Descriptor() ([]byte, []int) {
+	return file_index_cgo_msg_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *SegmentPrimaryKeys) GetSegmentId() int64 {
+	if x != nil {
+		return x.SegmentId
+	}
+	return 0
+}
+
+func (x *SegmentPrimaryKeys) GetPrimaryKeys() []string {
+	if x != nil {
+		return x.PrimaryKeys
+	}
+	return nil
+}
+
+func (x *SegmentPrimaryKeys) GetIntprimaryKeys() []int64 {
+	if x != nil {
+		return x.IntprimaryKeys
+	}
+	return nil
+}
+
+type BuildPrimaryIndexInfo struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ClusterID           string                `protobuf:"bytes,1,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
+	BuildID             int64                 `protobuf:"varint,2,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	CollectionID        int64                 `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	ShardName           string                `protobuf:"bytes,4,opt,name=shard_name,json=shardName,proto3" json:"shard_name,omitempty"`
+	IndexVersion        int64                 `protobuf:"varint,5,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
+	CurrentIndexVersion int32                 `protobuf:"varint,6,opt,name=current_index_version,json=currentIndexVersion,proto3" json:"current_index_version,omitempty"`
+	StorageConfig       *StorageConfig        `protobuf:"bytes,7,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
+	SegmentPrimaryKeys  []*SegmentPrimaryKeys `protobuf:"bytes,8,rep,name=segment_primary_keys,json=segmentPrimaryKeys,proto3" json:"segment_primary_keys,omitempty"`
+	IsIntPrimaryKeys    bool                  `protobuf:"varint,9,opt,name=is_int_primary_keys,json=isIntPrimaryKeys,proto3" json:"is_int_primary_keys,omitempty"`
+}
+
+func (x *BuildPrimaryIndexInfo) Reset() {
+	*x = BuildPrimaryIndexInfo{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_index_cgo_msg_proto_msgTypes[15]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *BuildPrimaryIndexInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuildPrimaryIndexInfo) ProtoMessage() {}
+
+func (x *BuildPrimaryIndexInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_index_cgo_msg_proto_msgTypes[15]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuildPrimaryIndexInfo.ProtoReflect.Descriptor instead.
+func (*BuildPrimaryIndexInfo) Descriptor() ([]byte, []int) {
+	return file_index_cgo_msg_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *BuildPrimaryIndexInfo) GetClusterID() string {
+	if x != nil {
+		return x.ClusterID
+	}
+	return ""
+}
+
+func (x *BuildPrimaryIndexInfo) GetBuildID() int64 {
+	if x != nil {
+		return x.BuildID
+	}
+	return 0
+}
+
+func (x *BuildPrimaryIndexInfo) GetCollectionID() int64 {
+	if x != nil {
+		return x.CollectionID
+	}
+	return 0
+}
+
+func (x *BuildPrimaryIndexInfo) GetShardName() string {
+	if x != nil {
+		return x.ShardName
+	}
+	return ""
+}
+
+func (x *BuildPrimaryIndexInfo) GetIndexVersion() int64 {
+	if x != nil {
+		return x.IndexVersion
+	}
+	return 0
+}
+
+func (x *BuildPrimaryIndexInfo) GetCurrentIndexVersion() int32 {
+	if x != nil {
+		return x.CurrentIndexVersion
+	}
+	return 0
+}
+
+func (x *BuildPrimaryIndexInfo) GetStorageConfig() *StorageConfig {
+	if x != nil {
+		return x.StorageConfig
+	}
+	return nil
+}
+
+func (x *BuildPrimaryIndexInfo) GetSegmentPrimaryKeys() []*SegmentPrimaryKeys {
+	if x != nil {
+		return x.SegmentPrimaryKeys
+	}
+	return nil
+}
+
+func (x *BuildPrimaryIndexInfo) GetIsIntPrimaryKeys() bool {
+	if x != nil {
+		return x.IsIntPrimaryKeys
+	}
+	return false
+}
+
+type LoadPrimaryIndexInfo struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	BuildID          int64                 `protobuf:"varint,1,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	Version          int64                 `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
+	CollectionID     int64                 `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	ShardName        string                `protobuf:"bytes,4,opt,name=shard_name,json=shardName,proto3" json:"shard_name,omitempty"`
+	Files            []string              `protobuf:"bytes,5,rep,name=files,proto3" json:"files,omitempty"`
+	LoadPriority     commonpb.LoadPriority `protobuf:"varint,6,opt,name=load_priority,json=loadPriority,proto3,enum=milvus.proto.common.LoadPriority" json:"load_priority,omitempty"`
+	IsIntPrimaryKeys bool                  `protobuf:"varint,7,opt,name=is_int_primary_keys,json=isIntPrimaryKeys,proto3" json:"is_int_primary_keys,omitempty"`
+}
+
+func (x *LoadPrimaryIndexInfo) Reset() {
+	*x = LoadPrimaryIndexInfo{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_index_cgo_msg_proto_msgTypes[16]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *LoadPrimaryIndexInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoadPrimaryIndexInfo) ProtoMessage() {}
+
+func (x *LoadPrimaryIndexInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_index_cgo_msg_proto_msgTypes[16]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoadPrimaryIndexInfo.ProtoReflect.Descriptor instead.
+func (*LoadPrimaryIndexInfo) Descriptor() ([]byte, []int) {
+	return file_index_cgo_msg_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *LoadPrimaryIndexInfo) GetBuildID() int64 {
+	if x != nil {
+		return x.BuildID
+	}
+	return 0
+}
+
+func (x *LoadPrimaryIndexInfo) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *LoadPrimaryIndexInfo) GetCollectionID() int64 {
+	if x != nil {
+		return x.CollectionID
+	}
+	return 0
+}
+
+func (x *LoadPrimaryIndexInfo) GetShardName() string {
+	if x != nil {
+		return x.ShardName
+	}
+	return ""
+}
+
+func (x *LoadPrimaryIndexInfo) GetFiles() []string {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *LoadPrimaryIndexInfo) GetLoadPriority() commonpb.LoadPriority {
+	if x != nil {
+		return x.LoadPriority
+	}
+	return commonpb.LoadPriority(0)
+}
+
+func (x *LoadPrimaryIndexInfo) GetIsIntPrimaryKeys() bool {
+	if x != nil {
+		return x.IsIntPrimaryKeys
+	}
+	return false
+}
+
 var File_index_cgo_msg_proto protoreflect.FileDescriptor
 
 var file_index_cgo_msg_proto_rawDesc = []byte{
@@ -1456,11 +1725,65 @@ var file_index_cgo_msg_proto_rawDesc = []byte{
 	0x18, 0x09, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0a, 0x65, 0x6e, 0x61, 0x62, 0x6c, 0x65, 0x4d, 0x6d,
 	0x61, 0x70, 0x12, 0x22, 0x0a, 0x0d, 0x6d, 0x6d, 0x61, 0x70, 0x5f, 0x64, 0x69, 0x72, 0x5f, 0x70,
 	0x61, 0x74, 0x68, 0x18, 0x0a, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x6d, 0x6d, 0x61, 0x70, 0x44,
-	0x69, 0x72, 0x50, 0x61, 0x74, 0x68, 0x42, 0x35, 0x5a, 0x33, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
-	0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2d, 0x69, 0x6f, 0x2f, 0x6d,
-	0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76, 0x32, 0x2f, 0x70, 0x72, 0x6f,
-	0x74, 0x6f, 0x2f, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x63, 0x67, 0x6f, 0x70, 0x62, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x69, 0x72, 0x50, 0x61, 0x74, 0x68, 0x22, 0x7f, 0x0a, 0x12, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e,
+	0x74, 0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x12, 0x1d, 0x0a, 0x0a,
+	0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03,
+	0x52, 0x09, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x21, 0x0a, 0x0c, 0x70,
+	0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x5f, 0x6b, 0x65, 0x79, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28,
+	0x09, 0x52, 0x0b, 0x70, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x12, 0x27,
+	0x0a, 0x0f, 0x69, 0x6e, 0x74, 0x70, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x5f, 0x6b, 0x65, 0x79,
+	0x73, 0x18, 0x03, 0x20, 0x03, 0x28, 0x03, 0x52, 0x0e, 0x69, 0x6e, 0x74, 0x70, 0x72, 0x69, 0x6d,
+	0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x22, 0xc4, 0x03, 0x0a, 0x15, 0x42, 0x75, 0x69, 0x6c,
+	0x64, 0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x49, 0x6e, 0x66,
+	0x6f, 0x12, 0x1c, 0x0a, 0x09, 0x63, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x49, 0x44, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x63, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x49, 0x44, 0x12,
+	0x18, 0x0a, 0x07, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03,
+	0x52, 0x07, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x49, 0x44, 0x12, 0x22, 0x0a, 0x0c, 0x63, 0x6f, 0x6c,
+	0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52,
+	0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12, 0x1d, 0x0a,
+	0x0a, 0x73, 0x68, 0x61, 0x72, 0x64, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x04, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x09, 0x73, 0x68, 0x61, 0x72, 0x64, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x23, 0x0a, 0x0d,
+	0x69, 0x6e, 0x64, 0x65, 0x78, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x05, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x0c, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f,
+	0x6e, 0x12, 0x32, 0x0a, 0x15, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x5f, 0x69, 0x6e, 0x64,
+	0x65, 0x78, 0x5f, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x06, 0x20, 0x01, 0x28, 0x05,
+	0x52, 0x13, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x49, 0x6e, 0x64, 0x65, 0x78, 0x56, 0x65,
+	0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x4b, 0x0a, 0x0e, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65,
+	0x5f, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x07, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x24, 0x2e,
+	0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x69, 0x6e, 0x64,
+	0x65, 0x78, 0x63, 0x67, 0x6f, 0x2e, 0x53, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e,
+	0x66, 0x69, 0x67, 0x52, 0x0d, 0x73, 0x74, 0x6f, 0x72, 0x61, 0x67, 0x65, 0x43, 0x6f, 0x6e, 0x66,
+	0x69, 0x67, 0x12, 0x5b, 0x0a, 0x14, 0x73, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74, 0x5f, 0x70, 0x72,
+	0x69, 0x6d, 0x61, 0x72, 0x79, 0x5f, 0x6b, 0x65, 0x79, 0x73, 0x18, 0x08, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x29, 0x2e, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e,
+	0x69, 0x6e, 0x64, 0x65, 0x78, 0x63, 0x67, 0x6f, 0x2e, 0x53, 0x65, 0x67, 0x6d, 0x65, 0x6e, 0x74,
+	0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x52, 0x12, 0x73, 0x65, 0x67,
+	0x6d, 0x65, 0x6e, 0x74, 0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x12,
+	0x2d, 0x0a, 0x13, 0x69, 0x73, 0x5f, 0x69, 0x6e, 0x74, 0x5f, 0x70, 0x72, 0x69, 0x6d, 0x61, 0x72,
+	0x79, 0x5f, 0x6b, 0x65, 0x79, 0x73, 0x18, 0x09, 0x20, 0x01, 0x28, 0x08, 0x52, 0x10, 0x69, 0x73,
+	0x49, 0x6e, 0x74, 0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x22, 0x9a,
+	0x02, 0x0a, 0x14, 0x4c, 0x6f, 0x61, 0x64, 0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x49, 0x6e,
+	0x64, 0x65, 0x78, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x18, 0x0a, 0x07, 0x62, 0x75, 0x69, 0x6c, 0x64,
+	0x49, 0x44, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x07, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x49,
+	0x44, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01,
+	0x28, 0x03, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x22, 0x0a, 0x0c, 0x63,
+	0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x18, 0x03, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x0c, 0x63, 0x6f, 0x6c, 0x6c, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44, 0x12,
+	0x1d, 0x0a, 0x0a, 0x73, 0x68, 0x61, 0x72, 0x64, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x04, 0x20,
+	0x01, 0x28, 0x09, 0x52, 0x09, 0x73, 0x68, 0x61, 0x72, 0x64, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x14,
+	0x0a, 0x05, 0x66, 0x69, 0x6c, 0x65, 0x73, 0x18, 0x05, 0x20, 0x03, 0x28, 0x09, 0x52, 0x05, 0x66,
+	0x69, 0x6c, 0x65, 0x73, 0x12, 0x46, 0x0a, 0x0d, 0x6c, 0x6f, 0x61, 0x64, 0x5f, 0x70, 0x72, 0x69,
+	0x6f, 0x72, 0x69, 0x74, 0x79, 0x18, 0x06, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x21, 0x2e, 0x6d, 0x69,
+	0x6c, 0x76, 0x75, 0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2e, 0x63, 0x6f, 0x6d, 0x6d, 0x6f,
+	0x6e, 0x2e, 0x4c, 0x6f, 0x61, 0x64, 0x50, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x52, 0x0c,
+	0x6c, 0x6f, 0x61, 0x64, 0x50, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x12, 0x2d, 0x0a, 0x13,
+	0x69, 0x73, 0x5f, 0x69, 0x6e, 0x74, 0x5f, 0x70, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x5f, 0x6b,
+	0x65, 0x79, 0x73, 0x18, 0x07, 0x20, 0x01, 0x28, 0x08, 0x52, 0x10, 0x69, 0x73, 0x49, 0x6e, 0x74,
+	0x50, 0x72, 0x69, 0x6d, 0x61, 0x72, 0x79, 0x4b, 0x65, 0x79, 0x73, 0x42, 0x35, 0x5a, 0x33, 0x67,
+	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73,
+	0x2d, 0x69, 0x6f, 0x2f, 0x6d, 0x69, 0x6c, 0x76, 0x75, 0x73, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x76,
+	0x32, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x63, 0x67, 0x6f,
+	0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1475,7 +1798,7 @@ func file_index_cgo_msg_proto_rawDescGZIP() []byte {
 	return file_index_cgo_msg_proto_rawDescData
 }
 
-var file_index_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_index_cgo_msg_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_index_cgo_msg_proto_goTypes = []interface{}{
 	(*TypeParams)(nil),            // 0: milvus.proto.indexcgo.TypeParams
 	(*IndexParams)(nil),           // 1: milvus.proto.indexcgo.IndexParams
@@ -1491,34 +1814,40 @@ var file_index_cgo_msg_proto_goTypes = []interface{}{
 	(*StoragePluginContext)(nil),  // 11: milvus.proto.indexcgo.StoragePluginContext
 	(*LoadTextIndexInfo)(nil),     // 12: milvus.proto.indexcgo.LoadTextIndexInfo
 	(*LoadJsonKeyIndexInfo)(nil),  // 13: milvus.proto.indexcgo.LoadJsonKeyIndexInfo
-	nil,                           // 14: milvus.proto.indexcgo.MapParamsV2.ParamsEntry
-	(*commonpb.KeyValuePair)(nil), // 15: milvus.proto.common.KeyValuePair
-	(*schemapb.FieldSchema)(nil),  // 16: milvus.proto.schema.FieldSchema
-	(commonpb.LoadPriority)(0),    // 17: milvus.proto.common.LoadPriority
+	(*SegmentPrimaryKeys)(nil),    // 14: milvus.proto.indexcgo.SegmentPrimaryKeys
+	(*BuildPrimaryIndexInfo)(nil), // 15: milvus.proto.indexcgo.BuildPrimaryIndexInfo
+	(*LoadPrimaryIndexInfo)(nil),  // 16: milvus.proto.indexcgo.LoadPrimaryIndexInfo
+	nil,                           // 17: milvus.proto.indexcgo.MapParamsV2.ParamsEntry
+	(*commonpb.KeyValuePair)(nil), // 18: milvus.proto.common.KeyValuePair
+	(*schemapb.FieldSchema)(nil),  // 19: milvus.proto.schema.FieldSchema
+	(commonpb.LoadPriority)(0),    // 20: milvus.proto.common.LoadPriority
 }
 var file_index_cgo_msg_proto_depIdxs = []int32{
-	15, // 0: milvus.proto.indexcgo.TypeParams.params:type_name -> milvus.proto.common.KeyValuePair
-	15, // 1: milvus.proto.indexcgo.IndexParams.params:type_name -> milvus.proto.common.KeyValuePair
-	15, // 2: milvus.proto.indexcgo.MapParams.params:type_name -> milvus.proto.common.KeyValuePair
-	14, // 3: milvus.proto.indexcgo.MapParamsV2.params:type_name -> milvus.proto.indexcgo.MapParamsV2.ParamsEntry
+	18, // 0: milvus.proto.indexcgo.TypeParams.params:type_name -> milvus.proto.common.KeyValuePair
+	18, // 1: milvus.proto.indexcgo.IndexParams.params:type_name -> milvus.proto.common.KeyValuePair
+	18, // 2: milvus.proto.indexcgo.MapParams.params:type_name -> milvus.proto.common.KeyValuePair
+	17, // 3: milvus.proto.indexcgo.MapParamsV2.params:type_name -> milvus.proto.indexcgo.MapParamsV2.ParamsEntry
 	4,  // 4: milvus.proto.indexcgo.BinarySet.datas:type_name -> milvus.proto.indexcgo.Binary
 	6,  // 5: milvus.proto.indexcgo.SegmentInsertFiles.field_insert_files:type_name -> milvus.proto.indexcgo.FieldInsertFiles
-	16, // 6: milvus.proto.indexcgo.BuildIndexInfo.field_schema:type_name -> milvus.proto.schema.FieldSchema
+	19, // 6: milvus.proto.indexcgo.BuildIndexInfo.field_schema:type_name -> milvus.proto.schema.FieldSchema
 	8,  // 7: milvus.proto.indexcgo.BuildIndexInfo.storage_config:type_name -> milvus.proto.indexcgo.StorageConfig
-	15, // 8: milvus.proto.indexcgo.BuildIndexInfo.index_params:type_name -> milvus.proto.common.KeyValuePair
-	15, // 9: milvus.proto.indexcgo.BuildIndexInfo.type_params:type_name -> milvus.proto.common.KeyValuePair
+	18, // 8: milvus.proto.indexcgo.BuildIndexInfo.index_params:type_name -> milvus.proto.common.KeyValuePair
+	18, // 9: milvus.proto.indexcgo.BuildIndexInfo.type_params:type_name -> milvus.proto.common.KeyValuePair
 	9,  // 10: milvus.proto.indexcgo.BuildIndexInfo.opt_fields:type_name -> milvus.proto.indexcgo.OptionalFieldInfo
 	7,  // 11: milvus.proto.indexcgo.BuildIndexInfo.segment_insert_files:type_name -> milvus.proto.indexcgo.SegmentInsertFiles
 	11, // 12: milvus.proto.indexcgo.BuildIndexInfo.storage_plugin_context:type_name -> milvus.proto.indexcgo.StoragePluginContext
-	16, // 13: milvus.proto.indexcgo.LoadTextIndexInfo.schema:type_name -> milvus.proto.schema.FieldSchema
-	17, // 14: milvus.proto.indexcgo.LoadTextIndexInfo.load_priority:type_name -> milvus.proto.common.LoadPriority
-	16, // 15: milvus.proto.indexcgo.LoadJsonKeyIndexInfo.schema:type_name -> milvus.proto.schema.FieldSchema
-	17, // 16: milvus.proto.indexcgo.LoadJsonKeyIndexInfo.load_priority:type_name -> milvus.proto.common.LoadPriority
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	19, // 13: milvus.proto.indexcgo.LoadTextIndexInfo.schema:type_name -> milvus.proto.schema.FieldSchema
+	20, // 14: milvus.proto.indexcgo.LoadTextIndexInfo.load_priority:type_name -> milvus.proto.common.LoadPriority
+	19, // 15: milvus.proto.indexcgo.LoadJsonKeyIndexInfo.schema:type_name -> milvus.proto.schema.FieldSchema
+	20, // 16: milvus.proto.indexcgo.LoadJsonKeyIndexInfo.load_priority:type_name -> milvus.proto.common.LoadPriority
+	8,  // 17: milvus.proto.indexcgo.BuildPrimaryIndexInfo.storage_config:type_name -> milvus.proto.indexcgo.StorageConfig
+	14, // 18: milvus.proto.indexcgo.BuildPrimaryIndexInfo.segment_primary_keys:type_name -> milvus.proto.indexcgo.SegmentPrimaryKeys
+	20, // 19: milvus.proto.indexcgo.LoadPrimaryIndexInfo.load_priority:type_name -> milvus.proto.common.LoadPriority
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_index_cgo_msg_proto_init() }
@@ -1695,6 +2024,42 @@ func file_index_cgo_msg_proto_init() {
 				return nil
 			}
 		}
+		file_index_cgo_msg_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*SegmentPrimaryKeys); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_index_cgo_msg_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*BuildPrimaryIndexInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_index_cgo_msg_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*LoadPrimaryIndexInfo); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1702,7 +2067,7 @@ func file_index_cgo_msg_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_index_cgo_msg_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

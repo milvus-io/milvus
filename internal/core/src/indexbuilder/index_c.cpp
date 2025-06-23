@@ -39,6 +39,8 @@
 #include "index/json_stats/JsonKeyStats.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "monitor/scope_metric.h"
+#include "index/PrimaryIndex.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 
 using namespace milvus;
 CStatus
@@ -467,6 +469,271 @@ BuildTextIndex(ProtoLayoutInterface result,
         auto status = CStatus();
         status.error_code = e.get_error_code();
         status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+BuildPrimaryIndex(ProtoLayoutInterface result,
+                  const uint8_t* serialized_build_index_info,
+                  const uint64_t len) {
+    try {
+        auto build_index_info =
+            std::make_unique<milvus::proto::indexcgo::BuildPrimaryIndexInfo>();
+        auto res =
+            build_index_info->ParseFromArray(serialized_build_index_info, len);
+        AssertInfo(res, "Unmarshal build index info failed");
+
+        auto storage_config =
+            get_storage_config(build_index_info->storage_config());
+
+        // init file manager
+        milvus::storage::FieldDataMeta field_meta{
+            build_index_info->collectionid(), 0, 0};
+
+        milvus::storage::IndexMeta index_meta{
+            0,
+            0,
+            build_index_info->buildid(),
+            build_index_info->index_version(),
+        };
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
+
+        milvus::storage::FileManagerContext fileManagerContext(
+            field_meta, index_meta, chunk_manager);
+        if (build_index_info->is_int_primary_keys()) {
+            std::vector<milvus::index::SegmentData<int64_t>> segments;
+            for (int i = 0; i < build_index_info->segment_primary_keys_size();
+                 ++i) {
+                const auto& seg_pk = build_index_info->segment_primary_keys(i);
+                milvus::index::SegmentData<int64_t> seg_data(
+                    seg_pk.segment_id());
+                for (int j = 0; j < seg_pk.primary_keys_size(); ++j) {
+                    seg_data.keys.push_back(seg_pk.intprimary_keys(j));
+                }
+                segments.push_back(std::move(seg_data));
+            }
+            auto index = std::make_unique<index::PrimaryIndex<int64_t>>(
+                fileManagerContext, false);
+            index->BuildWithPrimaryKeys(segments);
+
+            auto create_index_result = index->Upload();
+            create_index_result->SerializeAt(
+                reinterpret_cast<milvus::ProtoLayout*>(result));
+        } else {
+            std::vector<milvus::index::SegmentData<std::string>> segments;
+            for (int i = 0; i < build_index_info->segment_primary_keys_size();
+                 ++i) {
+                const auto& seg_pk = build_index_info->segment_primary_keys(i);
+                milvus::index::SegmentData<std::string> seg_data(
+                    seg_pk.segment_id());
+                for (int j = 0; j < seg_pk.primary_keys_size(); ++j) {
+                    seg_data.keys.push_back(seg_pk.primary_keys(j));
+                }
+                segments.push_back(std::move(seg_data));
+            }
+
+            auto index = std::make_unique<index::PrimaryIndex<std::string>>(
+                fileManagerContext, false);
+            index->BuildWithPrimaryKeys(segments);
+
+            auto create_index_result = index->Upload();
+            create_index_result->SerializeAt(
+                reinterpret_cast<milvus::ProtoLayout*>(result));
+        }
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+LoadPrimaryIndex(CPrimaryIndex* res_index,
+                 const uint8_t* serialized_load_index_info,
+                 const uint64_t len) {
+    try {
+        auto info_proto =
+            std::make_unique<milvus::proto::indexcgo::LoadPrimaryIndexInfo>();
+        info_proto->ParseFromArray(serialized_load_index_info, len);
+
+        milvus::storage::FieldDataMeta field_meta{
+            info_proto->collectionid(), 0, 0};
+        milvus::storage::IndexMeta index_meta{
+            0, 0, info_proto->buildid(), info_proto->version()};
+        auto remote_chunk_manager =
+            milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                .GetRemoteChunkManager();
+
+        milvus::Config config;
+        std::vector<std::string> files;
+        for (const auto& f : info_proto->files()) {
+            files.push_back(f);
+        }
+        config[milvus::index::INDEX_FILES] = files;
+        config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
+        milvus::storage::FileManagerContext file_ctx(
+            field_meta, index_meta, remote_chunk_manager);
+        if (info_proto->is_int_primary_keys()) {
+            auto index = std::make_unique<milvus::index::PrimaryIndex<int64_t>>(
+                file_ctx, true);
+            index->Load(config);
+            *res_index = index.release();
+        } else {
+            auto index =
+                std::make_unique<milvus::index::PrimaryIndex<std::string>>(
+                    file_ctx, true);
+            index->Load(config);
+            *res_index = index.release();
+        }
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+QueryPrimaryIndex(CPrimaryIndex index_handle,
+                  const char* key,
+                  int64_t* result) {
+    try {
+        auto index =
+            reinterpret_cast<milvus::index::PrimaryIndex<std::string>*>(
+                index_handle);
+        if (!index) {
+            auto status = CStatus();
+            status.error_code = UnexpectedError;
+            status.error_msg = strdup("PrimaryIndex is null");
+            return status;
+        }
+
+        std::string key_str(key);
+        *result = index->query(key_str);
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+DeletePrimaryIndex(CPrimaryIndex index_handle) {
+    try {
+        auto index =
+            reinterpret_cast<milvus::index::PrimaryIndex<std::string>*>(
+                index_handle);
+        if (index) {
+            delete index;
+        }
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+ResetSegmentId(CPrimaryIndex index_handle,
+               int64_t to_segment_id,
+               int64_t from_segment_id) {
+    try {
+        auto index =
+            reinterpret_cast<milvus::index::PrimaryIndex<std::string>*>(
+                index_handle);
+        if (!index) {
+            auto status = CStatus();
+            status.error_code = UnexpectedError;
+            status.error_msg = strdup("PrimaryIndex is null");
+            return status;
+        }
+
+        index->reset_segment_id(to_segment_id, from_segment_id);
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+GetSegmentList(CPrimaryIndex index_handle, int64_t** result, int64_t* size) {
+    try {
+        auto index =
+            reinterpret_cast<milvus::index::PrimaryIndex<std::string>*>(
+                index_handle);
+        if (!index) {
+            auto status = CStatus();
+            status.error_code = UnexpectedError;
+            status.error_msg = strdup("PrimaryIndex is null");
+            return status;
+        }
+
+        auto segment_list = index->get_segment_list();
+        *size = segment_list.size();
+
+        if (*size > 0) {
+            *result = static_cast<int64_t*>(malloc(*size * sizeof(int64_t)));
+            if (!*result) {
+                auto status = CStatus();
+                status.error_code = UnexpectedError;
+                status.error_msg =
+                    strdup("Failed to allocate memory for segment list");
+                return status;
+            }
+            std::copy(segment_list.begin(), segment_list.end(), *result);
+        } else {
+            *result = nullptr;
+        }
+
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
