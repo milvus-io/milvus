@@ -633,6 +633,9 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
 		return errors.New("altering tenant id or collection id is forbidden")
 	}
+	if oldColl.DBID != newColl.DBID {
+		return errors.New("altering dbID should use `AlterCollectionDB` interface")
+	}
 	oldCollClone := oldColl.Clone()
 	oldCollClone.DBID = newColl.DBID
 	oldCollClone.Name = newColl.Name
@@ -649,7 +652,6 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 	oldCollClone.Fields = newColl.Fields
 	oldCollClone.UpdateTimestamp = newColl.UpdateTimestamp
 
-	oldKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
 	newKey := BuildCollectionKey(newColl.DBID, oldColl.CollectionID)
 	value, err := proto.Marshal(model.MarshalCollectionModel(oldCollClone))
 	if err != nil {
@@ -669,12 +671,9 @@ func (kc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 			saves[k] = string(v)
 		}
 	}
-	if oldKey == newKey {
-		return etcd.SaveByBatchWithLimit(saves, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
-			return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
-		})
-	}
-	return kc.Snapshot.MultiSaveAndRemove(ctx, saves, []string{oldKey}, ts)
+	return etcd.SaveByBatchWithLimit(saves, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
+		return kc.Snapshot.MultiSave(ctx, partialKvs, ts)
+	})
 }
 
 func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts typeutil.Timestamp, fieldModify bool) error {
@@ -684,6 +683,22 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	default:
 		return fmt.Errorf("altering collection doesn't support %s", alterType.String())
 	}
+}
+
+func (kc *Catalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
+	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
+		return errors.New("altering tenant id or collection id is forbidden")
+	}
+	oldKey := BuildCollectionKey(oldColl.DBID, oldColl.CollectionID)
+	newKey := BuildCollectionKey(newColl.DBID, newColl.CollectionID)
+
+	value, err := proto.Marshal(model.MarshalCollectionModel(newColl))
+	if err != nil {
+		return err
+	}
+	saves := map[string]string{newKey: string(value)}
+
+	return kc.Snapshot.MultiSaveAndRemove(ctx, saves, []string{oldKey}, ts)
 }
 
 func (kc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
@@ -864,7 +879,7 @@ func (kc *Catalog) fixDefaultDBIDConsistency(ctx context.Context, collMeta *pb.C
 		coll := model.UnmarshalCollectionModel(collMeta)
 		cloned := coll.Clone()
 		cloned.DBID = util.DefaultDBID
-		kc.alterModifyCollection(ctx, coll, cloned, ts, false)
+		kc.AlterCollectionDB(ctx, coll, cloned, ts)
 
 		collMeta.DbId = util.DefaultDBID
 	}

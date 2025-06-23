@@ -125,6 +125,55 @@ func (_c *RootCoordCatalog_AlterCollection_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// AlterCollectionDB provides a mock function with given fields: ctx, oldColl, newColl, ts
+func (_m *RootCoordCatalog) AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64) error {
+	ret := _m.Called(ctx, oldColl, newColl, ts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AlterCollectionDB")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Collection, *model.Collection, uint64) error); ok {
+		r0 = rf(ctx, oldColl, newColl, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_AlterCollectionDB_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterCollectionDB'
+type RootCoordCatalog_AlterCollectionDB_Call struct {
+	*mock.Call
+}
+
+// AlterCollectionDB is a helper method to define mock.On call
+//   - ctx context.Context
+//   - oldColl *model.Collection
+//   - newColl *model.Collection
+//   - ts uint64
+func (_e *RootCoordCatalog_Expecter) AlterCollectionDB(ctx interface{}, oldColl interface{}, newColl interface{}, ts interface{}) *RootCoordCatalog_AlterCollectionDB_Call {
+	return &RootCoordCatalog_AlterCollectionDB_Call{Call: _e.mock.On("AlterCollectionDB", ctx, oldColl, newColl, ts)}
+}
+
+func (_c *RootCoordCatalog_AlterCollectionDB_Call) Run(run func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts uint64)) *RootCoordCatalog_AlterCollectionDB_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Collection), args[2].(*model.Collection), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterCollectionDB_Call) Return(_a0 error) *RootCoordCatalog_AlterCollectionDB_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterCollectionDB_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, uint64) error) *RootCoordCatalog_AlterCollectionDB_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterCredential provides a mock function with given fields: ctx, credential
 func (_m *RootCoordCatalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
 	ret := _m.Called(ctx, credential)
