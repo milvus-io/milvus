@@ -406,7 +406,7 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     auto load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        path_.c_str(), load_in_mmap, milvus::index::SetBitset);
+        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -524,8 +524,8 @@ JsonKeyStatsInvertedIndex::Reload() {
 }
 
 void
-JsonKeyStatsInvertedIndex::CreateReader() {
-    wrapper_->create_reader();
+JsonKeyStatsInvertedIndex::CreateReader(SetBitsetFn set_bitset) {
+    wrapper_->create_reader(set_bitset);
 }
 
 }  // namespace milvus::index

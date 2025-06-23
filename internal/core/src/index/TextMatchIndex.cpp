@@ -167,7 +167,7 @@ TextMatchIndex::Load(const Config& config) {
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), load_in_mmap, milvus::index::SetBitset);
+        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
 
     if (!load_in_mmap) {
         // the index is loaded in ram, so we can remove files in advance
@@ -291,8 +291,8 @@ TextMatchIndex::Reload() {
 }
 
 void
-TextMatchIndex::CreateReader() {
-    wrapper_->create_reader();
+TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
+    wrapper_->create_reader(set_bitset);
 }
 
 void

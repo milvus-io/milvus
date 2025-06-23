@@ -609,7 +609,7 @@ TEST(GrowingJsonKeyStatsIndexTest, GrowingIndex) {
     for (const auto& jsonData : jsonDatas) {
         jsons.push_back(milvus::Json(simdjson::padded_string(jsonData)));
     }
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddJSONDatas(jsonDatas.size(), jsonDatas.data(), nullptr, 0);
     index->Commit();
     index->Reload();
