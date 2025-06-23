@@ -890,9 +890,10 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 
 	newColl := oldColl.Clone()
 	newColl.Name = newName
+	newColl.DBName = dbName
 	newColl.DBID = targetDB.ID
-	if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, false); err != nil {
-		log.Warn("alter collection by catalog failed", zap.Error(err))
+	if err := mt.catalog.AlterCollectionDB(ctx, oldColl, newColl, ts); err != nil {
+		log.Warn("alter collectionDB by catalog failed", zap.Error(err))
 		return err
 	}
 

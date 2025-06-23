@@ -1555,9 +1555,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 	t.Run("alter collection fail", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything,
-			mock.Anything,
+		catalog.On("AlterCollectionDB",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -1651,9 +1649,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 	t.Run("alter collection ok", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything,
-			mock.Anything,
+		catalog.On("AlterCollectionDB",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
