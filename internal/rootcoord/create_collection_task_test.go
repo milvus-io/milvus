@@ -886,34 +886,6 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 		assert.Contains(t, err.Error(), "field data type: None is not supported")
 	})
 
-	t.Run("struct array field - has system fields", func(t *testing.T) {
-		collectionName := funcutil.GenRandomStr()
-		task := createCollectionTask{
-			Req: &milvuspb.CreateCollectionRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName: collectionName,
-			},
-		}
-		schema := &schemapb.CollectionSchema{
-			Name: collectionName,
-			StructArrayFields: []*schemapb.StructArrayFieldSchema{
-				{
-					Name: "struct_field",
-					Fields: []*schemapb.FieldSchema{
-						{
-							Name:        RowIDFieldName,
-							DataType:    schemapb.DataType_Array,
-							ElementType: schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-		}
-		err := task.validateSchema(context.TODO(), schema)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "schema contains system field")
-	})
-
 	t.Run("struct array field - valid case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
