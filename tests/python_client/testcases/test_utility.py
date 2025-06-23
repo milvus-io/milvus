@@ -1101,7 +1101,6 @@ class TestUtilityBase(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix + "new")
         alias = cf.gen_unique_str(prefix + "alias")
         self.utility_wrap.create_alias(old_collection_name, alias)
-        collection_alias = collection_w.aliases
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
         collection_w = self.init_collection_wrap(name=new_collection_name,
                                                  check_task=CheckTasks.check_collection_property,
@@ -1110,7 +1109,7 @@ class TestUtilityBase(TestcaseBase):
         collections = self.utility_wrap.list_collections()[0]
         assert new_collection_name in collections
         assert old_collection_name not in collections
-        assert collection_alias == collection_w.aliases
+        assert [alias] == collection_w.aliases
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collections(self):
