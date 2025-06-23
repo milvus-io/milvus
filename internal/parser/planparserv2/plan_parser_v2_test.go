@@ -163,6 +163,23 @@ func TestExpr_Compare(t *testing.T) {
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
 	}
+
+	exprStrs = []string{
+		`BoolField == false + true`,
+		`StringField == "1" + "2"`,
+		`BoolField == false - true`,
+		`StringField == "1" - "2"`,
+		`BoolField == false * true`,
+		`StringField == "1" * "2"`,
+		`BoolField == false / true`,
+		`StringField == "1" / "2"`,
+		`BoolField == false % true`,
+		`StringField == "1" % "2"`,
+	}
+
+	for _, exprStr := range exprStrs {
+		assertInvalidExpr(t, helper, exprStr)
+	}
 }
 
 func TestExpr_UnaryRange(t *testing.T) {
