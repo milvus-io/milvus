@@ -172,6 +172,7 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 		client, err = service.NewClient("https://"+c.AccessKeyID+".blob."+c.Address+"/", cred, &service.ClientOptions{})
 	} else {
 		connectionString := os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
+		log.Info("connectionString", zap.String("connectionString", connectionString))
 		if connectionString == "" {
 			connectionString = "DefaultEndpointsProtocol=https;AccountName=" + c.AccessKeyID +
 				";AccountKey=" + c.SecretAccessKeyID + ";EndpointSuffix=" + c.Address

@@ -237,3 +237,11 @@ func (gcsReader *GcsReader) Seek(offset int64, whence int) (int64, error) {
 	gcsReader.position = newOffset
 	return newOffset, nil
 }
+
+func (gcsReader *GcsReader) Size() (int64, error) {
+	attrs, err := gcsReader.obj.Attrs(context.Background())
+	if err != nil {
+		return 0, checkObjectStorageError(gcsReader.obj.ObjectName(), err)
+	}
+	return attrs.Size, nil
+}

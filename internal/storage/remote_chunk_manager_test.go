@@ -18,6 +18,8 @@ package storage
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path"
 	"testing"
 
@@ -526,6 +528,8 @@ func TestAzureChunkManager(t *testing.T) {
 	configRoot := Params.MinioCfg.RootPath.GetValue()
 
 	testMinIOKVRoot := path.Join(configRoot, "milvus-minio-ut-root")
+
+	fmt.Println(os.Getenv("AZURE_STORAGE_CONNECTION_STRING"))
 
 	t.Run("test load", func(t *testing.T) {
 		testLoadRoot := path.Join(testMinIOKVRoot, "test_load")
