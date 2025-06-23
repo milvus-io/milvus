@@ -18,10 +18,12 @@ package logutil
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/exp/constraints"
 	"google.golang.org/grpc/grpclog"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -171,4 +173,9 @@ func Logger(ctx context.Context) *zap.Logger {
 
 func WithModule(ctx context.Context, module string) context.Context {
 	return log.WithModule(ctx, module)
+}
+
+// keeps only 2 decimal places
+func ToMB[T constraints.Integer | constraints.Float](mem T) T {
+	return T(math.Round(float64(mem)/1024/1024*100) / 100)
 }
