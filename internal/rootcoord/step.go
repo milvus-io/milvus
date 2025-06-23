@@ -466,13 +466,14 @@ func (s *nullStep) Weight() stepPriority {
 
 type AlterCollectionStep struct {
 	baseStep
-	oldColl *model.Collection
-	newColl *model.Collection
-	ts      Timestamp
+	oldColl     *model.Collection
+	newColl     *model.Collection
+	ts          Timestamp
+	fieldModify bool
 }
 
 func (a *AlterCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts, a.fieldModify)
 	return nil, err
 }
 
@@ -508,7 +509,7 @@ type AddCollectionFieldStep struct {
 func (a *AddCollectionFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	// newColl := a.oldColl.Clone()
 	// newColl.Fields = append(newColl.Fields, a.newField)
-	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.updatedCollection, a.updatedCollection.UpdateTimestamp)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.updatedCollection, a.updatedCollection.UpdateTimestamp, true)
 	log.Ctx(ctx).Info("add field done", zap.Int64("collectionID", a.oldColl.CollectionID), zap.Any("new field", a.newField))
 	return nil, err
 }
