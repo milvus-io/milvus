@@ -154,7 +154,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
 			Prefix: &prefix,
 		})
-		if pager.More() {
+		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
 				return err
@@ -169,7 +169,7 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsHierarchyPager("/", &container.ListBlobsHierarchyOptions{
 			Prefix: &prefix,
 		})
-		if pager.More() {
+		for pager.More() {
 			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
 				return err
