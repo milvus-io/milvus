@@ -58,6 +58,9 @@ func (s *ChannelExclusiveBalanceSuit) SetupSuite() {
 	// disable compaction
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
 
+	// speed up assign node to replica
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CheckNodeInReplicaInterval.Key, "5")
+
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
@@ -188,22 +191,22 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 
 	// expected each channel own 3 exclusive node
 	s.Eventually(func() bool {
-		channelNodeCounter := make(map[string]int)
+		channelExclusiveNodes := make(map[string][]int64)
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
 
-			log.Info("resp", zap.Any("segments", resp1.Segments))
+			log.Info("resp", zap.Int64("node", node.GetQueryNode().GetNodeID()), zap.Any("segments", resp1.Segments), zap.Any("channel", resp1.GetChannels()))
 			if channel, ok := s.isSameChannel(resp1.GetSegments()); ok {
-				channelNodeCounter[channel] += 1
+				channelExclusiveNodes[channel] = append(channelExclusiveNodes[channel], node.GetQueryNode().GetNodeID())
 			}
 		}
 
-		log.Info("dist", zap.Any("nodes", channelNodeCounter))
+		log.Info("dist", zap.Any("nodes", channelExclusiveNodes))
 		nodeCountMatch := true
-		for _, cnt := range channelNodeCounter {
-			if cnt != channelNodeCount {
+		for _, nodes := range channelExclusiveNodes {
+			if len(nodes) != channelNodeCount {
 				nodeCountMatch = false
 				break
 			}
@@ -220,21 +223,21 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 
 	// expected each channel own 3 exclusive node
 	s.Eventually(func() bool {
-		channelNodeCounter := make(map[string]int)
+		channelExclusiveNodes := make(map[string][]int64)
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			if err != nil && merr.Ok(resp1.GetStatus()) {
-				log.Info("resp", zap.Any("segments", resp1.Segments))
+				log.Info("resp", zap.Int64("node", node.GetQueryNode().GetNodeID()), zap.Any("segments", resp1.Segments), zap.Any("channel", resp1.GetChannels()))
 				if channel, ok := s.isSameChannel(resp1.GetSegments()); ok {
-					channelNodeCounter[channel] += 1
+					channelExclusiveNodes[channel] = append(channelExclusiveNodes[channel], node.GetQueryNode().GetNodeID())
 				}
 			}
 		}
 
-		log.Info("dist", zap.Any("nodes", channelNodeCounter))
+		log.Info("dist", zap.Any("nodes", channelExclusiveNodes))
 		nodeCountMatch := true
-		for _, cnt := range channelNodeCounter {
-			if cnt != channelNodeCount {
+		for _, nodes := range channelExclusiveNodes {
+			if len(nodes) != channelNodeCount {
 				nodeCountMatch = false
 				break
 			}
