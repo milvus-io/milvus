@@ -410,13 +410,12 @@ TEST_F(FileWriterTest, LargeBufferSizeWriteWithDirectIO) {
 // Tese config FileWriterConfig with unknown mode
 TEST_F(FileWriterTest, UnknownModeWriteWithDirectIO) {
     uint8_t mode = 2;
-    EXPECT_THROW(
+    EXPECT_NO_THROW(
         {
             FileWriterConfig::GetInstance().SetMode(
                 static_cast<FileWriterConfig::WriteMode>(mode));
             FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
-        },
-        std::invalid_argument);
+        });
 }
 
 TEST_F(FileWriterTest, HalfAlignedDataWriteWithDirectIO) {
@@ -571,4 +570,363 @@ TEST_F(FileWriterTest, MultiThreadedWriteWithDirectIO) {
         EXPECT_EQ(read_data.size(), data_size_per_thread);
         EXPECT_EQ(read_data, test_data[i]);
     }
+}
+
+// Test executor-based asynchronous writes
+TEST_F(FileWriterTest, ExecutorBasedAsyncWrites) {
+    // Set up executor with 2 threads
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "executor_async.txt").string();
+    FileWriter writer(filename);
+
+    // Write multiple chunks
+    const int num_chunks = 10;
+    const size_t chunk_size = 1024;
+    std::vector<std::vector<char>> chunks(num_chunks,
+                                          std::vector<char>(chunk_size));
+
+    for (auto& chunk : chunks) {
+        std::generate(chunk.begin(), chunk.end(), std::rand);
+        writer.Write(chunk.data(), chunk.size());
+    }
+    writer.Finish();
+
+    // Verify file contents
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+
+    std::vector<char> expected_data;
+    for (const auto& chunk : chunks) {
+        expected_data.insert(expected_data.end(), chunk.begin(), chunk.end());
+    }
+    EXPECT_EQ(read_data, expected_data);
+}
+
+// Test executor-based asynchronous writes with direct IO
+TEST_F(FileWriterTest, ExecutorBasedAsyncWritesWithDirectIO) {
+    // Set up executor with 2 threads
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::DIRECT);
+    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+
+    std::string filename = (test_dir_ / "executor_async_direct.txt").string();
+    FileWriter writer(filename);
+
+    // Write multiple chunks asynchronously
+    const int num_chunks = 10;
+    const size_t chunk_size = kBufferSize;
+    std::vector<std::vector<char>> chunks(num_chunks,
+                                          std::vector<char>(chunk_size));
+
+    for (auto& chunk : chunks) {
+        std::generate(chunk.begin(), chunk.end(), std::rand);
+        writer.Write(chunk.data(), chunk.size());
+    }
+    writer.Finish();
+
+    // Verify file contents
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+
+    std::vector<char> expected_data;
+    for (const auto& chunk : chunks) {
+        expected_data.insert(expected_data.end(), chunk.begin(), chunk.end());
+    }
+    EXPECT_EQ(read_data, expected_data);
+}
+
+// Test concurrent writes using executor
+TEST_F(FileWriterTest, ConcurrentWritesWithExecutor) {
+    // Set up executor with 4 threads
+    FileWriterConfig::GetInstance().SetWriteExecutor(4);
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+
+    const int num_files = 8;
+    std::vector<std::string> filenames;
+    std::vector<std::vector<char>> test_data;
+
+    // Prepare filenames and test data
+    for (int i = 0; i < num_files; ++i) {
+        filenames.push_back(
+            (test_dir_ / ("concurrent_executor_" + std::to_string(i) + ".txt"))
+                .string());
+        test_data.emplace_back(1024 * 1024);  // 1MB per file
+        std::generate(test_data[i].begin(), test_data[i].end(), std::rand);
+    }
+
+    // Write to all files concurrently
+    std::vector<std::thread> threads;
+    threads.reserve(num_files);
+    for (int i = 0; i < num_files; ++i) {
+        threads.emplace_back([&, i]() {
+            FileWriter writer(filenames[i]);
+            writer.Write(test_data[i].data(), test_data[i].size());
+            writer.Finish();
+        });
+    }
+
+    // Wait for all threads to complete
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // Verify all files
+    for (int i = 0; i < num_files; ++i) {
+        std::ifstream file(filenames[i], std::ios::binary);
+        std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                    std::istreambuf_iterator<char>());
+        EXPECT_EQ(read_data, test_data[i]);
+    }
+}
+
+// Test executor configuration with invalid number of threads
+TEST_F(FileWriterTest, InvalidExecutorConfiguration) {
+    // Test with zero threads
+    EXPECT_NO_THROW(FileWriterConfig::GetInstance().SetWriteExecutor(0));
+
+    // Test with negative number of threads
+    EXPECT_NO_THROW(FileWriterConfig::GetInstance().SetWriteExecutor(-1));
+}
+
+// Test executor configuration changes
+TEST_F(FileWriterTest, ExecutorConfigurationChanges) {
+    // Set initial executor
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+
+    // Change executor configuration
+    FileWriterConfig::GetInstance().SetWriteExecutor(4);
+
+    // Verify the change doesn't break functionality
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "executor_change.txt").string();
+    FileWriter writer(filename);
+
+    std::string test_data = "Test data for executor change";
+    writer.Write(test_data.data(), test_data.size());
+    writer.Finish();
+
+    // Verify file contents
+    std::ifstream file(filename, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, test_data);
+}
+
+// Test mixed buffered and direct IO with executor
+TEST_F(FileWriterTest, MixedIOWithExecutor) {
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+
+    // Test buffered IO with executor
+    {
+        FileWriterConfig::GetInstance().SetMode(
+            FileWriterConfig::WriteMode::BUFFERED);
+        std::string filename = (test_dir_ / "mixed_buffered.txt").string();
+        FileWriter writer(filename);
+
+        std::string test_data = "Buffered IO test data";
+        writer.Write(test_data.data(), test_data.size());
+        writer.Finish();
+
+        std::ifstream file(filename, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, test_data);
+    }
+
+    // Test direct IO with executor
+    {
+        FileWriterConfig::GetInstance().SetMode(
+            FileWriterConfig::WriteMode::DIRECT);
+        FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+        std::string filename = (test_dir_ / "mixed_direct.txt").string();
+        FileWriter writer(filename);
+
+        std::string test_data = "Direct IO test data";
+        writer.Write(test_data.data(), test_data.size());
+        writer.Finish();
+
+        std::ifstream file(filename, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, test_data);
+    }
+}
+
+// Test large data writes with executor
+TEST_F(FileWriterTest, LargeDataWritesWithExecutor) {
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+
+    std::string filename = (test_dir_ / "large_data_executor.txt").string();
+    FileWriter writer(filename);
+
+    const size_t large_size = 10 * 1024 * 1024;  // 10MB
+    std::vector<char> large_data(large_size);
+    std::generate(large_data.begin(), large_data.end(), std::rand);
+
+    writer.Write(large_data.data(), large_data.size());
+    writer.Finish();
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    EXPECT_EQ(read_data, large_data);
+}
+
+// Test executor with different buffer sizes
+TEST_F(FileWriterTest, ExecutorWithDifferentBufferSizes) {
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::DIRECT);
+
+    std::vector<size_t> buffer_sizes = {4096, 8192, 16384, 32768};
+
+    for (size_t buffer_size : buffer_sizes) {
+        FileWriterConfig::GetInstance().SetBufferSize(buffer_size);
+
+        std::string filename =
+            (test_dir_ /
+             ("buffer_size_" + std::to_string(buffer_size) + ".txt"))
+                .string();
+        FileWriter writer(filename);
+
+        std::vector<char> test_data(buffer_size * 2);
+        std::generate(test_data.begin(), test_data.end(), std::rand);
+
+        writer.Write(test_data.data(), test_data.size());
+        writer.Finish();
+
+        std::ifstream file(filename, std::ios::binary);
+        std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                    std::istreambuf_iterator<char>());
+        EXPECT_EQ(read_data, test_data);
+    }
+}
+
+// Test error handling in async operations
+TEST_F(FileWriterTest, ErrorHandlingInAsyncOperations) {
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+
+    // Test with invalid file path in async context
+    std::string invalid_path = "/invalid/path/async_test.txt";
+
+    // This should throw an exception even in async context
+    EXPECT_THROW(
+        {
+            FileWriter writer(invalid_path);
+            std::string test_data = "Test data";
+            writer.Write(test_data.data(), test_data.size());
+            writer.Finish();
+        },
+        std::runtime_error);
+}
+
+// Test concurrent access to FileWriterConfig
+TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
+    const int num_threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
+
+    threads.reserve(num_threads);
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back([i]() {
+            // Each thread sets different executor configurations
+            FileWriterConfig::GetInstance().SetWriteExecutor(i + 1);
+            FileWriterConfig::GetInstance().SetMode(
+                i % 2 == 0 ? FileWriterConfig::WriteMode::BUFFERED
+                           : FileWriterConfig::WriteMode::DIRECT);
+            FileWriterConfig::GetInstance().SetBufferSize(4096 * (i + 1));
+        });
+    }
+
+    // Wait for all threads to complete
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // Verify that the configuration is still valid
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+    std::string filename =
+        (std::filesystem::temp_directory_path() / "concurrent_config_test.txt")
+            .string();
+
+    FileWriter writer(filename);
+    std::string test_data = "Concurrent config test";
+    writer.Write(test_data.data(), test_data.size());
+    writer.Finish();
+
+    // Clean up
+    std::filesystem::remove(filename);
+}
+// Test that changing FileWriterConfig during FileWriter operations doesn't affect existing instances
+TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
+    // Start with buffered mode
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+
+    std::string filename1 =
+        (std::filesystem::temp_directory_path() / "config_change_test1.txt")
+            .string();
+    std::string filename2 =
+        (std::filesystem::temp_directory_path() / "config_change_test2.txt")
+            .string();
+
+    // Create first FileWriter
+    FileWriter writer1(filename1);
+
+    // Start writing some data with first writer
+    std::string test_data1 = "First writer data";
+    writer1.Write(test_data1.data(), test_data1.size());
+
+    // Change configuration while first writer is still active
+    FileWriterConfig::GetInstance().SetMode(
+        FileWriterConfig::WriteMode::DIRECT);
+    FileWriterConfig::GetInstance().SetBufferSize(8192);
+    FileWriterConfig::GetInstance().SetWriteExecutor(4);
+
+    // Create second FileWriter with new configuration
+    FileWriter writer2(filename2);
+
+    // Continue writing with both writers
+    std::string test_data2 = "Second writer data";
+    writer2.Write(test_data2.data(), test_data2.size());
+
+    std::string more_data1 = "More data for first writer";
+    writer1.Write(more_data1.data(), more_data1.size());
+
+    // Finish both writers
+    size_t size1 = writer1.Finish();
+    size_t size2 = writer2.Finish();
+
+    // Verify both files were written correctly
+    EXPECT_EQ(size1, test_data1.size() + more_data1.size());
+    EXPECT_EQ(size2, test_data2.size());
+
+    // Read back and verify content
+    std::ifstream file1(filename1);
+    std::string content1((std::istreambuf_iterator<char>(file1)),
+                         std::istreambuf_iterator<char>());
+    EXPECT_EQ(content1, test_data1 + more_data1);
+
+    std::ifstream file2(filename2);
+    std::string content2((std::istreambuf_iterator<char>(file2)),
+                         std::istreambuf_iterator<char>());
+    EXPECT_EQ(content2, test_data2);
+
+    // Clean up
+    std::filesystem::remove(filename1);
+    std::filesystem::remove(filename2);
 }

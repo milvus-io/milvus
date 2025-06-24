@@ -115,7 +115,7 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 }
 
 CStatus
-InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb) {
+InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads) {
     std::string mode_str(mode);
 
     if (mode_str == "direct") {
@@ -126,6 +126,8 @@ InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb) {
     } else {
         return milvus::FailureCStatus(milvus::ConfigInvalid, "Invalid mode");
     }
+
+    milvus::storage::FileWriterConfig::GetInstance().SetWriteExecutor(nr_threads);
 
     return milvus::SuccessCStatus();
 }

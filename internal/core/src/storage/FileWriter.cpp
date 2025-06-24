@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <utility>
+#include "folly/futures/Future.h"
 #include "monitor/prometheus_client.h"
 #include "storage/FileWriter.h"
 
@@ -128,8 +129,9 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
         if (!PositionedWrite(aligned_buf_, capacity_, file_size_)) {
             Cleanup();
             PanicInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: " + filename_ +
-                          " (err: " + strerror(errno) + ")");
+                      "Failed to write to file: {}, error: {}",
+                      filename_,
+                      strerror(errno));
         }
         file_size_ += capacity_;
         left_size -= cpy_size;
@@ -208,10 +210,81 @@ FileWriter::Write(const void* data, size_t nbyte) {
         return;
     }
 
-    if (use_direct_io_) {
-        WriteWithDirectIO(data, nbyte);
+    auto executor = FileWriterConfig::GetInstance().GetWriteExecutor();
+    if (executor != nullptr) {
+        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
+        auto future = promise->getFuture();
+        executor->add([this, data, nbyte, promise]() {
+            try {
+                if (use_direct_io_) {
+                    WriteWithDirectIO(data, nbyte);
+                } else {
+                    WriteWithBufferedIO(data, nbyte);
+                }
+                promise->setValue(folly::Unit{});
+            } catch (const std::exception& e) {
+                promise->setException(
+                    folly::exception_wrapper(std::current_exception()));
+            } catch (...) {
+                promise->setException(
+                    folly::exception_wrapper(std::current_exception()));
+            }
+        });
+
+        try {
+            future.wait();
+        } catch (const std::exception& e) {
+            Cleanup();
+            PanicInfo(ErrorCode::FileWriteFailed,
+                      "Failed to write to file: {}, error: {}",
+                      filename_,
+                      e.what());
+        }
     } else {
-        WriteWithBufferedIO(data, nbyte);
+        if (use_direct_io_) {
+            WriteWithDirectIO(data, nbyte);
+        } else {
+            WriteWithBufferedIO(data, nbyte);
+        }
+    }
+}
+
+void
+FileWriter::FlushWithBufferedIO() {
+    if (!PositionedWrite(aligned_buf_, offset_, file_size_)) {
+        Cleanup();
+        PanicInfo(ErrorCode::FileWriteFailed,
+                  "Failed to write to file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
+    }
+    file_size_ += offset_;
+    offset_ = 0;
+}
+
+void
+FileWriter::FlushWithDirectIO() {
+    size_t nearest_aligned_offset =
+        (offset_ + ALIGNMENT_MASK) & ~ALIGNMENT_MASK;
+    memset(static_cast<char*>(aligned_buf_) + offset_,
+           0,
+           nearest_aligned_offset - offset_);
+    if (!PositionedWrite(aligned_buf_, nearest_aligned_offset, file_size_)) {
+        Cleanup();
+        PanicInfo(ErrorCode::FileWriteFailed,
+                  "Failed to write to file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
+    }
+    file_size_ += offset_;
+    offset_ = 0;
+    // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
+    if (ftruncate(fd_, file_size_) != 0) {
+        Cleanup();
+        PanicInfo(ErrorCode::FileWriteFailed,
+                  "Failed to truncate file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
     }
 }
 
@@ -219,29 +292,45 @@ size_t
 FileWriter::Finish() {
     AssertInfo(fd_ != -1, "FileWriter is not initialized or finished");
 
-    // if the aligned buffer is not empty, we should write it to the file
+    // if the aligned buffer is not empty, we should flush it to the file
     if (offset_ != 0) {
-        size_t nearest_aligned_offset =
-            (offset_ + ALIGNMENT_MASK) & ~ALIGNMENT_MASK;
-        memset(static_cast<char*>(aligned_buf_) + offset_,
-               0,
-               nearest_aligned_offset - offset_);
-        if (!PositionedWrite(
-                aligned_buf_, nearest_aligned_offset, file_size_)) {
-            Cleanup();
-            PanicInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      strerror(errno));
-        }
-        file_size_ += offset_;
-        // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
-        if (ftruncate(fd_, file_size_) != 0) {
-            Cleanup();
-            PanicInfo(ErrorCode::FileWriteFailed,
-                      "Failed to truncate file: {}, error: {}",
-                      filename_,
-                      strerror(errno));
+        auto executor = FileWriterConfig::GetInstance().GetWriteExecutor();
+        if (executor != nullptr) {
+            auto promise = std::make_shared<folly::Promise<folly::Unit>>();
+            auto future = promise->getFuture();
+
+            executor->add([this, promise]() {
+                try {
+                    if (use_direct_io_) {
+                        FlushWithDirectIO();
+                    } else {
+                        FlushWithBufferedIO();
+                    }
+                    promise->setValue(folly::Unit{});
+                } catch (const std::exception& e) {
+                    promise->setException(
+                        folly::exception_wrapper(std::current_exception()));
+                } catch (...) {
+                    promise->setException(
+                        folly::exception_wrapper(std::current_exception()));
+                }
+            });
+
+            try {
+                future.wait();
+            } catch (const std::exception& e) {
+                Cleanup();
+                PanicInfo(ErrorCode::FileWriteFailed,
+                          "Failed to flush file: {}, error: {}",
+                          filename_,
+                          e.what());
+            }
+        } else {
+            if (use_direct_io_) {
+                FlushWithDirectIO();
+            } else {
+                FlushWithBufferedIO();
+            }
         }
     }
 

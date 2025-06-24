@@ -206,7 +206,8 @@ func ReconfigFileWriterParams(evt *config.Event) {
 		pt := paramtable.Get()
 		mode := pt.CommonCfg.DiskWriteMode.GetValue()
 		bufferSize := pt.CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()
-		C.InitFileWriterConfig(C.CString(mode), C.uint64_t(bufferSize))
+		nrThreads := pt.CommonCfg.DiskWriteNrThreads.GetAsInt()
+		C.InitFileWriterConfig(C.CString(mode), C.uint64_t(bufferSize), C.int(nrThreads))
 	}
 }
 
@@ -218,6 +219,8 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteMode", ReconfigFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,
 		config.NewHandler("common.diskWriteBufferSizeKb", ReconfigFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteNrThreads.Key,
+		config.NewHandler("common.diskWriteNrThreads", ReconfigFileWriterParams))
 }
 
 // InitSegcore set init params of segCore, such as chunkRows, SIMD type...
@@ -257,7 +260,8 @@ func (node *QueryNode) InitSegcore() error {
 
 	cDiskWriteMode := C.CString(paramtable.Get().CommonCfg.DiskWriteMode.GetValue())
 	cDiskWriteBufferSizeKb := C.uint64_t(paramtable.Get().CommonCfg.DiskWriteBufferSizeKb.GetAsUint64())
-	C.InitFileWriterConfig(cDiskWriteMode, cDiskWriteBufferSizeKb)
+	cDiskWriteNrThreads := C.int(paramtable.Get().CommonCfg.DiskWriteNrThreads.GetAsInt())
+	C.InitFileWriterConfig(cDiskWriteMode, cDiskWriteBufferSizeKb, cDiskWriteNrThreads)
 	C.free(unsafe.Pointer(cDiskWriteMode))
 
 	node.RegisterSegcoreConfigWatcher()
