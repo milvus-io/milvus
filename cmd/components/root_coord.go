@@ -55,6 +55,7 @@ func (rc *RootCoord) Prepare() error {
 
 // Run starts service
 func (rc *RootCoord) Run() error {
+	log.Ctx(rc.ctx).Info("RootCoord component wrapper starting server run...")
 	if err := rc.svr.Run(); err != nil {
 		log.Ctx(rc.ctx).Error("RootCoord starts error", zap.Error(err))
 		return err

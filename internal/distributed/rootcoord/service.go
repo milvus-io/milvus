@@ -220,6 +220,7 @@ func (s *Server) init() error {
 		dataCoord := s.newDataCoordClient(s.ctx)
 		s.dataCoord = dataCoord
 		if err := s.rootCoord.SetDataCoordClient(dataCoord); err != nil {
+			log.Error("RootCoord failed to set DataCoord client", zap.Error(err))
 			panic(err)
 		}
 	}
@@ -229,11 +230,14 @@ func (s *Server) init() error {
 		queryCoord := s.newQueryCoordClient(s.ctx)
 		s.queryCoord = queryCoord
 		if err := s.rootCoord.SetQueryCoordClient(queryCoord); err != nil {
+			log.Error("RootCoord failed to set QueryCoord client", zap.Error(err))
 			panic(err)
 		}
 	}
 
+	log.Info("RootCoord starting initialization...")
 	if err := s.rootCoord.Init(); err != nil {
+		log.Error("RootCoord initialization failed", zap.Error(err))
 		return err
 	}
 	log.Info("RootCoord init done ...")
@@ -321,11 +325,13 @@ func (s *Server) start() error {
 		log.Error("RootCoord registers service failed", zap.Error(err))
 		return err
 	}
+	log.Info("RootCoord session registration completed successfully")
 
 	if err := s.rootCoord.Start(); err != nil {
 		log.Error("RootCoord start service failed", zap.Error(err))
 		return err
 	}
+	log.Info("RootCoord service started successfully")
 
 	return nil
 }

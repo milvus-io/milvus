@@ -282,7 +282,9 @@ func (c *Core) SetQueryCoordClient(s types.QueryCoordClient) error {
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	log := log.Ctx(c.ctx)
+	log.Info("RootCoord starting session registration to etcd...")
 	c.session.Register()
+	log.Info("RootCoord session.Register() call completed, setting up post-registration logic...")
 	afterRegister := func() {
 		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
 		log.Info("RootCoord Register Finished")
@@ -292,7 +294,14 @@ func (c *Core) Register() error {
 		})
 	}
 	if c.enableActiveStandBy {
+		log.Info("RootCoord starting active-standby session processing...")
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("RootCoord active-standby session processing panicked", zap.Any("panic", r))
+					panic(r)
+				}
+			}()
 			if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
 				log.Warn("failed to activate standby rootcoord server", zap.Error(err))
 				panic(err)
@@ -300,6 +309,7 @@ func (c *Core) Register() error {
 			afterRegister()
 		}()
 	} else {
+		log.Info("RootCoord running in non-standby mode, executing afterRegister directly...")
 		afterRegister()
 	}
 
@@ -542,16 +552,22 @@ func (c *Core) Init() error {
 
 			var err error
 			c.initOnce.Do(func() {
+				log.Info("RootCoord starting internal initialization (active-standby mode)...")
 				if err = c.initInternal(); err != nil {
-					log.Error("RootCoord init failed", zap.Error(err))
+					log.Error("RootCoord internal initialization failed (active-standby mode)", zap.Error(err))
+				} else {
+					log.Info("RootCoord internal initialization completed successfully (active-standby mode)")
 				}
 			})
 			if err != nil {
 				return err
 			}
 			c.startOnce.Do(func() {
+				log.Info("RootCoord starting internal service (active-standby mode)...")
 				if err = c.startInternal(); err != nil {
-					log.Error("RootCoord start failed", zap.Error(err))
+					log.Error("RootCoord internal service start failed (active-standby mode)", zap.Error(err))
+				} else {
+					log.Info("RootCoord internal service started successfully (active-standby mode)")
 				}
 			})
 			log.Info("RootCoord startup success", zap.String("address", c.session.Address))
@@ -561,7 +577,13 @@ func (c *Core) Init() error {
 		log.Info("RootCoord enter standby mode successfully")
 	} else {
 		c.initOnce.Do(func() {
+			log.Info("RootCoord starting internal initialization (non-standby mode)...")
 			initError = c.initInternal()
+			if initError != nil {
+				log.Error("RootCoord internal initialization failed (non-standby mode)", zap.Error(initError))
+			} else {
+				log.Info("RootCoord internal initialization completed successfully (non-standby mode)")
+			}
 		})
 	}
 
@@ -732,15 +754,20 @@ func (c *Core) restore(ctx context.Context) error {
 
 func (c *Core) startInternal() error {
 	log := log.Ctx(c.ctx)
+	log.Info("RootCoord starting proxy watcher...")
 	if err := c.proxyWatcher.WatchProxy(c.ctx); err != nil {
 		log.Fatal("rootcoord failed to watch proxy", zap.Error(err))
 		// you can not just stuck here,
 		panic(err)
 	}
+	log.Info("RootCoord proxy watcher started successfully")
 
+	log.Info("RootCoord starting restore process...")
 	if err := c.restore(c.ctx); err != nil {
+		log.Error("RootCoord restore process failed", zap.Error(err))
 		panic(err)
 	}
+	log.Info("RootCoord restore process completed successfully")
 
 	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		c.quotaCenter.Start()
@@ -787,10 +814,17 @@ func (c *Core) startServerLoop() {
 
 // Start starts RootCoord.
 func (c *Core) Start() error {
+	log := log.Ctx(c.ctx)
 	var err error
 	if !c.enableActiveStandBy {
 		c.startOnce.Do(func() {
+			log.Info("RootCoord starting internal service (non-standby mode)...")
 			err = c.startInternal()
+			if err != nil {
+				log.Error("RootCoord internal service start failed (non-standby mode)", zap.Error(err))
+			} else {
+				log.Info("RootCoord internal service started successfully (non-standby mode)")
+			}
 		})
 	}
 
