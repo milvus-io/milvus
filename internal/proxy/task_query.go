@@ -482,9 +482,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
 	}
 	if collectionInfo.collectionTTL != 0 {
-		physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
+		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		// preventing overflow, abort ttl timestamp
+		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+			t.CollectionTtlTimestamps = 0
+		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
