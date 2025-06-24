@@ -116,8 +116,8 @@ class AzureChunkManager : public ChunkManager {
         return path_prefix_;
     }
 
-    inline std::string
-    GetBucketName() {
+    virtual std::string
+    GetBucketName() const {
         return default_bucket_name_;
     }
 

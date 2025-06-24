@@ -131,10 +131,17 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContainsForIndexSegmentImpl();
 
+    void
+    ExecuteSharedArrayFilterWithExecutor(
+        const std::string& pointer,
+        const std::function<bool(milvus::BsonView, uint32_t, uint32_t)>&
+            shared_executor);
+
  private:
     std::shared_ptr<const milvus::expr::JsonContainsExpr> expr_;
     bool arg_inited_{false};
     std::shared_ptr<MultiElement> arg_set_;
+    std::shared_ptr<MultiElement> arg_set_double_;
 };
 }  //namespace exec
 }  // namespace milvus

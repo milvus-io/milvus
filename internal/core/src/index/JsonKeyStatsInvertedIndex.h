@@ -16,17 +16,10 @@
 
 #include "index/InvertedIndexTantivy.h"
 #include "common/jsmn.h"
+#include "index/json_stats/utils.h"
+
 namespace milvus::index {
-enum class JSONType {
-    UNKNOWN,
-    BOOL,
-    INT32,
-    INT64,
-    FLOAT,
-    DOUBLE,
-    STRING,
-    STRING_ESCAPE
-};
+
 using stdclock = std::chrono::high_resolution_clock;
 class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:

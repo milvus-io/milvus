@@ -149,7 +149,21 @@ class SortVectorElement : public MultiElement {
     bool
     In(const ValueType& value) const override {
         AssertInfo(sorted_, "In() should be sorted before");
-        if (std::holds_alternative<T>(value)) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (std::holds_alternative<std::string>(value)) {
+                return std::binary_search(values_.begin(),
+                                          values_.end(),
+                                          std::get<std::string>(value));
+            } else if (std::holds_alternative<std::string_view>(value)) {
+                return std::binary_search(
+                    values_.begin(),
+                    values_.end(),
+                    std::string(std::get<std::string_view>(value)),
+                    [](const std::string& a, std::string_view b) {
+                        return a < b;
+                    });
+            }
+        } else if (std::holds_alternative<T>(value)) {
             return std::binary_search(
                 values_.begin(), values_.end(), std::get<T>(value));
         }
@@ -165,6 +179,11 @@ class SortVectorElement : public MultiElement {
     void
     AddElement(const T& value) {
         values_.push_back(value);
+    }
+
+    std::vector<T>
+    GetElements() const {
+        return values_;
     }
 
  public:
@@ -243,6 +262,7 @@ class SetElement : public MultiElement {
         if (std::holds_alternative<T>(value)) {
             return values_.count(std::get<T>(value)) > 0;
         }
+        return false;
     }
 
     void
