@@ -102,7 +102,7 @@ genValidIter(const uint8_t* valid_data, int length) {
 
 void
 ReadMediumType(BinlogReaderPtr reader) {
-    AssertInfo(reader->Tail() == 0,
+    AssertInfo(reader->Tell() == 0,
                "medium type must be parsed from stream header");
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
