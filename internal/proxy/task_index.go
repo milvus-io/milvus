@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -50,6 +51,10 @@ const (
 	DropIndexTaskName             = "DropIndexTask"
 	GetIndexStateTaskName         = "GetIndexStateTask"
 	GetIndexBuildProgressTaskName = "GetIndexBuildProgressTask"
+
+	NgramIndexName = "ngram"
+	MinGramKey     = "min_gram"
+	MaxGramKey     = "max_gram"
 
 	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey
@@ -214,6 +219,34 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 		if err != nil || indexparamcheck.IsHYBRIDChecker(checker) {
 			log.Ctx(ctx).Warn("Failed to get index checker", zap.String(common.IndexTypeKey, specifyIndexType))
 			return merr.WrapErrParameterInvalid("valid index", fmt.Sprintf("invalid index type: %s", specifyIndexType))
+		}
+
+		// Check parameters for Ngram index
+		if specifyIndexType == NgramIndexName {
+			if cit.fieldSchema.DataType != schemapb.DataType_VarChar {
+				// todo(SpadeA): we may support it for json in the future
+				return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR field")
+			}
+
+			minGramStr, minGramExist := indexParamsMap[MinGramKey]
+			maxGramStr, maxGramExist := indexParamsMap[MaxGramKey]
+			if !minGramExist || !maxGramExist {
+				return merr.WrapErrParameterInvalidMsg("Ngram index must specify both min_gram and max_gram")
+			}
+
+			minGram, err := strconv.Atoi(minGramStr)
+			if err != nil {
+				return merr.WrapErrParameterInvalidMsg("min_gram for Ngram index must be an integer, got: %s", minGramStr)
+			}
+
+			maxGram, err := strconv.Atoi(maxGramStr)
+			if err != nil {
+				return merr.WrapErrParameterInvalidMsg("max_gram for Ngram index must be an integer, got: %s", maxGramStr)
+			}
+
+			if minGram <= 0 || maxGram <= 0 || minGram > maxGram {
+				return merr.WrapErrParameterInvalidMsg("invalid min_gram or max_gram value for Ngram index, min_gram: %d, max_gram: %d", minGram, maxGram)
+			}
 		}
 	}
 
