@@ -894,7 +894,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
         "milvus_tokenizer",
         field_meta.get_analyzer_params().c_str());
     index->Commit();
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
     text_indexes_[field_id] = std::move(index);
@@ -955,7 +955,7 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
         JSON_KEY_STATS_COMMIT_INTERVAL, unique_id.c_str());
 
     index->Commit();
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
 
     json_indexes_[field_id] = std::move(index);
 }

@@ -2138,7 +2138,7 @@ SegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     }
 
     // create index reader.
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
     // release index writer.
     index->Finish();
 

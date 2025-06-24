@@ -1,3 +1,5 @@
+use crate::convert_to_rust_slice;
+use core::slice;
 use std::ffi::c_void;
 use std::ops::Bound;
 use tantivy::{directory::MmapDirectory, Index};
@@ -31,6 +33,6 @@ pub fn free_binding<T>(ptr: *mut c_void) {
 #[cfg(test)]
 pub extern "C" fn set_bitset(bitset: *mut c_void, doc_id: *const u32, len: usize) {
     let bitset = unsafe { &mut *(bitset as *mut Vec<u32>) };
-    let docs = unsafe { std::slice::from_raw_parts(doc_id, len) };
+    let docs = unsafe { convert_to_rust_slice!(doc_id, len) };
     bitset.extend_from_slice(docs);
 }

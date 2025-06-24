@@ -1523,7 +1523,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     }
 
     // create index reader.
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetSealed);
     // release index writer.
     index->Finish();
 
