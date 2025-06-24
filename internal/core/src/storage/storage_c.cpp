@@ -119,15 +119,15 @@ InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads) 
     std::string mode_str(mode);
 
     if (mode_str == "direct") {
-        milvus::storage::FileWriterConfig::GetInstance().SetMode(milvus::storage::FileWriterConfig::WriteMode::DIRECT);
-        milvus::storage::FileWriterConfig::GetInstance().SetBufferSize(buffer_size_kb * 1024);
+        milvus::storage::FileWriter::SetMode(milvus::storage::FileWriter::WriteMode::DIRECT);
+        milvus::storage::FileWriter::SetBufferSize(buffer_size_kb * 1024);
     } else if (mode_str == "buffered") {
-        milvus::storage::FileWriterConfig::GetInstance().SetMode(milvus::storage::FileWriterConfig::WriteMode::BUFFERED);
+        milvus::storage::FileWriter::SetMode(milvus::storage::FileWriter::WriteMode::BUFFERED);
     } else {
         return milvus::FailureCStatus(milvus::ConfigInvalid, "Invalid mode");
     }
 
-    milvus::storage::FileWriterConfig::GetInstance().SetWriteExecutor(nr_threads);
+    milvus::storage::FileWriteWorkerPool::GetInstance().Configure(nr_threads);
 
     return milvus::SuccessCStatus();
 }

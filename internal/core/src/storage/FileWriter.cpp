@@ -22,12 +22,12 @@
 namespace milvus::storage {
 
 FileWriter::FileWriter(std::string filename) : filename_(std::move(filename)) {
-    auto write_mode = FileWriterConfig::GetInstance().GetMode();
-    use_direct_io_ = write_mode == FileWriterConfig::WriteMode::DIRECT;
+    auto mode = GetMode();
+    use_direct_io_ = mode == WriteMode::DIRECT;
     auto open_flags = O_CREAT | O_RDWR | O_TRUNC;
     if (use_direct_io_) {
         // check if the file is aligned to the alignment size
-        size_t buf_size = FileWriterConfig::GetInstance().GetBufferSize();
+        size_t buf_size = GetBufferSize();
         AssertInfo(
             !(buf_size == 0 || (buf_size % ALIGNMENT_BYTES) != 0),
             "Buffer size must be greater than 0 and aligned to the alignment "
@@ -112,6 +112,19 @@ FileWriter::PositionedWrite(const void* data,
 }
 
 void
+FileWriter::PositionedWriteWithCheck(const void* data,
+                                     size_t nbyte,
+                                     size_t file_offset) {
+    if (!PositionedWrite(data, nbyte, file_offset)) {
+        Cleanup();
+        PanicInfo(ErrorCode::FileWriteFailed,
+                  "Failed to write to file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
+    }
+}
+
+void
 FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
     const char* src = static_cast<const char*>(data);
     // if the data can fit in the aligned buffer, we can just copy it to the aligned buffer
@@ -126,13 +139,7 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
     if (offset_ != 0) {
         size_t cpy_size = capacity_ - offset_;
         memcpy(static_cast<char*>(aligned_buf_) + offset_, src, cpy_size);
-        if (!PositionedWrite(aligned_buf_, capacity_, file_size_)) {
-            Cleanup();
-            PanicInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      strerror(errno));
-        }
+        PositionedWriteWithCheck(aligned_buf_, capacity_, file_size_);
         file_size_ += capacity_;
         left_size -= cpy_size;
         src += cpy_size;
@@ -144,17 +151,9 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
     if (reinterpret_cast<uintptr_t>(src) % ALIGNMENT_BYTES == 0) {
         size_t aligned_left_size = left_size & ~ALIGNMENT_MASK;
         left_size -= aligned_left_size;
-        int empty_loops = 0;
-        int64_t this_wait_us = 0;
         while (aligned_left_size != 0) {
             size_t bytes_written = std::min(aligned_left_size, capacity_);
-            if (!PositionedWrite(src, bytes_written, file_size_)) {
-                Cleanup();
-                PanicInfo(ErrorCode::FileWriteFailed,
-                          "Failed to write to file: {}, error: {}",
-                          filename_,
-                          strerror(errno));
-            }
+            PositionedWriteWithCheck(src, bytes_written, file_size_);
             file_size_ += bytes_written;
             aligned_left_size -= bytes_written;
             src += bytes_written;
@@ -165,13 +164,7 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
     while (left_size >= capacity_) {
         size_t copy_size = capacity_ - offset_;
         memcpy(static_cast<char*>(aligned_buf_) + offset_, src, copy_size);
-        if (!PositionedWrite(aligned_buf_, capacity_, file_size_)) {
-            Cleanup();
-            PanicInfo(ErrorCode::FileWriteFailed,
-                      "Failed to write to file: {}, error: {}",
-                      filename_,
-                      strerror(errno));
-        }
+        PositionedWriteWithCheck(aligned_buf_, capacity_, file_size_);
         file_size_ += capacity_;
         offset_ = 0;
         left_size -= copy_size;
@@ -192,13 +185,7 @@ FileWriter::WriteWithDirectIO(const void* data, size_t nbyte) {
 
 void
 FileWriter::WriteWithBufferedIO(const void* data, size_t nbyte) {
-    if (!PositionedWrite(data, nbyte, file_size_)) {
-        Cleanup();
-        PanicInfo(ErrorCode::FileWriteFailed,
-                  "Failed to write to file: {}, error: {}",
-                  filename_,
-                  strerror(errno));
-    }
+    PositionedWriteWithCheck(data, nbyte, file_size_);
     file_size_ += nbyte;
     monitor::disk_write_total_bytes_buffered.Increment(nbyte);
 }
@@ -220,9 +207,6 @@ FileWriter::Write(const void* data, size_t nbyte) {
                 WriteWithBufferedIO(data, nbyte);
             }
             promise->setValue(folly::Unit{});
-        } catch (const std::exception& e) {
-            promise->setException(
-                folly::exception_wrapper(std::current_exception()));
         } catch (...) {
             promise->setException(
                 folly::exception_wrapper(std::current_exception()));
@@ -250,15 +234,10 @@ FileWriter::Write(const void* data, size_t nbyte) {
 
 void
 FileWriter::FlushWithBufferedIO() {
-    if (!PositionedWrite(aligned_buf_, offset_, file_size_)) {
-        Cleanup();
-        PanicInfo(ErrorCode::FileWriteFailed,
-                  "Failed to write to file: {}, error: {}",
-                  filename_,
-                  strerror(errno));
-    }
+    PositionedWriteWithCheck(aligned_buf_, offset_, file_size_);
     file_size_ += offset_;
     offset_ = 0;
+    monitor::disk_write_total_bytes_buffered.Increment(offset_);
 }
 
 void
@@ -268,13 +247,7 @@ FileWriter::FlushWithDirectIO() {
     memset(static_cast<char*>(aligned_buf_) + offset_,
            0,
            nearest_aligned_offset - offset_);
-    if (!PositionedWrite(aligned_buf_, nearest_aligned_offset, file_size_)) {
-        Cleanup();
-        PanicInfo(ErrorCode::FileWriteFailed,
-                  "Failed to write to file: {}, error: {}",
-                  filename_,
-                  strerror(errno));
-    }
+    PositionedWriteWithCheck(aligned_buf_, nearest_aligned_offset, file_size_);
     file_size_ += offset_;
     offset_ = 0;
     // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
@@ -285,6 +258,7 @@ FileWriter::FlushWithDirectIO() {
                   filename_,
                   strerror(errno));
     }
+    monitor::disk_write_total_bytes_direct.Increment(offset_);
 }
 
 size_t
@@ -303,9 +277,6 @@ FileWriter::Finish() {
                     FlushWithBufferedIO();
                 }
                 promise->setValue(folly::Unit{});
-            } catch (const std::exception& e) {
-                promise->setException(
-                    folly::exception_wrapper(std::current_exception()));
             } catch (...) {
                 promise->setException(
                     folly::exception_wrapper(std::current_exception()));
@@ -336,6 +307,53 @@ FileWriter::Finish() {
 
     // return the file size
     return file_size_;
+}
+
+FileWriter::WriteMode FileWriter::mode_ = FileWriter::WriteMode::BUFFERED;
+size_t FileWriter::buffer_size_ = DEFAULT_BUFFER_SIZE;
+
+void
+FileWriter::SetMode(WriteMode mode) {
+    if (mode != WriteMode::BUFFERED && mode != WriteMode::DIRECT) {
+        LOG_WARN(
+            "Invalid write mode: {}, expected: BUFFERED or DIRECT, "
+            "set to BUFFERED",
+            static_cast<int>(mode));
+        mode = WriteMode::BUFFERED;
+    }
+    mode_ = mode;
+    LOG_INFO("Set write mode to {}", static_cast<uint8_t>(mode));
+}
+
+void
+FileWriter::SetBufferSize(size_t buffer_size) {
+    if (buffer_size > MAX_BUFFER_SIZE) {
+        LOG_WARN("Invalid buffer size: {}, expected: <= {}, set to {}",
+                 buffer_size,
+                 MAX_BUFFER_SIZE,
+                 MAX_BUFFER_SIZE);
+        buffer_size = MAX_BUFFER_SIZE;
+    } else if (buffer_size < MIN_BUFFER_SIZE) {
+        LOG_WARN("Invalid buffer size: {}, expected: >= {}, set to {}",
+                 buffer_size,
+                 MIN_BUFFER_SIZE,
+                 MIN_BUFFER_SIZE);
+        buffer_size = MIN_BUFFER_SIZE;
+    } else {
+        buffer_size = (buffer_size + ALIGNMENT_MASK) & ~ALIGNMENT_MASK;
+    }
+    buffer_size_ = buffer_size;
+    LOG_INFO("Set buffer size to {}", buffer_size);
+}
+
+FileWriter::WriteMode
+FileWriter::GetMode() {
+    return mode_;
+}
+
+size_t
+FileWriter::GetBufferSize() {
+    return buffer_size_;
 }
 
 }  // namespace milvus::storage
