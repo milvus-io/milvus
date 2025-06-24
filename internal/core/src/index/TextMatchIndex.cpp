@@ -149,8 +149,8 @@ TextMatchIndex::Load(const Config& config) {
     disk_file_manager_->CacheTextLogToDisk(files_value);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),
-                                                     milvus::index::SetBitsetSealed);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        prefix.c_str(), milvus::index::SetBitsetSealed);
 }
 
 void
