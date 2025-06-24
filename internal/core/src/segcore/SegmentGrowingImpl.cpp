@@ -1269,7 +1269,7 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     // loading old segment with new schema will have meta appended
     if (!insert_record_.is_data_exist(field_id)) {
         insert_record_.append_field_meta(
-            field_id, field_meta, size_per_chunk());
+            field_id, field_meta, size_per_chunk(), mmap_descriptor_);
     }
 
     auto total_row_num = insert_record_.size();
