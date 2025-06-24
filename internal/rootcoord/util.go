@@ -479,6 +479,11 @@ func checkStructArrayFieldSchema(schemas []*schemapb.StructArrayFieldSchema) err
 		// todo(SpadeA): check struct array field schema
 
 		for _, field := range schema.GetFields() {
+			if field.IsPartitionKey || field.IsPrimaryKey {
+				msg := fmt.Sprintf("partition key or primary key can not be in struct array field. data type:%s, element type:%s, name:%s",
+					field.DataType.String(), field.ElementType.String(), field.Name)
+				return merr.WrapErrParameterInvalidMsg(msg)
+			}
 			if field.GetNullable() && typeutil.IsVectorType(field.ElementType) {
 				msg := fmt.Sprintf("vector type not support null, data type:%s, element type:%s, name:%s",
 					field.DataType.String(), field.ElementType.String(), field.Name)
