@@ -37,7 +37,7 @@ main(int argc, char* argv[]) {
         text_index.commit();
     }
 
-    text_index.create_reader();
+    text_index.create_reader(milvus::index::SetBitsetSealed);
     text_index.register_tokenizer(tokenizer_name.c_str(), analyzer_params);
 
     {

@@ -179,18 +179,18 @@ struct TantivyIndexWrapper {
 
     // create reader.
     void
-    create_reader() {
+    create_reader(SetBitsetFn set_bitset) {
         if (writer_ != nullptr) {
-            auto res = RustResultWrapper(tantivy_create_reader_from_writer(
-                writer_, milvus::index::SetBitset));
+            auto res = RustResultWrapper(
+                tantivy_create_reader_from_writer(writer_, set_bitset));
             AssertInfo(res.result_->success,
                        "failed to create reader from writer: {}",
                        res.result_->error);
             reader_ = res.result_->value.ptr._0;
         } else if (!path_.empty()) {
             assert(tantivy_index_exist(path_.c_str()));
-            auto res = RustResultWrapper(tantivy_load_index(
-                path_.c_str(), load_in_mmap_, milvus::index::SetBitset));
+            auto res = RustResultWrapper(
+                tantivy_load_index(path_.c_str(), load_in_mmap_, set_bitset));
             AssertInfo(res.result_->success,
                        "failed to load index: {}",
                        res.result_->error);

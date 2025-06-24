@@ -630,7 +630,7 @@ class JsonFlatIndexExprTest : public ::testing::Test {
 
         json_index_->BuildWithFieldData({json_field});
         json_index_->finish();
-        json_index_->create_reader();
+        json_index_->create_reader(milvus::index::SetBitsetSealed);
 
         load_index_info.field_id = json_fid_.get();
         load_index_info.field_type = DataType::JSON;

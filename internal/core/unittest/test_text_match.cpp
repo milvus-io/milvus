@@ -155,7 +155,7 @@ TEST(TextMatch, Index) {
                                          "unique_id",
                                          "milvus_tokenizer",
                                          "{}");
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddText("football, basketball, pingpang", true, 0);
     index->AddText("", false, 1);
     index->AddText("swimming, football", true, 2);

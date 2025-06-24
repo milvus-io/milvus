@@ -135,7 +135,7 @@ TEST(JsonIndexTest, TestJsonContains) {
     json_field->add_json_data(jsons);
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;
@@ -230,7 +230,7 @@ TEST(JsonIndexTest, TestJsonCast) {
     json_field->add_json_data(jsons);
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;

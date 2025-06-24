@@ -31,7 +31,7 @@ main(int argc, char* argv[]) {
         text_index.commit();
     }
 
-    text_index.create_reader();
+    text_index.create_reader(milvus::index::SetBitsetSealed);
     {
         auto result = to_set(text_index.match_query("football"));
         assert(result.size() == 2);
