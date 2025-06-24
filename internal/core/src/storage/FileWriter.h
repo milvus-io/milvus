@@ -29,6 +29,7 @@
 #include <folly/executors/SerialExecutor.h>
 
 #include "common/EasyAssert.h"
+#include "storage/PayloadWriter.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::storage {
@@ -93,44 +94,24 @@ class FileWriter {
     size_t offset_{0};
 };
 
-/**
- * FileWriterConfig is a singleton used to configure the FileWriter.
- * Three parameters are configurable:
- * 1. The number of writer threads in the extra thread pool, which is used to write data to files.
- * 2. The write mode, which can be 'buffered' (default) or 'direct'.
- * 3. The buffer size used for direct I/O, which is only used when the write mode is 'direct'.
- *
- * FileWriterConfig is thread-safe, so you can modify the configuration from multiple threads.
- * Note: The write mode and buffer size are not protected by a lock, but this is acceptable since changes to the write mode and buffer size will not affect existing FileWriter instances.
- */
-class FileWriterConfig {
+class FileWriteWorkerPool {
  public:
-    enum class WriteMode : uint8_t { BUFFERED = 0, DIRECT = 1 };
+    FileWriteWorkerPool() = default;
 
-    static FileWriterConfig&
+    static FileWriteWorkerPool&
     GetInstance() {
-        static FileWriterConfig instance;
+        static FileWriteWorkerPool instance;
         return instance;
     }
 
     static void
-    Configure(int nr_executor, WriteMode mode, size_t buffer_size) {
+    Configure(int nr_executor) {
         auto& instance = GetInstance();
-        instance.SetWriteExecutor(nr_executor);
-        instance.SetMode(mode);
-        instance.SetBufferSize(buffer_size);
-    }
-
-    ~FileWriterConfig() {
-        if (executor_ != nullptr) {
-            executor_->stop();
-            executor_->join();
-            executor_ = nullptr;
-        }
+        instance.SetExecutor(nr_executor);
     }
 
     void
-    SetWriteExecutor(int nr_executor) {
+    SetExecutor(int nr_executor) {
         if (nr_executor < 0) {
             LOG_WARN(
                 "Invalid number of executor, expected: > 0, got: {}, "
@@ -162,6 +143,63 @@ class FileWriterConfig {
             old_executor->join();
         }
         LOG_INFO("Set write executor to {}", nr_executor);
+    }
+
+    bool
+    AddTask(std::function<void()> task) {
+        if (executor_ == nullptr) {
+            return false;
+        }
+        executor_->add(std::move(task));
+        return true;
+    }
+
+    ~FileWriteWorkerPool() {
+        if (executor_ != nullptr) {
+            executor_->stop();
+            executor_->join();
+            executor_ = nullptr;
+        }
+    }
+
+ private:
+    std::shared_ptr<folly::CPUThreadPoolExecutor> executor_{nullptr};
+    std::mutex executor_mutex_{};
+};
+
+/**
+ * FileWriterConfig is a singleton used to configure the FileWriter.
+ * Three parameters are configurable:
+ * 1. The number of writer threads in the extra thread pool, which is used to write data to files.
+ * 2. The write mode, which can be 'buffered' (default) or 'direct'.
+ * 3. The buffer size used for direct I/O, which is only used when the write mode is 'direct'.
+ *
+ * FileWriterConfig is thread-safe, so you can modify the configuration from multiple threads.
+ * Note: The write mode and buffer size are not protected by a lock, but this is acceptable since changes to the write mode and buffer size will not affect existing FileWriter instances.
+ */
+class FileWriterConfig {
+ public:
+    enum class WriteMode : uint8_t { BUFFERED = 0, DIRECT = 1 };
+
+    static FileWriterConfig&
+    GetInstance() {
+        static FileWriterConfig instance;
+        return instance;
+    }
+
+    static void
+    Configure(int nr_executor, WriteMode mode, size_t buffer_size) {
+        auto& instance = GetInstance();
+        instance.SetWriteExecutor(nr_executor);
+        instance.SetMode(mode);
+        instance.SetBufferSize(buffer_size);
+    }
+
+    ~FileWriterConfig() = default;
+
+    void
+    SetWriteExecutor(int nr_executor) {
+        FileWriteWorkerPool::Configure(nr_executor);
     }
 
     void
@@ -208,10 +246,9 @@ class FileWriterConfig {
         return buffer_size_;
     }
 
-    std::shared_ptr<folly::CPUThreadPoolExecutor>
+    FileWriteWorkerPool&
     GetWriteExecutor() {
-        std::lock_guard<std::mutex> lock(executor_mutex_);
-        return executor_;
+        return FileWriteWorkerPool::GetInstance();
     }
 
     FileWriterConfig(const FileWriterConfig&) = delete;
@@ -230,10 +267,6 @@ class FileWriterConfig {
     FileWriterConfig() = default;
     WriteMode mode_{WriteMode::BUFFERED};
     size_t buffer_size_{0};
-
-    // for executor
-    std::mutex executor_mutex_;
-    std::shared_ptr<folly::CPUThreadPoolExecutor> executor_{nullptr};
 };
 
 }  // namespace milvus::storage

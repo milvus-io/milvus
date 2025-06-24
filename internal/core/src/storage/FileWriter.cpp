@@ -210,27 +210,26 @@ FileWriter::Write(const void* data, size_t nbyte) {
         return;
     }
 
-    auto executor = FileWriterConfig::GetInstance().GetWriteExecutor();
-    if (executor != nullptr) {
-        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-        auto future = promise->getFuture();
-        executor->add([this, data, nbyte, promise]() {
-            try {
-                if (use_direct_io_) {
-                    WriteWithDirectIO(data, nbyte);
-                } else {
-                    WriteWithBufferedIO(data, nbyte);
-                }
-                promise->setValue(folly::Unit{});
-            } catch (const std::exception& e) {
-                promise->setException(
-                    folly::exception_wrapper(std::current_exception()));
-            } catch (...) {
-                promise->setException(
-                    folly::exception_wrapper(std::current_exception()));
+    auto promise = std::make_shared<folly::Promise<folly::Unit>>();
+    auto future = promise->getFuture();
+    auto task = [this, data, nbyte, promise]() {
+        try {
+            if (use_direct_io_) {
+                WriteWithDirectIO(data, nbyte);
+            } else {
+                WriteWithBufferedIO(data, nbyte);
             }
-        });
+            promise->setValue(folly::Unit{});
+        } catch (const std::exception& e) {
+            promise->setException(
+                folly::exception_wrapper(std::current_exception()));
+        } catch (...) {
+            promise->setException(
+                folly::exception_wrapper(std::current_exception()));
+        }
+    };
 
+    if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
         try {
             future.wait();
         } catch (const std::exception& e) {
@@ -294,28 +293,26 @@ FileWriter::Finish() {
 
     // if the aligned buffer is not empty, we should flush it to the file
     if (offset_ != 0) {
-        auto executor = FileWriterConfig::GetInstance().GetWriteExecutor();
-        if (executor != nullptr) {
-            auto promise = std::make_shared<folly::Promise<folly::Unit>>();
-            auto future = promise->getFuture();
-
-            executor->add([this, promise]() {
-                try {
-                    if (use_direct_io_) {
-                        FlushWithDirectIO();
-                    } else {
-                        FlushWithBufferedIO();
-                    }
-                    promise->setValue(folly::Unit{});
-                } catch (const std::exception& e) {
-                    promise->setException(
-                        folly::exception_wrapper(std::current_exception()));
-                } catch (...) {
-                    promise->setException(
-                        folly::exception_wrapper(std::current_exception()));
+        auto promise = std::make_shared<folly::Promise<folly::Unit>>();
+        auto future = promise->getFuture();
+        auto task = [this, promise]() {
+            try {
+                if (use_direct_io_) {
+                    FlushWithDirectIO();
+                } else {
+                    FlushWithBufferedIO();
                 }
-            });
+                promise->setValue(folly::Unit{});
+            } catch (const std::exception& e) {
+                promise->setException(
+                    folly::exception_wrapper(std::current_exception()));
+            } catch (...) {
+                promise->setException(
+                    folly::exception_wrapper(std::current_exception()));
+            }
+        };
 
+        if (FileWriteWorkerPool::GetInstance().AddTask(task)) {
             try {
                 future.wait();
             } catch (const std::exception& e) {
