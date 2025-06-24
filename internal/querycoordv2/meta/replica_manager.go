@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -36,6 +37,39 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+// ReplicaManagerInterface defines core operations for replica management
+type ReplicaManagerInterface interface {
+	// Basic operations
+	Recover(ctx context.Context, collections []int64) error
+	Get(ctx context.Context, id typeutil.UniqueID) *Replica
+	Spawn(ctx context.Context, collection int64,
+		replicaNumInRG map[string]int, channels []string, loadPriority commonpb.LoadPriority) ([]*Replica, error)
+
+	// Replica manipulation
+	TransferReplica(ctx context.Context, collectionID typeutil.UniqueID, srcRGName string, dstRGName string, replicaNum int) error
+	MoveReplica(ctx context.Context, dstRGName string, toMove []*Replica) error
+	RemoveCollection(ctx context.Context, collectionID typeutil.UniqueID) error
+	RemoveReplicas(ctx context.Context, collectionID typeutil.UniqueID, replicas ...typeutil.UniqueID) error
+
+	// Query operations
+	GetByCollection(ctx context.Context, collectionID typeutil.UniqueID) []*Replica
+	GetByCollectionAndNode(ctx context.Context, collectionID, nodeID typeutil.UniqueID) *Replica
+	GetByNode(ctx context.Context, nodeID typeutil.UniqueID) []*Replica
+	GetByResourceGroup(ctx context.Context, rgName string) []*Replica
+
+	// Node management
+	RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) error
+	RemoveNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error
+	RemoveSQNode(ctx context.Context, replicaID typeutil.UniqueID, nodes ...typeutil.UniqueID) error
+
+	// Metadata access
+	GetResourceGroupByCollection(ctx context.Context, collection typeutil.UniqueID) typeutil.Set[string]
+	GetReplicasJSON(ctx context.Context, meta *Meta) string
+}
+
+// Add the interface implementation assertion
+var _ ReplicaManagerInterface = (*ReplicaManager)(nil)
 
 type ReplicaManager struct {
 	rwmutex sync.RWMutex
@@ -94,7 +128,8 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		}
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
-			m.putReplicaInMemory(newReplica(replica))
+			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
+			m.putReplicaInMemory(rep)
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
@@ -125,7 +160,9 @@ func (m *ReplicaManager) Get(ctx context.Context, id typeutil.UniqueID) *Replica
 }
 
 // Spawn spawns N replicas at resource group for given collection in ReplicaManager.
-func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int, channels []string) ([]*Replica, error) {
+func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
+	channels []string, loadPriority commonpb.LoadPriority,
+) ([]*Replica, error) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -146,12 +183,12 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 					channelExclusiveNodeInfo[channel] = &querypb.ChannelNodeInfo{}
 				}
 			}
-			replicas = append(replicas, newReplica(&querypb.Replica{
+			replicas = append(replicas, NewReplicaWithPriority(&querypb.Replica{
 				ID:               id,
 				CollectionID:     collection,
 				ResourceGroup:    rgName,
 				ChannelNodeInfos: channelExclusiveNodeInfo,
-			}))
+			}, loadPriority))
 		}
 	}
 	if err := m.put(ctx, replicas...); err != nil {

@@ -25,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -127,14 +128,13 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret := make([]task.Task, 0)
 
 	// compare with targets to find the lack and redundancy of segments
-	lacks, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
-	// loadCtx := trace.ContextWithSpan(context.Background(), c.meta.GetCollection(replica.CollectionID).LoadSpan)
-	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, replica)
+	lacks, loadPriorities, redundancies := c.getSealedSegmentDiff(ctx, replica.GetCollectionID(), replica.GetID())
+	tasks := c.createSegmentLoadTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), lacks, loadPriorities, replica)
 	task.SetReason("lacks of segment", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	ret = append(ret, tasks...)
 
-	redundancies = c.filterSegmentInUse(ctx, replica, redundancies)
+	redundancies = c.filterOutSegmentInUse(ctx, replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("segment not exists in target", tasks...)
 	task.SetPriority(task.TaskPriorityNormal, tasks...)
@@ -142,7 +142,7 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedSealedSegments(ctx, replica.GetID())
-	redundancies = c.filterExistedOnLeader(replica, redundancies)
+	redundancies = c.filterOutExistedOnLeader(replica, redundancies)
 	tasks = c.createSegmentReduceTasks(c.getTraceCtx(ctx, replica.GetCollectionID()), redundancies, replica, querypb.DataScope_Historical)
 	task.SetReason("redundancies of segment", tasks...)
 	// set deduplicate task priority to low, to avoid deduplicate task cancel balance task
@@ -173,19 +173,15 @@ func (c *SegmentChecker) getGrowingSegmentDiff(ctx context.Context, collectionID
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replica.GetID()))
 
-	leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
-	for channelName, node := range leaders {
-		view := c.dist.LeaderViewManager.GetLeaderShardView(node, channelName)
-		if view == nil {
-			log.Info("leaderView is not ready, skip", zap.String("channelName", channelName), zap.Int64("node", node))
-			continue
-		}
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	for _, d := range delegatorList {
+		view := d.View
 		targetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 		if view.TargetVersion != targetVersion {
 			// before shard delegator update it's readable version, skip release segment
 			log.RatedInfo(20, "before shard delegator update it's readable version, skip release segment",
-				zap.String("channelName", channelName),
-				zap.Int64("nodeID", node),
+				zap.String("channelName", view.Channel),
+				zap.Int64("nodeID", view.ID),
 				zap.Int64("leaderVersion", view.TargetVersion),
 				zap.Int64("currentVersion", targetVersion),
 			)
@@ -229,7 +225,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	ctx context.Context,
 	collectionID int64,
 	replicaID int64,
-) (toLoad []*datapb.SegmentInfo, toRelease []*meta.Segment) {
+) (toLoad []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, toRelease []*meta.Segment) {
 	replica := c.meta.Get(ctx, replicaID)
 	if replica == nil {
 		log.Info("replica does not exist, skip it")
@@ -252,10 +248,15 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
-
 	// Segment which exist on next target, but not on dist
 	for _, segment := range nextTargetMap {
 		if isSegmentLack(segment) {
+			_, existOnCurrent := currentTargetMap[segment.GetID()]
+			if existOnCurrent {
+				loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
+			} else {
+				loadPriorities = append(loadPriorities, replica.LoadPriority())
+			}
 			toLoad = append(toLoad, segment)
 		}
 	}
@@ -300,58 +301,77 @@ func (c *SegmentChecker) findRepeatedSealedSegments(ctx context.Context, replica
 	return segments
 }
 
-func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
-	filtered := make([]*meta.Segment, 0, len(segments))
+// for duplicated segment, we should release the one which is not serving on leader
+func (c *SegmentChecker) filterOutExistedOnLeader(replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+	notServing := make([]*meta.Segment, 0, len(segments))
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+		return d.View.Channel
+	})
 	for _, s := range segments {
-		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
-		if !ok {
+		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
+		if len(delegatorList) == 0 {
 			continue
 		}
 
-		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		if view == nil {
-			continue
+		servingOnLeader := false
+		for _, delegator := range delegatorList {
+			segInView, ok := delegator.View.Segments[s.GetID()]
+			if ok && segInView.NodeID == s.Node {
+				servingOnLeader = true
+				break
+			}
 		}
-		seg, ok := view.Segments[s.GetID()]
-		if ok && seg.NodeID == s.Node {
-			// if this segment is serving on leader, do not remove it for search available
-			continue
+
+		if !servingOnLeader {
+			notServing = append(notServing, s)
 		}
-		filtered = append(filtered, s)
 	}
-	return filtered
+	return notServing
 }
 
-func (c *SegmentChecker) filterSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
-	filtered := make([]*meta.Segment, 0, len(segments))
+// for sealed segment which doesn't exist in target, we should release it after delegator has updated to latest readable version
+func (c *SegmentChecker) filterOutSegmentInUse(ctx context.Context, replica *meta.Replica, segments []*meta.Segment) []*meta.Segment {
+	notUsed := make([]*meta.Segment, 0, len(segments))
+	delegatorList := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
+	ch2DelegatorList := lo.GroupBy(delegatorList, func(d *meta.DmChannel) string {
+		return d.View.Channel
+	})
 	for _, s := range segments {
-		leaderID, ok := c.dist.ChannelDistManager.GetShardLeader(replica, s.GetInsertChannel())
-		if !ok {
-			continue
-		}
-
-		view := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, s.GetInsertChannel())
-		if view == nil {
-			continue
-		}
 		currentTargetVersion := c.targetMgr.GetCollectionTargetVersion(ctx, s.CollectionID, meta.CurrentTarget)
 		partition := c.meta.CollectionManager.GetPartition(ctx, s.PartitionID)
 
-		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
-		// Notice: if syncTargetVersion stuck, segment on delegator won't be released
-		readableVersionNotUpdate := view.TargetVersion != initialTargetVersion && view.TargetVersion < currentTargetVersion
-		if partition != nil && readableVersionNotUpdate {
-			// leader view version hasn't been updated, segment maybe still in use
+		delegatorList := ch2DelegatorList[s.GetInsertChannel()]
+		if len(delegatorList) == 0 {
 			continue
 		}
-		filtered = append(filtered, s)
+
+		stillInUseByDelegator := false
+		// if delegator has valid target version, and before it update to latest readable version, skip release it's sealed segment
+		for _, delegator := range delegatorList {
+			// Notice: if syncTargetVersion stuck, segment on delegator won't be released
+			readableVersionNotUpdate := delegator.View.TargetVersion != initialTargetVersion && delegator.View.TargetVersion < currentTargetVersion
+			if partition != nil && readableVersionNotUpdate {
+				// leader view version hasn't been updated, segment maybe still in use
+				stillInUseByDelegator = true
+				break
+			}
+		}
+
+		if !stillInUseByDelegator {
+			notUsed = append(notUsed, s)
+		}
 	}
-	return filtered
+	return notUsed
 }
 
-func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, replica *meta.Replica) []task.Task {
+func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []*datapb.SegmentInfo, loadPriorities []commonpb.LoadPriority, replica *meta.Replica) []task.Task {
 	if len(segments) == 0 {
 		return nil
+	}
+	priorityMap := make(map[int64]commonpb.LoadPriority)
+	for i, s := range segments {
+		priorityMap[s.GetID()] = loadPriorities[i]
 	}
 
 	shardSegments := lo.GroupBy(segments, func(s *datapb.SegmentInfo) string {
@@ -361,7 +381,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	plans := make([]balance.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
-		leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(shard))
+		leader := c.dist.ChannelDistManager.GetShardLeader(shard, replica)
 		if leader == nil {
 			continue
 		}
@@ -379,6 +399,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		shardPlans := c.getBalancerFunc().AssignSegment(ctx, replica.GetCollectionID(), segmentInfos, rwNodes, true)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
+			shardPlans[i].LoadPriority = priorityMap[shardPlans[i].Segment.GetID()]
 		}
 		plans = append(plans, shardPlans...)
 	}
@@ -396,6 +417,7 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 			c.ID(),
 			s.GetCollectionID(),
 			replica,
+			replica.LoadPriority(),
 			action,
 		)
 		if err != nil {

@@ -156,7 +156,7 @@ class ExprMaterializedViewTest : public testing::Test {
         auto binary_plan = milvus::segcore::translate_text_plan_to_binary_plan(
             plan_str.c_str());
         return milvus::query::CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
     }
 
     knowhere::MaterializedViewSearchInfo
@@ -335,7 +335,7 @@ TEST_F(ExprMaterializedViewTest, TestMvNoExpr) {
                 milvus::segcore::translate_text_plan_to_binary_plan(
                     plan_str.c_str());
             auto plan = milvus::query::CreateSearchPlanByExpr(
-                *schema, binary_plan.data(), binary_plan.size());
+                schema, binary_plan.data(), binary_plan.size());
             auto mv = ExecutePlan(plan);
             TestMvExpectDefault(mv);
         }

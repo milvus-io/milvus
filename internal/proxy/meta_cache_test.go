@@ -1083,7 +1083,6 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			CreatedTimestamps:    []uint64{11},
 			CreatedUtcTimestamps: []uint64{11},
 		}, nil).Once()
-		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, c.collID, int64(1))
@@ -1118,7 +1117,6 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			CreatedTimestamps:    []uint64{11},
 			CreatedUtcTimestamps: []uint64{11},
 		}, nil).Once()
-		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Once()
 		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
 		assert.Equal(t, c.collID, int64(1))
@@ -1362,7 +1360,7 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	assert.Equal(t, id, typeutil.UniqueID(0))
 }
 
-func TestMetaCache_GetShards(t *testing.T) {
+func TestMetaCache_GetShard(t *testing.T) {
 	var (
 		ctx            = context.Background()
 		collectionName = "collection1"
@@ -1375,13 +1373,13 @@ func TestMetaCache_GetShards(t *testing.T) {
 	require.Nil(t, err)
 
 	t.Run("No collection in meta cache", func(t *testing.T) {
-		shards, err := globalMetaCache.GetShards(ctx, true, dbName, "non-exists", 0)
+		shards, err := globalMetaCache.GetShard(ctx, true, dbName, "non-exists", 0, "channel-1")
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
 
 	t.Run("without shardLeaders in collection info invalid shardLeaders", func(t *testing.T) {
-		shards, err := globalMetaCache.GetShards(ctx, false, dbName, collectionName, collectionID)
+		shards, err := globalMetaCache.GetShard(ctx, false, dbName, collectionName, collectionID, "channel-1")
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
@@ -1395,19 +1393,18 @@ func TestMetaCache_GetShards(t *testing.T) {
 						ChannelName: "channel-1",
 						NodeIds:     []int64{1, 2, 3},
 						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+						Serviceable: []bool{true, true, true},
 					},
 				},
 			}, nil
 		}
 
-		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		shards, err := globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
-		assert.Equal(t, 1, len(shards))
-		assert.Equal(t, 3, len(shards["channel-1"]))
+		assert.Equal(t, 3, len(shards))
 
 		// get from cache
-
 		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
 			return &querypb.GetShardLeadersResponse{
 				Status: &commonpb.Status{
@@ -1417,12 +1414,11 @@ func TestMetaCache_GetShards(t *testing.T) {
 			}, nil
 		}
 
-		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		shards, err = globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
 
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
-		assert.Equal(t, 1, len(shards))
-		assert.Equal(t, 3, len(shards["channel-1"]))
+		assert.Equal(t, 3, len(shards))
 	})
 }
 
@@ -1455,16 +1451,16 @@ func TestMetaCache_ClearShards(t *testing.T) {
 						ChannelName: "channel-1",
 						NodeIds:     []int64{1, 2, 3},
 						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+						Serviceable: []bool{true, true, true},
 					},
 				},
 			}, nil
 		}
 
-		shards, err := globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		shards, err := globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
 		require.NoError(t, err)
 		require.NotEmpty(t, shards)
-		require.Equal(t, 1, len(shards))
-		require.Equal(t, 3, len(shards["channel-1"]))
+		require.Equal(t, 3, len(shards))
 
 		globalMetaCache.DeprecateShardCache(dbName, collectionName)
 
@@ -1477,7 +1473,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 			}, nil
 		}
 
-		shards, err = globalMetaCache.GetShards(ctx, true, dbName, collectionName, collectionID)
+		shards, err = globalMetaCache.GetShard(ctx, true, dbName, collectionName, collectionID, "channel-1")
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
@@ -1836,22 +1832,23 @@ func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil
 	}
-	nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
+	nodeInfos, err := globalMetaCache.GetShard(ctx, true, dbName, "collection1", 1, "channel-1")
 	assert.NoError(t, err)
-	assert.Len(t, nodeInfos["channel-1"], 3)
+	assert.Len(t, nodeInfos, 3)
 	assert.Equal(t, called.Load(), int32(1))
 
-	globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
+	globalMetaCache.GetShard(ctx, true, dbName, "collection1", 1, "channel-1")
 	assert.Equal(t, called.Load(), int32(1))
 
 	globalMetaCache.InvalidateShardLeaderCache([]int64{1})
-	nodeInfos, err = globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
+	nodeInfos, err = globalMetaCache.GetShard(ctx, true, dbName, "collection1", 1, "channel-1")
 	assert.NoError(t, err)
-	assert.Len(t, nodeInfos["channel-1"], 3)
+	assert.Len(t, nodeInfos, 3)
 	assert.Equal(t, called.Load(), int32(2))
 }
 
@@ -2151,4 +2148,87 @@ func TestMetaCache_Parallel(t *testing.T) {
 	assert.Equal(t, int64(111), collInfo.collID)
 	_, ok = cache.collInfo[dbName]["collection1"]
 	assert.True(t, ok)
+}
+
+func TestMetaCache_GetShardLeaderList(t *testing.T) {
+	var (
+		ctx            = context.Background()
+		collectionName = "collection1"
+		collectionID   = int64(1)
+	)
+
+	rootCoord := &MockMixCoordClientInterface{}
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, mgr)
+	require.Nil(t, err)
+
+	t.Run("No collection in meta cache", func(t *testing.T) {
+		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, "non-exists", 0, true)
+		assert.Error(t, err)
+		assert.Empty(t, channels)
+	})
+
+	t.Run("Get channel list without cache", func(t *testing.T) {
+		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return &querypb.GetShardLeadersResponse{
+				Status: merr.Success(),
+				Shards: []*querypb.ShardLeadersList{
+					{
+						ChannelName: "channel-1",
+						NodeIds:     []int64{1, 2, 3},
+						NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+						Serviceable: []bool{true, true, true},
+					},
+					{
+						ChannelName: "channel-2",
+						NodeIds:     []int64{4, 5, 6},
+						NodeAddrs:   []string{"localhost:9003", "localhost:9004", "localhost:9005"},
+						Serviceable: []bool{true, true, true},
+					},
+				},
+			}, nil
+		}
+
+		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, false)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(channels))
+		assert.Contains(t, channels, "channel-1")
+		assert.Contains(t, channels, "channel-2")
+	})
+
+	t.Run("Get channel list with cache", func(t *testing.T) {
+		// First call should populate cache
+		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, true)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(channels))
+
+		// Mock should return error but cache should be used
+		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return &querypb.GetShardLeadersResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "should not be called when using cache",
+				},
+			}, nil
+		}
+
+		channels, err = globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, true)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(channels))
+		assert.Contains(t, channels, "channel-1")
+		assert.Contains(t, channels, "channel-2")
+	})
+
+	t.Run("Error from coordinator", func(t *testing.T) {
+		// Deprecate cache first
+		globalMetaCache.DeprecateShardCache(dbName, collectionName)
+
+		rootCoord.getShardLeaders = func(ctx context.Context, in *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+			return nil, errors.New("coordinator error")
+		}
+
+		channels, err := globalMetaCache.GetShardLeaderList(ctx, dbName, collectionName, collectionID, true)
+		assert.Error(t, err)
+		assert.Empty(t, channels)
+	})
 }

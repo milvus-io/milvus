@@ -82,7 +82,7 @@ class IVF_RABITQ:
             "description": "Refine Type Test",
             "params": {"refine_type": "PQ"},
             "expected": {"err_code": 999,
-                         "err_msg": "invalid refine type : PQ, optional types are [sq6, sq8, fp16, bf16]"}
+                         "err_msg": "invalid refine type : PQ, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "SQ6 Test",
@@ -91,29 +91,29 @@ class IVF_RABITQ:
         },
         {
             "description": "SQ8 Test",
-            "params": {"refine": 'true', "refine_type": "SQ8"},
+            "params": {"refine": 'TRUE', "refine_type": "SQ8"},
             "expected": success
         },
         {
             "description": "FP16 Test",
-            "params": {"refine": 'true', "refine_type": "FP16"},
+            "params": {"refine": True, "refine_type": "FP16"},
             "expected": success
         },
         {
             "description": "BF16 Test",
-            "params": {"refine": 'true', "refine_type": "BF16"},
+            "params": {"refine": 'True', "refine_type": "BF16"},
             "expected": success
         },
         {
             "description": "FP32 Test",
-            "params": {"refine": 'true', "refine_type": "FP32"},
+            "params": {"refine": True, "refine_type": "FP32"},
             "expected": success
         },
         {
             "description": "Invalid Refine Type Test",
             "params": {"refine": 'true', "refine_type": "INVALID"},
             "expected": {"err_code": 999,
-                         "err_msg": "invalid refine type : INVALID, optional types are [sq6, sq8, fp16, bf16]"}
+                         "err_msg": "invalid refine type : INVALID, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "Integer Type Test",
@@ -128,30 +128,30 @@ class IVF_RABITQ:
         },
         {
             "description": "Lowercase String Test",
-            "params": {"refine": 'true', "refine_type": "sq6"},
+            "params": {"refine": True, "refine_type": "sq6"},
             "expected": success
         },
         {
             "description": "Mixed Case String Test",
-            "params": {"refine": 'true', "refine_type": "Sq8.0"},
+            "params": {"refine": True, "refine_type": "Sq8.0"},
             "expected": {"err_code": 999,
-                         "err_msg": "invalid refine type : Sq8.0, optional types are [sq6, sq8, fp16, bf16]"}
+                         "err_msg": "invalid refine type : Sq8.0, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "Whitespace String Test",
             "params": {"refine_type": " SQ8 "},
             "expected": {"err_code": 999,
-                         "err_msg": "invalid refine type :  SQ8 , optional types are [sq6, sq8, fp16, bf16]"}
+                         "err_msg": "invalid refine type :  SQ8 , optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "Integer Type Test",
-            "params": {"refine": 'true', "refine_type": 8},
+            "params": {"refine": True, "refine_type": 8},
             "expected": {"err_code": 999,
-                         "err_msg": "invalid refine type : 8, optional types are [sq6, sq8, fp16, bf16]"}
+                         "err_msg": "invalid refine type : 8, optional types are [sq6, sq8, fp16, bf16, fp32, flat]"}
         },
         {
             "description": "None Type Test",
-            "params": {"refine": 'true', "refine_type": None},
+            "params": {"refine": True, "refine_type": None},
             "expected": success
         },
 

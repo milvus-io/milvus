@@ -63,25 +63,28 @@ type dispatcherManager struct {
 	factory     msgstream.Factory
 	closeChan   chan struct{}
 	closeOnce   sync.Once
+
+	includeSkipWhenSplit bool
 }
 
-func NewDispatcherManager(pchannel string, role string, nodeID int64, factory msgstream.Factory) DispatcherManager {
+func NewDispatcherManager(pchannel string, role string, nodeID int64, factory msgstream.Factory, includeSkipWhenSplit bool) DispatcherManager {
 	log.Info("create new dispatcherManager", zap.String("role", role),
 		zap.Int64("nodeID", nodeID), zap.String("pchannel", pchannel))
 	c := &dispatcherManager{
-		role:              role,
-		nodeID:            nodeID,
-		pchannel:          pchannel,
-		registeredTargets: typeutil.NewConcurrentMap[string, *target](),
-		deputyDispatchers: make(map[int64]*Dispatcher),
-		factory:           factory,
-		closeChan:         make(chan struct{}),
+		role:                 role,
+		nodeID:               nodeID,
+		pchannel:             pchannel,
+		registeredTargets:    typeutil.NewConcurrentMap[string, *target](),
+		deputyDispatchers:    make(map[int64]*Dispatcher),
+		factory:              factory,
+		closeChan:            make(chan struct{}),
+		includeSkipWhenSplit: includeSkipWhenSplit,
 	}
 	return c
 }
 
 func (c *dispatcherManager) Add(ctx context.Context, streamConfig *StreamConfig) (<-chan *MsgPack, error) {
-	t := newTarget(streamConfig)
+	t := newTarget(streamConfig, c.includeSkipWhenSplit)
 	if _, ok := c.registeredTargets.GetOrInsert(t.vchannel, t); ok {
 		return nil, fmt.Errorf("vchannel %s already exists in the dispatcher", t.vchannel)
 	}
@@ -125,8 +128,8 @@ func (c *dispatcherManager) Close() {
 func (c *dispatcherManager) Run() {
 	log := log.With(zap.String("role", c.role), zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 	log.Info("dispatcherManager is running...")
-	ticker1 := time.NewTicker(10 * time.Second)
-	ticker2 := time.NewTicker(paramtable.Get().MQCfg.MergeCheckInterval.GetAsDuration(time.Second))
+	ticker1 := time.NewTicker(30 * time.Second)
+	ticker2 := time.NewTicker(paramtable.Get().MQCfg.CheckInterval.GetAsDuration(time.Second))
 	defer ticker1.Stop()
 	defer ticker2.Stop()
 	for {
@@ -269,7 +272,7 @@ OUTER:
 
 	// TODO: add newDispatcher timeout param and init context
 	id := c.idAllocator.Inc()
-	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, includeCurrentMsg, latestTarget.pos.GetTimestamp())
+	d, err := NewDispatcher(context.Background(), c.factory, id, c.pchannel, earliestTarget.pos, earliestTarget.subPos, includeCurrentMsg, latestTarget.pos.GetTimestamp(), c.includeSkipWhenSplit)
 	if err != nil {
 		panic(err)
 	}

@@ -64,7 +64,6 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -191,23 +190,26 @@ class TestSearchGroupBy(TestcaseBase):
                 3. search with group by
                 verify: the error code and msg
         """
-        if index in ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8", "DISKANN", "SCANN"]:
-            pass  # Only HNSW and IVF_FLAT are supported
+        support_group_by_index_types = ["HNSW", "IVF_FLAT", "FLAT", "IVF_SQ8", "IVF_RABITQ", "DISKANN", "SCANN"]
+        metric = "L2"
+        collection_w = self.init_collection_general(prefix, insert_data=True, is_index=False,
+                                                    is_all_data_type=True, with_json=False)[0]
+        params = cf.get_index_params_params(index)
+        index_params = {"index_type": index, "params": params, "metric_type": metric}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params)
+        collection_w.load()
+
+        search_params = {"params": {}}
+        nq = 1
+        limit = 1
+        search_vectors = cf.gen_vectors(nq, dim=ct.default_dim)
+
+        # search with groupby
+        if index in support_group_by_index_types:
+            collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
+                                param=search_params, limit=limit,
+                                group_by_field=ct.default_int8_field_name)
         else:
-            metric = "L2"
-            collection_w = self.init_collection_general(prefix, insert_data=True, is_index=False,
-                                                        is_all_data_type=True, with_json=False)[0]
-            params = cf.get_index_params_params(index)
-            index_params = {"index_type": index, "params": params, "metric_type": metric}
-            collection_w.create_index(ct.default_float_vec_field_name, index_params)
-            collection_w.load()
-
-            search_params = {"params": {}}
-            nq = 1
-            limit = 1
-            search_vectors = cf.gen_vectors(nq, dim=ct.default_dim)
-
-            # search with groupby
             err_code = 999
             err_msg = f"current index:{index} doesn't support"
             collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,

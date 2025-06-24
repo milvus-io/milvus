@@ -47,6 +47,7 @@ type Node interface {
 	IsInputNode() bool
 	Start()
 	Close()
+	Free()
 }
 
 // BaseNode defines some common node attributes and behavior
@@ -238,6 +239,9 @@ func (node *BaseNode) Start() {}
 
 // Close implementing Node, base node does nothing when stops
 func (node *BaseNode) Close() {}
+
+// Free resource after all node close
+func (node *BaseNode) Free() {}
 
 func (node *BaseNode) Name() string {
 	return "BaseNode"

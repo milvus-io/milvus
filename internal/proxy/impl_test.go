@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/resource"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -2165,22 +2166,81 @@ func TestAlterCollectionReplicateProperty(t *testing.T) {
 }
 
 func TestRunAnalyzer(t *testing.T) {
-	p := &Proxy{}
-	// run analyzer with default params
-	resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-		Placeholder: [][]byte{[]byte("test doc")},
-	})
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.GetStatus()))
-	assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
+	paramtable.Init()
+	ctx := context.Background()
 
-	// run analyzer with invalid params
-	resp, err = p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
-		Placeholder:    [][]byte{[]byte("test doc")},
-		AnalyzerParams: "invalid json",
-	})
+	cache := globalMetaCache
+	globalMetaCache = nil
+	defer func() { globalMetaCache = cache }()
+
+	p := &Proxy{}
+
+	tsoAllocatorIns := newMockTsoAllocator()
+	sched, err := newTaskScheduler(ctx, tsoAllocatorIns, p.factory)
 	require.NoError(t, err)
-	require.Error(t, merr.Error(resp.GetStatus()))
+	sched.Start()
+	defer sched.Close()
+
+	p.sched = sched
+
+	t.Run("run analyzer err with node not healthy", func(t *testing.T) {
+		p.UpdateStateCode(commonpb.StateCode_Abnormal)
+		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		require.NoError(t, err)
+		require.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	p.UpdateStateCode(commonpb.StateCode_Healthy)
+	t.Run("run analyzer with default params", func(t *testing.T) {
+		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
+			Placeholder: [][]byte{[]byte("test doc")},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, len(resp.GetResults()[0].GetTokens()), 2)
+	})
+
+	t.Run("run analyzer with invalid params", func(t *testing.T) {
+		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
+			Placeholder:    [][]byte{[]byte("test doc")},
+			AnalyzerParams: "invalid json",
+		})
+		require.NoError(t, err)
+		require.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("run analyzer from loaded collection field", func(t *testing.T) {
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+
+		fieldMap := &typeutil.ConcurrentMap[string, int64]{}
+		fieldMap.Insert("test_text", 100)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "test_collection").Return(1, nil)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, "test_collection").Return(&schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{{
+					FieldID: 100,
+					Name:    "test_text",
+				}},
+			},
+			fieldMap: fieldMap,
+		}, nil)
+
+		lb := NewMockLBPolicy(t)
+		lb.EXPECT().ExecuteOneChannel(mock.Anything, mock.Anything).Return(nil)
+		p.lbPolicy = lb
+
+		resp, err := p.RunAnalyzer(context.Background(), &milvuspb.RunAnalyzerRequest{
+			Placeholder:    [][]byte{[]byte("test doc")},
+			CollectionName: "test_collection",
+			FieldName:      "test_text",
+		})
+
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+	})
 }
 
 func Test_GetSegmentsInfo(t *testing.T) {

@@ -129,13 +129,13 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	flushTs, has := flushResp.GetCollFlushTs()[s.collectionName]
 	s.True(has)
 
+	s.WaitForFlush(ctx, ids, flushTs, s.dbName, s.collectionName)
 	segments, err := s.Cluster.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, s.dbName, s.collectionName)
 
 	// create index
 	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{

@@ -72,7 +72,7 @@ CRetrieve(CSegmentInterface c_segment,
           uint64_t timestamp,
           CRetrieveResult** result) {
     auto future = AsyncRetrieve(
-        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0);
+        {}, c_segment, c_plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false, 0, 0);
     auto futurePtr = static_cast<milvus::futures::IFuture*>(
         static_cast<void*>(static_cast<CFuture*>(future)));
 
@@ -490,7 +490,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
         retrive_pks.push_back(value);
     }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
@@ -617,7 +617,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         retrive_pks.push_back(value);
     }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
@@ -734,7 +734,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
         }
     }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
@@ -819,7 +819,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
         }
     }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
@@ -991,7 +991,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
         }
     }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
@@ -1089,7 +1089,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
         }
     }
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
         milvus::expr::ColumnInfo(
             FieldId(101), DataType::INT64, std::vector<std::string>()),
@@ -1260,7 +1260,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     auto status = NewSegment(collection, Growing, -1, &segment, false);
     ASSERT_EQ(status.error_code, Success);
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
 
     int N = 10000;
     auto dataset = DataGen(schema, N);
@@ -4371,7 +4371,7 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
     segment->LoadIndex(load_index_info);
 
     // create retrieve plan
-    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     std::vector<proto::plan::GenericValue> retrive_row_ids;
     proto::plan::GenericValue val;

@@ -67,6 +67,10 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
 		}
+		if field.GetIsFunctionOutput() {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
+		}
 
 		cr, err := NewFieldReader(ctx, fileReader, i, field)
 		if err != nil {
@@ -80,7 +84,8 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	for _, field := range nameToField {
-		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() {
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
+			field.GetNullable() || field.GetDefaultValue() != nil {
 			continue
 		}
 		if _, ok := crs[field.GetFieldID()]; !ok {
@@ -285,12 +290,17 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		return field.Name
 	})
 	for _, field := range schema.GetFields() {
+		// ignore autoPKField and functionOutputField
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
 		arrField, ok := arrNameToField[field.GetName()]
 		if !ok {
-			if field.GetIsDynamic() {
+			// Special fields no need to provide in data files, the parquet file doesn't contain this field, no need to compare
+			// 1. dynamic field(name is "$meta"), ignore
+			// 2. nullable field, filled with null values
+			// 3. default value field, filled with default value
+			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
 				continue
 			}
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' not in arrow schema", field.GetName()))

@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -28,9 +29,13 @@ func (b broadcast) Append(ctx context.Context, msg message.BroadcastMutableMessa
 
 func (b broadcast) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		// should be an unreachable error.
 		return ErrWALAccesserClosed
 	}
 	defer b.lifetime.Done()
 
-	return b.streamingCoordClient.Broadcast().Ack(ctx, req)
+	// retry until the ctx is canceled.
+	return retry.Do(ctx, func() error {
+		return b.streamingCoordClient.Broadcast().Ack(ctx, req)
+	}, retry.AttemptAlways())
 }

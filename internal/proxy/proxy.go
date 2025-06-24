@@ -401,6 +401,10 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 // Start starts a proxy node.
 func (node *Proxy) Start() error {
 	log := log.Ctx(node.ctx)
+
+	node.shardMgr.Start()
+	log.Debug("start shard client manager done", zap.String("role", typeutil.ProxyRole))
+
 	if err := node.sched.Start(); err != nil {
 		log.Warn("failed to start task scheduler", zap.String("role", typeutil.ProxyRole), zap.Error(err))
 		return err

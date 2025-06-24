@@ -121,6 +121,12 @@ func (fg *TimeTickedFlowGraph) Close() {
 			}
 		}
 		fg.closeWg.Wait()
+
+		// free some source after all node close.
+		// such as function.
+		for _, v := range fg.nodeCtx {
+			v.node.Free()
+		}
 	})
 }
 

@@ -26,7 +26,8 @@ type RootCoordCatalog interface {
 	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error)
 	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
-	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp) error
+	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp, fieldModify bool) error
+	AlterCollectionDB(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error
 
 	CreatePartition(ctx context.Context, dbID int64, partition *model.Partition, ts typeutil.Timestamp) error
 	DropPartition(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error
@@ -203,6 +204,12 @@ type QueryCoordCatalog interface {
 
 // StreamingCoordCataLog is the interface for streamingcoord catalog
 type StreamingCoordCataLog interface {
+	// GetVersion get the streaming version from metastore.
+	GetVersion(ctx context.Context) (*streamingpb.StreamingVersion, error)
+
+	// SaveVersion save the streaming version to metastore.
+	SaveVersion(ctx context.Context, version *streamingpb.StreamingVersion) error
+
 	// physical channel watch related
 
 	// ListPChannel list all pchannels on milvus.

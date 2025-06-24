@@ -116,13 +116,35 @@ func (c *Client) getMixCoordAddr() (string, error) {
 	}
 	ms, ok := msess[key]
 	if !ok {
-		log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
-		return "", errors.New("find no available mixcoord, check mixcoord state")
+		if paramtable.GetRole() == typeutil.StandaloneRole {
+			return c.getCompatibleMixCoordAddr()
+		} else {
+			log.Warn("MixCoordClient mess key not exist", zap.Any("key", key))
+			return "", errors.New("find no available mixcoord, check mixcoord state")
+		}
 	}
 	log.Debug("MixCoordClient GetSessions success",
 		zap.String("address", ms.Address),
 		zap.Int64("serverID", ms.ServerID),
-	)
+		zap.String("role", key))
+	c.grpcClient.SetNodeID(ms.ServerID)
+	return ms.Address, nil
+}
+
+// compatible with standalone mode upgrade from 2.5, shoule be removed in 3.0
+func (c *Client) getCompatibleMixCoordAddr() (string, error) {
+	log := log.Ctx(c.ctx)
+	msess, _, err := c.sess.GetSessions(typeutil.RootCoordRole)
+	if err != nil {
+		log.Debug("mixCoordClient getSessions failed", zap.Any("key", typeutil.RootCoordRole), zap.Error(err))
+		return "", errors.New("find no available mixcoord, check mixcoord state")
+	}
+	ms, ok := msess[typeutil.RootCoordRole]
+	if !ok {
+		log.Warn("MixCoordClient mess key not exist", zap.Any("key", typeutil.RootCoordRole))
+		return "", errors.New("find no available mixcoord, check mixcoord state")
+	}
+	log.Debug("MixCoordClient GetSessions use rootCoord", zap.Any("key", typeutil.RootCoordRole))
 	c.grpcClient.SetNodeID(ms.ServerID)
 	return ms.Address, nil
 }
@@ -1803,5 +1825,27 @@ func (c *Client) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
 		return client.UpdateLoadConfig(ctx, req)
+	})
+}
+
+func (c *Client) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.GetQuotaMetricsResponse, error) {
+		return client.GetQuotaMetrics(ctx, req)
+	})
+}
+
+func (c *Client) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.ListLoadedSegmentsResponse, error) {
+		return client.ListLoadedSegments(ctx, req)
 	})
 }

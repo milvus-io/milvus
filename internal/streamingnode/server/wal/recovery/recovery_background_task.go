@@ -20,6 +20,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+// isDirty checks if the recovery storage mem state is not consistent with the persisted recovery storage.
+func (rs *recoveryStorageImpl) isDirty() bool {
+	if rs.pendingPersistSnapshot != nil {
+		return true
+	}
+
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return rs.dirtyCounter > 0
+}
+
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
 // promise there's only one consumer of wal.
 // But currently, we don't implement the CAS operation of meta interface.
@@ -28,6 +39,10 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
 		ticker.Stop()
+		rs.Logger().Info("recovery storage background task, perform a graceful exit...")
+		if err := rs.persistDritySnapshotWhenClosing(); err != nil {
+			rs.Logger().Warn("failed to persist dirty snapshot when closing", zap.Error(err))
+		}
 		rs.backgroundTaskNotifier.Finish(struct{}{})
 		rs.Logger().Info("recovery storage background task exit")
 	}()
@@ -35,20 +50,11 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 	for {
 		select {
 		case <-rs.backgroundTaskNotifier.Context().Done():
-			// If the background task is exiting when on-operating persist operation,
-			// We can try to do a graceful exit.
-			rs.Logger().Info("recovery storage background task, perform a graceful exit...")
-			if err := rs.persistDritySnapshotWhenClosing(); err != nil {
-				rs.Logger().Warn("failed to persist dirty snapshot when closing", zap.Error(err))
-				return
-			}
-			rs.gracefulClosed = true
-			return // exit the background task
+			return
 		case <-rs.persistNotifier:
 		case <-ticker.C:
 		}
-		snapshot := rs.consumeDirtySnapshot()
-		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), snapshot, zap.DebugLevel); err != nil {
+		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), zap.DebugLevel); err != nil {
 			return
 		}
 	}
@@ -59,12 +65,26 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 	ctx, cancel := context.WithTimeout(context.Background(), rs.cfg.gracefulTimeout)
 	defer cancel()
 
-	snapshot := rs.consumeDirtySnapshot()
-	return rs.persistDirtySnapshot(ctx, snapshot, zap.InfoLevel)
+	for rs.isDirty() {
+		if err := rs.persistDirtySnapshot(ctx, zap.InfoLevel); err != nil {
+			return err
+		}
+	}
+	rs.gracefulClosed = true
+	return nil
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
-func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, snapshot *RecoverySnapshot, lvl zapcore.Level) (err error) {
+func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl zapcore.Level) (err error) {
+	if rs.pendingPersistSnapshot == nil {
+		// if there's no dirty snapshot, generate a new one.
+		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()
+	}
+	if rs.pendingPersistSnapshot == nil {
+		return nil
+	}
+
+	snapshot := rs.pendingPersistSnapshot
 	rs.metrics.ObserveIsOnPersisting(true)
 	logger := rs.Logger().With(
 		zap.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
@@ -77,8 +97,9 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, snapsho
 			logger.Warn("failed to persist dirty snapshot", zap.Error(err))
 			return
 		}
+		rs.pendingPersistSnapshot = nil
 		logger.Log(lvl, "persist dirty snapshot")
-		defer rs.metrics.ObserveIsOnPersisting(false)
+		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
 	if err := rs.dropAllVirtualChannel(ctx, snapshot.VChannels); err != nil {
@@ -128,12 +149,13 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, snapsho
 }
 
 func (rs *recoveryStorageImpl) sampleTruncateCheckpoint(checkpoint *WALCheckpoint) {
-	if rs.flusherCheckpoint == nil {
+	flusherCP := rs.getFlusherCheckpoint()
+	if flusherCP == nil {
 		return
 	}
 	// use the smaller one to truncate the wal.
-	if rs.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
-		rs.truncator.SampleCheckpoint(rs.flusherCheckpoint)
+	if flusherCP.MessageID.LTE(checkpoint.MessageID) {
+		rs.truncator.SampleCheckpoint(flusherCP)
 	} else {
 		rs.truncator.SampleCheckpoint(checkpoint)
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -39,6 +40,7 @@ type SegmentAssignPlan struct {
 	FromScore    int64
 	ToScore      int64
 	SegmentScore int64
+	LoadPriority commonpb.LoadPriority
 }
 
 func (segPlan *SegmentAssignPlan) String() string {
@@ -92,7 +94,7 @@ func (b *RoundRobinBalancer) AssignSegment(ctx context.Context, collectionID int
 		return cnt1+delta1 < cnt2+delta2
 	})
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	ret := make([]SegmentAssignPlan, 0, len(segments))
 	for i, s := range segments {
 		plan := SegmentAssignPlan{
@@ -153,14 +155,6 @@ func (b *RoundRobinBalancer) AssignChannel(ctx context.Context, collectionID int
 func (b *RoundRobinBalancer) BalanceReplica(ctx context.Context, replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	// TODO by chun.han
 	return nil, nil
-}
-
-func (b *RoundRobinBalancer) permitBalanceChannel(collectionID int64) bool {
-	return b.scheduler.GetSegmentTaskNum(task.WithCollectionID2TaskFilter(collectionID), task.WithTaskTypeFilter(task.TaskTypeMove)) == 0
-}
-
-func (b *RoundRobinBalancer) permitBalanceSegment(collectionID int64) bool {
-	return b.scheduler.GetChannelTaskNum(task.WithCollectionID2TaskFilter(collectionID), task.WithTaskTypeFilter(task.TaskTypeMove)) == 0
 }
 
 func (b *RoundRobinBalancer) getNodes(nodes []int64) []*session.NodeInfo {

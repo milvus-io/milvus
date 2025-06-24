@@ -85,7 +85,7 @@ GetMatchExpr(SchemaPtr schema,
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -951,9 +951,8 @@ TEST(TextMatch, SealedJieBaNullable) {
     }
 }
 
-// TODO(tiered storage 1): this also fails on master branch.
 // Test that growing segment loading flushed binlogs will build text match index.
-TEST(TextMatch, DISABLED_GrowingLoadData) {
+TEST(TextMatch, GrowingLoadData) {
     int64_t N = 7;
     auto schema = GenTestSchema({}, true);
     schema->AddField(

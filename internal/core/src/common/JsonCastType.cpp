@@ -21,7 +21,10 @@ const std::unordered_map<std::string, const JsonCastType>
                       JsonCastType::DataType::DOUBLE)},
         {"ARRAY_VARCHAR",
          JsonCastType(JsonCastType::DataType::ARRAY,
-                      JsonCastType::DataType::VARCHAR)}};
+                      JsonCastType::DataType::VARCHAR)},
+        {"JSON",
+         JsonCastType(JsonCastType::DataType::JSON,
+                      JsonCastType::DataType::JSON)}};
 
 const JsonCastType JsonCastType::UNKNOWN = JsonCastType(
     JsonCastType::DataType::UNKNOWN, JsonCastType::DataType::UNKNOWN);
@@ -75,5 +78,10 @@ JsonCastType::ToMilvusDataType() const {
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
     }
+}
+
+std::string
+JsonCastType::ToString() const {
+    return fmt::format("{}", *this);
 }
 }  // namespace milvus

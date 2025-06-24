@@ -25,6 +25,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+#include "log/Log.h"
 #include "Types.h"
 #include "arrow/api.h"
 #include "arrow/array/array_binary.h"
@@ -34,7 +35,9 @@
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "common/Array.h"
+#include "common/VectorArray.h"
 #include "knowhere/dataset.h"
+#include "common/TypeTraits.h"
 
 namespace milvus {
 
@@ -55,7 +58,8 @@ class FieldDataBase {
     virtual void
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
-                  ssize_t element_count) = 0;
+                  ssize_t element_count,
+                  ssize_t offset) = 0;
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) = 0;
@@ -162,7 +166,8 @@ class FieldBitsetImpl : public FieldDataBase {
     void
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
-                  ssize_t element_count) override {
+                  ssize_t element_count,
+                  ssize_t offset) override {
         PanicInfo(NotImplemented,
                   "FillFieldData(const void* field_data, "
                   "const uint8_t* valid_data, ssize_t element_count)"
@@ -341,7 +346,7 @@ class FieldDataImpl : public FieldDataBase {
             if (IsVectorDataType(data_type)) {
                 PanicInfo(NotImplemented, "vector type not support null");
             }
-            valid_data_.resize((num_rows_ + 7) / 8);
+            valid_data_.resize((num_rows_ + 7) / 8, 0xFF);
         }
     }
 
@@ -376,7 +381,8 @@ class FieldDataImpl : public FieldDataBase {
     void
     FillFieldData(const void* field_data,
                   const uint8_t* valid_data,
-                  ssize_t element_count) override;
+                  ssize_t element_count,
+                  ssize_t offset) override;
 
     void
     FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) override;
@@ -478,7 +484,7 @@ class FieldDataImpl : public FieldDataBase {
             data_.resize(num_rows_ * dim_);
         }
         if (nullable_) {
-            valid_data_.resize((num_rows_ + 7) / 8);
+            valid_data_.resize((num_rows_ + 7) / 8, 0xFF);
         }
     }
 
@@ -496,7 +502,7 @@ class FieldDataImpl : public FieldDataBase {
             num_rows_ = num_rows;
             data_.resize(num_rows_ * dim_);
             if (nullable_) {
-                valid_data_.resize((num_rows + 7) / 8);
+                valid_data_.resize((num_rows + 7) / 8, 0xFF);
             }
         }
     }
@@ -594,10 +600,13 @@ class FieldDataStringImpl : public FieldDataImpl<std::string, true> {
         }
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();
-            if (valid_data == nullptr) {
-                valid_data_.resize((n + 7) / 8, 0xFF);
-            } else {
-                std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
+            if (valid_data != nullptr) {
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
             }
         }
         length_ += n;
@@ -658,7 +667,8 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
             resize_field_data(length_ + element_count);
         }
 
-        valid_data_.assign((element_count + 7) / 8, 0x00);
+        bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_fill(
+            valid_data_.data(), length_, element_count, false);
         length_ += element_count;
     }
 
@@ -685,10 +695,13 @@ class FieldDataJsonImpl : public FieldDataImpl<Json, true> {
         }
         if (IsNullable()) {
             auto valid_data = array->null_bitmap_data();
-            if (valid_data == nullptr) {
-                valid_data_.assign((n + 7) / 8, 0xFF);
-            } else {
-                std::copy_n(valid_data, (n + 7) / 8, valid_data_.data());
+            if (valid_data != nullptr) {
+                bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                    valid_data,
+                    array->offset(),
+                    valid_data_.data(),
+                    length_,
+                    n);
             }
         }
         length_ += n;
@@ -798,6 +811,34 @@ class FieldDataArrayImpl : public FieldDataImpl<Array, true> {
                                 bool nullable,
                                 int64_t total_num_rows = 0)
         : FieldDataImpl<Array, true>(1, data_type, nullable, total_num_rows) {
+    }
+
+    int64_t
+    DataSize() const override {
+        int64_t data_size = 0;
+        for (size_t offset = 0; offset < length(); ++offset) {
+            data_size += data_[offset].byte_size();
+        }
+        return data_size;
+    }
+
+    int64_t
+    DataSize(ssize_t offset) const override {
+        AssertInfo(offset < get_num_rows(),
+                   "field data subscript out of range");
+        AssertInfo(offset < length(),
+                   "subscript position don't has valid value");
+        return data_[offset].byte_size();
+    }
+};
+
+// is_type_entire_row set be true as each element in data_ is a VectorArray
+class FieldDataVectorArrayImpl : public FieldDataImpl<VectorArray, true> {
+ public:
+    explicit FieldDataVectorArrayImpl(DataType data_type,
+                                      int64_t total_num_rows = 0)
+        : FieldDataImpl<VectorArray, true>(
+              1, data_type, false, total_num_rows) {
     }
 
     int64_t

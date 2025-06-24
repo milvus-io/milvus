@@ -378,6 +378,7 @@ func GenTestIndexInfoList(collectionID int64, schema *schemapb.CollectionSchema)
 					{Key: common.MetricTypeKey, Value: metric.L2},
 					{Key: common.IndexTypeKey, Value: IndexFaissIVFFlat},
 					{Key: "nlist", Value: "128"},
+					{Key: common.LoadPriorityKey, Value: "high"},
 				}
 			}
 		case schemapb.DataType_BinaryVector:
@@ -386,6 +387,7 @@ func GenTestIndexInfoList(collectionID int64, schema *schemapb.CollectionSchema)
 					{Key: common.MetricTypeKey, Value: metric.JACCARD},
 					{Key: common.IndexTypeKey, Value: IndexFaissBinIVFFlat},
 					{Key: "nlist", Value: "128"},
+					{Key: common.LoadPriorityKey, Value: "high"},
 				}
 			}
 		case schemapb.DataType_SparseFloatVector:
@@ -394,6 +396,7 @@ func GenTestIndexInfoList(collectionID int64, schema *schemapb.CollectionSchema)
 					{Key: common.MetricTypeKey, Value: metric.IP},
 					{Key: common.IndexTypeKey, Value: IndexSparseWand},
 					{Key: "M", Value: "16"},
+					{Key: common.LoadPriorityKey, Value: "high"},
 				}
 			}
 		}
@@ -824,7 +827,7 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 
 func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLength int, indexType, metricType string, cm storage.ChunkManager) (*querypb.FieldIndexInfo, error) {
 	typeParams, indexParams := genIndexParams(indexType, metricType)
-
+	indexParams[common.LoadPriorityKey] = "HIGH"
 	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
@@ -1240,7 +1243,7 @@ func GenSimpleRetrievePlan(collection *segcore.CCollection) (*segcore.RetrievePl
 		return nil, err
 	}
 
-	plan, err2 := segcore.NewRetrievePlan(collection, planBytes, timestamp, 100, 0)
+	plan, err2 := segcore.NewRetrievePlan(collection, planBytes, timestamp, 100, 0, 0)
 	return plan, err2
 }
 

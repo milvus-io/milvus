@@ -163,6 +163,11 @@ func TestShardInterceptor(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, msgID)
 
+	// Flush from old arch should always be allowed.
+	msgID, err = i.DoAppend(utility.WithFlushFromOldArch(ctx), msg, appender)
+	assert.NoError(t, err)
+	assert.NotNil(t, msgID)
+
 	ctx = utility.WithExtraAppendResult(ctx, &utility.ExtraAppendResult{})
 	msg = message.NewManualFlushMessageBuilderV2().
 		WithVChannel(vchannel).
@@ -218,6 +223,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Unset()
 	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Return(nil)
+	shardManager.EXPECT().ApplyDelete(mock.Anything).Return(nil)
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)

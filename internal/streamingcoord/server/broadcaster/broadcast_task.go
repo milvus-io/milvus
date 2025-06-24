@@ -2,12 +2,14 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
@@ -115,11 +117,29 @@ func (b *broadcastTask) InitializeRecovery(ctx context.Context) error {
 	return nil
 }
 
+// mustGetImmutableMessageFromVChannel gets the immutable message from the vchannel.
+func (b *broadcastTask) mustGetImmutableMessageFromVChannel(vchannel string) message.MutableMessage {
+	msgs := b.PendingBroadcastMessages()
+	for _, msg := range msgs {
+		if msg.VChannel() == vchannel {
+			return msg
+		}
+	}
+	panic(fmt.Sprintf("vchannel %s not found", vchannel))
+}
+
 // Ack acknowledges the message at the specified vchannel.
 func (b *broadcastTask) Ack(ctx context.Context, vchannel string) error {
+	// TODO: after all status is recovered from wal, we need make a async framework to handle the callback asynchronously.
+	msg := b.mustGetImmutableMessageFromVChannel(vchannel)
+	if err := registry.CallMessageAckCallback(ctx, msg); err != nil {
+		b.Logger().Warn("message ack callback failed", log.FieldMessage(msg), zap.Error(err))
+		return err
+	}
+	b.Logger().Warn("message ack callback success", log.FieldMessage(msg))
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	task, ok := b.copyAndSetVChannelAcked(vchannel)
 	if !ok {
 		return nil

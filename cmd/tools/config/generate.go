@@ -233,11 +233,12 @@ func WriteYaml(w io.Writer) {
 		{
 			name: "mq",
 			header: `
-# Milvus supports four MQ: rocksmq(based on RockDB), Pulsar and Kafka.
-# You can change your mq by setting mq.type field.
-# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported in cluster mode)`,
+# Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
+# You can change the MQ by setting the mq.type field.
+# If the mq.type field is not set, the following priority is used when multiple MQs are configured in this file:
+# 1. standalone (local) mode: rocksmq (default) > Pulsar > Kafka > Woodpecker
+# 2. cluster mode: Pulsar (default) > Kafka (rocksmq is unsupported in cluster mode) > Woodpecker
+# Note: These MQ priorities are compatible with existing instances. For new instances, it is recommended to explicitly use Woodpecker to achieve better performance, operational simplicity, and cost efficiency.`,
 		},
 		{
 			name: "woodpecker",

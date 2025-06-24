@@ -26,16 +26,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
 
-func TestFunctionRunnerSuite(t *testing.T) {
-	suite.Run(t, new(FunctionRunnerSuite))
+func TestBM25FunctionRunnerSuite(t *testing.T) {
+	suite.Run(t, new(BM25FunctionRunnerSuite))
 }
 
-type FunctionRunnerSuite struct {
+type BM25FunctionRunnerSuite struct {
 	suite.Suite
 	schema *schemapb.CollectionSchema
 }
 
-func (s *FunctionRunnerSuite) SetupTest() {
+func (s *BM25FunctionRunnerSuite) SetupTest() {
 	s.schema = &schemapb.CollectionSchema{
 		Name: "test",
 		Fields: []*schemapb.FieldSchema{
@@ -46,7 +46,7 @@ func (s *FunctionRunnerSuite) SetupTest() {
 	}
 }
 
-func (s *FunctionRunnerSuite) TestBM25() {
+func (s *BM25FunctionRunnerSuite) TestBM25() {
 	_, err := NewFunctionRunner(s.schema, &schemapb.FunctionSchema{
 		Name:          "test",
 		Type:          schemapb.FunctionType_BM25,
@@ -78,5 +78,11 @@ func (s *FunctionRunnerSuite) TestBM25() {
 
 	// return error because field not string
 	_, err = runner.BatchRun([]int64{})
+	s.Error(err)
+
+	runner.Close()
+
+	// run after close
+	_, err = runner.BatchRun([]string{"test string", "test string 2"})
 	s.Error(err)
 }

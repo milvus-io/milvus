@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -565,6 +567,7 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 }
 
 func (s *DataNodeServicesSuite) TestRPCWatch() {
+	os.Setenv("MILVUS_STREAMING_SERVICE_ENABLED", "0")
 	s.Run("node not healthy", func() {
 		s.SetupTest()
 		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -1221,12 +1224,17 @@ func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
 
 func (s *DataNodeServicesSuite) TestCreateTask() {
 	s.Run("create pre-import task", func() {
+		preImportReq := &datapb.PreImportRequest{
+			StorageConfig: compaction.CreateStorageConfig(),
+		}
+		payload, err := proto.Marshal(preImportReq)
+		s.NoError(err)
 		req := &workerpb.CreateTaskRequest{
 			Properties: map[string]string{
 				taskcommon.ClusterIDKey: "cluster-0",
 				taskcommon.TypeKey:      taskcommon.PreImport,
 			},
-			Payload: []byte{},
+			Payload: payload,
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(merr.CheckRPCCall(status, err))
@@ -1234,7 +1242,8 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 
 	s.Run("create import task", func() {
 		importReq := &datapb.ImportRequest{
-			Schema: &schemapb.CollectionSchema{},
+			Schema:        &schemapb.CollectionSchema{},
+			StorageConfig: compaction.CreateStorageConfig(),
 		}
 		payload, err := proto.Marshal(importReq)
 		s.NoError(err)
@@ -1397,18 +1406,6 @@ func (s *DataNodeServicesSuite) TestQueryTask() {
 		resp, err := s.node.QueryTask(s.ctx, req)
 		s.Error(merr.CheckRPCCall(resp, err))
 		s.True(strings.Contains(resp.GetStatus().GetReason(), "not found"))
-	})
-
-	s.Run("query slot task", func() {
-		req := &workerpb.QueryTaskRequest{
-			Properties: map[string]string{
-				taskcommon.ClusterIDKey: "cluster-0",
-				taskcommon.TypeKey:      taskcommon.QuerySlot,
-				taskcommon.TaskIDKey:    "1",
-			},
-		}
-		resp, err := s.node.QueryTask(s.ctx, req)
-		s.NoError(merr.CheckRPCCall(resp, err))
 	})
 
 	s.Run("invalid task type", func() {

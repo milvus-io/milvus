@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -94,6 +95,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("err"))
 		meta.On("ListAliasesByID", mock.Anything, mock.Anything).Return([]string{})
 
@@ -120,6 +122,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(&model.Collection{CollectionID: int64(1)}, nil)
 		meta.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -155,6 +158,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(&model.Collection{CollectionID: int64(1)}, nil)
 		meta.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -338,6 +342,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		meta.On("ListAliasesByID", mock.Anything, mock.Anything).Return([]string{})
 
@@ -416,5 +421,196 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 	})
 	t.Run("alter successfully5", func(t *testing.T) {
 		testFunc(t, nil, nil, []string{common.CollectionDescription})
+	})
+}
+
+func Test_alterCollectionFieldTask_Prepare(t *testing.T) {
+	t.Run("invalid collection name", func(t *testing.T) {
+		task := &alterCollectionFieldTask{
+			Req: &milvuspb.AlterCollectionFieldRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+			},
+		}
+		err := task.Prepare(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid field name", func(t *testing.T) {
+		task := &alterCollectionFieldTask{
+			Req: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+				CollectionName: "cn",
+			},
+		}
+		err := task.Prepare(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("normal name", func(t *testing.T) {
+		task := &alterCollectionFieldTask{
+			Req: &milvuspb.AlterCollectionFieldRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+				CollectionName: "cn",
+				FieldName:      "ok",
+			},
+		}
+		err := task.Prepare(context.Background())
+		assert.NoError(t, err)
+	})
+}
+
+func Test_alterCollectionFieldTask_Execute(t *testing.T) {
+	testFn := func(req *milvuspb.AlterCollectionFieldRequest, meta *mockrootcoord.IMetaTable, expectError bool) {
+		broker := newMockBroker()
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+			return nil
+		}
+
+		packChan := make(chan *msgstream.ConsumeMsgPack, 10)
+		ticker := newChanTimeTickSync(packChan)
+		ticker.addDmlChannels("by-dev-rootcoord-dml_1")
+
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker), withTtSynchronizer(ticker), withInvalidTsoAllocator())
+
+		task := &alterCollectionFieldTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      req,
+		}
+		err := task.Execute(context.Background())
+		if expectError {
+			assert.Error(t, err)
+		} else {
+			assert.NoError(t, err)
+		}
+	}
+
+	t.Run("properties and deleteKeys are empty", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		req := &milvuspb.AlterCollectionFieldRequest{
+			Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+			Properties: []*commonpb.KeyValuePair{},
+			DeleteKeys: []string{},
+		}
+		testFn(req, meta, true)
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("collection not found"))
+
+		req := &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+			CollectionName: "cn",
+			DeleteKeys:     []string{common.MaxLengthKey},
+		}
+		testFn(req, meta, true)
+	})
+
+	t.Run("field not found", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			CollectionID: int64(1),
+			Name:         "cn",
+			DBName:       "foo",
+			Fields:       []*model.Field{},
+		}, nil)
+
+		req := &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+			CollectionName: "cn",
+			DbName:         "foo",
+			FieldName:      "bar",
+			DeleteKeys:     []string{common.MaxLengthKey},
+		}
+		testFn(req, meta, true)
+	})
+
+	t.Run("update properties", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			CollectionID: int64(1),
+			Name:         "cn",
+			DBName:       "foo",
+			Fields: []*model.Field{{
+				FieldID:  int64(1),
+				Name:     "bar",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "50"},
+				},
+			}},
+		}, nil)
+		meta.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
+		req := &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+			CollectionName: "cn",
+			DbName:         "foo",
+			FieldName:      "bar",
+			Properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "100"},
+			},
+		}
+		testFn(req, meta, false)
+	})
+
+	t.Run("delete properties", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(&model.Collection{
+			CollectionID: int64(1),
+			Name:         "cn",
+			DBName:       "foo",
+			Fields: []*model.Field{{
+				FieldID:  int64(1),
+				Name:     "bar",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: "100"},
+					{Key: common.MmapEnabledKey, Value: "true"},
+				},
+			}},
+		}, nil)
+		meta.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
+		req := &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollectionField},
+			CollectionName: "cn",
+			DbName:         "foo",
+			FieldName:      "bar",
+			DeleteKeys:     []string{common.MmapEnabledKey},
+		}
+		testFn(req, meta, false)
 	})
 }

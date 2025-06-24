@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -201,6 +202,7 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
+	impl.shardManager.ApplyDelete(deleteMessage)
 	return appendOp(ctx, msg)
 }
 
@@ -259,11 +261,17 @@ func (impl *shardInterceptor) handleCreateSegment(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleFlushSegment(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	flushMsg := message.MustAsMutableFlushMessageV2(msg)
 	h := flushMsg.Header()
+	if utility.GetFlushFromOldArch(ctx) {
+		// The flush message come from old arch, so it's not managed by shard manager.
+		// We need to flush it into wal directly.
+		impl.shardManager.Logger().Info("flush segment from old arch, skip checking of shard manager", log.FieldMessage(msg))
+		return appendOp(ctx, msg)
+	}
+
 	if err := impl.shardManager.CheckIfSegmentCanBeFlushed(h.GetCollectionId(), h.GetPartitionId(), h.GetSegmentId()); err != nil {
 		// The segment can not be flushed at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
-
 	msgID, err := appendOp(ctx, msg)
 	if err != nil {
 		return nil, err

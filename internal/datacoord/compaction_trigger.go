@@ -356,7 +356,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, signal.isForce, group.segments...)
+			group.segments = FilterInIndexedSegments(context.Background(), t.handler, t.meta, signal.isForce, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)
@@ -458,18 +458,14 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	}
 
 	buckets := [][]*SegmentInfo{}
-	toUpdate := newSegmentPacker("update", prioritizedCandidates)
-	toMerge := newSegmentPacker("merge", smallCandidates)
-	toPack := newSegmentPacker("pack", nonPlannedSegments)
+	toUpdate := newSegmentPacker("update", prioritizedCandidates, compactTime)
+	toMerge := newSegmentPacker("merge", smallCandidates, compactTime)
 
 	maxSegs := int64(4096) // Deprecate the max segment limit since it is irrelevant in simple compactions.
 	minSegs := Params.DataCoordCfg.MinSegmentToMerge.GetAsInt64()
 	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
 	satisfiedSize := int64(float64(expectedSize) * compactableProportion)
-	expantionRate := Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()
 	maxLeftSize := expectedSize - satisfiedSize
-	expectedExpandedSize := int64(float64(expectedSize) * expantionRate)
-	maxExpandedLeftSize := expectedExpandedSize - satisfiedSize
 	reasons := make([]string, 0)
 	// 1. Merge small segments if they can make a full bucket
 	for {
@@ -492,11 +488,12 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		reasons = append(reasons, fmt.Sprintf("packing %d prioritized segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
-	// if there is any segment toUpdate left, its size must greater than expectedSize, add it to the buckets
+	// if there is any segment toUpdate left, its size must be greater than expectedSize, add it to the buckets
 	for _, s := range toUpdate.candidates {
 		buckets = append(buckets, []*SegmentInfo{s})
 		reasons = append(reasons, fmt.Sprintf("force packing prioritized segment %d", s.GetID()))
 	}
+
 	// 2.+ legacy: squeeze small segments
 	// Try merge all small segments, and then squeeze
 	for {
@@ -507,18 +504,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		reasons = append(reasons, fmt.Sprintf("packing all %d small segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
-	remaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
-	toMerge = newSegmentPacker("merge", remaining)
-
-	// 3. pack remaining small segments with non-planned segments
-	for {
-		pack, _ := toMerge.packWith(expectedExpandedSize, maxExpandedLeftSize, minSegs, maxSegs, toPack)
-		if len(pack) == 0 {
-			break
-		}
-		reasons = append(reasons, fmt.Sprintf("packing %d small segments and non-planned segments", len(pack)))
-		buckets = append(buckets, pack)
-	}
+	smallRemaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
 
 	tasks := make([]*typeutil.Pair[int64, []int64], len(buckets))
 	for i, b := range buckets {
@@ -540,6 +526,13 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 			zap.Int("nonPlannedSegments", len(nonPlannedSegments)),
 			zap.Strings("reasons", reasons))
 	}
+	if len(smallRemaining) > 0 {
+		log.RatedInfo(300, "remain small segments",
+			zap.Int64("collectionID", signal.collectionID),
+			zap.Int64("partitionID", signal.partitionID),
+			zap.String("channel", signal.channel),
+			zap.Int("smallRemainingCount", len(smallRemaining)))
+	}
 	return tasks
 }
 
@@ -551,7 +544,7 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
 			return isSegmentHealthy(segment) &&
-				isFlush(segment) &&
+				isFlushed(segment) &&
 				!segment.isCompacting && // not compacting now
 				!segment.GetIsImporting() && // not importing now
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
@@ -658,6 +651,28 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 	return is
 }
 
+func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *compactTime, segment *SegmentInfo) bool {
+	if Params.DataCoordCfg.CompactionExpiryTolerance.GetAsInt() >= 0 {
+		tolerantDuration := Params.DataCoordCfg.CompactionExpiryTolerance.GetAsDuration(time.Hour)
+		expireTime, _ := tsoutil.ParseTS(compactTime.expireTime)
+		earliestTolerance := expireTime.Add(-tolerantDuration)
+		earliestFromTime, _ := tsoutil.ParseTS(fromTs)
+		if earliestFromTime.Before(earliestTolerance) {
+			log.Info("Trigger strict expiry compaction for segment",
+				zap.Int64("segmentID", segment.GetID()),
+				zap.Int64("collectionID", segment.GetCollectionID()),
+				zap.Int64("partition", segment.GetPartitionID()),
+				zap.String("channel", segment.GetInsertChannel()),
+				zap.Time("compaction expire time", expireTime),
+				zap.Time("earliest tolerance", earliestTolerance),
+				zap.Time("segment earliest from time", earliestFromTime),
+			)
+			return true
+		}
+	}
+	return false
+}
+
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
@@ -672,6 +687,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	// if expire time is enabled, put segment into compaction candidate
 	totalExpiredSize := int64(0)
 	totalExpiredRows := 0
+	var earliestFromTs uint64 = math.MaxUint64
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
@@ -684,7 +700,11 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
+			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
 		}
+	}
+	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
+		return true
 	}
 
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
@@ -744,6 +764,10 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	}
 
 	return false
+}
+
+func isFlushed(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed
 }
 
 func isFlush(segment *SegmentInfo) bool {

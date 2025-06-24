@@ -278,9 +278,9 @@ message VchannelInfo {
   int64 collectionID = 1;
   string channelName = 2;
   msg.MsgPosition seek_position = 3;
-  repeated SegmentInfo unflushedSegments = 4; // deprecated, keep it for compatibility
-  repeated SegmentInfo flushedSegments = 5; // deprecated, keep it for compatibility
-  repeated SegmentInfo dropped_segments = 6; // deprecated, keep it for compatibility
+  repeated SegmentInfo unflushedSegments = 4 [deprecated = true]; // deprecated, keep it for compatibility
+  repeated SegmentInfo flushedSegments = 5 [deprecated = true]; // deprecated, keep it for compatibility
+  repeated SegmentInfo dropped_segments = 6 [deprecated = true]; // deprecated, keep it for compatibility
   repeated int64 unflushedSegmentIds = 7;
   repeated int64 flushedSegmentIds = 8;
   repeated int64 dropped_segmentIds = 9;
@@ -517,6 +517,13 @@ message GetChannelRecoveryInfoResponse {
   common.Status status = 1;
   VchannelInfo info = 2;
   schema.CollectionSchema schema = 3;
+  repeated SegmentNotCreatedByStreaming segments_not_created_by_streaming = 4; // Should be flushed by streaming service when upgrading.
+}
+
+message SegmentNotCreatedByStreaming {
+  int64 collection_id = 1;
+  int64 partition_id = 2;
+  int64 segment_id = 3;
 }
 
 message GetSegmentsByStatesRequest {
@@ -820,6 +827,7 @@ message PreImportRequest {
   schema.CollectionSchema schema = 7;
   repeated internal.ImportFile import_files = 8;
   repeated common.KeyValuePair options = 9;
+  index.StorageConfig storage_config = 10;
 }
 
 message IDRange {
@@ -846,6 +854,7 @@ message ImportRequest {
   uint64 ts = 10;
   IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
+  index.StorageConfig storage_config = 13;
 }
 
 message QueryPreImportRequest {
@@ -984,7 +993,7 @@ message QuerySlotRequest {}
 
 message QuerySlotResponse {
   common.Status status = 1;
-  int64 num_slots = 2;
+  int64 available_slots = 2;
 }
 
 enum CompactionTaskState {

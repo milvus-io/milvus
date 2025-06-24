@@ -761,8 +761,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("add_field", [True, False])
     def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field,
-                                                        enable_partition_key, nullable):
+                                                        enable_partition_key, nullable, add_field):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -809,7 +810,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             schema=schema
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
-
+        if add_field:
+            self._connect(enable_milvus_client_api=True)
+            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+                                             nullable=True)
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -949,7 +953,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
-    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key, include_meta, nullable):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key,
+                                              include_meta, nullable, add_field):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -963,6 +969,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             pytest.skip("include_meta only works with enable_dynamic_field")
         if nullable is True:
             pytest.skip("not support bulk insert numpy files in field which set nullable == true")
+        if add_field is True:
+            pytest.skip("https://github.com/milvus-io/milvus/issues/42173")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
@@ -995,7 +1003,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             schema=schema
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
-
+        if add_field:
+            self._connect(enable_milvus_client_api=True)
+            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+                                             nullable=True)
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -1119,8 +1130,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("nullable", [True, False])
+    @pytest.mark.parametrize("add_field", [True, False])
     def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field,
-                                                enable_partition_key, include_meta, nullable):
+                                                enable_partition_key, include_meta, nullable, add_field):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1169,6 +1181,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             schema=schema
         )
         self.collection_wrap.init_collection(c_name, schema=schema)
+        if add_field:
+            self._connect(enable_milvus_client_api=True)
+            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+                                             nullable=True)
 
         # import data
         t0 = time.time()
@@ -2153,9 +2169,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
     @pytest.mark.parametrize("nullable", [True, False])
-    def test_with_all_field_csv_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format, nullable):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_with_all_field_csv_with_bulk_writer(self, auto_id, dim, entities, enable_dynamic_field, sparse_format,
+                                                 nullable, add_field):
         """
         """
+        if add_field is True and auto_id is False:
+            pytest.skip("https://github.com/milvus-io/milvus/issues/42714")
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
@@ -2216,6 +2236,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 remote_writer.append_row(row)
             remote_writer.commit()
             files = remote_writer.batch_files
+        if add_field:
+            self._connect(enable_milvus_client_api=True)
+            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+                                             nullable=True)
         # import data
         for f in files:
             t0 = time.time()
@@ -2686,7 +2710,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             check_items={"nq": ct.default_nq,
                          "limit": ct.default_limit})
 
-class TestImportWithTextEmbedding(TestcaseBase):
+class TestImportWithTextEmbeddingFunction(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test import with text embedding
@@ -2694,8 +2718,9 @@ class TestImportWithTextEmbedding(TestcaseBase):
     """
 
     @pytest.mark.parametrize("file_format", ["json", "parquet", "numpy"])
+    @pytest.mark.parametrize("add_field", [True, False])
     @pytest.mark.tags(CaseLabel.L1)
-    def test_import_without_embedding(self, tei_endpoint, minio_host, file_format):
+    def test_import_without_embedding(self, tei_endpoint, minio_host, file_format, add_field):
         """
         target: test import data without embedding
         method: 1. create collection
@@ -2703,6 +2728,8 @@ class TestImportWithTextEmbedding(TestcaseBase):
                 3. verify embeddings are generated
         expected: embeddings should be generated after import
         """
+        if add_field is True and file_format == "numpy":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/42173")
         dim = 768
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
@@ -2749,6 +2776,10 @@ class TestImportWithTextEmbedding(TestcaseBase):
                 remote_writer.append_row(row)
             remote_writer.commit()
             files = remote_writer.batch_files
+        if add_field:
+            self._connect(enable_milvus_client_api=True)
+            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+                                             nullable=True)
         # import data
         for f in files:
             t0 = time.time()
@@ -2780,3 +2811,160 @@ class TestImportWithTextEmbedding(TestcaseBase):
         for r in res:
             assert "dense" in r
             assert len(r["dense"]) == dim
+
+
+class TestImportWithFunctionNegative(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test import with text embedding
+    ******************************************************************
+    """
+
+    @pytest.mark.parametrize("file_format", ["json", "parquet"])
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_import_for_bm25_function_with_output_field(self, tei_endpoint, minio_host, file_format):
+        """
+        target: test import data for bm25 with output field
+        method: 1. create collection
+                2. import data with output field
+                3. verify import failed
+        expected: import failed
+        """
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535, enable_analyzer=True),
+            FieldSchema(name="bm25", dtype=DataType.SPARSE_FLOAT_VECTOR),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+
+        bm25_function = Function(
+            name="text_embedding",
+            function_type=FunctionType.BM25,
+            input_field_names=["document"],
+            output_field_names=["bm25"],
+            params={
+            },
+        )
+        schema.add_function(bm25_function)
+        c_name = cf.gen_unique_str("import_without_embedding")
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+        # prepare import data with function output
+        invalid_schema = CollectionSchema(fields=fields, description="test collection")
+        nb = 1000
+        rng = np.random.default_rng()
+        if file_format == "json":
+            file_type = BulkFileType.JSON
+        elif file_format == "numpy":
+            file_type = BulkFileType.NUMPY
+        else:
+            file_type = BulkFileType.PARQUET
+        with RemoteBulkWriter(
+            schema=invalid_schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name="milvus-bucket",
+                endpoint=f"{minio_host}:9000",
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=file_type,
+        ) as remote_writer:
+            for i in range(nb):
+                row = {"id": i,
+                       "document": f"This is test document {i}",
+                       "bm25": {
+                            d: rng.random() for d in random.sample(range(1000), random.randint(20, 30))
+                        }
+                       }
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            files = remote_writer.batch_files
+        # import data
+        for f in files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=f
+            )
+            log.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert not success
+
+
+    @pytest.mark.parametrize("file_format", ["json", "parquet"])
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_import_for_text_embedding_function_with_output_field(self, tei_endpoint, minio_host, file_format):
+        """
+        target: test import data for text embedding function with output field
+        method: 1. create collection
+                2. import data for text embedding function with output field
+                3. import failed
+        expected: import failed
+        """
+        dim = 768
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="document", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="dense", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+
+        text_embedding_function = Function(
+            name="text_embedding",
+            function_type=FunctionType.TEXTEMBEDDING,
+            input_field_names=["document"],
+            output_field_names="dense",
+            params={
+                "provider": "TEI",
+                "endpoint": tei_endpoint,
+            },
+        )
+        schema.add_function(text_embedding_function)
+        c_name = cf.gen_unique_str("import_without_embedding")
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+        # prepare import data embedding
+        invalid_schema = CollectionSchema(fields=fields, description="test collection")
+        nb = 1000
+        if file_format == "json":
+            file_type = BulkFileType.JSON
+        elif file_format == "numpy":
+            file_type = BulkFileType.NUMPY
+        else:
+            file_type = BulkFileType.PARQUET
+        with RemoteBulkWriter(
+            schema=invalid_schema,
+            remote_path="bulk_data",
+            connect_param=RemoteBulkWriter.ConnectParam(
+                bucket_name="milvus-bucket",
+                endpoint=f"{minio_host}:9000",
+                access_key="minioadmin",
+                secret_key="minioadmin",
+            ),
+            file_type=file_type,
+        ) as remote_writer:
+            for i in range(nb):
+                row = {"id": i,
+                       "document": f"This is test document {i}",
+                       "dense": [random.random() for _ in range(dim)]
+                       }
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            files = remote_writer.batch_files
+        # import data
+        for f in files:
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=f
+            )
+            log.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert not success

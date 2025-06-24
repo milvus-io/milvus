@@ -81,7 +81,7 @@ TEST(Sealed, without_predicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -148,6 +148,8 @@ TEST(Sealed, without_predicate) {
 
     sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
     EXPECT_EQ(sr->get_total_result_count(), 0);
+    sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100);
+    EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
 TEST(Sealed, without_search_ef_less_than_limit) {
@@ -180,7 +182,7 @@ TEST(Sealed, without_search_ef_less_than_limit) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -284,7 +286,7 @@ TEST(Sealed, with_predicate) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -392,7 +394,7 @@ TEST(Sealed, with_predicate_filter_all) {
     auto query_ptr = vec_col.data() + BIAS * dim;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw =
         CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
@@ -548,7 +550,7 @@ TEST(Sealed, LoadFieldData) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -712,7 +714,7 @@ TEST(Sealed, ClearData) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -817,7 +819,7 @@ TEST(Sealed, LoadFieldDataMmap) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -932,7 +934,7 @@ TEST(Sealed, LoadScalarIndex) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -982,7 +984,7 @@ TEST(Sealed, LoadScalarIndex) {
     nothing_index.cache_index = CreateTestCacheIndex("test", std::move(temp2));
     segment->LoadIndex(nothing_index);
 
-    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp, 0, 100000);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
 }
@@ -1034,7 +1036,7 @@ TEST(Sealed, Delete) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1116,7 +1118,7 @@ TEST(Sealed, OverlapDelete) {
     Timestamp timestamp = 1000000;
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1240,7 +1242,7 @@ TEST(Sealed, BF) {
     auto binary_plan =
         translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     auto plan =
-        CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1303,7 +1305,7 @@ TEST(Sealed, BF_Overflow) {
     auto binary_plan =
         translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     auto plan =
-        CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+        CreateSearchPlanByExpr(schema, binary_plan.data(), binary_plan.size());
 
     auto num_queries = 10;
     auto query = GenQueryVecs(num_queries, dim);
@@ -1491,7 +1493,7 @@ TEST(Sealed, LoadArrayFieldData) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1548,7 +1550,7 @@ TEST(Sealed, LoadArrayFieldDataWithMMap) {
 
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group =
@@ -1769,7 +1771,7 @@ TEST(Sealed, SkipIndexSkipUnaryRangeNullable) {
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                     kPartitionID,
                                                     kSegmentID,
@@ -1840,7 +1842,7 @@ TEST(Sealed, SkipIndexSkipBinaryRangeNullable) {
     auto int64s_field_data =
         storage::CreateFieldData(DataType::INT64, true, 1, 5);
 
-    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5);
+    int64s_field_data->FillFieldData(int64s.data(), valid_data.data(), 5, 0);
     auto load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                     kPartitionID,
                                                     kSegmentID,
@@ -1990,12 +1992,17 @@ TEST(Sealed, QueryAllFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
-    auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
-    auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
-    auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
-    auto string_array_values = dataset.get_col<ScalarArray>(string_array_field);
-    auto double_array_values = dataset.get_col<ScalarArray>(double_array_field);
-    auto float_array_values = dataset.get_col<ScalarArray>(float_array_field);
+    auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
+    auto long_array_values =
+        dataset.get_col<ScalarFieldProto>(long_array_field);
+    auto bool_array_values =
+        dataset.get_col<ScalarFieldProto>(bool_array_field);
+    auto string_array_values =
+        dataset.get_col<ScalarFieldProto>(string_array_field);
+    auto double_array_values =
+        dataset.get_col<ScalarFieldProto>(double_array_field);
+    auto float_array_values =
+        dataset.get_col<ScalarFieldProto>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
     auto float16_vector_values = dataset.get_col<uint8_t>(float16_vec);
     auto bfloat16_vector_values = dataset.get_col<uint8_t>(bfloat16_vec);
@@ -2147,12 +2154,17 @@ TEST(Sealed, QueryAllNullableFields) {
     auto double_values = dataset.get_col<double>(double_field);
     auto varchar_values = dataset.get_col<std::string>(varchar_field);
     auto json_values = dataset.get_col<std::string>(json_field);
-    auto int_array_values = dataset.get_col<ScalarArray>(int_array_field);
-    auto long_array_values = dataset.get_col<ScalarArray>(long_array_field);
-    auto bool_array_values = dataset.get_col<ScalarArray>(bool_array_field);
-    auto string_array_values = dataset.get_col<ScalarArray>(string_array_field);
-    auto double_array_values = dataset.get_col<ScalarArray>(double_array_field);
-    auto float_array_values = dataset.get_col<ScalarArray>(float_array_field);
+    auto int_array_values = dataset.get_col<ScalarFieldProto>(int_array_field);
+    auto long_array_values =
+        dataset.get_col<ScalarFieldProto>(long_array_field);
+    auto bool_array_values =
+        dataset.get_col<ScalarFieldProto>(bool_array_field);
+    auto string_array_values =
+        dataset.get_col<ScalarFieldProto>(string_array_field);
+    auto double_array_values =
+        dataset.get_col<ScalarFieldProto>(double_array_field);
+    auto float_array_values =
+        dataset.get_col<ScalarFieldProto>(float_array_field);
     auto vector_values = dataset.get_col<float>(vec);
 
     auto bool_valid_values = dataset.get_col_valid(bool_field);
@@ -2266,4 +2278,58 @@ TEST(Sealed, SearchSortedPk) {
     auto offsets2 = segment->search_pk(PkType(pk_values[100]), int64_t(105));
     EXPECT_EQ(6, offsets2.size());
     EXPECT_EQ(100, offsets2[0].get());
+}
+
+TEST(Sealed, QueryVectorArrayAllFields) {
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    std::map<FieldId, FieldIndexMeta> filedMap{};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+
+    int64_t dataset_size = 1000;
+    int64_t dim = 128;
+    auto dataset = DataGen(schema, dataset_size);
+    auto segment_sealed = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto segment =
+        dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
+
+    auto int64_values = dataset.get_col<int64_t>(int64_field);
+    auto array_vec_values = dataset.get_col<VectorFieldProto>(array_vec);
+
+    auto ids_ds = GenRandomIds(dataset_size);
+    auto int64_result =
+        segment->bulk_subscript(int64_field, ids_ds->GetIds(), dataset_size);
+    auto array_float_vector_result =
+        segment->bulk_subscript(array_vec, ids_ds->GetIds(), dataset_size);
+
+    EXPECT_EQ(int64_result->scalars().long_data().data_size(), dataset_size);
+    EXPECT_EQ(array_float_vector_result->vectors().vector_array().data_size(),
+              dataset_size);
+
+    auto verify_float_vectors = [](auto arr1, auto arr2) {
+        static constexpr float EPSILON = 1e-6;
+        EXPECT_EQ(arr1.size(), arr2.size());
+        for (int64_t i = 0; i < arr1.size(); ++i) {
+            EXPECT_NEAR(arr1[i], arr2[i], EPSILON);
+        }
+    };
+    for (int64_t i = 0; i < dataset_size; ++i) {
+        auto arrow_array = array_float_vector_result->vectors()
+                               .vector_array()
+                               .data()[i]
+                               .float_vector()
+                               .data();
+        auto expected_array =
+            array_vec_values[ids_ds->GetIds()[i]].float_vector().data();
+        verify_float_vectors(arrow_array, expected_array);
+    }
+
+    EXPECT_EQ(int64_result->valid_data_size(), 0);
+    EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
 }

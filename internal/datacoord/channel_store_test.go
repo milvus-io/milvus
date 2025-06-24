@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -18,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 )
 
@@ -421,12 +423,18 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 	tests := []struct {
 		description string
 
-		inSuccess       bool
+		inErr           error
 		inChannelState  ChannelState
 		outChannelState ChannelState
 	}{
-		{"input standby, fail", false, Standby, Standby},
-		{"input standby, success", true, Standby, ToWatch},
+		{"input standby fail", errors.New("fail"), Standby, Standby},
+		{"input standby success", nil, Standby, ToWatch},
+		{"input towatch duplicate", merr.ErrChannelReduplicate, ToWatch, ToRelease},
+		{"input towatch fail", errors.New("fail"), ToWatch, Standby},
+		{"input towatch success", nil, ToWatch, Watching},
+		{"input torelease duplicate", merr.ErrChannelReduplicate, ToRelease, ToRelease},
+		{"input torelease fail", errors.New("fail"), ToRelease, ToRelease},
+		{"input torelease success", nil, ToRelease, Releasing},
 	}
 
 	for _, test := range tests {
@@ -443,10 +451,43 @@ func (s *StateChannelStoreSuite) TestUpdateState() {
 				},
 			}
 
-			store.UpdateState(test.inSuccess, bufferID, channel, 0)
+			store.UpdateState(test.inErr, bufferID, channel, 0)
 			s.Equal(test.outChannelState, channel.currentState)
 		})
 	}
+}
+
+func (s *StateChannelStoreSuite) TestReloadDupCh() {
+	s.mockTxn.ExpectedCalls = nil
+
+	tests := []struct {
+		channelName string
+		nodeID      int64
+	}{
+		{"ch1", 1},
+		{"ch1", bufferID},
+		{"ch1", 2},
+	}
+
+	var keys, values []string
+	for _, test := range tests {
+		keys = append(keys, fmt.Sprintf("channel_store/%d/%s", test.nodeID, test.channelName))
+		info := generateWatchInfo(test.channelName, datapb.ChannelWatchState_WatchSuccess)
+		bs, err := proto.Marshal(info)
+		s.Require().NoError(err)
+		values = append(values, string(bs))
+	}
+	s.mockTxn.EXPECT().LoadWithPrefix(mock.Anything, mock.AnythingOfType("string")).Return(keys, values, nil)
+	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
+
+	store := NewStateChannelStore(s.mockTxn)
+	err := store.Reload()
+	s.Require().NoError(err)
+
+	s.True(store.HasChannel("ch1"))
+	s.ElementsMatch([]int64{1}, store.GetNodes())
+	s.EqualValues(1, store.GetNodeChannelCount(1))
+	s.EqualValues(0, store.GetNodeChannelCount(2))
 }
 
 func (s *StateChannelStoreSuite) TestReload() {

@@ -59,11 +59,16 @@ GetKnnSearchRecall(
 }
 
 using Param =
-    std::tuple<DataType, knowhere::MetricType, /* IndexType */ std::string>;
+    std::tuple<DataType,
+               knowhere::MetricType,
+               /* IndexType */ std::string,
+               /* DenseVectorInterminIndexType*/ std::optional<std::string>>;
 class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
-        std::tie(data_type, metric_type, index_type) = GetParam();
+        std::tie(
+            data_type, metric_type, index_type, dense_vec_intermin_index_type) =
+            GetParam();
 
         schema = std::make_shared<Schema>();
 
@@ -79,6 +84,13 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             raw_dataset = knowhere::GenDataSet(data_n, data_d, vec_data.get());
             raw_dataset->SetIsOwner(true);
             vec_data.release();
+            if (dense_vec_intermin_index_type.has_value() &&
+                dense_vec_intermin_index_type.value() ==
+                    knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR) {
+                intermin_index_has_raw_data = false;
+            } else {
+                intermin_index_has_raw_data = true;
+            }
         } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
             auto sparse_vecs = GenerateRandomSparseFloatVector(data_n);
             vec_field_data->FillFieldData(sparse_vecs.get(), data_n);
@@ -91,6 +103,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
             raw_dataset->SetIsOwner(true);
             raw_dataset->SetIsSparse(true);
             sparse_vecs.release();
+            intermin_index_has_raw_data = false;
         } else {
             throw std::runtime_error("not implemented");
         }
@@ -149,6 +162,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     milvus::SchemaPtr schema;
     knowhere::MetricType metric_type;
     DataType data_type;
+    std::optional<std::string> dense_vec_intermin_index_type = std::nullopt;
     std::string index_type;
     size_t data_n = 10000;
     size_t data_d = 128;
@@ -157,6 +171,7 @@ class BinlogIndexTest : public ::testing::TestWithParam<Param> {
     milvus::segcore::SegmentSealedUPtr segment = nullptr;
     milvus::FieldId vec_field_id;
     knowhere::DataSetPtr raw_dataset;
+    bool intermin_index_has_raw_data;
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -165,13 +180,26 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple(DataType::VECTOR_FLOAT,
                         knowhere::metric::L2,
-                        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT),
+                        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                        knowhere::IndexEnum::
+                            INDEX_FAISS_IVFFLAT_CC),  // intermin index has data
+        std::make_tuple(
+            DataType::VECTOR_FLOAT,
+            knowhere::metric::L2,
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+            knowhere::IndexEnum::
+                INDEX_FAISS_SCANN_DVR),  // intermin index not has data
+        std::make_tuple(
+            DataType::VECTOR_SPARSE_FLOAT,
+            knowhere::metric::IP,
+            knowhere::IndexEnum::
+                INDEX_SPARSE_INVERTED_INDEX,  //intermin index not has data
+            std::nullopt),
         std::make_tuple(DataType::VECTOR_SPARSE_FLOAT,
                         knowhere::metric::IP,
-                        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX),
-        std::make_tuple(DataType::VECTOR_SPARSE_FLOAT,
-                        knowhere::metric::IP,
-                        knowhere::IndexEnum::INDEX_SPARSE_WAND)));
+                        knowhere::IndexEnum::
+                            INDEX_SPARSE_WAND,  // intermin index not has data
+                        std::nullopt)));
 
 TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     IndexMetaPtr collection_index_meta = GetCollectionIndexMeta(index_type);
@@ -181,6 +209,10 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
 
     auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
     segcore_config.set_enable_interim_segment_index(true);
+    if (dense_vec_intermin_index_type.has_value()) {
+        segcore_config.set_dense_vector_intermin_index_type(
+            dense_vec_intermin_index_type.value());
+    }
     segcore_config.set_nprobe(32);
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField();
@@ -188,6 +220,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
     //assert segment has been built binlog index
     EXPECT_TRUE(segment->HasIndex(vec_field_id));
     EXPECT_EQ(segment->get_row_count(), data_n);
+
     EXPECT_TRUE(segment->HasFieldData(vec_field_id));
 
     // 2. search binlog index
@@ -214,7 +247,7 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
             : CreateSparseFloatPlaceholderGroup(num_queries);
 
     auto plan = milvus::query::CreateSearchPlanByExpr(
-        *schema, plan_str.data(), plan_str.size());
+        schema, plan_str.data(), plan_str.size());
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -255,7 +288,8 @@ TEST_P(BinlogIndexTest, AccuracyWithLoadFieldData) {
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
         // only INDEX_FAISS_IVFFLAT has raw data, thus it should release the raw field data.
-        EXPECT_EQ(segment->HasFieldData(vec_field_id), index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+        EXPECT_EQ(segment->HasFieldData(vec_field_id),
+                  index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
         auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63, 0);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
@@ -274,6 +308,10 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
 
     auto& segcore_config = milvus::segcore::SegcoreConfig::default_config();
     segcore_config.set_enable_interim_segment_index(true);
+    if (dense_vec_intermin_index_type.has_value()) {
+        segcore_config.set_dense_vector_intermin_index_type(
+            dense_vec_intermin_index_type.value());
+    }
     segcore_config.set_nprobe(32);
     // 1. load field data, and build binlog index for binlog data
     LoadVectorField("./data/mmap-test");
@@ -308,7 +346,7 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
             : CreateSparseFloatPlaceholderGroup(num_queries);
 
     auto plan = milvus::query::CreateSearchPlanByExpr(
-        *schema, plan_str.data(), plan_str.size());
+        schema, plan_str.data(), plan_str.size());
     auto ph_group =
         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
@@ -348,7 +386,8 @@ TEST_P(BinlogIndexTest, AccuracyWithMapFieldData) {
         ASSERT_NO_THROW(segment->LoadIndex(load_info));
         EXPECT_TRUE(segment->HasIndex(vec_field_id));
         EXPECT_EQ(segment->get_row_count(), data_n);
-        EXPECT_EQ(segment->HasFieldData(vec_field_id), index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
+        EXPECT_EQ(segment->HasFieldData(vec_field_id),
+                  index_type != knowhere::IndexEnum::INDEX_FAISS_IVFFLAT);
         auto ivf_sr = segment->Search(plan.get(), ph_group.get(), 1L << 63);
         auto similary = GetKnnSearchRecall(num_queries,
                                            binlog_index_sr->seg_offsets_.data(),
@@ -364,7 +403,7 @@ TEST_P(BinlogIndexTest, DisableInterimIndex) {
 
     segment = CreateSealedSegment(schema, collection_index_meta);
     LoadOtherFields();
-    SegcoreSetEnableTempSegmentIndex(false);
+    SegcoreSetEnableInterminSegmentIndex(false);
 
     LoadVectorField();
 
@@ -419,7 +458,7 @@ TEST_P(BinlogIndexTest, LoadBinlogWithoutIndexMeta) {
         GetCollectionIndexMeta(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
     segment = CreateSealedSegment(schema, collection_index_meta);
-    SegcoreSetEnableTempSegmentIndex(true);
+    SegcoreSetEnableInterminSegmentIndex(true);
 
     LoadVectorField();
 

@@ -124,10 +124,20 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 	loadVersion := time.Now().UnixMilli()
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, loadVersion, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+		},
+	})
 
 	tasks = suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -145,13 +155,21 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	version1, version2 := int64(1), int64(2)
 	observer.dist.SegmentDistManager.Update(node1)
 	observer.dist.SegmentDistManager.Update(node2, utils.CreateTestSegment(1, 1, 1, node2, version2, "test-insert-channel"))
-	view = utils.CreateTestLeaderView(node2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	view.Segments[1] = &querypb.SegmentDist{
-		NodeID:  node1,
-		Version: version1,
-	}
-	observer.dist.LeaderViewManager.Update(node2, view)
+	observer.dist.ChannelDistManager.Update(node2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    node2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+			Segments:      map[int64]*querypb.SegmentDist{1: {NodeID: node1, Version: version1}},
+		},
+	})
 
 	tasks = suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -199,10 +217,20 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+		},
+	})
 
 	suite.checker.Deactivate()
 	tasks := suite.checker.Check(context.TODO())
@@ -243,10 +271,20 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+		},
+	})
 
 	mutableReplica := replica.CopyForWrite()
 	mutableReplica.AddRONode(2)
@@ -293,11 +331,20 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"),
 		utils.CreateTestSegment(1, 1, 2, 2, 1, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
-
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+		},
+	})
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
@@ -346,14 +393,35 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 0, "test-insert-channel"))
 	observer.dist.SegmentDistManager.Update(4, utils.CreateTestSegment(1, 1, 1, 4, 0, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(4, utils.CreateTestChannel(1, 4, 2, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
-	view2 := utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(4, view2)
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+		},
+	})
+	observer.dist.ChannelDistManager.Update(4, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    4,
+		Version: 2,
+		View: &meta.LeaderView{
+			ID:            4,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+			Segments:      map[int64]*querypb.SegmentDist{1: {NodeID: 4}},
+		},
+	})
 
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -385,10 +453,21 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	view := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 1}, map[int64]*meta.Segment{})
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, view)
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+			Segments:      map[int64]*querypb.SegmentDist{3: {NodeID: 1}},
+		},
+	})
 
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -426,8 +505,21 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 		channels, segments, nil)
 	observer.target.UpdateCollectionNextTarget(ctx, int64(1))
 
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2, 2: 2}, map[int64]*meta.Segment{}))
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+			Segments:      map[int64]*querypb.SegmentDist{3: {NodeID: 2}, 2: {NodeID: 2}},
+		},
+	})
 
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -443,7 +535,7 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 	ctx := context.Background()
 	testChannel := "test-insert-channel"
-	leaderID := int64(2)
+	// leaderID := int64(2)
 	observer := suite.checker
 	observer.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(1, 1))
 	observer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(1, 1))
@@ -477,14 +569,31 @@ func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 	observer.target.UpdateCollectionCurrentTarget(ctx, 1)
 	loadVersion := time.Now().UnixMilli()
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, loadVersion, testChannel))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, testChannel))
-	view := utils.CreateTestLeaderView(2, 1, testChannel, map[int64]int64{2: 1}, map[int64]*meta.Segment{})
-	view.PartitionStatsVersions = map[int64]int64{
-		1: 100,
-	}
+	// observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, testChannel))
+	// view := utils.CreateTestLeaderView(2, 1, testChannel, map[int64]int64{2: 1}, map[int64]*meta.Segment{})
+	// view.PartitionStatsVersions = map[int64]int64{
+	// 1: 100,
+	// }
 	// current partition stat version in leader view is version100 for partition1
-	view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(leaderID, view)
+	// view.TargetVersion = observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget)
+	// observer.dist.ShardLeaderManager.Update(leaderID, view)
+	observer.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:            2,
+			CollectionID:  1,
+			Channel:       "test-insert-channel",
+			TargetVersion: observer.target.GetCollectionTargetVersion(ctx, 1, meta.CurrentTarget),
+			PartitionStatsVersions: map[int64]int64{
+				1: 100,
+			},
+		},
+	})
 
 	tasks = suite.checker.Check(context.TODO())
 	suite.Len(tasks, 1)

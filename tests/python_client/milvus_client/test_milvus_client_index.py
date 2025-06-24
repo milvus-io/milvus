@@ -207,6 +207,72 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
                           check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_supported_index", ct.all_index_types[:-2])
+    def test_milvus_client_int8_vector_create_not_supported_cpu_index(self, not_supported_index):
+        """
+        target: test create non-supported index on int8 vector
+        method: create non-supported index on int8 vector
+        expected: raise exception
+        """
+        if not_supported_index in ct.int8_vector_index:
+            pytest.skip("This index is supported by int8 vector")
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.INT8_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+        # 2. index_params.add_index("title")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "embeddings")
+        # 3. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
+        # 4. create another index
+        error = {ct.err_code: 1100, ct.err_msg: f"data type Int8Vector can't build with this index {not_supported_index}: "
+                                                f"invalid parameter[expected=valid index params][actual=invalid index params]"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("not_supported_index", ct.all_index_types[-2:])
+    def test_milvus_client_int8_vector_create_not_supported_GPU_index(self, not_supported_index):
+        """
+        target: test create non-supported index on int8 vector
+        method: create non-supported index on int8 vector
+        expected: raise exception
+        """
+        if not_supported_index in ct.int8_vector_index:
+            pytest.skip("This index is supported by int8 vector")
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+        dim = 128
+        # 1. create collection
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id_string", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.INT8_VECTOR, dim=dim)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("embeddings", metric_type="COSINE")
+        # 2. index_params.add_index("title")
+        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "embeddings")
+        # 3. prepare index params
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="embeddings", index_type=not_supported_index, metric_type="L2")
+        # 4. create another index
+        error = {ct.err_code: 1100, ct.err_msg: f"invalid parameter[expected=valid index][actual=invalid "
+                                                f"index type: {not_supported_index}"}
+        self.create_index(client, collection_name, index_params,
+                          check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientIndexValid(TestMilvusClientV2Base):
     """ Test case of index interface """
@@ -329,7 +395,8 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_index_auto_index(self, numeric_index, varchar_index, metric_type):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_index_auto_index(self, numeric_index, varchar_index, metric_type, add_field):
         """
         target: test index with autoindex on both scalar and vector field
         method: create connection, collection, insert and search
@@ -349,6 +416,11 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         schema.add_field(ct.default_bool_field_name, DataType.BOOL)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema, consistency_level="Strong")
+        if add_field:
+            self.add_collection_field(client, collection_name, field_name="field_int", data_type=DataType.INT32,
+                                      nullable=True)
+            self.add_collection_field(client, collection_name, field_name="field_varchar", data_type=DataType.VARCHAR,
+                                      nullable=True, max_length=64)
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, "vector")
         res = self.list_indexes(client, collection_name)[0]
@@ -365,6 +437,9 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         index_params.add_index(field_name=ct.default_bool_field_name, index_type="", metric_type=metric_type)
         index_params.add_index(field_name=default_string_field_name, index_type=varchar_index, metric_type=metric_type)
         index_params.add_index(field_name=default_primary_key_field_name, index_type=numeric_index, metric_type=metric_type)
+        if add_field:
+            index_params.add_index(field_name="field_int", index_type=numeric_index, metric_type=metric_type)
+            index_params.add_index(field_name="field_varchar", index_type=varchar_index, metric_type=metric_type)
         # 3. create index
         self.create_index(client, collection_name, index_params)
         # 4. drop index
@@ -377,6 +452,9 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
         self.drop_index(client, collection_name, ct.default_bool_field_name)
         self.drop_index(client, collection_name, default_string_field_name)
         self.drop_index(client, collection_name, default_primary_key_field_name)
+        if add_field:
+            self.drop_index(client, collection_name, "field_int")
+            self.drop_index(client, collection_name, "field_varchar")
         # 5. create index
         self.create_index(client, collection_name, index_params)
         # 6. insert
@@ -385,7 +463,10 @@ class TestMilvusClientIndexValid(TestMilvusClientV2Base):
                  ct.default_int32_field_name: np.int32(i), ct.default_int16_field_name: np.int16(i),
                  ct.default_int8_field_name: np.int8(i), default_float_field_name: i * 1.0,
                  ct.default_double_field_name: np.double(i), ct.default_bool_field_name: np.bool_(i),
-                 default_string_field_name: str(i)} for i in range(default_nb)]
+                 default_string_field_name: str(i),
+                 **({"field_int": 10} if add_field else {}),
+                 **({"field_varchar": "default"} if add_field else {})
+                 } for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 7. load collection
         self.load_collection(client, collection_name)

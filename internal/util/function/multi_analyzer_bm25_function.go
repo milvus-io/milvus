@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
@@ -35,6 +36,9 @@ const multiAnalyzerParams = "multi_analyzer_params"
 // Input: string string // text, analyzer name
 // Output: map[uint32]float32
 type MultiAnalyzerBM25FunctionRunner struct {
+	mu     sync.RWMutex
+	closed bool
+
 	analyzers   map[string]tokenizerapi.Tokenizer
 	alias       map[string]string // alias -> analyzer name
 	schema      *schemapb.FunctionSchema
@@ -172,6 +176,13 @@ func (v *MultiAnalyzerBM25FunctionRunner) run(text []string, analyzerName []stri
 }
 
 func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, fmt.Errorf("analyzer receview request after function closed")
+	}
+
 	if len(inputs) != 2 {
 		return nil, fmt.Errorf("BM25 function with multi analyzer must received two input column")
 	}
@@ -224,6 +235,102 @@ func (v *MultiAnalyzerBM25FunctionRunner) BatchRun(inputs ...any) ([]any, error)
 	return []any{buildSparseFloatArray(embedData)}, nil
 }
 
+func (v *MultiAnalyzerBM25FunctionRunner) analyze(data []string, analyzerName []string, dst [][]*milvuspb.AnalyzerToken, withDetail bool, withHash bool) error {
+	cloneAnalyzers := map[string]tokenizerapi.Tokenizer{}
+	defer func() {
+		for _, analyzer := range cloneAnalyzers {
+			analyzer.Destroy()
+		}
+	}()
+
+	for i := 0; i < len(data); i++ {
+		result := []*milvuspb.AnalyzerToken{}
+		analyzer, err := v.getAnalyzer(analyzerName[i], cloneAnalyzers)
+		if err != nil {
+			return err
+		}
+
+		tokenStream := analyzer.NewTokenStream(data[i])
+		defer tokenStream.Destroy()
+		for tokenStream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if withDetail {
+				token = tokenStream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{
+					Token: tokenStream.Token(),
+				}
+			}
+
+			if withHash {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			result = append(result, token)
+		}
+		dst[i] = result
+	}
+	return nil
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs ...any) ([][]*milvuspb.AnalyzerToken, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, fmt.Errorf("analyzer receview request after function closed")
+	}
+
+	if len(inputs) != 2 {
+		return nil, fmt.Errorf("multi analyzer must received two input column(text, analyzer_name)")
+	}
+
+	text, ok := inputs[0].([]string)
+	if !ok {
+		return nil, fmt.Errorf("multi analyzer text input must be string list")
+	}
+
+	analyzer, ok := inputs[1].([]string)
+	if !ok {
+		return nil, fmt.Errorf("multi analyzer input analyzer name must be string list")
+	}
+
+	if len(text) != len(analyzer) {
+		return nil, fmt.Errorf("multi analyzer input text and analyzer name must have same length")
+	}
+
+	rowNum := len(text)
+	result := make([][]*milvuspb.AnalyzerToken, rowNum)
+	wg := sync.WaitGroup{}
+
+	errCh := make(chan error, v.concurrency)
+	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+		start := j
+		end := start + rowNum/v.concurrency
+		if i < rowNum%v.concurrency {
+			end += 1
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := v.analyze(text[start:end], analyzer[start:end], result[start:end], withDetail, withHash)
+			if err != nil {
+				errCh <- err
+				return
+			}
+		}()
+		j = end
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 func (v *MultiAnalyzerBM25FunctionRunner) GetSchema() *schemapb.FunctionSchema {
 	return v.schema
 }
@@ -234,4 +341,14 @@ func (v *MultiAnalyzerBM25FunctionRunner) GetOutputFields() []*schemapb.FieldSch
 
 func (v *MultiAnalyzerBM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
 	return v.inputFields
+}
+
+func (v *MultiAnalyzerBM25FunctionRunner) Close() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	for _, analyzer := range v.analyzers {
+		analyzer.Destroy()
+	}
+	v.closed = true
 }

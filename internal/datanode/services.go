@@ -214,15 +214,27 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
-
+	compactionParams, err := compaction.ParseParamsFromJSON(req.GetJsonParams())
+	if err != nil {
+		return merr.Status(err), err
+	}
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, compactionParams.StorageConfig)
+	if err != nil {
+		log.Error("create chunk manager failed",
+			zap.String("bucket", compactionParams.StorageConfig.GetBucketName()),
+			zap.String("ROOTPATH", compactionParams.StorageConfig.GetRootPath()),
+			zap.Error(err),
+		)
+		return merr.Status(err), err
+	}
 	var task compactor.Compactor
-	binlogIO := io.NewBinlogIO(node.chunkManager)
+	binlogIO := io.NewBinlogIO(cm)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = compactor.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
-			node.chunkManager,
+			cm,
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
@@ -274,6 +286,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 }
 
 // SyncSegments called by DataCoord, sync the compacted segments' meta between DC and DN
+// deprecated after v2.6.0
 func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
@@ -447,11 +460,20 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+			zap.Error(err),
+		)
+		return merr.Status(err), nil
+	}
+
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, node.chunkManager)
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, cm)
 	} else {
-		task = importv2.NewPreImportTask(req, node.importTaskMgr, node.chunkManager)
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, cm)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -465,6 +487,9 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 		zap.Strings("vchannels", req.GetVchannels()),
+		zap.Uint64("ts", req.GetTs()),
+		zap.Int64("idBegin", req.GetIDRange().GetBegin()),
+		zap.Int64("idEnd", req.GetIDRange().GetEnd()),
 		zap.Any("segments", req.GetRequestSegments()),
 		zap.Any("files", req.GetFiles()))
 
@@ -473,11 +498,20 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		log.Error("create chunk manager failed", zap.String("bucket", req.GetStorageConfig().GetBucketName()),
+			zap.String("accessKey", req.GetStorageConfig().GetAccessKeyID()),
+			zap.Error(err),
+		)
+		return merr.Status(err), nil
+	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	} else {
-		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, cm)
 	}
 	node.importTaskMgr.Add(task)
 
@@ -569,9 +603,35 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		}, nil
 	}
 
+	var (
+		totalSlots     = node.totalSlot
+		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
+		compactionUsed = node.compactionExecutor.Slots()
+		importUsed     = node.importScheduler.Slots()
+	)
+
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
+
+	log.Ctx(ctx).Info("query slots done",
+		zap.Int64("totalSlots", totalSlots),
+		zap.Int64("availableSlots", availableSlots),
+		zap.Int64("indexStatsUsed", indexStatsUsed),
+		zap.Int64("compactionUsed", compactionUsed),
+		zap.Int64("importUsed", importUsed),
+	)
+
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "total").Set(float64(totalSlots))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "indexStatsUsed").Set(float64(indexStatsUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "compactionUsed").Set(float64(compactionUsed))
+	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "importUsed").Set(float64(importUsed))
+
 	return &datapb.QuerySlotResponse{
-		Status:   merr.Success(),
-		NumSlots: node.compactionExecutor.Slots(),
+		Status:         merr.Success(),
+		AvailableSlots: availableSlots,
 	}, nil
 }
 
@@ -749,12 +809,6 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
 		return wrapQueryTaskResult(resp, resProperties)
-	case taskcommon.QuerySlot:
-		resp, err := node.GetJobStats(ctx, &workerpb.GetJobStatsRequest{})
-		if err != nil {
-			return nil, err
-		}
-		return wrapQueryTaskResult(resp, nil)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
@@ -789,9 +843,14 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		if err != nil {
 			return merr.Status(err), nil
 		}
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
 		return node.DropJobsV2(ctx, &workerpb.DropJobsV2Request{
-			TaskIDs: []int64{taskID},
-			JobType: jobType,
+			ClusterID: clusterID,
+			TaskIDs:   []int64{taskID},
+			JobType:   jobType,
 		})
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())

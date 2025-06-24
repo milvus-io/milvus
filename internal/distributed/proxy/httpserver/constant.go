@@ -36,6 +36,7 @@ const (
 	CollectionFieldCategory = "/collections/fields/"
 	ResourceGroupCategory   = "/resource_groups/"
 	SegmentCategory         = "/segments/"
+	QuotaCenterCategory     = "/quotacenter/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -161,6 +162,7 @@ const (
 
 	HTTPReturnMinIndexVersion = "minIndexVersion"
 	HTTPReturnMaxIndexVersion = "maxIndexVersion"
+	HTTPReturnIndexParams     = "indexParams"
 
 	HTTPReturnDistance = "distance"
 

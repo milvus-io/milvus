@@ -916,7 +916,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
 		log.Warn(
@@ -928,7 +928,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcEnqueued(method),
 		zap.Uint64("BeginTS", rct.BeginTs()),
 		zap.Uint64("EndTS", rct.EndTs()))
@@ -945,7 +945,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.Uint64("BeginTS", rct.BeginTs()),
 		zap.Uint64("EndTS", rct.EndTs()))
@@ -3188,9 +3188,13 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if span >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
+		spanPerNq := span
+		if qt.SearchRequest.GetNq() > 0 {
+			spanPerNq = span / time.Duration(qt.SearchRequest.GetNq())
+		}
+		if spanPerNq >= paramtable.Get().ProxyCfg.SlowLogSpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Uint64("guarantee_timestamp", qt.GetGuaranteeTimestamp()),
-				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
+				zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span), zap.Duration("durationPerNq", spanPerNq))
 			// WebUI slow query shall use slow log as well.
 			user, _ := GetCurUserFromContext(ctx)
 			traceID := ""
@@ -4424,7 +4428,7 @@ func (node *Proxy) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegme
 	defer func() {
 		metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.TotalLabel, req.GetDbName(), collection).Inc()
 		if resp.GetStatus().GetCode() != 0 {
-			log.Warn("import failed", zap.String("err", resp.GetStatus().GetReason()))
+			log.Warn("GetSegmentsInfo failed", zap.String("err", resp.GetStatus().GetReason()))
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.FailLabel, req.GetDbName(), collection).Inc()
 		} else {
 			metrics.ProxyFunctionCall.WithLabelValues(nodeID, method, metrics.SuccessLabel, req.GetDbName(), collection).Inc()
@@ -6990,14 +6994,12 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
-	// TODO: use collection analyzer when collection name and field name not none
+func (node *Proxy) runAnalyzer(req *milvuspb.RunAnalyzerRequest) ([]*milvuspb.AnalyzerResult, error) {
 	tokenizer, err := ctokenizer.NewTokenizer(req.GetAnalyzerParams())
 	if err != nil {
-		return &milvuspb.RunAnalyzerResponse{
-			Status: merr.Status(err),
-		}, nil
+		return nil, err
 	}
+
 	defer tokenizer.Destroy()
 
 	results := make([]*milvuspb.AnalyzerResult, len(req.GetPlaceholder()))
@@ -7023,9 +7025,122 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 			results[i].Tokens = append(results[i].Tokens, token)
 		}
 	}
+	return results, nil
+}
 
-	return &milvuspb.RunAnalyzerResponse{
-		Status:  merr.Status(nil),
-		Results: results,
-	}, nil
+func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RunAnalyzer")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if len(req.Placeholder) == 0 {
+		return &milvuspb.RunAnalyzerResponse{
+			Status:  merr.Status(nil),
+			Results: make([]*milvuspb.AnalyzerResult, 0),
+		}, nil
+	}
+
+	if req.GetCollectionName() == "" {
+		results, err := node.runAnalyzer(req)
+		if err != nil {
+			return &milvuspb.RunAnalyzerResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		return &milvuspb.RunAnalyzerResponse{
+			Status:  merr.Status(nil),
+			Results: results,
+		}, nil
+	}
+
+	if err := validateRunAnalyzer(req); err != nil {
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(merr.WrapErrAsInputError(err)),
+		}, nil
+	}
+
+	method := "RunAnalyzer"
+	task := &RunAnalyzerTask{
+		ctx:                ctx,
+		lb:                 node.lbPolicy,
+		Condition:          NewTaskCondition(ctx),
+		RunAnalyzerRequest: req,
+	}
+
+	if err := node.sched.dqQueue.Enqueue(task); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+		)
+
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			metrics.AbandonLabel,
+			req.GetDbName(),
+			req.GetCollectionName(),
+		).Inc()
+
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if err := task.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+		)
+
+		metrics.ProxyFunctionCall.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			method,
+			metrics.FailLabel,
+			req.GetDbName(),
+			req.GetCollectionName(),
+		).Inc()
+
+		return &milvuspb.RunAnalyzerResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	return task.result, nil
+}
+
+func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuotaMetrics")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetQuotaMetricsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive GetQuotaMetrics request")
+
+	metricsResp, err := node.mixCoord.GetQuotaMetrics(ctx, req)
+	if err != nil {
+		log.Warn("GetQuotaMetrics fail",
+			zap.Error(err))
+		metricsResp.Status = merr.Status(err)
+		return metricsResp, nil
+	}
+	err = merr.Error(metricsResp.GetStatus())
+	if err != nil {
+		metricsResp.Status = merr.Status(err)
+		return metricsResp, nil
+	}
+
+	log.Info("GetQuotaMetrics success", zap.String("metrics", metricsResp.GetMetricsInfo()))
+
+	return metricsResp, nil
 }

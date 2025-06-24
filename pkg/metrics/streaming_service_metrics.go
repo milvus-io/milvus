@@ -231,6 +231,22 @@ var (
 		Buckets: secondsBuckets,
 	}, WALChannelLabelName, WALTxnStateLabelName)
 
+	// Rows level counter.
+	WALInsertRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "insert_rows_total",
+		Help: "Rows of growing insert on wal",
+	}, WALChannelLabelName)
+
+	WALInsertBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "insert_bytes",
+		Help: "Bytes of growing insert on wal",
+	}, WALChannelLabelName)
+
+	WALDeleteRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "delete_rows_total",
+		Help: "Rows of growing delete on wal",
+	}, WALChannelLabelName)
+
 	// Segment related metrics
 	WALGrowingSegmentRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_rows_total",
@@ -480,6 +496,10 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodeConsumeBytes)
 
 	registerWAL(registry)
+
+	// TODO: after remove the implementation of old data node
+	// Such as flowgraph and writebuffer, we can remove these metrics from streaming node.
+	RegisterDataNode(registry)
 }
 
 // registerWAL registers wal metrics
@@ -495,6 +515,9 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALTimeTickSyncTimeTick)
 	registry.MustRegister(WALInflightTxn)
 	registry.MustRegister(WALTxnDurationSeconds)
+	registry.MustRegister(WALInsertRowsTotal)
+	registry.MustRegister(WALInsertBytes)
+	registry.MustRegister(WALDeleteRowsTotal)
 	registry.MustRegister(WALGrowingSegmentBytes)
 	registry.MustRegister(WALGrowingSegmentRowsTotal)
 	registry.MustRegister(WALGrowingSegmentHWMBytes)

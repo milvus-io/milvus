@@ -77,9 +77,6 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = indexparamcheck.IndexINVERTED
-
-	defaultRRFParamsValue = 60
-	maxRRFParamsValue     = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -98,6 +95,26 @@ func isNumber(c uint8) bool {
 		return false
 	}
 	return true
+}
+
+// check run analyzer params when collection name was set
+func validateRunAnalyzer(req *milvuspb.RunAnalyzerRequest) error {
+	if req.GetAnalyzerParams() != "" {
+		return fmt.Errorf("run analyzer can't use analyzer params and (collection,field) in same time")
+	}
+
+	if req.GetFieldName() == "" {
+		return fmt.Errorf("must set field name when collection name was set")
+	}
+
+	if req.GetAnalyzerNames() != nil {
+		if len(req.GetAnalyzerNames()) != 1 && len(req.GetAnalyzerNames()) != len(req.GetPlaceholder()) {
+			return fmt.Errorf("only support set one analyzer name for all text or set analyzer name for each text, but now analzer name num: %d, text num: %d",
+				len(req.GetAnalyzerNames()), len(req.GetPlaceholder()))
+		}
+	}
+
+	return nil
 }
 
 func validateMaxQueryResultWindow(offset int64, limit int64) error {
@@ -407,7 +424,6 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 	if !exist {
 		return fmt.Errorf("type param(max_capacity) should be specified for array field %s of collection %s", field.GetName(), collectionName)
 	}
-
 	return nil
 }
 
@@ -699,7 +715,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 		if typeutil.IsFloatVectorType(dataType) {
 			return nil
 		}
-	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE:
+	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD:
 		if dataType == schemapb.DataType_BinaryVector {
 			return nil
 		}
@@ -1472,7 +1488,6 @@ func computeRecall(results *schemapb.SearchResultData, gts *schemapb.SearchResul
 // return value.
 func translateOutputFields(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
 	var primaryFieldName string
-	var dynamicField *schemapb.FieldSchema
 	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
 	resultFieldNameMap := make(map[string]bool)
 	resultFieldNames := make([]string, 0)
@@ -1484,9 +1499,6 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
 			primaryFieldName = field.Name
-		}
-		if field.IsDynamic {
-			dynamicField = field
 		}
 		allFieldNameMap[field.Name] = field
 	}
@@ -1501,8 +1513,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		if outputFieldName == "*" {
 			userRequestedPkFieldExplicitly = true
 			for fieldName, field := range allFieldNameMap {
-				// skip Cold field and fields that can't be output
-				if schema.IsFieldLoaded(field.GetFieldID()) && schema.CanRetrieveRawFieldData(field) {
+				if schema.CanRetrieveRawFieldData(field) {
 					resultFieldNameMap[fieldName] = true
 					userOutputFieldsMap[fieldName] = true
 				}
@@ -1513,49 +1524,40 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 				if !schema.CanRetrieveRawFieldData(field) {
 					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
 				}
-				if schema.IsFieldLoaded(field.GetFieldID()) {
-					resultFieldNameMap[outputFieldName] = true
-					userOutputFieldsMap[outputFieldName] = true
-				} else {
-					return nil, nil, nil, false, fmt.Errorf("field %s is not loaded", outputFieldName)
-				}
+				resultFieldNameMap[outputFieldName] = true
+				userOutputFieldsMap[outputFieldName] = true
 			} else {
 				if schema.EnableDynamicField {
-					if schema.IsFieldLoaded(dynamicField.GetFieldID()) {
-						dynamicNestedPath := outputFieldName
-						err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
-							columnInfo := expr.GetColumnExpr().GetInfo()
-							// there must be no error here
-							dynamicField, _ := schema.schemaHelper.GetDynamicField()
-							// only $meta["xxx"] is allowed for now
-							if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
-								return errors.New("not support getting subkeys of json field yet")
-							}
-							nestedPaths := columnInfo.GetNestedPath()
-							// $meta["A"]["B"] not allowed for now
-							if len(nestedPaths) != 1 {
-								return errors.New("not support getting multiple level of dynamic field for now")
-							}
-							// $meta["dyn_field"], output field name could be:
-							// 1. "dyn_field", outputFieldName == nestedPath
-							// 2. `$meta["dyn_field"]` explicit form
-							if nestedPaths[0] != outputFieldName {
-								// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
-								dynamicNestedPath = nestedPaths[0]
-							}
-							return nil
-						})
-						if err != nil {
-							log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
-							return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+					dynamicNestedPath := outputFieldName
+					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+						columnInfo := expr.GetColumnExpr().GetInfo()
+						// there must be no error here
+						dynamicField, _ := schema.schemaHelper.GetDynamicField()
+						// only $meta["xxx"] is allowed for now
+						if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
+							return errors.New("not support getting subkeys of json field yet")
 						}
-						resultFieldNameMap[common.MetaFieldName] = true
-						userOutputFieldsMap[outputFieldName] = true
-						userDynamicFieldsMap[dynamicNestedPath] = true
-					} else {
-						// TODO after cold field be able to fetched with chunk cache, this check shall be removed
-						return nil, nil, nil, false, fmt.Errorf("field %s cannot be returned since dynamic field not loaded", outputFieldName)
+						nestedPaths := columnInfo.GetNestedPath()
+						// $meta["A"]["B"] not allowed for now
+						if len(nestedPaths) != 1 {
+							return errors.New("not support getting multiple level of dynamic field for now")
+						}
+						// $meta["dyn_field"], output field name could be:
+						// 1. "dyn_field", outputFieldName == nestedPath
+						// 2. `$meta["dyn_field"]` explicit form
+						if nestedPaths[0] != outputFieldName {
+							// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
+							dynamicNestedPath = nestedPaths[0]
+						}
+						return nil
+					})
+					if err != nil {
+						log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
+						return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
 					}
+					resultFieldNameMap[common.MetaFieldName] = true
+					userOutputFieldsMap[outputFieldName] = true
+					userDynamicFieldsMap[dynamicNestedPath] = true
 				} else {
 					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
 				}
@@ -1691,10 +1693,11 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			}
 			// when use default_value or has set Nullable
 			// it's ok that no corresponding fieldData found
-			dataToAppend := &schemapb.FieldData{
-				Type:      fieldSchema.GetDataType(),
-				FieldName: fieldSchema.GetName(),
+			dataToAppend, err := typeutil.GenEmptyFieldData(fieldSchema)
+			if err != nil {
+				return err
 			}
+			dataToAppend.ValidData = make([]bool, insertMsg.GetNumRows())
 			insertMsg.FieldsData = append(insertMsg.FieldsData, dataToAppend)
 		}
 	}
@@ -2506,4 +2509,22 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 		}
 	}
 	return false
+}
+
+func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
+	properties := make(map[string]string)
+	for _, pair := range pairs {
+		properties[pair.Key] = pair.Value
+	}
+
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return uint64(time.Duration(ttl) * time.Second)
+	}
+
+	return 0
 }

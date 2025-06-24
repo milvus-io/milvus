@@ -20,20 +20,13 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
@@ -109,51 +102,5 @@ func (impl *msgHandlerImpl) HandleManualFlush(flushMsg message.ImmutableManualFl
 }
 
 func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.ImmutableSchemaChangeMessageV2) error {
-	vchannel := msg.VChannel()
-	if err := impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds); err != nil {
-		return errors.Wrap(err, "failed to seal segments")
-	}
-	return streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
-		BroadcastID: msg.BroadcastHeader().BroadcastID,
-		VChannel:    vchannel,
-	})
-}
-
-func (impl *msgHandlerImpl) HandleImport(ctx context.Context, vchannel string, importMsg *msgpb.ImportMsg) error {
-	return retry.Do(ctx, func() (err error) {
-		defer func() {
-			if err == nil {
-				err = streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
-					BroadcastID: uint64(importMsg.GetJobID()),
-					VChannel:    vchannel,
-				})
-			}
-		}()
-		client, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-		if err != nil {
-			return err
-		}
-		importResp, err := client.ImportV2(ctx, &internalpb.ImportRequestInternal{
-			CollectionID:   importMsg.GetCollectionID(),
-			CollectionName: importMsg.GetCollectionName(),
-			PartitionIDs:   importMsg.GetPartitionIDs(),
-			ChannelNames:   []string{vchannel},
-			Schema:         importMsg.GetSchema(),
-			Files:          lo.Map(importMsg.GetFiles(), util.ConvertInternalImportFile),
-			Options:        funcutil.Map2KeyValuePair(importMsg.GetOptions()),
-			DataTimestamp:  importMsg.GetBase().GetTimestamp(),
-			JobID:          importMsg.GetJobID(),
-		})
-		err = merr.CheckRPCCall(importResp, err)
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			log.Ctx(ctx).Warn("import message failed because of collection not found, skip it", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return nil
-		}
-		if err != nil {
-			log.Ctx(ctx).Warn("import message failed", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
-			return err
-		}
-		log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
-		return nil
-	}, retry.AttemptAlways())
+	return impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -107,7 +108,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)
@@ -156,8 +157,13 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.NextTarget)) == 2
 	}, 5*time.Second, 1*time.Second)
 
-	suite.distMgr.LeaderViewManager.Update(2,
-		&meta.LeaderView{
+	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-1",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
 			ID:           2,
 			CollectionID: suite.collectionID,
 			Channel:      "channel-1",
@@ -165,7 +171,13 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 				11: {NodeID: 2},
 			},
 		},
-		&meta.LeaderView{
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-2",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
 			ID:           2,
 			CollectionID: suite.collectionID,
 			Channel:      "channel-2",
@@ -173,7 +185,7 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 				12: {NodeID: 2},
 			},
 		},
-	)
+	})
 
 	// Never update current target if it's empty, even the next target is ready
 	suite.Eventually(func() bool {
@@ -203,27 +215,36 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 	// Manually update next target
 	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
 	suite.NoError(err)
-
-	ch1View := &meta.LeaderView{
-		ID:           2,
-		CollectionID: suite.collectionID,
-		Channel:      "channel-1",
-		Segments: map[int64]*querypb.SegmentDist{
-			11: {NodeID: 2},
-			13: {NodeID: 2},
+	suite.distMgr.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-1",
 		},
-	}
-
-	ch2View := &meta.LeaderView{
-		ID:           2,
-		CollectionID: suite.collectionID,
-		Channel:      "channel-2",
-		Segments: map[int64]*querypb.SegmentDist{
-			12: {NodeID: 2},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: suite.collectionID,
+			Channel:      "channel-1",
+			Segments: map[int64]*querypb.SegmentDist{
+				11: {NodeID: 2},
+				13: {NodeID: 2},
+			},
 		},
-	}
-
-	suite.distMgr.LeaderViewManager.Update(2, ch1View, ch2View)
+	}, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: suite.collectionID,
+			ChannelName:  "channel-2",
+		},
+		Node: 2,
+		View: &meta.LeaderView{
+			ID:           2,
+			CollectionID: suite.collectionID,
+			Channel:      "channel-2",
+			Segments: map[int64]*querypb.SegmentDist{
+				12: {NodeID: 2},
+			},
+		},
+	})
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -242,7 +263,8 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 			len(suite.targetMgr.GetDmChannelsByCollection(ctx, suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 
-	action := suite.observer.checkNeedUpdateTargetVersion(ctx, ch1View, 100)
+	ch1View := suite.distMgr.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel("channel-1"))[0].View
+	action := suite.observer.genSyncAction(ctx, ch1View, 100)
 	suite.Equal(action.GetDeleteCP().Timestamp, uint64(200))
 }
 
@@ -328,7 +350,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.ctx, suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(suite.ctx, replicas...)

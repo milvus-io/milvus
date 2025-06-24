@@ -34,7 +34,7 @@ SealedIndexTranslator::SealedIndexTranslator(
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(load_index_info->field_type),
                 /* is_index */ true),
-            /* support_eviction */ false) {
+            /* support_eviction */ true) {
 }
 
 size_t
@@ -57,6 +57,7 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
             index_load_info_.index_size,
             index_load_info_.index_params,
             index_load_info_.enable_mmap);
+    // TODO(tiered storage 1), this is an estimation, error could be up to 20%.
     int64_t memory_cost = request.final_memory_cost * 1024 * 1024 * 1024;
     int64_t disk_cost = request.final_disk_cost * 1024 * 1024 * 1024;
     return milvus::cachinglayer::ResourceUsage{memory_cost, disk_cost};
@@ -85,7 +86,7 @@ SealedIndexTranslator::get_cells(const std::vector<cid_t>& cids) {
         config_[milvus::index::MMAP_FILE_PATH] = filepath.string();
     }
 
-    LOG_DEBUG("load index with configs: {}", config_.dump());
+    LOG_INFO("load index with configs: {}", config_.dump());
     index->Load(ctx_, config_);
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>

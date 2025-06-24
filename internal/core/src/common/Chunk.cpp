@@ -11,9 +11,6 @@
 
 #include <sys/mman.h>
 #include <cstdint>
-#include "common/Array.h"
-#include "common/Span.h"
-#include "common/Types.h"
 #include "common/Chunk.h"
 
 namespace milvus {

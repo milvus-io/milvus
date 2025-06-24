@@ -197,6 +197,16 @@ func (m *mockMixCoord) AddCollectionField(ctx context.Context, req *milvuspb.Add
 	panic("implement me")
 }
 
+func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	panic("implement me")
+}
+
+func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	return &querypb.ListLoadedSegmentsResponse{
+		Status: merr.Success(),
+	}, nil
+}
+
 func newMockMixCoord() *mockMixCoord {
 	return &mockMixCoord{state: commonpb.StateCode_Healthy}
 }
@@ -881,6 +891,10 @@ func (s *mockMixCoord) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	panic("implement me")
 }
 
+func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	panic("implement me")
+}
+
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mockMixCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	panic("implement me")
@@ -926,6 +940,10 @@ func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*
 
 func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {
 	return nil
+}
+
+func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
+	return nil, nil
 }
 
 func newMockHandlerWithMeta(meta *meta) *mockHandler {

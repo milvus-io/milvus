@@ -143,6 +143,7 @@ TEST_P(TaskTest, CallExprEmpty) {
         100000,
         MAX_TIMESTAMP,
         0,
+        0,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
 
@@ -163,7 +164,6 @@ TEST_P(TaskTest, CallExprEmpty) {
     EXPECT_EQ(num_rows, num_rows_);
 }
 
-// TODO(tiered storage 1): this is slower due to the overhead of RawAt.
 TEST_P(TaskTest, UnaryExpr) {
     ::milvus::proto::plan::GenericValue value;
     value.set_int64_val(-1);
@@ -181,6 +181,7 @@ TEST_P(TaskTest, UnaryExpr) {
         segment_.get(),
         100000,
         MAX_TIMESTAMP,
+        0,
         0,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));
@@ -228,6 +229,7 @@ TEST_P(TaskTest, LogicalExpr) {
         segment_.get(),
         100000,
         MAX_TIMESTAMP,
+        0,
         0,
         std::make_shared<milvus::exec::QueryConfig>(
             std::unordered_map<std::string, std::string>{}));

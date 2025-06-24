@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -101,54 +100,43 @@ func checkLoadStatus(ctx context.Context, m *meta.Meta, collectionID int64) erro
 	return nil
 }
 
-func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager,
-	nodeMgr *session.NodeManager, collectionID int64, channels map[string]*meta.DmChannel,
+func GetShardLeadersWithChannels(
+	ctx context.Context,
+	m *meta.Meta,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	channels map[string]*meta.DmChannel,
+	withUnserviceableShards bool,
 ) ([]*querypb.ShardLeadersList, error) {
 	ret := make([]*querypb.ShardLeadersList, 0)
+
+	replicas := m.ReplicaManager.GetByCollection(ctx, collectionID)
 	for _, channel := range channels {
 		log := log.Ctx(ctx).With(zap.String("channel", channel.GetChannelName()))
 
-		var channelErr error
-		leaders := dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
-		if len(leaders) == 0 {
-			channelErr = merr.WrapErrChannelLack(channel.GetChannelName(), "channel not subscribed")
-		}
-
-		readableLeaders := make(map[int64]*meta.LeaderView)
-		for _, leader := range leaders {
-			if leader.UnServiceableError != nil {
-				multierr.AppendInto(&channelErr, leader.UnServiceableError)
+		ids := make([]int64, 0, len(replicas))
+		addrs := make([]string, 0, len(replicas))
+		serviceable := make([]bool, 0, len(replicas))
+		for _, replica := range replicas {
+			leader := dist.ChannelDistManager.GetShardLeader(channel.GetChannelName(), replica)
+			if leader == nil || (!withUnserviceableShards && !leader.IsServiceable()) {
+				log.WithRateGroup("util.GetShardLeaders", 1, 60).
+					Warn("leader is not available in replica", zap.String("channel", channel.GetChannelName()), zap.Int64("replicaID", replica.GetID()))
 				continue
 			}
-			readableLeaders[leader.ID] = leader
-		}
-
-		if len(readableLeaders) == 0 {
-			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.Warn(msg, zap.Error(channelErr))
-			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName(), channelErr.Error())
-			return nil, err
-		}
-
-		readableLeaders = filterDupLeaders(ctx, m.ReplicaManager, readableLeaders)
-		ids := make([]int64, 0, len(leaders))
-		addrs := make([]string, 0, len(leaders))
-		for _, leader := range readableLeaders {
-			info := nodeMgr.Get(leader.ID)
+			info := nodeMgr.Get(leader.Node)
 			if info != nil {
 				ids = append(ids, info.ID())
 				addrs = append(addrs, info.Addr())
+				serviceable = append(serviceable, leader.IsServiceable())
 			}
 		}
 
-		// to avoid node down during GetShardLeaders
-		if len(ids) == 0 {
-			if channelErr == nil {
-				channelErr = merr.WrapErrChannelNotAvailable(channel.GetChannelName())
-			}
+		if len(ids) == 0 && !withUnserviceableShards {
+			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName())
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.Warn(msg, zap.Error(channelErr))
-			err := merr.WrapErrChannelNotAvailable(channel.GetChannelName(), channelErr.Error())
+			log.Warn(msg, zap.Error(err))
 			return nil, err
 		}
 
@@ -156,13 +144,22 @@ func GetShardLeadersWithChannels(ctx context.Context, m *meta.Meta, targetMgr me
 			ChannelName: channel.GetChannelName(),
 			NodeIds:     ids,
 			NodeAddrs:   addrs,
+			Serviceable: serviceable,
 		})
 	}
 
 	return ret, nil
 }
 
-func GetShardLeaders(ctx context.Context, m *meta.Meta, targetMgr meta.TargetManagerInterface, dist *meta.DistributionManager, nodeMgr *session.NodeManager, collectionID int64) ([]*querypb.ShardLeadersList, error) {
+func GetShardLeaders(ctx context.Context,
+	m *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	dist *meta.DistributionManager,
+	nodeMgr *session.NodeManager,
+	collectionID int64,
+	withUnserviceableShards bool,
+) ([]*querypb.ShardLeadersList, error) {
+	// skip check load status if withUnserviceableShards is true
 	if err := checkLoadStatus(ctx, m, collectionID); err != nil {
 		return nil, err
 	}
@@ -174,7 +171,7 @@ func GetShardLeaders(ctx context.Context, m *meta.Meta, targetMgr meta.TargetMan
 		log.Ctx(ctx).Warn("failed to get channels", zap.Error(err))
 		return nil, err
 	}
-	return GetShardLeadersWithChannels(ctx, m, targetMgr, dist, nodeMgr, collectionID, channels)
+	return GetShardLeadersWithChannels(ctx, m, dist, nodeMgr, collectionID, channels, withUnserviceableShards)
 }
 
 // CheckCollectionsQueryable check all channels are watched and all segments are loaded for this collection
@@ -213,7 +210,7 @@ func checkCollectionQueryable(ctx context.Context, m *meta.Meta, targetMgr meta.
 		return err
 	}
 
-	shardList, err := GetShardLeadersWithChannels(ctx, m, targetMgr, dist, nodeMgr, collectionID, channels)
+	shardList, err := GetShardLeadersWithChannels(ctx, m, dist, nodeMgr, collectionID, channels, false)
 	if err != nil {
 		return err
 	}

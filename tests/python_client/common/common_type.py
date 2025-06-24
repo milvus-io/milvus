@@ -39,15 +39,22 @@ default_double_field_name = "double"
 default_string_field_name = "varchar"
 default_json_field_name = "json_field"
 default_array_field_name = "int_array"
+default_int8_array_field_name = "int8_array"
+default_int16_array_field_name = "int16_array"
 default_int32_array_field_name = "int32_array"
+default_int64_array_field_name = "int64_array"
+default_bool_array_field_name = "bool_array"
 default_float_array_field_name = "float_array"
+default_double_array_field_name = "double_array"
 default_string_array_field_name = "string_array"
 default_float_vec_field_name = "float_vector"
 default_float16_vec_field_name = "float16_vector"
 default_bfloat16_vec_field_name = "bfloat16_vector"
+default_int8_vec_field_name = "int8_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 text_sparse_vector = "TEXT_SPARSE_VECTOR"
+default_reranker_field_name = "reranker_field"
 
 all_vector_types = [
         DataType.FLOAT_VECTOR,
@@ -67,10 +74,11 @@ default_metric_for_vector_type = {
     DataType.BINARY_VECTOR: "HAMMING",
 }
 
-all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]
-all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
 
-append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR]
+append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR]
+all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+all_vector_data_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
 default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
@@ -111,6 +119,8 @@ max_database_num = 64
 max_collections_per_db = 65536
 max_collection_num = 65536
 max_hybrid_search_req_num = 1024
+default_primary_key_field_name = "id"
+default_vector_field_name = "vector"
 
 
 IMAGE_REPOSITORY_MILVUS = "harbor.milvus.io/dockerhub/milvusdb/milvus"
@@ -236,7 +246,7 @@ get_wrong_format_dict = [
 
 get_all_kind_data_distribution = [
     1, np.float64(1.0), np.double(1.0), 9707199254740993.0, 9707199254740992,
-    '1', '123', '321', '213', True, False, [1, 2], [1.0, 2], None, {}, {"a": 1},
+    '1', '123', '321', '213', True, False, None, [1, 2], [1.0, 2],  {}, {"a": 1},
     {'a': 1.0}, {'a': 9707199254740993.0}, {'a': 9707199254740992}, {'a': '1'}, {'a': '123'},
     {'a': '321'}, {'a': '213'}, {'a': True}, {'a': [1, 2, 3]}, {'a': [1.0, 2, '1']}, {'a': [1.0, 2]},
     {'a': None}, {'a': {'b': 1}}, {'a': {'b': 1.0}}, {'a': [{'b': 1}, 2.0, np.double(3.0), '4', True, [1, 3.0], None]}
@@ -253,6 +263,8 @@ all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
 
 inverted_index_algo = ['TAAT_NAIVE', 'DAAT_WAND', 'DAAT_MAXSCORE']
 
+int8_vector_index = ["HNSW"]
+
 default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                               {"nlist": 128, "refine": 'true', "refine_type": "SQ8"},
                               {"M": 32, "efConstruction": 360}, {"nlist": 128}, {},
@@ -261,7 +273,7 @@ default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128,
                               {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
-                                    {"nprobe": 8, "rbq_bits_query": 6, "refine_k": 1.0},
+                                    {"nprobe": 8, "rbq_bits_query": 8, "refine_k": 10.0},
                                     {"ef": 100}, {"nprobe": 32, "reorder_k": 100}, {"search_list": 30},
                                     {}, {"nprobe": 32},
                                     {"drop_ratio_search": "0.2"}, {"drop_ratio_search": "0.2"},
@@ -316,7 +328,14 @@ privilege_group_privilege_dict = {"Query": False, "Search": False, "GetLoadState
                                   "AlterDatabase": False, "FlushAll": False, "ListPrivilegeGroups": False,
                                   "CreatePrivilegeGroup": False, "DropPrivilegeGroup": False,
                                   "OperatePrivilegeGroup": False}
-
+all_expr_fields = [default_int8_field_name, default_int16_field_name,
+                   default_int32_field_name, default_int64_field_name,
+                   default_float_field_name, default_double_field_name,
+                   default_string_field_name, default_bool_field_name,
+                   default_int8_array_field_name, default_int16_array_field_name,
+                   default_int32_array_field_name, default_int64_array_field_name,
+                   default_bool_array_field_name, default_float_array_field_name,
+                   default_double_array_field_name, default_string_array_field_name]
 
 class CheckTasks:
     """ The name of the method used to check the result """

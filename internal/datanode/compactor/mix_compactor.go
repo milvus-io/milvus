@@ -63,6 +63,8 @@ type mixCompactionTask struct {
 
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
+
+	compactionParams compaction.Params
 }
 
 var _ Compactor = (*mixCompactionTask)(nil)
@@ -88,6 +90,12 @@ func NewMixCompactionTask(
 func (t *mixCompactionTask) preCompact() error {
 	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
 		return t.ctx.Err()
+	}
+
+	var err error
+	t.compactionParams, err = compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
+	if err != nil {
+		return err
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) < 1 {
@@ -143,11 +151,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
-	if err != nil {
-		return nil, err
-	}
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
+	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +217,16 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	reader, err := storage.NewBinlogRecordReader(ctx, seg.GetFieldBinlogs(), t.plan.GetSchema(), storage.WithDownloader(t.binlogIO.Download), storage.WithVersion(seg.GetStorageVersion()))
+	// TODO bucketName shall be passed via StorageConfig like index/stats task
+	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+
+	reader, err := storage.NewBinlogRecordReader(ctx,
+		seg.GetFieldBinlogs(),
+		t.plan.GetSchema(),
+		storage.WithDownloader(t.binlogIO.Download),
+		storage.WithVersion(seg.GetStorageVersion()),
+		storage.WithBucketName(bucketName),
+	)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
 		return
@@ -327,12 +340,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, errors.New("illegal compaction plan")
 	}
 
-	compactionParams, err := compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
-	if err != nil {
-		return nil, err
-	}
-
-	sortMergeAppicable := compactionParams.UseMergeSort
+	sortMergeAppicable := t.compactionParams.UseMergeSort
 	if sortMergeAppicable {
 		for _, segment := range t.plan.GetSegmentBinlogs() {
 			if !segment.GetIsSorted() {
@@ -341,13 +349,14 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			}
 		}
 		if len(t.plan.GetSegmentBinlogs()) <= 1 ||
-			len(t.plan.GetSegmentBinlogs()) > compactionParams.MaxSegmentMergeSort {
+			len(t.plan.GetSegmentBinlogs()) > t.compactionParams.MaxSegmentMergeSort {
 			// sort merge is not applicable if there is only one segment or too many segments
 			sortMergeAppicable = false
 		}
 	}
 
 	var res []*datapb.CompactionSegment
+	var err error
 	if sortMergeAppicable {
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,

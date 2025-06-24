@@ -86,7 +86,7 @@ class TestCollectionRangeSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=ct.all_index_types[:8])
     def index_type(self, request):
-        tags = request.config.getoption("--tags")
+        tags = request.config.getoption("--tags", default=['L0', 'L1', 'L2'], skip=True)
         if CaseLabel.L2 not in tags:
             if request.param not in ct.L0_index_types:
                 pytest.skip(f"skip index type {request.param}")
@@ -94,10 +94,10 @@ class TestCollectionRangeSearch(TestcaseBase):
 
     @pytest.fixture(scope="function", params=ct.dense_metrics)
     def metric(self, request):
-        tags = request.config.getoption("--tags")
+        tags = request.config.getoption("--tags", default=['L0', 'L1', 'L2'], skip=True)
         if CaseLabel.L2 not in tags:
             if request.param != ct.default_L0_metric:
-                pytest.skip(f"skip index type {request.param}")
+                pytest.skip(f"skip metric type {request.param}")
         yield request.param
 
     @pytest.fixture(scope="function", params=[default_nb, default_nb_medium])

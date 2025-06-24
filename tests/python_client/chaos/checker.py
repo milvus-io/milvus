@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient, DataType, CollectionSchema
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
@@ -38,7 +38,7 @@ def get_chaos_info():
         with open(constants.CHAOS_INFO_SAVE_PATH, 'r') as f:
             chaos_info = json.load(f)
     except Exception as e:
-        log.warn(f"get_chaos_info error: {e}")
+        log.warning(f"get_chaos_info error: {e}")
         return None
     return chaos_info
 
@@ -240,6 +240,7 @@ class Op(Enum):
     load_balance = 'load_balance'
     bulk_insert = 'bulk_insert'
     alter_collection = 'alter_collection'
+    add_field = 'add_field'
     unknown = 'unknown'
 
 
@@ -314,7 +315,7 @@ def exception_handler():
                     log_message = f"Error in {class_name}.{function_name}: {log_e}"
                 else:
                     log_message = f"Error in {function_name}: {log_e}"
-                log.error(log_message)
+                log.exception(log_message)
                 log.error(log_e)
                 return Error(e), False
 
@@ -364,13 +365,18 @@ class Checker:
         p_name = partition_name if partition_name is not None else "_default"
         self.p_name = p_name
         self.p_names = [self.p_name] if partition_name is not None else None
-        schema = cf.gen_all_datatype_collection_schema(dim=dim) if schema is None else schema
+        if self.milvus_client.has_collection(c_name):
+            c, _ = self.c_wrap.init_collection(c_name)
+            schema = c.schema
+        else:
+            schema = cf.gen_all_datatype_collection_schema(dim=dim) if schema is None else schema
         self.schema = schema
         self.dim = cf.get_dim_by_schema(schema=schema)
         self.int64_field_name = cf.get_int64_field_name(schema=schema)
         self.text_field_name = cf.get_text_field_name(schema=schema)
         self.text_match_field_name_list = cf.get_text_match_field_name(schema=schema)
         self.float_vector_field_name = cf.get_float_vec_field_name(schema=schema)
+
         self.c_wrap.init_collection(name=c_name,
                                     schema=schema,
                                     shards_num=shards_num,
@@ -380,6 +386,7 @@ class Checker:
         self.json_field_names = cf.get_json_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
+        self.int8_vector_field_names = cf.get_int8_vec_field_name_list(schema=schema)
         self.bm25_sparse_field_names = cf.get_bm25_vec_field_name_list(schema=schema)
         # get index of collection
         indexes = [index.to_dict() for index in self.c_wrap.indexes]
@@ -424,6 +431,15 @@ class Checker:
                                      timeout=timeout,
                                      enable_traceback=enable_traceback,
                                      check_task=CheckTasks.check_nothing)
+        # create index for int8 vector fields
+        for f in self.int8_vector_field_names:
+            if f in indexed_fields:
+                continue
+            self.c_wrap.create_index(f,
+                                     constants.DEFAULT_INT8_INDEX_PARAM,
+                                     timeout=timeout,
+                                     enable_traceback=enable_traceback,
+                                     check_task=CheckTasks.check_nothing)
         # create index for binary vector fields
         for f in self.binary_vector_field_names:
             if f in indexed_fields:
@@ -455,9 +471,14 @@ class Checker:
         self.initial_entities = self.c_wrap.collection.num_entities
         self.scale = 100000  # timestamp scale to make time.time() as int64
 
+    def get_schema(self):
+        return self.c_wrap.collection.schema
+
     def insert_data(self, nb=constants.DELTA_PER_INS, partition_name=None):
         partition_name = self.p_name if partition_name is None else partition_name
-        data = cf.gen_row_data_by_schema(nb=nb, schema=self.schema)
+        client_schema = self.milvus_client.describe_collection(collection_name=self.c_name)
+        client_schema = CollectionSchema.construct_from_dict(client_schema)
+        data = cf.gen_row_data_by_schema(nb=nb, schema=client_schema)
         ts_data = []
         for i in range(nb):
             time.sleep(0.001)
@@ -472,12 +493,17 @@ class Checker:
                 wf = cf.analyze_documents(texts)
                 self.word_freq.update(wf)
 
-        res, result = self.c_wrap.insert(data=data,
-                                         partition_name=partition_name,
-                                         timeout=timeout,
-                                         enable_traceback=enable_traceback,
-                                         check_task=CheckTasks.check_nothing)
-        return res, result
+        try:
+            res = self.milvus_client.insert(
+                                             collection_name=self.c_name,
+                                             data=data,
+                                             partition_name=partition_name,
+                                             timeout=timeout,
+                                             enable_traceback=enable_traceback,
+                                             check_task=CheckTasks.check_nothing)
+            return res, True
+        except Exception as e:
+            return str(e), False
 
     def total(self):
         return self._succ + self._fail
@@ -678,18 +704,22 @@ class PartitionReleaseChecker(Checker):
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("SearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
         self.insert_data()
+        self.dense_anns_field_name_list = cf.get_dense_anns_field_name_list(self.schema)
+        self.data = None
+        self.anns_field_name = None
+        self.search_param = None
 
     @trace()
     def search(self):
         res, result = self.c_wrap.search(
-            data=cf.gen_vectors(5, self.dim),
-            anns_field=self.float_vector_field_name,
-            param=constants.DEFAULT_SEARCH_PARAM,
+            data=self.data,
+            anns_field=self.anns_field_name,
+            param=self.search_param,
             limit=1,
             partition_names=self.p_names,
             timeout=search_timeout,
@@ -699,6 +729,15 @@ class SearchChecker(Checker):
 
     @exception_handler()
     def run_task(self):
+        anns_field_item = random.choice(self.dense_anns_field_name_list)
+        self.anns_field_name = anns_field_item["name"]
+        dim = anns_field_item["dim"]
+        self.data = cf.gen_vectors(5, dim, vector_data_type=anns_field_item["dtype"])
+        if anns_field_item["dtype"] in [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR]:
+            self.search_param = constants.DEFAULT_SEARCH_PARAM
+        elif anns_field_item["dtype"] == DataType.INT8_VECTOR:
+            self.search_param = constants.DEFAULT_INT8_SEARCH_PARAM
+
         res, result = self.search()
         return res, result
 
@@ -864,6 +903,46 @@ class FlushChecker(Checker):
             sleep(constants.WAIT_PER_OP * 6)
 
 
+class AddFieldChecker(Checker):
+    """check add field operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, schema=None):
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("AddFieldChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+        self.initial_entities = self.c_wrap.collection.num_entities
+
+    @trace()
+    def add_field(self):
+        try:
+            new_field_name = cf.gen_unique_str("new_field_")
+            self.milvus_client.add_collection_field(collection_name=self.c_name,
+                                                    field_name=new_field_name,
+                                                    data_type=DataType.INT64,
+                                                    nullable=True)
+            log.debug(f"add field {new_field_name} to collection {self.c_name}")
+            time.sleep(1)
+            _, result = self.insert_data()
+            res, result = self.c_wrap.query(expr=f"{new_field_name} >= 0", output_fields=[new_field_name])
+            if result:
+                log.debug(f"query with field {new_field_name} success")
+            return None, result
+        except Exception as e:
+            log.error(e)
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        res, result = self.add_field()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP * 6)
+
+
+
 class InsertChecker(Checker):
     """check insert operations in a dependent thread"""
 
@@ -881,7 +960,8 @@ class InsertChecker(Checker):
 
     @trace()
     def insert_entities(self):
-        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        schema = self.get_schema()
+        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
         rows = len(data)
         ts_data = []
         for i in range(constants.DELTA_PER_INS):
@@ -958,7 +1038,8 @@ class InsertFreshnessChecker(Checker):
         self.file_name = f"/tmp/ci_logs/insert_data_{uuid.uuid4()}.parquet"
 
     def insert_entities(self):
-        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        schema = self.get_schema()
+        data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
         ts_data = []
         for i in range(constants.DELTA_PER_INS):
             time.sleep(0.001)
@@ -1005,7 +1086,8 @@ class UpsertChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("UpsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        schema = self.get_schema()
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
 
     @trace()
     def upsert_entities(self):
@@ -1021,7 +1103,8 @@ class UpsertChecker(Checker):
         # half of the data is upsert, the other half is insert
         rows = len(self.data)
         pk_old = [d[self.int64_field_name] for d in self.data[:rows // 2]]
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        schema = self.get_schema()
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
         pk_new = [d[self.int64_field_name] for d in self.data[rows // 2:]]
         pk_update = pk_old + pk_new
         for i in range(rows):
@@ -1044,7 +1127,8 @@ class UpsertFreshnessChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("UpsertChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        schema = self.get_schema()
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
 
     def upsert_entities(self):
 
@@ -1069,7 +1153,8 @@ class UpsertFreshnessChecker(Checker):
         # half of the data is upsert, the other half is insert
         rows = len(self.data[0])
         pk_old = self.data[0][:rows // 2]
-        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=self.schema)
+        schema = self.get_schema()
+        self.data = cf.gen_row_data_by_schema(nb=constants.DELTA_PER_INS, schema=schema)
         pk_new = self.data[0][rows // 2:]
         pk_update = pk_old + pk_new
         self.data[0] = pk_update

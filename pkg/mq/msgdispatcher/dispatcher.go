@@ -78,6 +78,8 @@ type Dispatcher struct {
 	targets *typeutil.ConcurrentMap[string, *target]
 
 	stream msgstream.MsgStream
+
+	includeSkipWhenSplit bool
 }
 
 func NewDispatcher(
@@ -89,6 +91,7 @@ func NewDispatcher(
 	subPos SubPos,
 	includeCurrentMsg bool,
 	pullbackEndTs typeutil.Timestamp,
+	includeSkipWhenSplit bool,
 ) (*Dispatcher, error) {
 	subName := fmt.Sprintf("%s-%d-%d", pchannel, id, time.Now().UnixNano())
 
@@ -142,6 +145,7 @@ func NewDispatcher(
 		pchannel:             pchannel,
 		targets:              typeutil.NewConcurrentMap[string, *target](),
 		stream:               stream,
+		includeSkipWhenSplit: includeSkipWhenSplit,
 	}
 
 	metrics.NumConsumers.WithLabelValues(paramtable.GetRole(), fmt.Sprint(paramtable.GetNodeID())).Inc()
@@ -240,7 +244,7 @@ func (d *Dispatcher) work() {
 			return
 		case pack := <-d.stream.Chan():
 			if pack == nil || len(pack.EndPositions) != 1 {
-				log.Error("consumed invalid msgPack")
+				log.Error("consumed invalid msgPack", zap.Any("pack", pack))
 				continue
 			}
 			d.curTs.Store(pack.EndPositions[0].GetTimestamp())
@@ -252,7 +256,11 @@ func (d *Dispatcher) work() {
 				isReplicateChannel := strings.Contains(vchannel, paramtable.Get().CommonCfg.ReplicateMsgChannel.GetValue())
 				// The dispatcher seeks from the oldest target,
 				// so for each target, msg before the target position must be filtered out.
-				if p.EndTs <= t.pos.GetTimestamp() && !isReplicateChannel {
+				//
+				// From 2.6.0, every message has a unique timetick, so we can filter out the msg by < but not <=.
+				if ((d.includeSkipWhenSplit && p.EndTs < t.pos.GetTimestamp()) ||
+					(!d.includeSkipWhenSplit && p.EndTs <= t.pos.GetTimestamp())) &&
+					!isReplicateChannel {
 					log.Info("skip msg",
 						zap.String("vchannel", vchannel),
 						zap.Int("msgCount", len(p.Msgs)),
@@ -264,7 +272,6 @@ func (d *Dispatcher) work() {
 						log.Debug("skip msg info",
 							zap.String("vchannel", vchannel),
 							zap.String("msgType", msg.Type().String()),
-							zap.Int64("msgID", msg.ID()),
 							zap.Uint64("msgBeginTs", msg.BeginTs()),
 							zap.Uint64("msgEndTs", msg.EndTs()),
 							zap.Uint64("packBeginTs", p.BeginTs),

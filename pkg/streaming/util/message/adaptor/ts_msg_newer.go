@@ -125,7 +125,10 @@ func NewManualFlushMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, e
 type SchemaChangeMessageBody struct {
 	*tsMsgImpl
 	SchemaChangeMessage message.ImmutableSchemaChangeMessageV2
-	BroadcastID         uint64
+}
+
+func (s *SchemaChangeMessageBody) ID() msgstream.UniqueID {
+	return 0
 }
 
 func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
@@ -144,6 +147,5 @@ func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, 
 			msgType: MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()),
 		},
 		SchemaChangeMessage: schChgMsg,
-		BroadcastID:         msg.BroadcastHeader().BroadcastID,
 	}, nil
 }

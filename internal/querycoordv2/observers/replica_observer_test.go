@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -34,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -130,7 +133,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	}, nil)
+	}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 
@@ -152,9 +155,15 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 
 	// Add some segment on nodes.
 	for nodeID := int64(1); nodeID <= 4; nodeID++ {
-		suite.distMgr.ChannelDistManager.Update(
-			nodeID,
-			utils.CreateTestChannel(suite.collectionID, nodeID, 1, "test-insert-channel1"))
+		suite.distMgr.ChannelDistManager.Update(nodeID, &meta.DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID: suite.collectionID,
+				ChannelName:  "test-insert-channel1",
+			},
+			Node:    nodeID,
+			Version: 1,
+			View:    &meta.LeaderView{ID: nodeID, CollectionID: suite.collectionID, Channel: "test-insert-channel1", Status: &querypb.LeaderViewStatus{Serviceable: true}},
+		})
 		suite.distMgr.SegmentDistManager.Update(
 			nodeID,
 			utils.CreateTestSegment(suite.collectionID, suite.partitionID, 1, nodeID, 1, "test-insert-channel1"))
@@ -255,7 +264,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	replicas, err := suite.meta.Spawn(ctx, suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	}, nil)
+	}, nil, commonpb.LoadPriority_LOW)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 

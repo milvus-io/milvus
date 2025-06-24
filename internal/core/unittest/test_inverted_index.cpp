@@ -132,7 +132,7 @@ test_run() {
                 valid_data_[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(data.data(), valid_data_, data.size());
+        field_data->FillFieldData(data.data(), valid_data_, data.size(), 0);
         delete[] valid_data_;
     } else {
         field_data->FillFieldData(data.data(), data.size());
@@ -167,8 +167,9 @@ test_run() {
         Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] = nb;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row;
+            config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -190,7 +191,8 @@ test_run() {
 
         Config config;
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
@@ -524,7 +526,7 @@ test_string() {
                 valid_data_[byteIndex] &= ~(1 << bitIndex);
             }
         }
-        field_data->FillFieldData(data.data(), valid_data_, data.size());
+        field_data->FillFieldData(data.data(), valid_data_, data.size(), 0);
         delete[] valid_data_;
     } else {
         field_data->FillFieldData(data.data(), data.size());
@@ -558,8 +560,9 @@ test_string() {
         Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] = nb;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row;
+            config[INDEX_NUM_ROWS_KEY] = nb + lack_binlog_row;
         }
 
         auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -581,7 +584,8 @@ test_string() {
 
         Config config;
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         ctx.set_for_loading_index(true);
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);

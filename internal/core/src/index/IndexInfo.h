@@ -31,6 +31,7 @@ struct CreateIndexInfo {
     uint32_t tantivy_index_version{7};
     JsonCastType json_cast_type{JsonCastType::UNKNOWN};
     std::string json_path;
+    std::string json_cast_function;
 };
 
 }  // namespace milvus::index

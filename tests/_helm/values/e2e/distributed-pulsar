@@ -146,6 +146,11 @@ pulsarv3:
       limits:
         cpu: "0.5"
         memory: 2Gi
+    configData:
+      PULSAR_MEM: >
+        -Xms512m
+        -Xmx512m
+        -XX:MaxDirectMemorySize=1024m
     tolerations:
     - effect: NoSchedule
       key: node-role.kubernetes.io/e2e

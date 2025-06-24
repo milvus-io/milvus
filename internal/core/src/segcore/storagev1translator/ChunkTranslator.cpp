@@ -32,7 +32,8 @@ ChunkTranslator::ChunkTranslator(
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
     std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
-    bool use_mmap)
+    bool use_mmap,
+    milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -44,8 +45,10 @@ ChunkTranslator::ChunkTranslator(
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
-            /* support_eviction */ false) {
+                /* is_index */ false,
+                /* in_load_list*/ field_data_info.in_load_list),
+            /* support_eviction */ false),
+      load_priority_(load_priority) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
                "ChunkTranslator not supported for system field");
     meta_.num_rows_until_chunk_.push_back(0);
@@ -59,72 +62,6 @@ ChunkTranslator::ChunkTranslator(
                            field_data_info.field_id,
                            meta_.num_rows_until_chunk_.back(),
                            field_data_info.row_count));
-}
-
-std::unique_ptr<milvus::Chunk>
-ChunkTranslator::load_chunk(milvus::cachinglayer::cid_t cid) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    auto channel = std::make_shared<ArrowReaderChannel>();
-    pool.Submit(LoadArrowReaderFromRemote,
-                std::vector<std::string>{files_and_rows_[cid].first},
-                channel);
-    LOG_DEBUG("segment {} submits load field {} chunk {} task to thread pool",
-              segment_id_,
-              field_id_,
-              cid);
-
-    auto data_type = field_meta_.get_data_type();
-
-    if (!use_mmap_) {
-        std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (channel->pop(r)) {
-            arrow::ArrayVector array_vec =
-                read_single_column_batches(r->reader);
-            return create_chunk(field_meta_,
-                                IsVectorDataType(data_type) &&
-                                        !IsSparseFloatVectorDataType(data_type)
-                                    ? field_meta_.get_dim()
-                                    : 1,
-                                array_vec);
-        }
-    } else {
-        // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
-        auto filepath = std::filesystem::path(mmap_dir_path_) /
-                        std::to_string(segment_id_) /
-                        std::to_string(field_id_) / std::to_string(cid);
-
-        LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
-                 segment_id_,
-                 field_id_,
-                 cid,
-                 filepath.string());
-
-        std::filesystem::create_directories(filepath.parent_path());
-
-        auto file = File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-
-        std::shared_ptr<milvus::ArrowDataWrapper> r;
-        while (channel->pop(r)) {
-            arrow::ArrayVector array_vec =
-                read_single_column_batches(r->reader);
-            auto chunk =
-                create_chunk(field_meta_,
-                             IsVectorDataType(data_type) &&
-                                     !IsSparseFloatVectorDataType(data_type)
-                                 ? field_meta_.get_dim()
-                                 : 1,
-                             file,
-                             /*file_offset*/ 0,
-                             array_vec);
-            auto ok = unlink(filepath.c_str());
-            AssertInfo(
-                ok == 0,
-                fmt::format("failed to unlink mmap data file {}, err: {}",
-                            filepath.c_str(),
-                            strerror(errno)));
-            return chunk;
-        }
-    }
 }
 
 size_t
@@ -156,9 +93,83 @@ ChunkTranslator::get_cells(
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         cells;
     cells.reserve(cids.size());
+
+    std::vector<std::string> remote_files;
+    remote_files.reserve(cids.size());
     for (auto cid : cids) {
-        cells.emplace_back(cid, load_chunk(cid));
+        remote_files.push_back(files_and_rows_[cid].first);
     }
+
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    auto channel = std::make_shared<ArrowReaderChannel>();
+    LOG_INFO("segment {} submits load field {} chunks {} task to thread pool",
+             segment_id_,
+             field_id_,
+             fmt::format("{}", fmt::join(cids, " ")));
+    pool.Submit(
+        LoadArrowReaderFromRemote, remote_files, channel, load_priority_);
+
+    auto data_type = field_meta_.get_data_type();
+
+    std::filesystem::path folder;
+
+    if (use_mmap_) {
+        folder = std::filesystem::path(mmap_dir_path_) /
+                 std::to_string(segment_id_) / std::to_string(field_id_);
+        std::filesystem::create_directories(folder);
+    }
+
+    for (auto cid : cids) {
+        std::unique_ptr<milvus::Chunk> chunk = nullptr;
+        if (!use_mmap_) {
+            std::shared_ptr<milvus::ArrowDataWrapper> r;
+            // this relies on the fact that channel is blocked when there is no data to pop
+            bool popped = channel->pop(r);
+            AssertInfo(popped, "failed to pop arrow reader from channel");
+            arrow::ArrayVector array_vec =
+                read_single_column_batches(r->reader);
+            chunk = create_chunk(field_meta_,
+                                 IsVectorDataType(data_type) &&
+                                         !IsSparseFloatVectorDataType(data_type)
+                                     ? field_meta_.get_dim()
+                                     : 1,
+                                 array_vec);
+        } else {
+            // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
+            auto filepath = folder / std::to_string(cid);
+
+            LOG_INFO("segment {} mmaping field {} chunk {} to path {}",
+                     segment_id_,
+                     field_id_,
+                     cid,
+                     filepath.string());
+
+            auto file =
+                File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
+
+            std::shared_ptr<milvus::ArrowDataWrapper> r;
+            bool popped = channel->pop(r);
+            AssertInfo(popped, "failed to pop arrow reader from channel");
+            arrow::ArrayVector array_vec =
+                read_single_column_batches(r->reader);
+            chunk = create_chunk(field_meta_,
+                                 IsVectorDataType(data_type) &&
+                                         !IsSparseFloatVectorDataType(data_type)
+                                     ? field_meta_.get_dim()
+                                     : 1,
+                                 file,
+                                 /*file_offset*/ 0,
+                                 array_vec);
+            auto ok = unlink(filepath.c_str());
+            AssertInfo(
+                ok == 0,
+                fmt::format("failed to unlink mmap data file {}, err: {}",
+                            filepath.c_str(),
+                            strerror(errno)));
+        }
+        cells.emplace_back(cid, std::move(chunk));
+    }
+
     return cells;
 }
 

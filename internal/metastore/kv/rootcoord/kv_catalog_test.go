@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -1019,14 +1018,14 @@ func TestCatalog_AlterCollection(t *testing.T) {
 	t.Run("add", func(t *testing.T) {
 		kc := NewCatalog(nil, nil)
 		ctx := context.Background()
-		err := kc.AlterCollection(ctx, nil, nil, metastore.ADD, 0)
+		err := kc.AlterCollection(ctx, nil, nil, metastore.ADD, 0, false)
 		assert.Error(t, err)
 	})
 
 	t.Run("delete", func(t *testing.T) {
 		kc := NewCatalog(nil, nil)
 		ctx := context.Background()
-		err := kc.AlterCollection(ctx, nil, nil, metastore.DELETE, 0)
+		err := kc.AlterCollection(ctx, nil, nil, metastore.DELETE, 0, false)
 		assert.Error(t, err)
 	})
 
@@ -1048,7 +1047,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		var collectionID int64 = 1
 		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, UpdateTimestamp: rand.Uint64()}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.NoError(t, err)
 		key := BuildCollectionKey(0, collectionID)
 		value, ok := kvs[key]
@@ -1067,25 +1066,69 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		var collectionID int64 = 1
 		oldC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreating}
 		newC := &model.Collection{TenantID: "2", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
 		assert.Error(t, err)
 	})
 
 	t.Run("modify db name", func(t *testing.T) {
 		var collectionID int64 = 1
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.MultiSaveAndRemoveFunc = func(ctx context.Context, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
-			assert.ElementsMatch(t, []string{BuildCollectionKey(0, collectionID)}, removals)
-			assert.Equal(t, len(saves), 1)
-			assert.Contains(t, maps.Keys(saves), BuildCollectionKey(1, collectionID))
-			return nil
-		}
 
 		kc := NewCatalog(nil, snapshot).(*Catalog)
 		ctx := context.Background()
 		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		newC := &model.Collection{DBID: 1, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
-		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		assert.Error(t, err)
+	})
+
+	t.Run("modify 64 fields", func(t *testing.T) {
+		var collectionID int64 = 1
+		snapshot := kv.NewMockSnapshotKV()
+		snapshot.MultiSaveFunc = func(ctx context.Context, saves map[string]string, ts typeutil.Timestamp) error {
+			assert.LessOrEqual(t, len(saves), 64)
+			return nil
+		}
+
+		kc := NewCatalog(nil, snapshot).(*Catalog)
+		ctx := context.Background()
+		// 2 system fields + 64 user fields
+		fields := make([]*model.Field, 66)
+		for i := range fields {
+			fields[i] = &model.Field{
+				FieldID: int64(i),
+			}
+		}
+		oldC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Fields: fields}
+		newC := &model.Collection{DBID: 0, CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, Fields: fields}
+		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0, true)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCatalog_AlterCollectionDB(t *testing.T) {
+	snapshot := kv.NewMockSnapshotKV()
+	kvs := map[string]string{}
+	snapshot.MultiSaveFunc = func(ctx context.Context, saveKvs map[string]string, _ typeutil.Timestamp) error {
+		for k, v := range saveKvs {
+			kvs[k] = v
+		}
+		return nil
+	}
+	kc := NewCatalog(nil, snapshot).(*Catalog)
+	ctx := context.Background()
+	var collectionID int64 = 1
+	t.Run("rename tencentid", func(t *testing.T) {
+		oldC := &model.Collection{TenantID: "0", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 0}
+		newC := &model.Collection{TenantID: "1", CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 1}
+		err := kc.AlterCollectionDB(ctx, oldC, newC, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("modify db", func(t *testing.T) {
+		oldC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 0}
+		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated, DBID: 1}
+		err := kc.AlterCollectionDB(ctx, oldC, newC, 0)
 		assert.NoError(t, err)
 	})
 }

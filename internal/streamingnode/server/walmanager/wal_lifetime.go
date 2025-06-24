@@ -93,6 +93,7 @@ func (w *walLifetime) Close() {
 	logger := log.With(zap.String("current", toStateString(currentState)))
 	if oldWAL := currentState.GetWAL(); oldWAL != nil {
 		oldWAL.Close()
+		w.statePair.SetCurrentState(newUnavailableCurrentState(currentState.Term(), nil))
 		logger.Info("close current term wal done at wal life time close")
 	}
 	logger.Info("wal lifetime closed")

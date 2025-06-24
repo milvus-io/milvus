@@ -109,11 +109,13 @@ class IndexFactory {
             storage::FileManagerContext());
 
     IndexBasePtr
-    CreateJsonIndex(IndexType index_type,
-                    JsonCastType cast_dtype,
-                    const std::string& nested_path,
-                    const storage::FileManagerContext& file_manager_context =
-                        storage::FileManagerContext());
+    CreateJsonIndex(
+        IndexType index_type,
+        JsonCastType cast_dtype,
+        const std::string& nested_path,
+        const storage::FileManagerContext& file_manager_context =
+            storage::FileManagerContext(),
+        const std::string& json_cast_function = UNKNOW_CAST_FUNCTION_NAME);
 
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info,

@@ -103,7 +103,9 @@ func registerDefaults() {
 		Handler: GetStaticHandler(),
 	})
 
-	RegisterWebUIHandler()
+	if paramtable.Get().HTTPCfg.EnableWebUI.GetAsBool() {
+		RegisterWebUIHandler()
+	}
 }
 
 func RegisterStopComponent(triggerComponentStop func(role string) error) {

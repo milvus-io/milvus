@@ -164,10 +164,10 @@ get_config(std::unique_ptr<milvus::proto::indexcgo::BuildIndexInfo>& info) {
     if (info->opt_fields().size()) {
         config[VEC_OPT_FIELDS] = get_opt_field(info->opt_fields());
     }
-    config["lack_binlog_rows"] = info->lack_binlog_rows();
     if (info->partition_key_isolation()) {
         config[PARTITION_KEY_ISOLATION_KEY] = info->partition_key_isolation();
     }
+    config[INDEX_NUM_ROWS_KEY] = info->num_rows();
     config[STORAGE_VERSION_KEY] = info->storage_version();
     if (info->storage_version() == STORAGE_V2) {
         config[SEGMENT_INSERT_FILES_KEY] =
@@ -238,8 +238,6 @@ CreateIndex(CIndex* res_index,
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
-
-        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(

@@ -48,10 +48,10 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // Note: this is temporary solution.
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
-CreateScalarDataArray(int64_t count, const FieldMeta& field_meta);
+CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-CreateVectorDataArray(int64_t count, const FieldMeta& field_meta);
+CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
@@ -109,11 +109,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
 
 void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
-                          std::shared_ptr<ArrowReaderChannel> channel);
+                          std::shared_ptr<ArrowReaderChannel> channel,
+                          milvus::proto::common::LoadPriority priority);
 
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel);
+                         FieldDataChannelPtr channel,
+                         milvus::proto::common::LoadPriority priority);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.
@@ -131,6 +133,6 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
             Timestamp value);
 
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index);
+getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list = true);
 
 }  // namespace milvus::segcore

@@ -151,8 +151,9 @@ const (
 	ConsistencyLevel          = "consistency_level"
 	HintsKey                  = "hints"
 
-	JSONCastTypeKey = "json_cast_type"
-	JSONPathKey     = "json_path"
+	JSONCastTypeKey     = "json_cast_type"
+	JSONPathKey         = "json_path"
+	JSONCastFunctionKey = "json_cast_function"
 )
 
 // Doc-in-doc-out
@@ -209,6 +210,7 @@ const (
 const (
 	MmapEnabledKey             = "mmap.enabled"
 	LazyLoadEnableKey          = "lazyload.enabled"
+	LoadPriorityKey            = "load_priority"
 	PartitionKeyIsolationKey   = "partitionkey.isolation"
 	FieldSkipLoadKey           = "field.skipLoad"
 	IndexOffsetCacheEnabledKey = "indexoffsetcache.enabled"

@@ -81,6 +81,10 @@ func (t *l0CompactionTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 	return timeType.GetTaskTime(t.times)
 }
 
+func (t *l0CompactionTask) GetTaskVersion() int64 {
+	return int64(t.GetTaskProto().GetRetryTimes())
+}
+
 func (t *l0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := log.With(zap.Int64("triggerID", t.GetTaskProto().GetTriggerID()), zap.Int64("nodeID", t.GetTaskProto().GetNodeID()))
 	plan, err := t.BuildCompactionRequest()
@@ -184,8 +188,13 @@ func (t *l0CompactionTask) Process() bool {
 		return t.processMetaSaved()
 	case datapb.CompactionTaskState_completed:
 		return t.processCompleted()
+	case datapb.CompactionTaskState_failed:
+		return true
+	case datapb.CompactionTaskState_timeout:
+		return true
+	default:
+		return false
 	}
-	return true
 }
 
 func (t *l0CompactionTask) processMetaSaved() bool {

@@ -72,8 +72,12 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 }
 
-func FilterInIndexedSegments(handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, skipNoIndexCollection bool, segments ...*SegmentInfo) []*SegmentInfo {
 	if len(segments) == 0 {
+		return nil
+	}
+
+	if ctx.Err() != nil {
 		return nil
 	}
 
@@ -89,8 +93,9 @@ func FilterInIndexedSegments(handler Handler, mt *meta, skipNoIndexCollection bo
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
-		coll, err := handler.GetCollection(ctx, collection)
+		timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*2)
+
+		coll, err := handler.GetCollection(timeoutCtx, collection)
 		cancel()
 		if err != nil {
 			log.Warn("failed to get collection schema", zap.Error(err))

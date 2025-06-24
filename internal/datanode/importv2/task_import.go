@@ -18,8 +18,8 @@ package importv2
 
 import (
 	"context"
+	"fmt"
 	"io"
-	"math"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -66,8 +66,8 @@ func NewImportTask(req *datapb.ImportRequest,
 	if importutilv2.IsBackup(req.GetOptions()) {
 		UnsetAutoID(req.GetSchema())
 	}
-	// Setting end as math.MaxInt64 to incrementally allocate logID.
-	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), math.MaxInt64)
+	// Allocator for autoIDs and logIDs.
+	alloc := allocator.NewLocalAllocator(req.GetIDRange().GetBegin(), req.GetIDRange().GetEnd())
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),
@@ -140,7 +140,7 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
+	bufferSize := paramtable.Get().DataNodeCfg.ImportInsertBufferSize.GetAsInt()
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", t.GetSchema()))...)
@@ -152,7 +152,8 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), bufferSize)
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
@@ -160,7 +161,8 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		err = t.importFile(reader)
 		if err != nil {
 			log.Warn("do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
+			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		log.Info("import file done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
@@ -191,12 +193,16 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 			}
 			return err
 		}
-		rowNum := GetInsertDataRowCount(data, t.GetSchema())
+		rowNum, _ := GetInsertDataRowCount(data, t.GetSchema())
 		if rowNum == 0 {
 			log.Info("0 row was imported, the data may have been deleted", WrapLogFields(t)...)
 			continue
 		}
 		err = AppendSystemFieldsData(t, data, rowNum)
+		if err != nil {
+			return err
+		}
+		err = AppendNullableDefaultFieldsData(t.GetSchema(), data, rowNum)
 		if err != nil {
 			return err
 		}
@@ -261,7 +267,7 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 			if err != nil {
 				return nil, nil, err
 			}
-			future, err := t.syncMgr.SyncData(t.ctx, syncTask)
+			future, err := t.syncMgr.SyncDataWithChunkManager(t.ctx, syncTask, t.cm)
 			if err != nil {
 				log.Ctx(context.TODO()).Error("sync data failed", WrapLogFields(t, zap.Error(err))...)
 				return nil, nil, err
