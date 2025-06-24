@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionName string) {
+func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionName string, storageV2 bool) {
 	c := s.Cluster
 
 	const (
@@ -51,7 +51,13 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		metricType = metric.L2
 	)
 
-	schema := integration.ConstructSchemaOfVecDataTypeWithStruct(collectionName, dim, true)
+	var schema *schemapb.CollectionSchema
+	// todo(SpadeA): fix this when v2 is supported
+	if storageV2 {
+		schema = integration.ConstructSchemaOfVecDataType(collectionName, dim, true, schemapb.DataType_FloatVector)
+	} else {
+		schema = integration.ConstructSchemaOfVecDataTypeWithStruct(collectionName, dim, true)
+	}
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -87,12 +93,16 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	for i := 0; i < rowNum/batch; i++ {
 		// insert
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, batch, dim)
-		structArrayField := integration.NewStructArrayFieldData(schema.StructArrayFields[0], integration.StructArrayField, batch, dim)
+		fieldsData := []*schemapb.FieldData{fVecColumn}
+		if !storageV2 {
+			structArrayField := integration.NewStructArrayFieldData(schema.StructArrayFields[0], integration.StructArrayField, batch, dim)
+			fieldsData = append(fieldsData, structArrayField)
+		}
 		hashKeys := integration.GenerateHashKeys(batch)
 		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn, structArrayField},
+			FieldsData:     fieldsData,
 			HashKeys:       hashKeys,
 			NumRows:        uint32(batch),
 		})
@@ -226,7 +236,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-	s.assertMixCompaction(ctx, collectionName)
+	s.assertMixCompaction(ctx, collectionName, false)
 	s.assertQuery(ctx, collectionName)
 
 	// drop collection
@@ -250,5 +260,5 @@ func (s *CompactionSuite) TestMixCompactionV2() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-	s.assertMixCompaction(ctx, collectionName)
+	s.assertMixCompaction(ctx, collectionName, true)
 }
