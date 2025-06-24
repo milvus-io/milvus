@@ -3230,7 +3230,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.interimIndex.refineWithQuant",
 		Version:      "2.5.6",
 		DefaultValue: "true",
-		Doc:          `whether to use refineQuantType to refine for fatser but loss a little precision`,
+		Doc:          `whether to use refineQuantType to refine for faster but loss a little precision`,
 		Export:       true,
 	}
 	p.InterimIndexRefineWithQuant.Init(base.mgr)
@@ -3967,7 +3967,7 @@ type dataCoordConfig struct {
 
 	CompactionRPCTimeout             ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
 	MinSegmentToMerge                ParamItem `refreshable:"true"`
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
@@ -4139,7 +4139,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.diskSegmentMaxSize",
 		Version:      "2.0.0",
 		DefaultValue: "2048",
-		Doc:          "Maximun size of a segment in MB for collection which has Disk index",
+		Doc:          "Maximum size of a segment in MB for collection which has Disk index",
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
@@ -4404,7 +4404,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 			}
 			return strconv.FormatInt(ms, 10)
 		},
-		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
+		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms",
 	}
 	p.CompactionScheduleInterval.Init(base.mgr)
 
@@ -4499,7 +4499,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",
 		Version:      "2.4.0",
-		Doc:          "The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
+		Doc:          "The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
 		DefaultValue: "8388608",
 		Export:       true,
 	}
@@ -4857,7 +4857,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.segmentFlushInterval",
 		Version:      "2.4.6",
 		DefaultValue: "2",
-		Doc:          "the minimal interval duration(unit: Seconds) between flusing operation on same segment",
+		Doc:          "the minimal interval duration(unit: Seconds) between flushing operation on same segment",
 		Export:       true,
 	}
 	p.SegmentFlushInterval.Init(base.mgr)

@@ -40,8 +40,7 @@ class FileWriterTest : public testing::Test {
 
 // Test basic file writing functionality with buffered IO
 TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     std::string filename = (test_dir_ / "basic_write.txt").string();
     FileWriter writer(filename);
@@ -59,9 +58,8 @@ TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
 
 // Test basic file writing functionality with direct IO
 TEST_F(FileWriterTest, BasicWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "basic_write.txt").string();
     FileWriter writer(filename);
@@ -79,9 +77,8 @@ TEST_F(FileWriterTest, BasicWriteWithDirectIO) {
 
 // Test writing data with size exactly equal to buffer size
 TEST_F(FileWriterTest, ExactBufferSizeWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "exact_buffer.txt").string();
     FileWriter writer(filename);
@@ -101,9 +98,8 @@ TEST_F(FileWriterTest, ExactBufferSizeWriteWithDirectIO) {
 
 // Test writing data size with multiple of buffer size
 TEST_F(FileWriterTest, MultipleOfBufferSizeWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "multiple_of_buffer_size.txt").string();
     FileWriter writer(filename);
@@ -122,9 +118,8 @@ TEST_F(FileWriterTest, MultipleOfBufferSizeWriteWithDirectIO) {
 
 // Test writing data size with unaligned to buffer size
 TEST_F(FileWriterTest, UnalignedToBufferSizeWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename =
         (test_dir_ / "unaligned_to_buffer_size.txt").string();
@@ -144,9 +139,8 @@ TEST_F(FileWriterTest, UnalignedToBufferSizeWriteWithDirectIO) {
 
 // Test writing data with size slightly less than buffer size
 TEST_F(FileWriterTest, SlightlyLessThanBufferSizeWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "slightly_less.txt").string();
     FileWriter writer(filename);
@@ -165,8 +159,7 @@ TEST_F(FileWriterTest, SlightlyLessThanBufferSizeWriteWithDirectIO) {
 
 // Test writing data with multiple small chunks with direct IO
 TEST_F(FileWriterTest, MultipleSmallChunksWriteWithBufferedIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     std::string filename =
         (test_dir_ / "multiple_small_chunks_buffered.txt").string();
@@ -196,9 +189,8 @@ TEST_F(FileWriterTest, MultipleSmallChunksWriteWithBufferedIO) {
 
 // Test writing data with multiple small chunks with direct IO
 TEST_F(FileWriterTest, MultipleSmallChunksWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename =
         (test_dir_ / "multiple_small_chunks_direct.txt").string();
@@ -228,9 +220,8 @@ TEST_F(FileWriterTest, MultipleSmallChunksWriteWithDirectIO) {
 
 // Test writing memory address aligned data
 TEST_F(FileWriterTest, MemoryAddressAlignedDataWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "aligned_write.txt").string();
     FileWriter writer(filename);
@@ -262,9 +253,8 @@ TEST_F(FileWriterTest, MemoryAddressAlignedDataWriteWithDirectIO) {
 
 // Test writing empty data
 TEST_F(FileWriterTest, EmptyDataWriteWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "empty_write.txt").string();
     FileWriter writer(filename);
@@ -279,9 +269,8 @@ TEST_F(FileWriterTest, EmptyDataWriteWithDirectIO) {
 
 // Test concurrent writes to different files
 TEST_F(FileWriterTest, ConcurrentWritesWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     const int num_threads = 4;
     std::vector<std::thread> threads;
@@ -319,9 +308,8 @@ TEST_F(FileWriterTest, ConcurrentWritesWithDirectIO) {
 
 // Test error handling for invalid file path
 TEST_F(FileWriterTest, InvalidFilePathWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string invalid_path = "/invalid/path/file.txt";
     EXPECT_THROW(FileWriter writer(invalid_path), std::runtime_error);
@@ -329,9 +317,8 @@ TEST_F(FileWriterTest, InvalidFilePathWithDirectIO) {
 
 // Test writing to a file that already exists
 TEST_F(FileWriterTest, ExistingFileWithDirectIO) {
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "existing.txt").string();
 
@@ -359,39 +346,35 @@ TEST_F(FileWriterTest, ExistingFileWithDirectIO) {
 // Test config FileWriterConfig with very small buffer size
 TEST_F(FileWriterTest, SmallBufferSizeWriteWithDirectIO) {
     const size_t small_buffer_size = 64;  // 64 bytes
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(small_buffer_size);
-    auto real_buffer_size = FileWriterConfig::GetInstance().GetBufferSize();
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(small_buffer_size);
+    auto real_buffer_size = FileWriter::GetBufferSize();
     EXPECT_EQ(real_buffer_size, kBufferSize);
 }
 
 // Test config FileWriterConfig with unaligned buffer size
 TEST_F(FileWriterTest, UnalignedBufferSizeWriteWithDirectIO) {
     const size_t unaligned_buffer_size = kBufferSize + 1;  // Not aligned to 4KB
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(unaligned_buffer_size);
-    auto real_buffer_size = FileWriterConfig::GetInstance().GetBufferSize();
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(unaligned_buffer_size);
+    auto real_buffer_size = FileWriter::GetBufferSize();
     EXPECT_EQ(real_buffer_size, 2 * kBufferSize);
 }
 
 // Test config FileWriterConfig with zero buffer size
 TEST_F(FileWriterTest, ZeroBufferSizeWriteWithDirectIO) {
     const size_t zero_buffer_size = 0;
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(zero_buffer_size);
-    auto real_buffer_size = FileWriterConfig::GetInstance().GetBufferSize();
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(zero_buffer_size);
+    auto real_buffer_size = FileWriter::GetBufferSize();
     EXPECT_EQ(real_buffer_size, kBufferSize);
 }
 
 // Test config FileWriterConfig with very large buffer size
 TEST_F(FileWriterTest, LargeBufferSizeWriteWithDirectIO) {
     const size_t large_buffer_size = 1024 * 1024;  // 1MB
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(large_buffer_size);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(large_buffer_size);
 
     std::string filename = (test_dir_ / "large_buffer.txt").string();
     FileWriter writer(filename);
@@ -412,9 +395,9 @@ TEST_F(FileWriterTest, UnknownModeWriteWithDirectIO) {
     uint8_t mode = 2;
     EXPECT_NO_THROW(
         {
-            FileWriterConfig::GetInstance().SetMode(
-                static_cast<FileWriterConfig::WriteMode>(mode));
-            FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+            FileWriter::SetMode(
+                static_cast<FileWriter::WriteMode>(mode));
+            FileWriter::SetBufferSize(kBufferSize);
         });
 }
 
@@ -575,9 +558,8 @@ TEST_F(FileWriterTest, MultiThreadedWriteWithDirectIO) {
 // Test executor-based asynchronous writes
 TEST_F(FileWriterTest, ExecutorBasedAsyncWrites) {
     // Set up executor with 2 threads
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(2);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     std::string filename = (test_dir_ / "executor_async.txt").string();
     FileWriter writer(filename);
@@ -609,10 +591,9 @@ TEST_F(FileWriterTest, ExecutorBasedAsyncWrites) {
 // Test executor-based asynchronous writes with direct IO
 TEST_F(FileWriterTest, ExecutorBasedAsyncWritesWithDirectIO) {
     // Set up executor with 2 threads
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+    FileWriteWorkerPool::GetInstance().Configure(2);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
 
     std::string filename = (test_dir_ / "executor_async_direct.txt").string();
     FileWriter writer(filename);
@@ -644,9 +625,8 @@ TEST_F(FileWriterTest, ExecutorBasedAsyncWritesWithDirectIO) {
 // Test concurrent writes using executor
 TEST_F(FileWriterTest, ConcurrentWritesWithExecutor) {
     // Set up executor with 4 threads
-    FileWriterConfig::GetInstance().SetWriteExecutor(4);
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(4);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     const int num_files = 8;
     std::vector<std::string> filenames;
@@ -689,23 +669,22 @@ TEST_F(FileWriterTest, ConcurrentWritesWithExecutor) {
 // Test executor configuration with invalid number of threads
 TEST_F(FileWriterTest, InvalidExecutorConfiguration) {
     // Test with zero threads
-    EXPECT_NO_THROW(FileWriterConfig::GetInstance().SetWriteExecutor(0));
+    EXPECT_NO_THROW(FileWriteWorkerPool::GetInstance().Configure(0));
 
     // Test with negative number of threads
-    EXPECT_NO_THROW(FileWriterConfig::GetInstance().SetWriteExecutor(-1));
+    EXPECT_NO_THROW(FileWriteWorkerPool::GetInstance().Configure(-1));
 }
 
 // Test executor configuration changes
 TEST_F(FileWriterTest, ExecutorConfigurationChanges) {
     // Set initial executor
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriteWorkerPool::GetInstance().Configure(2);
 
     // Change executor configuration
-    FileWriterConfig::GetInstance().SetWriteExecutor(4);
+    FileWriteWorkerPool::GetInstance().Configure(4);
 
     // Verify the change doesn't break functionality
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     std::string filename = (test_dir_ / "executor_change.txt").string();
     FileWriter writer(filename);
@@ -723,12 +702,11 @@ TEST_F(FileWriterTest, ExecutorConfigurationChanges) {
 
 // Test mixed buffered and direct IO with executor
 TEST_F(FileWriterTest, MixedIOWithExecutor) {
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriteWorkerPool::GetInstance().Configure(2);
 
     // Test buffered IO with executor
     {
-        FileWriterConfig::GetInstance().SetMode(
-            FileWriterConfig::WriteMode::BUFFERED);
+        FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
         std::string filename = (test_dir_ / "mixed_buffered.txt").string();
         FileWriter writer(filename);
 
@@ -744,9 +722,8 @@ TEST_F(FileWriterTest, MixedIOWithExecutor) {
 
     // Test direct IO with executor
     {
-        FileWriterConfig::GetInstance().SetMode(
-            FileWriterConfig::WriteMode::DIRECT);
-        FileWriterConfig::GetInstance().SetBufferSize(kBufferSize);
+        FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+        FileWriter::SetBufferSize(kBufferSize);
         std::string filename = (test_dir_ / "mixed_direct.txt").string();
         FileWriter writer(filename);
 
@@ -763,9 +740,8 @@ TEST_F(FileWriterTest, MixedIOWithExecutor) {
 
 // Test large data writes with executor
 TEST_F(FileWriterTest, LargeDataWritesWithExecutor) {
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(2);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     std::string filename = (test_dir_ / "large_data_executor.txt").string();
     FileWriter writer(filename);
@@ -785,14 +761,13 @@ TEST_F(FileWriterTest, LargeDataWritesWithExecutor) {
 
 // Test executor with different buffer sizes
 TEST_F(FileWriterTest, ExecutorWithDifferentBufferSizes) {
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
+    FileWriteWorkerPool::GetInstance().Configure(2);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
 
     std::vector<size_t> buffer_sizes = {4096, 8192, 16384, 32768};
 
     for (size_t buffer_size : buffer_sizes) {
-        FileWriterConfig::GetInstance().SetBufferSize(buffer_size);
+        FileWriter::SetBufferSize(buffer_size);
 
         std::string filename =
             (test_dir_ /
@@ -815,9 +790,8 @@ TEST_F(FileWriterTest, ExecutorWithDifferentBufferSizes) {
 
 // Test error handling in async operations
 TEST_F(FileWriterTest, ErrorHandlingInAsyncOperations) {
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(2);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     // Test with invalid file path in async context
     std::string invalid_path = "/invalid/path/async_test.txt";
@@ -842,11 +816,11 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([i]() {
             // Each thread sets different executor configurations
-            FileWriterConfig::GetInstance().SetWriteExecutor(i + 1);
-            FileWriterConfig::GetInstance().SetMode(
-                i % 2 == 0 ? FileWriterConfig::WriteMode::BUFFERED
-                           : FileWriterConfig::WriteMode::DIRECT);
-            FileWriterConfig::GetInstance().SetBufferSize(4096 * (i + 1));
+            FileWriteWorkerPool::GetInstance().Configure(i + 1);
+            FileWriter::SetMode(
+                i % 2 == 0 ? FileWriter::WriteMode::BUFFERED
+                           : FileWriter::WriteMode::DIRECT);
+            FileWriter::SetBufferSize(4096 * (i + 1));
         });
     }
 
@@ -856,8 +830,7 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
     }
 
     // Verify that the configuration is still valid
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
     std::string filename =
         (std::filesystem::temp_directory_path() / "concurrent_config_test.txt")
             .string();
@@ -873,9 +846,8 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
 // Test that changing FileWriterConfig during FileWriter operations doesn't affect existing instances
 TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     // Start with buffered mode
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::BUFFERED);
-    FileWriterConfig::GetInstance().SetWriteExecutor(2);
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+    FileWriteWorkerPool::GetInstance().Configure(2);
 
     std::string filename1 =
         (std::filesystem::temp_directory_path() / "config_change_test1.txt")
@@ -892,10 +864,9 @@ TEST_F(FileWriterTest, ConfigChangeDuringFileWriterOperations) {
     writer1.Write(test_data1.data(), test_data1.size());
 
     // Change configuration while first writer is still active
-    FileWriterConfig::GetInstance().SetMode(
-        FileWriterConfig::WriteMode::DIRECT);
-    FileWriterConfig::GetInstance().SetBufferSize(8192);
-    FileWriterConfig::GetInstance().SetWriteExecutor(4);
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(8192);
+    FileWriteWorkerPool::GetInstance().Configure(4);
 
     // Create second FileWriter with new configuration
     FileWriter writer2(filename2);
