@@ -96,7 +96,7 @@ class CachedSearchIteratorTest
     static knowhere::DataSetPtr knowhere_query_dataset_;
     static dataset::SearchDataset search_dataset_;
     static std::unique_ptr<ConcurrentVector<milvus::FloatVector>> vector_base_;
-    static std::shared_ptr<ChunkedColumn> column_;
+    static std::shared_ptr<ChunkedColumnInterface> column_;
     static std::vector<std::vector<char>> column_data_;
     static std::shared_ptr<Schema> schema_;
     static FieldId fakevec_id_;
@@ -256,8 +256,9 @@ class CachedSearchIteratorTest
         }
         auto translator = std::make_unique<TestChunkTranslator>(
             num_rows_per_chunk, "", std::move(chunks));
-        column_ =
-            std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
+        column_ = std::static_pointer_cast<ChunkedColumnInterface>(
+            MakeChunkedColumnBase(field_meta.get_data_type(),
+                                  std::move(translator), field_meta));
     }
 
     static void
@@ -341,7 +342,8 @@ FixedVector<float> CachedSearchIteratorTest::base_dataset_;
 FixedVector<float> CachedSearchIteratorTest::query_dataset_;
 std::unique_ptr<ConcurrentVector<milvus::FloatVector>>
     CachedSearchIteratorTest::vector_base_ = nullptr;
-std::shared_ptr<ChunkedColumn> CachedSearchIteratorTest::column_ = nullptr;
+std::shared_ptr<ChunkedColumnInterface> CachedSearchIteratorTest::column_ =
+    nullptr;
 std::vector<std::vector<char>> CachedSearchIteratorTest::column_data_;
 std::shared_ptr<Schema> CachedSearchIteratorTest::schema_{nullptr};
 FieldId CachedSearchIteratorTest::fakevec_id_(0);

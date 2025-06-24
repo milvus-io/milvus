@@ -99,8 +99,9 @@ TEST(test_chunk_segment, TestSearchOnSealed) {
 
     auto translator = std::make_unique<TestChunkTranslator>(
         num_rows_per_chunk, "", std::move(chunks));
-    auto column =
-        std::make_shared<ChunkedColumn>(std::move(translator), field_meta);
+    auto column = std::static_pointer_cast<ChunkedColumnInterface>(
+        MakeChunkedColumnBase(field_meta.get_data_type(),
+                              std::move(translator), field_meta));
 
     SearchInfo search_info;
     auto search_conf = knowhere::Json{
