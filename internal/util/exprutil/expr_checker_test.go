@@ -115,10 +115,7 @@ func TestParsePartitionKeys(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		idx := 0
 		t.Run(tc.name, func(t *testing.T) {
-			idx++
-			t.Log(idx, tc.name, tc.expr)
 			// test search plan
 			searchPlan, err := planparserv2.CreateSearchPlan(schemaHelper, tc.expr, "fvec_field", queryInfo, nil)
 			assert.NoError(t, err)
