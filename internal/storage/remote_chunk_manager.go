@@ -210,7 +210,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 			log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 			return err
 		}
-		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(len(data)))
+		metrics.PersistentDataKvSize.WithLabelValues(metrics.DataGetLabel).Observe(float64(size))
 		return nil
 	}, retry.Attempts(3), retry.RetryErr(merr.IsRetryableErr))
 	if err != nil {
