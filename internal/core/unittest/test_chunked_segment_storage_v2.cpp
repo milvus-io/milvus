@@ -74,15 +74,26 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         // Initialize file system
         auto conf = milvus_storage::ArrowFileSystemConfig();
         conf.storage_type = "local";
-        conf.root_path = "/tmp";
+        conf.root_path = "test_data";
         milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"/tmp/0.parquet", "/tmp/1.parquet"};
+        std::vector<std::string> paths = {"test_data/0/10000.parquet",
+                                          "test_data/102/10001.parquet",
+                                          "test_data/103/10002.parquet"};
+
+        // Create directories for the parquet files
+        for (const auto& path : paths) {
+            auto dir_path = path.substr(0, path.find_last_of('/'));
+            auto status = fs->CreateDir(dir_path);
+            EXPECT_TRUE(status.ok())
+                << "Failed to create directory: " << dir_path;
+        }
+
         std::vector<std::vector<int>> column_groups = {
-            {0, 1, 2}, {3, 4}};  // short columns and long columns
+            {0, 4, 3}, {2}, {1}};  // narrow columns and wide columns
         auto writer_memory = 16 * 1024 * 1024;
         auto storage_config = milvus_storage::StorageConfig();
 
@@ -162,15 +173,38 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                             false,
                             std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
-            int64_t(1),
-            FieldBinlogInfo{int64_t(1),
+            int64_t(102),
+            FieldBinlogInfo{int64_t(102),
                             static_cast<int64_t>(row_count),
                             std::vector<int64_t>(chunk_num * test_data_count),
                             false,
                             std::vector<std::string>({paths[1]})});
+        load_info.field_infos.emplace(
+            int64_t(103),
+            FieldBinlogInfo{int64_t(103),
+                            static_cast<int64_t>(row_count),
+                            std::vector<int64_t>(chunk_num * test_data_count),
+                            false,
+                            std::vector<std::string>({paths[2]})});
         load_info.mmap_dir_path = "";
         load_info.storage_version = 2;
-        segment->LoadFieldData(load_info);
+        segment->AddFieldDataInfoForSealed(load_info);
+        for (auto& [id, info] : load_info.field_infos) {
+            LoadFieldDataInfo load_field_info;
+            load_field_info.storage_version = 2;
+            load_field_info.mmap_dir_path = "";
+            load_field_info.field_infos.emplace(id, info);
+            segment->LoadFieldData(load_field_info);
+        }
+    }
+
+    void
+    TearDown() override {
+        // Clean up test data directory
+        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                      .GetArrowFileSystem();
+        auto status = fs->DeleteDir("test_data");
+        ASSERT_TRUE(status.ok());
     }
 
     segcore::SegmentSealedUPtr segment;
