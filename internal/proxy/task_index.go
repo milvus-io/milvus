@@ -52,9 +52,9 @@ const (
 	GetIndexStateTaskName         = "GetIndexStateTask"
 	GetIndexBuildProgressTaskName = "GetIndexBuildProgressTask"
 
-	NgramIndexName = "ngram"
-	MinGramKey     = "min_gram"
-	MaxGramKey     = "max_gram"
+	NgramIndexName = "NGRAM"
+	MinGramKey     = "MIN_GRAM"
+	MaxGramKey     = "MAX_GRAM"
 
 	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey

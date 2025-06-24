@@ -14,16 +14,14 @@
 
 namespace milvus::index {
 NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
-                                       bool for_loading_index,
-                                       uintptr_t min_gram,
-                                       uintptr_t max_gram)
-    : min_gram_(min_gram), max_gram_(max_gram) {
+                                       const NgramParams& params)
+    : min_gram_(params.min_gram), max_gram_(params.max_gram) {
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    if (for_loading_index) {
+    if (params.loading_index) {
         path_ = disk_file_manager_->GetLocalNgramIndexPrefix();
     } else {
         path_ = disk_file_manager_->GetLocalTempNgramIndexPrefix();
@@ -32,7 +30,7 @@ NgramInvertedIndex::NgramInvertedIndex(const storage::FileManagerContext& ctx,
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            field_name.c_str(), path_.c_str(), min_gram, max_gram);
+            field_name.c_str(), path_.c_str(), min_gram_, max_gram_);
     }
 }
 

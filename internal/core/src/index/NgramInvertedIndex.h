@@ -26,11 +26,9 @@ namespace milvus::index {
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
     explicit NgramInvertedIndex(const storage::FileManagerContext& ctx,
-                                bool for_loading_index,
-                                uintptr_t min_gram,
-                                uintptr_t max_gram);
+                                const NgramParams& params);
 
-    ~NgramInvertedIndex() override{};
+    ~NgramInvertedIndex() override {};
 
  public:
     IndexStatsPtr

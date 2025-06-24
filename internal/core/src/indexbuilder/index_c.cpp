@@ -473,15 +473,16 @@ BuildNgramIndex(ProtoLayoutInterface result,
 
         uintptr_t min_gram =
             std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                           config, milvus::index::MIN_NGRAM)
+                           config, milvus::index::MIN_GRAM)
                            .value());
         uintptr_t max_gram =
             std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                           config, milvus::index::MAX_NGRAM)
+                           config, milvus::index::MAX_GRAM)
                            .value());
 
+        milvus::index::NgramParams ngram_params{false, min_gram, max_gram};
         auto index = std::make_unique<index::NgramInvertedIndex>(
-            fileManagerContext, false, min_gram, max_gram);
+            fileManagerContext, ngram_params);
         index->Build(config);
         auto create_index_result = index->Upload(config);
 

@@ -437,9 +437,7 @@ LoadTextIndex(CSegmentInterface c_segment,
         config["index_files"] = files;
         config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
         milvus::storage::FileManagerContext ctx(
-            field_meta,
-            index_meta,
-            remote_chunk_manager);
+            field_meta, index_meta, remote_chunk_manager);
 
         auto index = std::make_unique<milvus::index::TextMatchIndex>(ctx);
         index->Load(config);
@@ -549,8 +547,10 @@ LoadNgramIndex(CTraceContext c_trace,
         milvus::storage::FileManagerContext file_ctx(
             field_meta, index_meta, remote_chunk_manager);
 
+        milvus::index::NgramParams ngram_params{
+            true, info_proto->min_gram(), info_proto->max_gram()};
         auto index = std::make_unique<milvus::index::NgramInvertedIndex>(
-            file_ctx, true, info_proto->min_gram(), info_proto->max_gram());
+            file_ctx, ngram_params);
         index->Load(ctx, config);
 
         segment->LoadNgramIndex(milvus::FieldId(info_proto->fieldid()),
