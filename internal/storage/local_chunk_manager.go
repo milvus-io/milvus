@@ -71,7 +71,13 @@ func (lcm *LocalChunkManager) Path(ctx context.Context, filePath string) (string
 }
 
 func (lcm *LocalChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
-	return Open(filePath)
+	file, err := Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return &LocalReader{
+		File: file,
+	}, nil
 }
 
 // Write writes the data to local storage.
@@ -261,4 +267,16 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 		return err
 	}
 	return removeErr
+}
+
+type LocalReader struct {
+	*os.File
+}
+
+func (lr *LocalReader) Size() (int64, error) {
+	stat, err := lr.Stat()
+	if err != nil {
+		return -1, nil
+	}
+	return stat.Size(), nil
 }
