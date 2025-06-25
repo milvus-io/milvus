@@ -95,7 +95,7 @@ func NewPreImportTasks(fileGroups [][]*internalpb.ImportFile,
 }
 
 func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
-	job ImportJob, alloc allocator.Allocator, meta *meta, importMeta ImportMeta,
+	job ImportJob, alloc allocator.Allocator, meta *meta, importMeta ImportMeta, segmentMaxSize int,
 ) ([]ImportTask, error) {
 	idBegin, _, err := alloc.AllocN(int64(len(fileGroups)))
 	if err != nil {
@@ -120,7 +120,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			times:      taskcommon.NewTimes(),
 		}
 		task.task.Store(taskProto)
-		segments, err := AssignSegments(job, task, alloc, meta)
+		segments, err := AssignSegments(job, task, alloc, meta, int64(segmentMaxSize))
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +138,25 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	return tasks, nil
 }
 
-func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta) ([]int64, error) {
+func GetSegmentMaxSize(job ImportJob, meta *meta) int {
+	allDiskIndex := meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
+
+	var segmentMaxSize int
+	if allDiskIndex {
+		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		segmentMaxSize = paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.GetAsInt() * 1024 * 1024
+	} else {
+		// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+		segmentMaxSize = paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	}
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	if isL0Import {
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
+	}
+	return segmentMaxSize
+}
+
+func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64) ([]int64, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(job.GetSchema())
 	if err != nil {
 		return nil, err
@@ -158,11 +176,6 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 	}
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	if isL0Import {
-		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
-	}
 	segmentLevel := datapb.SegmentLevel_L1
 	if isL0Import {
 		segmentLevel = datapb.SegmentLevel_L0
@@ -287,6 +300,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		ImportFiles:   importFiles,
 		Options:       job.GetOptions(),
 		StorageConfig: createStorageConfig(),
+		TaskSlot:      task.GetTaskSlot(),
 	}
 }
 
@@ -353,25 +367,13 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
+		TaskSlot:        task.GetTaskSlot(),
 	}, nil
 }
 
-func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, allDiskIndex bool) [][]*datapb.ImportFileStats {
+func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
 	if len(files) == 0 {
 		return nil
-	}
-
-	var segmentMaxSize int
-	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		segmentMaxSize = Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt() * 1024 * 1024
-	} else {
-		// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-		segmentMaxSize = Params.DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
-	}
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	if isL0Import {
-		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
 	}
 
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
@@ -750,4 +752,37 @@ func ValidateMaxImportJobExceed(ctx context.Context, importMeta ImportMeta) erro
 				"please consider importing multiple files in one request for better efficiency."))
 	}
 	return nil
+}
+
+// CalculateTaskSlot calculates the required resource slots for an import task based on CPU and memory constraints
+// The function uses a dual-constraint approach:
+// 1. CPU constraint: Based on the number of files to process in parallel
+// 2. Memory constraint: Based on the total buffer size required for all virtual channels and partitions
+// Returns the maximum of the two constraints to ensure sufficient resources
+func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
+	job := importMeta.GetJob(context.TODO(), task.GetJobID())
+
+	// Calculate CPU-based slots
+	fileNumPerSlot := paramtable.Get().DataCoordCfg.ImportFileNumPerSlot.GetAsInt()
+	cpuBasedSlots := len(task.GetFileStats()) / fileNumPerSlot
+	if cpuBasedSlots < 1 {
+		cpuBasedSlots = 1
+	}
+
+	// Calculate memory-based slots
+	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
+	totalBufferSize := baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+	if isL0Import {
+		// L0 import won't hash the data by channel or partition, so we use base buffer size for l0 import
+		totalBufferSize = baseBufferSize
+	}
+	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
+	memoryBasedSlots := totalBufferSize / memoryLimitPerSlot
+
+	// Return the larger value to ensure both CPU and memory constraints are satisfied
+	if cpuBasedSlots > memoryBasedSlots {
+		return cpuBasedSlots
+	}
+	return memoryBasedSlots
 }
