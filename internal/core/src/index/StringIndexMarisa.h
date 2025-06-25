@@ -121,6 +121,9 @@ class StringIndexMarisa : public StringIndex {
     SetNull(TargetBitmap& bitset);
 
     void
+    ResetNull(TargetBitmap& bitset);
+
+    void
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
