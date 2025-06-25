@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -87,6 +88,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 	t.Run("Test empty result", func(t *testing.T) {
