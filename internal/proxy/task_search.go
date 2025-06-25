@@ -265,9 +265,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	if collectionInfo.collectionTTL != 0 {
-		physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
+		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		// preventing overflow, abort ttl timestamp
+		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+			t.CollectionTtlTimestamps = 0
+		}
 	}
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
