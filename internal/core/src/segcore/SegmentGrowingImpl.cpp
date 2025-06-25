@@ -1275,10 +1275,11 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto total_row_num = insert_record_.size();
 
     auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
-    insert_record_.get_data_base(field_id)->set_data_raw(
-        0, total_row_num, data.get(), field_meta);
     insert_record_.get_valid_data(field_id)->set_data_raw(
         total_row_num, data.get(), field_meta);
+    insert_record_.get_data_base(field_id)->set_data_raw(
+        0, total_row_num, data.get(), field_meta);
+
     LOG_INFO("Growing segment {} fill empty field {} done",
              this->get_segment_id(),
              field_meta.get_id().get());
