@@ -100,18 +100,14 @@ genValidIter(const uint8_t* valid_data, int length) {
     return valid_data_;
 }
 
-StorageType
+void
 ReadMediumType(BinlogReaderPtr reader) {
     AssertInfo(reader->Tell() == 0,
                "medium type must be parsed from stream header");
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
     AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
-    if (magic_num == MAGIC_NUM) {
-        return StorageType::Remote;
-    }
-
-    return StorageType::LocalDisk;
+    AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
 }
 
 void
@@ -676,20 +672,6 @@ GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
     return (prefix / path / path1).string();
 }
 
-std::unique_ptr<DataCodec>
-DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
-                            const std::string& file,
-                            bool is_field_data) {
-    // TODO remove this Size() cost
-    auto fileSize = chunk_manager->Size(file);
-    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-    chunk_manager->Read(file, buf.get(), fileSize);
-    auto res = DeserializeFileData(buf, fileSize, is_field_data);
-    res->SetData(buf);
-    // DataCodec must keep the buf alive for zero-copy usage, otherwise segmentation violation will occur
-    return res;
-}
-
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
@@ -721,16 +703,28 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
               const std::vector<std::string>& remote_files,
-              milvus::ThreadPoolPriority priority) {
+              milvus::ThreadPoolPriority priority,
+              bool is_field_data) {
     auto& pool = ThreadPools::GetThreadPool(priority);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
+
+    auto DownloadAndDeserialize = [&](ChunkManager* chunk_manager, const std::string& file, bool is_field_data) {
+        // TODO remove this Size() cost
+        auto fileSize = chunk_manager->Size(file);
+        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+        chunk_manager->Read(file, buf.get(), fileSize);
+        auto res = DeserializeFileData(buf, fileSize, is_field_data);
+        return res;
+    };
+
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
-            DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
+            DownloadAndDeserialize, remote_chunk_manager, file, is_field_data));
     }
     return futures;
 }
+
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,

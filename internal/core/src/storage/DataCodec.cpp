@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/DataCodec.h"
+#include <memory>
 #include "storage/Event.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
@@ -25,9 +26,13 @@
 
 namespace milvus::storage {
 
-// deserialize remote insert and index file
 std::unique_ptr<DataCodec>
-DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
+DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
+                    int64_t length,
+                    bool is_field_data) {
+    auto reader = std::make_shared<BinlogReader>(input_data, length);
+    ReadMediumType(reader);
+
     DescriptorEvent descriptor_event(reader);
     auto data_type =
         static_cast<DataType>(descriptor_event.event_data.fix_part.data_type);
@@ -54,6 +59,9 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
             insert_data->SetFieldDataMeta(data_meta);
             insert_data->SetTimestamps(insert_event_data.start_timestamp,
                                        insert_event_data.end_timestamp);
+            // DataCodec must keep the input_data alive for zero-copy usage,
+            // otherwise segmentation violation will occur
+            insert_data->SetData(input_data);
             return insert_data;
         }
         case EventType::IndexFileEvent: {
@@ -95,6 +103,9 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
             index_data->set_index_meta(index_meta);
             index_data->SetTimestamps(index_event_data.start_timestamp,
                                       index_event_data.end_timestamp);
+            // DataCodec must keep the input_data alive for zero-copy usage,
+            // otherwise segmentation violation will occur
+            index_data->SetData(input_data);
             return index_data;
         }
         default:
@@ -102,35 +113,6 @@ DeserializeRemoteFileData(BinlogReaderPtr reader, bool is_field_data) {
                 DataFormatBroken,
                 fmt::format("unsupported event type {}", header.event_type_));
     }
-}
-
-// For now, no file header in file data
-std::unique_ptr<DataCodec>
-DeserializeLocalFileData(BinlogReaderPtr reader) {
-    PanicInfo(NotImplemented, "not supported");
-}
-
-std::unique_ptr<DataCodec>
-DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
-                    int64_t length,
-                    bool is_field_data) {
-    auto binlog_reader = std::make_shared<BinlogReader>(input_data, length);
-    auto medium_type = ReadMediumType(binlog_reader);
-    std::unique_ptr<DataCodec> res;
-    switch (medium_type) {
-        case StorageType::Remote: {
-            res = DeserializeRemoteFileData(binlog_reader, is_field_data);
-            break;
-        }
-        case StorageType::LocalDisk: {
-            res = DeserializeLocalFileData(binlog_reader);
-            break;
-        }
-        default:
-            PanicInfo(DataFormatBroken,
-                      fmt::format("unsupported medium type {}", medium_type));
-    }
-    return res;
 }
 
 }  // namespace milvus::storage

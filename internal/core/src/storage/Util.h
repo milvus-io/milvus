@@ -38,7 +38,7 @@
 
 namespace milvus::storage {
 
-StorageType
+void
 ReadMediumType(BinlogReaderPtr reader);
 
 void
@@ -139,11 +139,6 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
 std::string
 GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id);
 
-std::unique_ptr<DataCodec>
-DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
-                            const std::string& file,
-                            bool is_field_data = true);
-
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           uint8_t* buf,
@@ -156,7 +151,8 @@ std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(
     ChunkManager* remote_chunk_manager,
     const std::vector<std::string>& remote_files,
-    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH);
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH,
+    bool is_field_data = true);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
