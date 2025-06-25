@@ -265,9 +265,13 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	if collectionInfo.collectionTTL != 0 {
-		physicalTime, _ := tsoutil.ParseTS(guaranteeTs)
+		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		// preventing overflow, abort
+		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+		}
 	}
 
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()

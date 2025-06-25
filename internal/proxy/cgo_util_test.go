@@ -37,7 +37,7 @@ func Test_CheckVecIndexWithDataTypeExist(t *testing.T) {
 		{"SPARSE_WAND", schemapb.DataType_Float16Vector, false},
 
 		{"GPU_BRUTE_FORCE", schemapb.DataType_FloatVector, true},
-		{"GPU_BRUTE_FORCE", schemapb.DataType_Float16Vector, false},
+		{"GPU_BRUTE_FORCE", schemapb.DataType_Float16Vector, true},
 		{"GPU_BRUTE_FORCE", schemapb.DataType_BinaryVector, false},
 
 		{"BIN_IVF_FLAT", schemapb.DataType_BinaryVector, true},
