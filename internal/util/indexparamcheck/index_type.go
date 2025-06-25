@@ -33,6 +33,7 @@ const (
 	IndexBitmap   IndexType = "BITMAP"
 	IndexHybrid   IndexType = "HYBRID" // BITMAP + INVERTED
 	IndexINVERTED IndexType = "INVERTED"
+	IndexNGRAM    IndexType = "NGRAM"
 
 	AutoIndex IndexType = "AUTOINDEX"
 )
