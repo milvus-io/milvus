@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	MinGramKey = "MIN_GRAM"
-	MaxGramKey = "MAX_GRAM"
+	MinGramKey = "min_gram"
+	MaxGramKey = "max_gram"
 )
 
 type NgramIndexChecker struct {

@@ -45,9 +45,13 @@ ScalarIndexCreator::ScalarIndexCreator(
             milvus::index::NgramParams ngram_params{};
             ngram_params.loading_index = false;
             ngram_params.min_gram =
-                config.at(milvus::index::MIN_GRAM).get<uintptr_t>();
+                std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                               config, milvus::index::MIN_GRAM)
+                               .value());
             ngram_params.max_gram =
-                config.at(milvus::index::MAX_GRAM).get<uintptr_t>();
+                std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                               config, milvus::index::MAX_GRAM)
+                               .value());
             index_info.ngram_params = std::make_optional(ngram_params);
         }
     }
