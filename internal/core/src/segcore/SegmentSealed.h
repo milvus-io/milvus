@@ -113,7 +113,6 @@ class SegmentSealed : public SegmentInternalInterface {
         });
     }
 
-
     virtual void
     LoadJsonKeyIndex(
         FieldId field_id,
