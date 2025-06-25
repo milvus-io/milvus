@@ -39,6 +39,18 @@ var CheckBucketRetryAttempts uint = 20
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
+type ObjectReader struct {
+	*minio.Object
+}
+
+func (or *ObjectReader) Size() (int64, error) {
+	stat, err := or.Stat()
+	if err != nil {
+		return -1, err
+	}
+	return stat.Size, nil
+}
+
 type MinioObjectStorage struct {
 	*minio.Client
 }
@@ -181,7 +193,9 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 	if err != nil {
 		return nil, checkObjectStorageError(objectName, err)
 	}
-	return object, nil
+	return &ObjectReader{
+		Object: object,
+	}, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
