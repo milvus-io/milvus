@@ -349,16 +349,20 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         }
 
         if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
-            AssertInfo(index_params.find("min_gram") != index_params.end(),
-                       "min_gram is empty for ngram index");
-            AssertInfo(index_params.find("max_gram") != index_params.end(),
-                       "max_gram is empty for ngram index");
+            AssertInfo(index_params.find(milvus::index::MIN_GRAM) !=
+                           index_params.end(),
+                       "MIN_GRAM is empty for ngram index");
+            AssertInfo(index_params.find(milvus::index::MAX_GRAM) !=
+                           index_params.end(),
+                       "MAX_GRAM is empty for ngram index");
 
             // get min_gram and max_gram and convert to uintptr_t
             milvus::index::NgramParams ngram_params{};
-            ngram_params.loading_index = false;
-            ngram_params.min_gram = std::stoul(index_params.at("min_gram"));
-            ngram_params.max_gram = std::stoul(index_params.at("max_gram"));
+            ngram_params.loading_index = true;
+            ngram_params.min_gram =
+                std::stoul(index_params.at(milvus::index::MIN_GRAM));
+            ngram_params.max_gram =
+                std::stoul(index_params.at(milvus::index::MAX_GRAM));
             index_info.ngram_params = std::make_optional(ngram_params);
         }
 

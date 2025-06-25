@@ -51,8 +51,6 @@ const (
 	GetIndexStateTaskName         = "GetIndexStateTask"
 	GetIndexBuildProgressTaskName = "GetIndexBuildProgressTask"
 
-	NgramIndexName = "NGRAM"
-
 	AutoIndexName = common.AutoIndexName
 	DimKey        = common.DimKey
 	IsSparseKey   = common.IsSparseKey

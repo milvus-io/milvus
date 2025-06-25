@@ -21,6 +21,7 @@
 #include "test_utils/storage_test_utils.h"
 #include "index/IndexFactory.h"
 #include "index/NgramInvertedIndex.h"
+#include "segcore/load_index_c.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -158,6 +159,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     int64_t segment_id = 3;
     int64_t index_build_id = 4000;
     int64_t index_version = 4000;
+    int64_t index_id = 5000;
 
     auto schema = std::make_shared<Schema>();
     auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
@@ -224,8 +226,13 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
 
+        auto ngram_params = index::NgramParams{
+            .loading_index = false,
+            .min_gram = 2,
+            .max_gram = 4,
+        };
         auto index =
-            std::make_shared<index::NgramInvertedIndex>(ctx, false, 2, 4);
+            std::make_shared<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Build(config);
 
         auto create_index_result = index->Upload();
@@ -242,12 +249,17 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         index_info.field_type = DataType::VARCHAR;
 
         Config config;
-        config["index_files"] = index_files;
-        config["min_gram"] = 2;
-        config["max_gram"] = 4;
+        config[milvus::index::INDEX_FILES] = index_files;
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
 
+        auto ngram_params = index::NgramParams{
+            .loading_index = true,
+            .min_gram = 2,
+            .max_gram = 4,
+        };
         auto index =
-            std::make_unique<index::NgramInvertedIndex>(ctx, true, 2, 4);
+            std::make_unique<index::NgramInvertedIndex>(ctx, ngram_params);
         index->Load(milvus::tracer::TraceContext{}, config);
 
         auto cnt = index->Count();
@@ -267,15 +279,51 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         for (size_t i = 0; i < nb; i++) {
             ASSERT_EQ(bitset[i], expected_result[i]);
         }
+    }
 
-        segment->LoadNgramIndex(field_id, std::move(index));
-        auto unary_range_expr = test::GenUnaryRangeExpr(OpType::InnerMatch, literal);
+    {
+        std::map<std::string, std::string> index_params{
+            {milvus::index::INDEX_TYPE, milvus::index::NGRAM_INDEX_TYPE},
+            {milvus::index::MIN_GRAM, "2"},
+            {milvus::index::MAX_GRAM, "4"},
+            {milvus::LOAD_PRIORITY, "HIGH"},
+        };
+        milvus::segcore::LoadIndexInfo load_index_info{
+            .collection_id = collection_id,
+            .partition_id = partition_id,
+            .segment_id = segment_id,
+            .field_id = field_id.get(),
+            .field_type = DataType::VARCHAR,
+            .enable_mmap = true,
+            .mmap_dir_path = "/tmp/test-ngram-index-mmap-dir",
+            .index_id = index_id,
+            .index_build_id = index_build_id,
+            .index_version = index_version,
+            .index_params = index_params,
+            .index_files = index_files,
+            .schema = field_meta.field_schema,
+            .index_size = 1024 * 1024 * 1024,  // 1G index size
+        };
+
+        uint8_t trace_id = 1;
+        uint8_t span_id = 2;
+        CTraceContext trace{
+            .traceID = &trace_id,
+            .spanID = &span_id,
+            .traceFlags = 0,
+        };
+        auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);
+        AppendIndexV2(trace, cload_index_info);
+        UpdateSealedSegmentIndex(segment.get(), cload_index_info);
+
+        auto unary_range_expr =
+            test::GenUnaryRangeExpr(OpType::InnerMatch, literal);
         auto column_info = test::GenColumnInfo(
             field_id.get(), proto::schema::DataType::VarChar, false, false);
         unary_range_expr->set_allocated_column_info(column_info);
         auto expr = test::GenExpr();
         expr->set_allocated_unary_range_expr(unary_range_expr);
-        auto parser = ProtoParser(*schema);
+        auto parser = ProtoParser(schema);
         auto typed_expr = parser.ParseExprs(*expr);
         auto parsed = std::make_shared<plan::FilterBitsNode>(
             DEFAULT_PLANNODE_ID, typed_expr);

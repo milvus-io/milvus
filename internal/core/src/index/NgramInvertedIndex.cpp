@@ -61,7 +61,7 @@ void
 NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                          const Config& config) {
     auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load ngram index");
 
