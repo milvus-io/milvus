@@ -2896,7 +2896,6 @@ type queryNodeConfig struct {
 
 	// Idf Oracle
 	IDFEnableDisk       ParamItem `refreshable:"true"`
-	IDFLocalPath        ParamItem `refreshable:"true"`
 	IDFWriteConcurrenct ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
@@ -2910,14 +2909,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "true",
 	}
 	p.IDFEnableDisk.Init(base.mgr)
-
-	p.IDFLocalPath = ParamItem{
-		Key:          "queryNode.idfOracle.localPath",
-		Version:      "2.6.0",
-		Export:       true,
-		DefaultValue: "/var/lib/milvus/bm25_logs",
-	}
-	p.IDFLocalPath.Init(base.mgr)
 
 	p.IDFWriteConcurrenct = ParamItem{
 		Key:          "queryNode.idfOracle.writeConcurrency",

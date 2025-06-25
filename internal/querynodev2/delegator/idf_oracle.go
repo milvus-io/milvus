@@ -404,7 +404,7 @@ func (o *idfOracle) syncloop() {
 
 func (o *idfOracle) localloop() {
 	pool := conc.NewPool[struct{}](paramtable.Get().QueryNodeCfg.IDFWriteConcurrenct.GetAsInt())
-	o.dirPath = path.Join(paramtable.Get().QueryNodeCfg.IDFLocalPath.GetValue(), fmt.Sprintf("%d", o.collectionID))
+	o.dirPath = path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "bm25", fmt.Sprintf("%d", o.collectionID))
 
 	defer o.wg.Done()
 	for {
