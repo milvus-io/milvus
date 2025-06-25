@@ -514,19 +514,6 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	return m
 }()
 
-func IsVectorDataType(dataType schemapb.DataType) bool {
-	switch dataType {
-	case schemapb.DataType_BinaryVector,
-		schemapb.DataType_Float16Vector,
-		schemapb.DataType_BFloat16Vector,
-		schemapb.DataType_Int8Vector,
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_SparseFloatVector:
-		return true
-	}
-	return false
-}
-
 // Since parquet does not support custom fallback encoding for now,
 // we disable dict encoding for primary key.
 // It can be scale to all fields once parquet fallback encoding is available.
