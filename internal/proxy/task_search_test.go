@@ -707,6 +707,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 
@@ -723,6 +724,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 
@@ -756,6 +758,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 
@@ -896,7 +899,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.True(t, st.isIterator)
@@ -925,7 +928,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.Error(t, st.PreExecute(ctx))
 	})
@@ -956,7 +959,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
@@ -978,7 +981,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
@@ -1000,7 +1003,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 	})
