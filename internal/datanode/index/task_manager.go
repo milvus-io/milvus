@@ -377,20 +377,19 @@ func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 
 func (s *StatsTaskInfo) ToStatsResult(taskID int64) *workerpb.StatsResult {
 	return &workerpb.StatsResult{
-		TaskID:              taskID,
-		State:               s.State,
-		FailReason:          s.FailReason,
-		CollectionID:        s.CollID,
-		PartitionID:         s.PartID,
-		SegmentID:           s.SegID,
-		Channel:             s.InsertChannel,
-		InsertLogs:          s.InsertLogs,
-		StatsLogs:           s.StatsLogs,
-		TextStatsLogs:       s.TextStatsLogs,
-		Bm25Logs:            s.Bm25Logs,
-		NumRows:             s.NumRows,
-		JsonKeyStatsLogs:    s.JSONKeyStatsLogs,
-		NgramIndexStatsLogs: s.NgramIndexStatsLogs,
+		TaskID:           taskID,
+		State:            s.State,
+		FailReason:       s.FailReason,
+		CollectionID:     s.CollID,
+		PartitionID:      s.PartID,
+		SegmentID:        s.SegID,
+		Channel:          s.InsertChannel,
+		InsertLogs:       s.InsertLogs,
+		StatsLogs:        s.StatsLogs,
+		TextStatsLogs:    s.TextStatsLogs,
+		Bm25Logs:         s.Bm25Logs,
+		NumRows:          s.NumRows,
+		JsonKeyStatsLogs: s.JSONKeyStatsLogs,
 	}
 }
 

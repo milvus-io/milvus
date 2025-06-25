@@ -345,21 +345,6 @@ func (st *statsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort || st.req.GetSubJobType() == indexpb.StatsSubJob_NgramIndexJob {
-		err = st.createNgramIndex(ctx,
-			st.req.GetStorageConfig(),
-			st.req.GetCollectionID(),
-			st.req.GetPartitionID(),
-			st.req.GetTargetSegmentID(),
-			st.req.GetTaskVersion(),
-			st.req.GetTaskID(),
-			insertLogs)
-		if err != nil {
-			log.Warn("stats wrong, failed to create ngram index", zap.Error(err))
-			return err
-		}
-	}
-
 	return nil
 }
 

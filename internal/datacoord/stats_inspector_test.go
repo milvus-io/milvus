@@ -97,25 +97,6 @@ func (s *statsInspectorSuite) SetupTest() {
 						},
 					},
 				},
-				{
-					FieldID:  102,
-					Name:     "ngram",
-					DataType: schemapb.DataType_String,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "enable_ngram_index",
-							Value: "true",
-						},
-						{
-							Key:   "min_gram",
-							Value: "2",
-						},
-						{
-							Key:   "max_gram",
-							Value: "3",
-						},
-					},
-				},
 			},
 		},
 	})
@@ -343,19 +324,6 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
 	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
 }
 
-func (s *statsInspectorSuite) TestTriggerNgramIndexStatsTask() {
-	// Set up a sorted segment without ngram index
-	segment := s.mt.segments.segments[20]
-	segment.IsSorted = true
-	segment.NgramIndexStats = nil
-
-	// Test triggering ngram index stats task
-	s.inspector.triggerNgramIndexStatsTask()
-
-	// Verify task creation
-	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
-}
-
 func (s *statsInspectorSuite) TestTriggerBM25StatsTask() {
 	// BM25 functionality is disabled in current version
 	s.inspector.triggerBM25StatsTask()
@@ -433,24 +401,4 @@ func (s *statsInspectorSuite) TestEnableBM25() {
 	// Test if BM25 is enabled
 	result := s.inspector.enableBM25()
 	s.False(result, "BM25 should be disabled by default")
-}
-
-func (s *statsInspectorSuite) TestNeedDoNgramIndex() {
-	// Test case when ngram index is needed
-	segment := s.mt.segments.segments[20]
-	segment.IsSorted = true
-	result := needDoNgramIndex(segment, []int64{102})
-	s.True(result, "Segment should need ngram index")
-
-	// Test case when ngram index already exists
-	segment.NgramIndexStats = map[int64]*datapb.NgramIndexStats{
-		102: {},
-	}
-	result = needDoNgramIndex(segment, []int64{102})
-	s.False(result, "Segment should not need ngram index")
-
-	// Test case with unsorted segment
-	segment.IsSorted = false
-	result = needDoNgramIndex(segment, []int64{102})
-	s.False(result, "Unsorted segment should not need ngram index")
 }
