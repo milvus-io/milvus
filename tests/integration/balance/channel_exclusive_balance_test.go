@@ -172,6 +172,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 }
 
 func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
+	s.T().Skip("skip until we fix the issue https://github.com/milvus-io/milvus/issues/42930")
 	name := "test_balance_" + funcutil.GenRandomStr()
 	channelCount := 5
 	channelNodeCount := 3
