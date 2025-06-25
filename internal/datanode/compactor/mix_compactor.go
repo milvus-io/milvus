@@ -152,8 +152,6 @@ func (t *mixCompactionTask) mergeSplit(
 		return nil, err
 	}
 
-	log.Info("debug zccc", zap.Any("writer", mWriter))
-
 	deletedRowCount := int64(0)
 	expiredRowCount := int64(0)
 
