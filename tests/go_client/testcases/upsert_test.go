@@ -253,6 +253,11 @@ func TestUpsertSamePksManyTimes(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
 
+	// flush -> index -> load
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
 	var _columns []column.Column
 	upsertNb := 10
 	for i := 0; i < 10; i++ {
@@ -261,11 +266,6 @@ func TestUpsertSamePksManyTimes(t *testing.T) {
 		_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(_columns...))
 		common.CheckErr(t, err, true)
 	}
-
-	// flush -> index -> load
-	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
-	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query and verify the updated entities
 	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, upsertNb)).
@@ -331,7 +331,7 @@ func TestUpsertAutoID(t *testing.T) {
 	// upsert without pks -> error
 	vecColumn = hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn))
-	common.CheckErr(t, err, false, "has no corresponding fieldData pass in: invalid parameter")
+	common.CheckErr(t, err, false, "must assign pk when upsert, primary field: int64: invalid parameter")
 }
 
 // test upsert autoId collection
@@ -417,7 +417,7 @@ func TestUpsertNotExistCollectionPartition(t *testing.T) {
 	// create default collection with autoID true
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithPartition("aaa"))
+	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName))
 	common.CheckErr(t, errUpsert, false, "num_rows should be greater than 0")
 
 	// upsert not exist partition
@@ -434,6 +434,8 @@ func TestUpsertInvalidColumnData(t *testing.T) {
 
 	// create and insert
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	hp.CollPrepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	hp.CollPrepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	upsertNb := 10
 	// 1. upsert missing columns
@@ -496,7 +498,7 @@ func TestUpsertDynamicField(t *testing.T) {
 	common.CheckErr(t, err, true)
 	require.Equal(t, upsertNb, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
 
-	// 1. upsert exist pk without dynamic column
+	// 1. upsert exist pk without dynamic column, won't overide dynamic field with empty
 	opt := *hp.TNewDataOption()
 	pkColumn, vecColumn := hp.GenColumnData(upsertNb, entity.FieldTypeInt64, opt), hp.GenColumnData(upsertNb, entity.FieldTypeFloatVector, opt)
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumn, vecColumn))
@@ -506,7 +508,7 @@ func TestUpsertDynamicField(t *testing.T) {
 	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s < %d", common.DefaultDynamicNumberField, upsertNb)).
 		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
-	require.Equal(t, 0, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
+	require.Equal(t, 10, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
 
 	// 2. upsert not exist pk with dynamic column ->  field dynamicNumber does not exist in collection
 	opt.TWithStart(common.DefaultNb)

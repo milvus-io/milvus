@@ -1155,7 +1155,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
 	})
@@ -1185,7 +1185,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1226,7 +1226,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 	})
@@ -1256,7 +1256,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
 	})
@@ -1285,7 +1285,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1319,7 +1319,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1357,7 +1357,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1391,7 +1391,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1425,7 +1425,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1458,7 +1458,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 	t.Run("normal when upsert", func(t *testing.T) {
@@ -1501,7 +1501,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false, false)
 		assert.NoError(t, err)
 
 		task = insertTask{
@@ -1542,7 +1542,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				},
 			},
 		}
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false, false)
 		assert.NoError(t, err)
 	})
 
@@ -1585,7 +1585,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 
@@ -1628,7 +1628,7 @@ func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true, false)
 		assert.NoError(t, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 		paramtable.Get().Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)

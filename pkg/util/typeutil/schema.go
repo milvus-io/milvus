@@ -702,31 +702,39 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 
 // AppendFieldData appends fields data of specified index from src to dst
 func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int64) {
+	dstMap := make(map[int64]*schemapb.FieldData)
+	for _, fieldData := range dst {
+		if fieldData != nil {
+			dstMap[fieldData.FieldId] = fieldData
+		}
+	}
 	for i, fieldData := range src {
-		if dst[i] == nil {
-			dst[i] = &schemapb.FieldData{
+		dstFieldData, ok := dstMap[fieldData.FieldId]
+		if !ok {
+			dstFieldData = &schemapb.FieldData{
 				Type:      fieldData.Type,
 				FieldName: fieldData.FieldName,
 				FieldId:   fieldData.FieldId,
 				IsDynamic: fieldData.IsDynamic,
 			}
+			dst[i] = dstFieldData
 		}
 		// assign null data
 		if len(fieldData.GetValidData()) != 0 {
-			if dst[i].ValidData == nil {
-				dst[i].ValidData = make([]bool, 0)
+			if dstFieldData.ValidData == nil {
+				dstFieldData.ValidData = make([]bool, 0)
 			}
 			valid := fieldData.ValidData[idx]
-			dst[i].ValidData = append(dst[i].ValidData, valid)
+			dstFieldData.ValidData = append(dstFieldData.ValidData, valid)
 		}
 		switch fieldType := fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
-			if dst[i] == nil || dst[i].GetScalars() == nil {
-				dst[i].Field = &schemapb.FieldData_Scalars{
+			if dstFieldData.GetScalars() == nil {
+				dstFieldData.Field = &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{},
 				}
 			}
-			dstScalar := dst[i].GetScalars()
+			dstScalar := dstFieldData.GetScalars()
 			switch srcScalar := fieldType.Scalars.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				if dstScalar.GetBoolData() == nil {
@@ -830,19 +838,14 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 			}
 		case *schemapb.FieldData_Vectors:
 			dim := fieldType.Vectors.Dim
-			if dst[i] == nil || dst[i].GetVectors() == nil {
-				dst[i] = &schemapb.FieldData{
-					Type:      fieldData.Type,
-					FieldName: fieldData.FieldName,
-					FieldId:   fieldData.FieldId,
-					Field: &schemapb.FieldData_Vectors{
-						Vectors: &schemapb.VectorField{
-							Dim: dim,
-						},
+			if dstFieldData.GetVectors() == nil {
+				dstFieldData.Field = &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: dim,
 					},
 				}
 			}
-			dstVector := dst[i].GetVectors()
+			dstVector := dstFieldData.GetVectors()
 			switch srcVector := fieldType.Vectors.Data.(type) {
 			case *schemapb.VectorField_BinaryVector:
 				if dstVector.GetBinaryVector() == nil {
@@ -990,48 +993,6 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 	}
 }
 
-// getFieldDataSize calculates the number of rows in a FieldData
-func getFieldDataSize(fieldData *schemapb.FieldData) int64 {
-	switch fieldType := fieldData.Field.(type) {
-	case *schemapb.FieldData_Scalars:
-		switch fieldType.Scalars.Data.(type) {
-		case *schemapb.ScalarField_BoolData:
-			return int64(len(fieldType.Scalars.GetBoolData().Data))
-		case *schemapb.ScalarField_IntData:
-			return int64(len(fieldType.Scalars.GetIntData().Data))
-		case *schemapb.ScalarField_LongData:
-			return int64(len(fieldType.Scalars.GetLongData().Data))
-		case *schemapb.ScalarField_FloatData:
-			return int64(len(fieldType.Scalars.GetFloatData().Data))
-		case *schemapb.ScalarField_DoubleData:
-			return int64(len(fieldType.Scalars.GetDoubleData().Data))
-		case *schemapb.ScalarField_StringData:
-			return int64(len(fieldType.Scalars.GetStringData().Data))
-		case *schemapb.ScalarField_ArrayData:
-			return int64(len(fieldType.Scalars.GetArrayData().Data))
-		case *schemapb.ScalarField_JsonData:
-			return int64(len(fieldType.Scalars.GetJsonData().Data))
-		}
-	case *schemapb.FieldData_Vectors:
-		dim := fieldType.Vectors.Dim
-		switch fieldType.Vectors.Data.(type) {
-		case *schemapb.VectorField_BinaryVector:
-			return int64(len(fieldType.Vectors.GetBinaryVector()) * 8 / int(dim))
-		case *schemapb.VectorField_FloatVector:
-			return int64(len(fieldType.Vectors.GetFloatVector().Data) / int(dim))
-		case *schemapb.VectorField_Float16Vector:
-			return int64(len(fieldType.Vectors.GetFloat16Vector()) / (int(dim) * 2))
-		case *schemapb.VectorField_Bfloat16Vector:
-			return int64(len(fieldType.Vectors.GetBfloat16Vector()) / (int(dim) * 2))
-		case *schemapb.VectorField_SparseFloatVector:
-			return int64(len(fieldType.Vectors.GetSparseFloatVector().Contents))
-		case *schemapb.VectorField_Int8Vector:
-			return int64(len(fieldType.Vectors.GetInt8Vector()) / int(dim))
-		}
-	}
-	return 0
-}
-
 func UpdateFieldData(base, update []*schemapb.FieldData, idx int64) error {
 	// Create a map for quick lookup of update fields by field ID
 	updateFieldMap := make(map[string]*schemapb.FieldData)
@@ -1039,30 +1000,17 @@ func UpdateFieldData(base, update []*schemapb.FieldData, idx int64) error {
 		updateFieldMap[fieldData.FieldName] = fieldData
 	}
 	// Iterate through base fields and update if corresponding field exists in update
-	for i, baseFieldData := range base {
+	for _, baseFieldData := range base {
 		updateFieldData, exists := updateFieldMap[baseFieldData.FieldName]
 		if !exists {
-			log.Info("field not found in update", zap.Any("baseFieldData", baseFieldData.FieldId))
 			// No update for this field, keep original value
 			continue
-		}
-
-		// Check if idx is within bounds for both base and update
-		baseSize := getFieldDataSize(baseFieldData)
-		updateSize := getFieldDataSize(updateFieldData)
-
-		// Check bounds
-		if idx < 0 || idx >= baseSize {
-			return fmt.Errorf("index %d is out of bounds for base field %s (size: %d)", idx, baseFieldData.FieldName, baseSize)
-		}
-		if idx >= updateSize {
-			return fmt.Errorf("index %d is out of bounds for update field %s (size: %d)", idx, updateFieldData.FieldName, updateSize)
 		}
 
 		// Update ValidData if present
 		if len(updateFieldData.GetValidData()) != 0 {
 			if len(baseFieldData.GetValidData()) != 0 {
-				base[i].ValidData[idx] = updateFieldData.ValidData[idx]
+				baseFieldData.ValidData[idx] = updateFieldData.ValidData[idx]
 			}
 		}
 
@@ -1130,11 +1078,11 @@ func UpdateFieldData(base, update []*schemapb.FieldData, idx int64) error {
 							baseMap[k] = v
 						}
 						// marshal back
-						newJson, err := json.Marshal(baseMap)
+						newJSON, err := json.Marshal(baseMap)
 						if err != nil {
 							return fmt.Errorf("failed to marshal merged json: %v", err)
 						}
-						baseScalar.GetJsonData().Data[idx] = newJson
+						baseScalar.GetJsonData().Data[idx] = newJSON
 					} else {
 						baseScalar.GetJsonData().Data[idx] = updateData.Data[idx]
 					}
