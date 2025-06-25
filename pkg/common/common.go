@@ -121,9 +121,6 @@ const (
 
 	// JSONIndexPath storage path const for json index
 	JSONIndexPath = "json_key_index_log"
-
-	// NgramIndexPath storage path const for ngram index
-	NgramIndexPath = "ngram_index_log"
 )
 
 // Search, Index parameter keys

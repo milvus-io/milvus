@@ -108,14 +108,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         json_key_indexes_[field_id] = std::move(index);
     }
 
-    void
-    LoadNgramIndex(FieldId field_id,
-                   std::unique_ptr<index::NgramInvertedIndex> index) override {
-        std::unique_lock lck(mutex_);
-        const auto& field_meta = schema_->operator[](field_id);
-        ngram_indexes_[field_id] = std::move(index);
-    }
-
     index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
@@ -126,15 +118,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return iter->second.get();
     }
 
-    index::NgramInvertedIndex*
-    GetNgramIndex(FieldId field_id) const override {
+    bool
+    HasNgramIndex(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
-        auto iter = ngram_indexes_.find(field_id);
-        if (iter == ngram_indexes_.end()) {
-            return nullptr;
-        }
-        return iter->second.get();
+        return ngram_indexings_.find(field_id) != ngram_indexings_.end();
     }
+
+    PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const override;
 
     // TODO(tiered storage 1): should return a PinWrapper
     void
@@ -442,6 +433,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;
 
+    // ngram field index
+    std::unordered_map<FieldId, index::CacheIndexBasePtr> ngram_indexings_;
+
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
     // vector field index
@@ -480,9 +474,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::unordered_map<FieldId,
                        std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
         json_key_indexes_;
-
-    std::unordered_map<FieldId, std::unique_ptr<index::NgramInvertedIndex>>
-        ngram_indexes_;
 };
 
 inline SegmentSealedUPtr

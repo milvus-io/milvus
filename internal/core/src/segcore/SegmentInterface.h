@@ -151,7 +151,7 @@ class SegmentInterface {
                     const int64_t* offsets,
                     int64_t count) const = 0;
 
-    virtual index::NgramInvertedIndex*
+    virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const = 0;
 
     virtual void
@@ -365,7 +365,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override;
 
-    virtual index::NgramInvertedIndex*
+    virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
 
  public:

@@ -376,7 +376,6 @@ message SegmentLoadInfo {
     repeated data.FieldBinlog bm25logs = 21;
     map<int64, data.JsonKeyStats> jsonKeyStatsLogs = 22;
     common.LoadPriority priority = 23;
-    map<int64, data.NgramIndexStats> ngramStatsLogs = 24;
 }
 
 message FieldIndexInfo {

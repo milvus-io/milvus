@@ -342,38 +342,36 @@ func (m *TaskManager) WaitTaskFinish() {
 }
 
 type StatsTaskInfo struct {
-	Cancel              context.CancelFunc
-	State               indexpb.JobState
-	FailReason          string
-	CollID              typeutil.UniqueID
-	PartID              typeutil.UniqueID
-	SegID               typeutil.UniqueID
-	InsertChannel       string
-	NumRows             int64
-	InsertLogs          []*datapb.FieldBinlog
-	StatsLogs           []*datapb.FieldBinlog
-	TextStatsLogs       map[int64]*datapb.TextIndexStats
-	Bm25Logs            []*datapb.FieldBinlog
-	JSONKeyStatsLogs    map[int64]*datapb.JsonKeyStats
-	NgramIndexStatsLogs map[int64]*datapb.NgramIndexStats
+	Cancel           context.CancelFunc
+	State            indexpb.JobState
+	FailReason       string
+	CollID           typeutil.UniqueID
+	PartID           typeutil.UniqueID
+	SegID            typeutil.UniqueID
+	InsertChannel    string
+	NumRows          int64
+	InsertLogs       []*datapb.FieldBinlog
+	StatsLogs        []*datapb.FieldBinlog
+	TextStatsLogs    map[int64]*datapb.TextIndexStats
+	Bm25Logs         []*datapb.FieldBinlog
+	JSONKeyStatsLogs map[int64]*datapb.JsonKeyStats
 }
 
 func (s *StatsTaskInfo) Clone() *StatsTaskInfo {
 	return &StatsTaskInfo{
-		Cancel:              s.Cancel,
-		State:               s.State,
-		FailReason:          s.FailReason,
-		CollID:              s.CollID,
-		PartID:              s.PartID,
-		SegID:               s.SegID,
-		InsertChannel:       s.InsertChannel,
-		NumRows:             s.NumRows,
-		InsertLogs:          s.CloneInsertLogs(),
-		StatsLogs:           s.CloneStatsLogs(),
-		TextStatsLogs:       s.CloneTextStatsLogs(),
-		Bm25Logs:            s.CloneBm25Logs(),
-		JSONKeyStatsLogs:    s.CloneJSONKeyStatsLogs(),
-		NgramIndexStatsLogs: s.CloneNgramIndexStatsLogs(),
+		Cancel:           s.Cancel,
+		State:            s.State,
+		FailReason:       s.FailReason,
+		CollID:           s.CollID,
+		PartID:           s.PartID,
+		SegID:            s.SegID,
+		InsertChannel:    s.InsertChannel,
+		NumRows:          s.NumRows,
+		InsertLogs:       s.CloneInsertLogs(),
+		StatsLogs:        s.CloneStatsLogs(),
+		TextStatsLogs:    s.CloneTextStatsLogs(),
+		Bm25Logs:         s.CloneBm25Logs(),
+		JSONKeyStatsLogs: s.CloneJSONKeyStatsLogs(),
 	}
 }
 
@@ -431,14 +429,6 @@ func (s *StatsTaskInfo) CloneBm25Logs() []*datapb.FieldBinlog {
 func (s *StatsTaskInfo) CloneJSONKeyStatsLogs() map[int64]*datapb.JsonKeyStats {
 	clone := make(map[int64]*datapb.JsonKeyStats)
 	for k, v := range s.JSONKeyStatsLogs {
-		clone[k] = typeutil.Clone(v)
-	}
-	return clone
-}
-
-func (s *StatsTaskInfo) CloneNgramIndexStatsLogs() map[int64]*datapb.NgramIndexStats {
-	clone := make(map[int64]*datapb.NgramIndexStats)
-	for k, v := range s.NgramIndexStatsLogs {
 		clone[k] = typeutil.Clone(v)
 	}
 	return clone
@@ -542,27 +532,6 @@ func (m *TaskManager) StoreJSONKeyStatsResult(
 	defer m.stateLock.Unlock()
 	if info, ok := m.statsTasks[key]; ok {
 		info.JSONKeyStatsLogs = jsonKeyIndexLogs
-		info.SegID = segID
-		info.CollID = collID
-		info.PartID = partID
-		info.InsertChannel = channel
-	}
-}
-
-func (m *TaskManager) StoreNgramIndexResult(
-	clusterID string,
-	taskID typeutil.UniqueID,
-	collID typeutil.UniqueID,
-	partID typeutil.UniqueID,
-	segID typeutil.UniqueID,
-	channel string,
-	ngramIndexStats map[int64]*datapb.NgramIndexStats,
-) {
-	key := Key{ClusterID: clusterID, TaskID: taskID}
-	m.stateLock.Lock()
-	defer m.stateLock.Unlock()
-	if info, ok := m.statsTasks[key]; ok {
-		info.NgramIndexStatsLogs = ngramIndexStats
 		info.SegID = segID
 		info.CollID = collID
 		info.PartID = partID

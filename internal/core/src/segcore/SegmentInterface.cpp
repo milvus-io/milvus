@@ -537,10 +537,9 @@ SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
 }
 
 // Only sealed segment has ngram index
-index::NgramInvertedIndex*
+PinWrapper<index::NgramInvertedIndex*>
 SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
-    return nullptr;
+    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
-
 
 }  // namespace milvus::segcore

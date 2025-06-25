@@ -91,7 +91,6 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		IsSorted:         segment.GetIsSorted(),
 		TextStatsLogs:    segment.GetTextStatsLogs(),
 		JsonKeyStatsLogs: segment.GetJsonKeyStats(),
-		NgramStatsLogs:   segment.GetNgramIndexStats(),
 	}
 	return loadInfo
 }
