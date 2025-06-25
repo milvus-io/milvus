@@ -14,6 +14,7 @@ from chaos.checker import (InsertChecker,
                            PhraseMatchChecker,
                            JsonQueryChecker,
                            DeleteChecker,
+                           AddFieldChecker,
                            Op,
                            ResultAnalyzer
                            )
@@ -58,7 +59,7 @@ class TestOperations(TestBase):
     def connection(self, host, port, user, password, milvus_ns):
         if user and password:
             # log.info(f"connect to {host}:{port} with user {user} and password {password}")
-            connections.connect('default', host=host, port=port, user=user, password=password, secure=True)
+            connections.connect('default', host=host, port=port, user=user, password=password)
         else:
             connections.connect('default', host=host, port=port)
         if connections.has_connection("default") is False:
@@ -86,6 +87,7 @@ class TestOperations(TestBase):
             Op.phrase_match: PhraseMatchChecker(collection_name=c_name),
             Op.json_query: JsonQueryChecker(collection_name=c_name),
             Op.delete: DeleteChecker(collection_name=c_name),
+            Op.add_field: AddFieldChecker(collection_name=c_name),
         }
         log.info(f"init_health_checkers: {checkers}")
         self.health_checkers = checkers

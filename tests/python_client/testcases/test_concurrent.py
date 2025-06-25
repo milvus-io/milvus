@@ -50,7 +50,7 @@ class TestOperations(TestBase):
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, user, password, milvus_ns):
         if user and password:
-            connections.connect('default', host=host, port=port, user=user, password=password, secure=True)
+            connections.connect('default', host=host, port=port, user=user, password=password)
         else:
             connections.connect('default', host=host, port=port)
         if connections.has_connection("default") is False:

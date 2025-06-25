@@ -106,6 +106,7 @@ message LoadTextIndexInfo {
   int64 collectionID = 6;
   int64 partitionID = 7;
   common.LoadPriority load_priority = 8;
+  bool enable_mmap = 9;
 }
 
 message LoadJsonKeyIndexInfo {
@@ -117,6 +118,7 @@ message LoadJsonKeyIndexInfo {
   int64 collectionID = 6;
   int64 partitionID = 7;
   common.LoadPriority load_priority = 8;
+  bool enable_mmap = 9;
 }
 
 message LoadNgramIndexInfo {

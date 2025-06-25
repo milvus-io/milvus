@@ -35,6 +35,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/SystemProperty.h"
@@ -171,8 +172,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         JsonIndex index;
         index.nested_path = path;
         index.field_id = field_id;
-        index.index = std::move(const_cast<LoadIndexInfo&>(info).index);
-        index.cast_type = index.index->GetCastType();
+        index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        index.cast_type = JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
         json_indices.push_back(std::move(index));
         return;
     }
@@ -1210,7 +1211,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     }
 
     // create index reader.
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetSealed);
     // release index writer.
     index->Finish();
 

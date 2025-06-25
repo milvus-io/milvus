@@ -354,6 +354,7 @@ proxy:
     hstsMaxAge: 31536000 # Strict-Transport-Security max-age in seconds
     hstsIncludeSubDomains: false # Include subdomains in Strict-Transport-Security
     enableHSTS: false # Whether to enable setting the Strict-Transport-Security header
+    enableWebUI: true # Whether to enable setting the WebUI middleware on the metrics port
   ip:  # TCP/IP address of proxy. If not specified, use the first unicastable address
   port: 19530 # TCP port of proxy
   internalPort: 19529
@@ -1210,13 +1211,16 @@ streaming:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
     triggerInterval: 1m
-    # The initial interval of balance task trigger backoff, 50 ms by default.
+    # The initial interval of balance task trigger backoff, 10 ms by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
-    backoffInitialInterval: 50ms
+    backoffInitialInterval: 10ms
     backoffMultiplier: 2 # The multiplier of balance task trigger backoff, 2 by default
-    # The timeout of wal balancer operation, 10s by default.
+    # The max interval of balance task trigger backoff, 5s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    backoffMaxInterval: 5s
+    # The timeout of wal balancer operation, 30s by default.
     # If the operation exceeds this timeout, it will be canceled.
-    operationTimeout: 10s
+    operationTimeout: 30s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       vchannelFair:

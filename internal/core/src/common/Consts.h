@@ -104,3 +104,5 @@ const int64_t STORAGE_V1 = 1;
 const int64_t STORAGE_V2 = 2;
 
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
+
+const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;

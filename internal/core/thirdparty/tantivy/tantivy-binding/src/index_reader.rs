@@ -31,10 +31,18 @@ pub(crate) struct IndexReaderWrapper {
 }
 
 impl IndexReaderWrapper {
-    pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+    pub fn load(
+        path: &str,
+        load_in_mmap: bool,
+        set_bitset: SetBitsetFn,
+    ) -> Result<IndexReaderWrapper> {
         init_log();
 
-        let index = Index::open_in_dir(path)?;
+        let index = if load_in_mmap {
+            Index::open_in_dir(path)?
+        } else {
+            Index::open_in_dir_in_ram(path)?
+        };
 
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }

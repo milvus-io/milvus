@@ -5191,7 +5191,8 @@ type dataNodeConfig struct {
 	// index services config
 	BuildParallel ParamItem `refreshable:"false"`
 
-	WorkerSlotUnit ParamItem `refreshable:"true"`
+	WorkerSlotUnit      ParamItem `refreshable:"true"`
+	StandaloneSlotRatio ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -5618,6 +5619,14 @@ if this parameter <= 0, will set it as 10`,
 		Doc:          "Indicates how many slots each worker occupies per 2c8g",
 	}
 	p.WorkerSlotUnit.Init(base.mgr)
+
+	p.StandaloneSlotRatio = ParamItem{
+		Key:          "dataNode.standaloneSlotFactor",
+		Version:      "2.5.14",
+		DefaultValue: "0.25",
+		Doc:          "Offline task slot ratio in standalone mode",
+	}
+	p.StandaloneSlotRatio.Init(base.mgr)
 }
 
 type streamingConfig struct {
@@ -5625,6 +5634,7 @@ type streamingConfig struct {
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
+	WALBalancerBackoffMaxInterval     ParamItem `refreshable:"true"`
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
 
 	// balancer Policy
@@ -5678,9 +5688,9 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerBackoffInitialInterval = ParamItem{
 		Key:     "streaming.walBalancer.backoffInitialInterval",
 		Version: "2.6.0",
-		Doc: `The initial interval of balance task trigger backoff, 50 ms by default.
+		Doc: `The initial interval of balance task trigger backoff, 10 ms by default.
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
-		DefaultValue: "50ms",
+		DefaultValue: "10ms",
 		Export:       true,
 	}
 	p.WALBalancerBackoffInitialInterval.Init(base.mgr)
@@ -5692,12 +5702,21 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+	p.WALBalancerBackoffMaxInterval = ParamItem{
+		Key:     "streaming.walBalancer.backoffMaxInterval",
+		Version: "2.6.0",
+		Doc: `The max interval of balance task trigger backoff, 5s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
+		DefaultValue: "5s",
+		Export:       true,
+	}
+	p.WALBalancerBackoffMaxInterval.Init(base.mgr)
 	p.WALBalancerOperationTimeout = ParamItem{
 		Key:     "streaming.walBalancer.operationTimeout",
 		Version: "2.6.0",
-		Doc: `The timeout of wal balancer operation, 10s by default.
+		Doc: `The timeout of wal balancer operation, 30s by default.
 If the operation exceeds this timeout, it will be canceled.`,
-		DefaultValue: "10s",
+		DefaultValue: "30s",
 		Export:       true,
 	}
 	p.WALBalancerOperationTimeout.Init(base.mgr)

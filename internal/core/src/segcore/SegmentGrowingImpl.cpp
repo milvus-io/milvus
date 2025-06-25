@@ -1133,7 +1133,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
         "milvus_tokenizer",
         field_meta.get_analyzer_params().c_str());
     index->Commit();
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
     text_indexes_[field_id] = std::move(index);
@@ -1198,7 +1198,7 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
         JSON_KEY_STATS_COMMIT_INTERVAL, unique_id.c_str());
 
     index->Commit();
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
 
     json_indexes_[field_id] = std::move(index);
 }
@@ -1255,7 +1255,8 @@ SegmentGrowingImpl::FinishLoad() {
         }
         // append_data is called according to schema before
         // so we must check data empty here
-        if (!IsVectorDataType(field_meta.get_data_type()) &&insert_record_.get_data_base(field_id)->empty()) {
+        if (!IsVectorDataType(field_meta.get_data_type()) &&
+            insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
         }
     }

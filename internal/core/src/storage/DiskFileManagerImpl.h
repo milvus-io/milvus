@@ -126,6 +126,18 @@ class DiskFileManagerImpl : public FileManagerImpl {
                           milvus::proto::common::LoadPriority priority);
 
     void
+    RemoveIndexFiles();
+
+    void
+    RemoveTextLogFiles();
+
+    void
+    RemoveJsonKeyIndexFiles();
+
+    void
+    RemoveNgramIndexFiles();
+
+    void
     AddBatchIndexFiles(const std::string& local_file_name,
                        const std::vector<int64_t>& local_file_offsets,
                        const std::vector<std::string>& remote_files,

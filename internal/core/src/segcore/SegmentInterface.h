@@ -138,7 +138,7 @@ class SegmentInterface {
     virtual index::TextMatchIndex*
     GetTextIndex(FieldId field_id) const = 0;
 
-    virtual index::IndexBase*
+    virtual PinWrapper<index::IndexBase*>
     GetJsonIndex(FieldId field_id, std::string path) const {
         return nullptr;
     }

@@ -118,9 +118,8 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	logs := make(map[int64]*datapb.FieldBinlog)
 	paths := make([]string, 0)
-	for columnGroup := range columnGroups {
-		columnGroupID := typeutil.UniqueID(columnGroup)
-		path := metautil.BuildInsertLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroupID, bw.nextID())
+	for _, columnGroup := range columnGroups {
+		path := metautil.BuildInsertLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
 		paths = append(paths, path)
 	}
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
@@ -146,15 +145,15 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err = w.Write(rec); err != nil {
 		return nil, err
 	}
-	for columnGroup := range columnGroups {
-		columnGroupID := typeutil.UniqueID(columnGroup)
+	for _, columnGroup := range columnGroups {
+		columnGroupID := columnGroup.GroupID
 		logs[columnGroupID] = &datapb.FieldBinlog{
 			FieldID: columnGroupID,
 			Binlogs: []*datapb.Binlog{
 				{
-					LogSize:       int64(w.GetColumnGroupWrittenUncompressed(columnGroup)),
-					MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup)),
-					LogPath:       w.GetWrittenPaths()[columnGroupID],
+					LogSize:       int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+					MemorySize:    int64(w.GetColumnGroupWrittenUncompressed(columnGroup.GroupID)),
+					LogPath:       w.GetWrittenPaths(columnGroupID),
 					EntriesNum:    w.GetWrittenRowNum(),
 					TimestampFrom: tsFrom,
 					TimestampTo:   tsTo,
@@ -171,7 +170,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 // split by row average size
 func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, splitThresHold int64) ([]storagecommon.ColumnGroup, error) {
 	groups := make([]storagecommon.ColumnGroup, 0)
-	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
+	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0), GroupID: storagecommon.DefaultShortColumnGroupID}
 	memorySizes := make(map[storage.FieldID]int64, len(insertData[0].Data))
 	rowNums := make(map[storage.FieldID]int64, len(insertData[0].Data))
 	for _, data := range insertData {
@@ -188,21 +187,21 @@ func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, sp
 	if len(uniqueRows) != 1 || uniqueRows[0] == 0 {
 		return nil, errors.New("row num is not equal for each field")
 	}
-	for i, field := range bw.metaCache.Schema().GetFields() {
+	for i, field := range bw.schema.GetFields() {
 		if _, ok := memorySizes[field.FieldID]; !ok {
 			return nil, fmt.Errorf("field %d not found in insert data", field.FieldID)
 		}
 		// Check if the field is a vector type
 		if storage.IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
 		} else if rowNums[field.FieldID] != 0 && memorySizes[field.FieldID]/rowNums[field.FieldID] >= splitThresHold {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
+			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
 		} else {
 			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
 		}
 	}
 	if len(shortColumnGroup.Columns) > 0 {
-		groups = append(groups, shortColumnGroup)
+		groups = append([]storagecommon.ColumnGroup{shortColumnGroup}, groups...)
 	}
 	return groups, nil
 }
@@ -219,15 +218,15 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema().GetFields()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, bw.schema.GetFields()); err != nil {
 			return nil, err
 		}
 	}
 
 	rec := builder.NewRecord()
-	field2Col := make(map[storage.FieldID]int, len(bw.metaCache.Schema().GetFields()))
+	field2Col := make(map[storage.FieldID]int, len(bw.schema.GetFields()))
 
-	for c, field := range bw.metaCache.Schema().GetFields() {
+	for c, field := range bw.schema.GetFields() {
 		field2Col[field.FieldID] = c
 	}
 	return storage.NewSimpleArrowRecord(rec, field2Col), nil

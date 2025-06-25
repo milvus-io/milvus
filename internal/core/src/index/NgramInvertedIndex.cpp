@@ -91,8 +91,10 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                                               config[milvus::LOAD_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),
-                                                     milvus::index::SetBitset);
+    auto load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
     LOG_INFO(
         "load ngram index done for field id:{} with dir:{}", field_id_, path_);
 }

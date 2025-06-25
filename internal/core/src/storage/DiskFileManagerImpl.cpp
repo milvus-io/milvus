@@ -55,12 +55,10 @@ DiskFileManagerImpl::DiskFileManagerImpl(
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
-    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
-    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
-    local_chunk_manager->RemoveDir(GetLocalNgramIndexPrefix());
+    RemoveIndexFiles();
+    RemoveTextLogFiles();
+    RemoveJsonKeyIndexFiles();
+    RemoveNgramIndexFiles();
 }
 
 bool
@@ -519,6 +517,34 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     return local_data_path;
 }
 
+void
+DiskFileManagerImpl::RemoveIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveTextLogFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveJsonKeyIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveNgramIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalNgramIndexPrefix());
+}
+
 template <DataType T>
 bool
 WriteOptFieldIvfDataImpl(
@@ -786,12 +812,13 @@ DiskFileManagerImpl::GetLocalTempJsonKeyIndexPrefix() {
 
 std::string
 DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
-    return GenJsonKeyIndexPathPrefix(rcm_,
-                                     index_meta_.build_id,
-                                     index_meta_.index_version,
-                                     field_meta_.segment_id,
-                                     field_meta_.field_id,
-                                     false);
+    return GenRemoteJsonKeyIndexPathPrefix(rcm_,
+                                           index_meta_.build_id,
+                                           index_meta_.index_version,
+                                           field_meta_.collection_id,
+                                           field_meta_.partition_id,
+                                           field_meta_.segment_id,
+                                           field_meta_.field_id);
 }
 
 std::string

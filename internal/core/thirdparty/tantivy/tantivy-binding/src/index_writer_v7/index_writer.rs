@@ -1,3 +1,4 @@
+use core::slice;
 use std::ffi::CStr;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use tantivy::schema::{
 };
 use tantivy::{doc, Index, IndexWriter, TantivyDocument};
 
+use crate::convert_to_rust_slice;
 use crate::data_type::TantivyDataType;
 
 use crate::error::{Result, TantivyBindingError};
@@ -214,8 +216,7 @@ impl IndexWriterWrapperImpl {
                 .to_str()
                 .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
 
-            let offsets =
-                unsafe { std::slice::from_raw_parts(json_offsets[i], json_offsets_len[i]) };
+            let offsets = unsafe { convert_to_rust_slice!(json_offsets[i], json_offsets_len[i]) };
 
             for offset in offsets {
                 batch.push(UserOperation::Add(doc!(

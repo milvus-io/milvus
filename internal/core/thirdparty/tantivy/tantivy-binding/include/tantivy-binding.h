@@ -120,7 +120,7 @@ RustResult tantivy_create_ngram_writer(const char *field_name,
                                        uintptr_t num_threads,
                                        uintptr_t overall_memory_budget_in_bytes);
 
-RustResult tantivy_load_index(const char *path, SetBitsetFn set_bitset);
+RustResult tantivy_load_index(const char *path, bool load_in_mmap, SetBitsetFn set_bitset);
 
 void tantivy_free_index_reader(void *ptr);
 
