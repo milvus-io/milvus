@@ -1060,14 +1060,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
     for (auto& remote_chunk_files : remote_files) {
         AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
-
-        // find second last of / to get group_id
-        std::string path = remote_chunk_files[0];
-        size_t last_slash = path.find_last_of("/");
-        size_t second_last_slash = path.find_last_of("/", last_slash - 1);
-        int64_t group_id = std::stol(path.substr(
-            second_last_slash + 1, last_slash - second_last_slash - 1));
-
+        int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
         column_group_files[group_id] = remote_chunk_files;
     }
 
@@ -1182,6 +1175,15 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
     }
 
     return field_datas;
+}
+
+int64_t
+ExtractGroupIdFromPath(const std::string& path) {
+    // find second last of / to get group_id
+    size_t last_slash = path.find_last_of("/");
+    size_t second_last_slash = path.find_last_of("/", last_slash - 1);
+    return std::stol(
+        path.substr(second_last_slash + 1, last_slash - second_last_slash - 1));
 }
 
 }  // namespace milvus::storage

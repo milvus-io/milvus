@@ -202,6 +202,9 @@ CollectFieldDataChannel(FieldDataChannelPtr& channel);
 FieldDataPtr
 MergeFieldData(std::vector<FieldDataPtr>& data_array);
 
+int64_t
+ExtractGroupIdFromPath(const std::string& path);
+
 template <typename T, typename = void>
 struct has_native_type : std::false_type {};
 template <typename T>
