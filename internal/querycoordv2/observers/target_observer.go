@@ -225,7 +225,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
 			case ReleasePartition:
+				ob.keylocks.Lock(req.CollectionID)
 				ob.targetMgr.RemovePartitionFromNextTarget(ctx, req.CollectionID, req.PartitionIDs...)
+				ob.keylocks.Unlock(req.CollectionID)
 				req.Notifier <- nil
 			}
 			log.Info("manually trigger update target done",
