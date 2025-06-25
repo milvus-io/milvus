@@ -39,6 +39,7 @@ type FileReader interface {
 	io.Closer
 	io.ReaderAt
 	io.Seeker
+	Size() (int64, error)
 }
 
 // ChunkObjectInfo is to store object info.

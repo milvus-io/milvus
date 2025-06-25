@@ -29,6 +29,7 @@
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
 #include "index/IndexFactory.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
 #include "index/Index.h"
@@ -629,12 +630,14 @@ class JsonFlatIndexExprTest : public ::testing::Test {
 
         json_index_->BuildWithFieldData({json_field});
         json_index_->finish();
-        json_index_->create_reader();
+        json_index_->create_reader(milvus::index::SetBitsetSealed);
 
         load_index_info.field_id = json_fid_.get();
         load_index_info.field_type = DataType::JSON;
-        load_index_info.index = std::move(json_index_);
-        load_index_info.index_params = {{JSON_PATH, json_index_path}};
+        load_index_info.index_params = {{JSON_PATH, json_index_path},
+                                        {JSON_CAST_TYPE, "JSON"}};
+        load_index_info.cache_index =
+            CreateTestCacheIndex("", std::move(json_index_));
         segment_->LoadIndex(load_index_info);
         auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                       .GetRemoteChunkManager();

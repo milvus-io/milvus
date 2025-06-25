@@ -60,6 +60,11 @@ type mockReader struct {
 	io.Closer
 	io.ReaderAt
 	io.Seeker
+	size int64
+}
+
+func (mr *mockReader) Size() (int64, error) {
+	return mr.size, nil
 }
 
 type SchedulerSuite struct {
@@ -197,12 +202,6 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 	s.NoError(err)
 
 	cm := mocks.NewChunkManager(s.T())
-	type mockReader struct {
-		io.Reader
-		io.Closer
-		io.ReaderAt
-		io.Seeker
-	}
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)

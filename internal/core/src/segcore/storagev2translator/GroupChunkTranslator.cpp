@@ -20,6 +20,7 @@
 #include "common/Types.h"
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/common/constants.h"
 #include "storage/ThreadPools.h"
 #include "segcore/memory_planner.h"
 
@@ -41,8 +42,9 @@ GroupChunkTranslator::GroupChunkTranslator(
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
     bool use_mmap,
-    std::vector<milvus_storage::RowGroupMetadataVector>& row_group_meta_list,
-    milvus_storage::FieldIDList field_id_list,
+    const std::vector<milvus_storage::RowGroupMetadataVector>&
+        row_group_meta_list,
+    int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
@@ -51,10 +53,9 @@ GroupChunkTranslator::GroupChunkTranslator(
       insert_files_(insert_files),
       use_mmap_(use_mmap),
       row_group_meta_list_(row_group_meta_list),
-      field_id_list_(field_id_list),
       load_priority_(load_priority),
       meta_(
-          field_id_list.size(),
+          num_fields,
           use_mmap ? milvus::cachinglayer::StorageType::DISK
                    : milvus::cachinglayer::StorageType::MEMORY,
           // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it
@@ -162,9 +163,9 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 nullptr,
                                 load_priority_);
     });
-    LOG_INFO("segment {} submits load fields {} task to thread pool",
+    LOG_INFO("segment {} submits load column group {} task to thread pool",
              segment_id_,
-             field_id_list_.ToString());
+             column_group_info_.field_id);
 
     std::shared_ptr<milvus::ArrowDataWrapper> r;
     int64_t cid_idx = 0;
@@ -193,8 +194,17 @@ GroupChunkTranslator::load_group_chunk(
     // Create chunks for each field in this batch
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     // Iterate through field_id_list to get field_id and create chunk
-    for (size_t i = 0; i < field_id_list_.size(); ++i) {
-        auto field_id = field_id_list_.Get(i);
+    for (int i = 0; i < table->schema()->num_fields(); ++i) {
+        AssertInfo(table->schema()->field(i)->metadata()->Contains(
+                       milvus_storage::ARROW_FIELD_ID_KEY),
+                   "field id not found in metadata for field {}",
+                   table->schema()->field(i)->name());
+        auto field_id = std::stoll(table->schema()
+                                       ->field(i)
+                                       ->metadata()
+                                       ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                       ->data());
+
         auto fid = milvus::FieldId(field_id);
         if (fid == RowFieldID) {
             // ignore row id field

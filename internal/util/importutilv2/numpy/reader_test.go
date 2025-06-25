@@ -42,6 +42,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+type mockReader struct {
+	io.Reader
+	io.Closer
+	io.ReaderAt
+	io.Seeker
+	size int64
+}
+
+func (mr *mockReader) Size() (int64, error) {
+	return mr.size, nil
+}
+
 type ReaderSuite struct {
 	suite.Suite
 
@@ -145,13 +157,6 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	}
 
 	cm := mocks.NewChunkManager(suite.T())
-	type mockReader struct {
-		io.Reader
-		io.Closer
-		io.ReaderAt
-		io.Seeker
-	}
-
 	var data interface{}
 	for fieldID, fieldData := range insertData.Data {
 		dataType := fieldIDToField[fieldID].GetDataType()
@@ -287,13 +292,6 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 	}
 
 	cm := mocks.NewChunkManager(suite.T())
-	type mockReader struct {
-		io.Reader
-		io.Closer
-		io.ReaderAt
-		io.Seeker
-	}
-
 	var data interface{}
 	for fieldID, fieldData := range insertData.Data {
 		dataType := fieldIDToField[fieldID].GetDataType()

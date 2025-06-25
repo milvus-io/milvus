@@ -949,30 +949,12 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
 
-        std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
-            futures;
-        futures.reserve(remote_files.size());
-        for (const auto& file : remote_files) {
-            auto future = pool.Submit([rcm, file]() {
-                auto fileSize = rcm->Size(file);
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-                rcm->Read(file, buf.get(), fileSize);
-                auto result =
-                    storage::DeserializeFileData(buf, fileSize, false);
-                result->SetData(buf);
-                return result->GetReader();
-            });
-            futures.emplace_back(std::move(future));
+        auto codec_futures = storage::GetObjectData(rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
+        for (auto& codec_future : codec_futures) {
+            auto reader = codec_future.get()->GetReader();
+            channel->push(reader);
         }
-
-        for (auto& future : futures) {
-            auto field_data = future.get();
-            channel->push(field_data);
-        }
-
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -987,27 +969,11 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
-
-        std::vector<std::future<FieldDataPtr>> futures;
-        futures.reserve(remote_files.size());
-        for (const auto& file : remote_files) {
-            auto future = pool.Submit([rcm, file]() {
-                auto fileSize = rcm->Size(file);
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-                rcm->Read(file, buf.get(), fileSize);
-                auto result = storage::DeserializeFileData(buf, fileSize);
-                return result->GetFieldData();
-            });
-            futures.emplace_back(std::move(future));
-        }
-
-        for (auto& future : futures) {
-            auto field_data = future.get();
+        auto codec_futures = storage::GetObjectData(rcm.get(), remote_files, milvus::PriorityForLoad(priority));
+        for (auto& codec_future : codec_futures) {
+            auto field_data = codec_future.get()->GetFieldData();
             channel->push(field_data);
         }
-
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());

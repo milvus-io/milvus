@@ -187,7 +187,7 @@ func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, sp
 	if len(uniqueRows) != 1 || uniqueRows[0] == 0 {
 		return nil, errors.New("row num is not equal for each field")
 	}
-	for i, field := range bw.metaCache.Schema().GetFields() {
+	for i, field := range bw.schema.GetFields() {
 		if _, ok := memorySizes[field.FieldID]; !ok {
 			return nil, fmt.Errorf("field %d not found in insert data", field.FieldID)
 		}
@@ -218,15 +218,15 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := storage.BuildRecord(builder, chunk, bw.metaCache.Schema()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, bw.schema); err != nil {
 			return nil, err
 		}
 	}
 
 	rec := builder.NewRecord()
-	field2Col := make(map[storage.FieldID]int, len(bw.metaCache.Schema().GetFields()))
+	field2Col := make(map[storage.FieldID]int, len(bw.schema.GetFields()))
 
-	for c, field := range bw.metaCache.Schema().GetFields() {
+	for c, field := range bw.schema.GetFields() {
 		field2Col[field.FieldID] = c
 	}
 	return storage.NewSimpleArrowRecord(rec, field2Col), nil

@@ -103,8 +103,6 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
     auto fr =
         std::make_shared<milvus_storage::FileRowGroupReader>(fs_, paths_[0]);
-    auto field_id_list =
-        fr->file_metadata()->GetGroupFieldIDList().GetFieldIDList(0);
 
     row_group_meta_list.push_back(
         fr->file_metadata()->GetRowGroupMetadataVector());
@@ -115,7 +113,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
                                     paths_,
                                     use_mmap,
                                     row_group_meta_list,
-                                    field_id_list,
+                                    schema_->get_field_ids().size(),
                                     milvus::proto::common::LoadPriority::LOW);
 
     // num cells
