@@ -581,10 +581,6 @@ func IsArrayType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_Array
 }
 
-func IsArrayVectorType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_ArrayOfVector
-}
-
 // IsFloatingType returns true if input is a floating type, otherwise false
 func IsFloatingType(dataType schemapb.DataType) bool {
 	switch dataType {
@@ -630,7 +626,7 @@ func IsArrayContainStringElementType(dataType schemapb.DataType, elementType sch
 }
 
 func IsVariableDataType(dataType schemapb.DataType) bool {
-	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType) || IsArrayVectorType(dataType)
+	return IsStringType(dataType) || IsArrayType(dataType) || IsJSONType(dataType) || IsVectorArrayType(dataType)
 }
 
 func IsPrimitiveType(dataType schemapb.DataType) bool {
