@@ -90,6 +90,8 @@ github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9 h1:eXnmJhsHt8m6NU3IJ19U
 github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=
 github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d h1:G0m3OIz70MZUWq3EgK3CesDbo8upS2Vm9/P3FtgI+Jk=
 github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d/go.mod h1:3eOhrUMpNV+6aFIbp5/iudMxNCF27Vw2OZgy4xEx0Fg=
+github.com/XTxxxx/milvus-proto/go-api/v2 v2.0.0-20250623104223-ee1fab7062c1 h1:+RAUCdU+43nRgAiCJXcFj5qQZtNbsu8UPPNlofV75K0=
+github.com/XTxxxx/milvus-proto/go-api/v2 v2.0.0-20250623104223-ee1fab7062c1/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/actgardner/gogen-avro/v10 v10.1.0/go.mod h1:o+ybmVjEa27AAr35FRqU98DJu1fXES56uXniYFv4yDA=
 github.com/actgardner/gogen-avro/v10 v10.2.1/go.mod h1:QUhjeHPchheYmMDni/Nx7VB0RsT/ee8YIgGY/xpEQgQ=
 github.com/actgardner/gogen-avro/v9 v9.1.0/go.mod h1:nyTj6wPqDJoxM3qdnjcLv+EnMDSDFqE0qDpva2QRmKc=
