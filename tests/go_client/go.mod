@@ -3,7 +3,7 @@ module github.com/milvus-io/milvus/tests/go_client
 go 1.24.2
 
 require (
-	github.com/milvus-io/milvus/client/v2 v2.0.0-20241125024034-0b9edb62a92d
+	github.com/milvus-io/milvus/client/v2 v2.5.4
 	github.com/milvus-io/milvus/pkg/v2 v2.5.7
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
@@ -13,7 +13,7 @@ require (
 	google.golang.org/grpc v1.65.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
+replace github.com/milvus-io/milvus/client/v2 => ../../client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -51,7 +51,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.13 // indirect
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.5.14 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
