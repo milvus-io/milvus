@@ -112,7 +112,9 @@ LocalChunkManager::Write(const std::string& absPathStr,
     boost::filesystem::path absPath(absPathStr);
     // if filepath not exists, will create this file automatically
     // ensure upper directory exist firstly
-    boost::filesystem::create_directories(absPath.parent_path());
+    if (!boost::filesystem::exists(absPath.parent_path())) {
+        boost::filesystem::create_directories(absPath.parent_path());
+    }
 
     std::ofstream outfile;
     outfile.open(absPathStr.data(), std::ios_base::binary);

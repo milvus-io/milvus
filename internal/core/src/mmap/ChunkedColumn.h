@@ -203,6 +203,15 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                   "BulkValueAt only supported for ChunkedColumn");
     }
 
+    void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) override {
+        PanicInfo(ErrorCode::Unsupported,
+                  "BulkVectorValueAt only supported for ChunkedColumn");
+    }
+
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViews(int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
@@ -318,6 +327,15 @@ class ChunkedColumn : public ChunkedColumnBase {
         }
     }
 
+    void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) override {
+        PanicInfo(ErrorCode::Unsupported,
+                  "BulkVectorValueAt is not supported for ChunkedColumn<T>");
+    }
+
     PinWrapper<SpanBase>
     Span(int64_t chunk_id) const override {
         auto ca = slot_->PinCells({chunk_id});
@@ -352,6 +370,21 @@ class ChunkedColumn<void> : public ChunkedColumnBase {
                 int64_t count) override {
         PanicInfo(ErrorCode::Unsupported,
                   "BulkValueAt is not supported for ChunkedColumn<void>");
+    }
+
+    void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) override {
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = slot_->PinCells(cids);
+        auto dst_vec = reinterpret_cast<char*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto chunk = ca->get_ith_cell(cids[i]);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
+        }
     }
 
     PinWrapper<SpanBase>

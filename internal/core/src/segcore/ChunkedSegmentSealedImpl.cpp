@@ -1042,6 +1042,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
         dst[i] = src[offset];
     }
 }
+
 template <typename S, typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
@@ -1113,12 +1114,10 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
                                               int64_t count,
                                               void* dst_raw) {
     auto dst_vec = reinterpret_cast<char*>(dst_raw);
-    field->BulkValueAt(
-        [&](const char* value, size_t i) {
-            auto dst = dst_vec + i * element_sizeof;
-            memcpy(dst, value, element_sizeof);
-        },
+    field->BulkVectorValueAt(
+        dst_vec,
         seg_offsets,
+        element_sizeof,
         count);
 }
 
