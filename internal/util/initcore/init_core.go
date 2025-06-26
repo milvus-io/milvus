@@ -239,6 +239,11 @@ func CleanGlogManager() {
 	C.SegcoreCloseGlog()
 }
 
+func ShutDownThreadPools() {
+	C.ShutDownThreadPools()
+	log.Info("ShutDownThreadPools")
+}
+
 // HandleCStatus deals with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if status.error_code == 0 {

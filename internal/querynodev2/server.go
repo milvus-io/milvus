@@ -198,10 +198,20 @@ func ResizeHighPriorityPool(evt *config.Event) {
 	}
 }
 
+func ResizeChunkCachePool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newRatio := pt.CommonCfg.ChunkCacheThreadCoreCoefficient.GetAsFloat()
+		C.ResizeTheadPool(C.int64_t(3), C.float(newRatio))
+	}
+}
+
 func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
+	pt.Watch(pt.CommonCfg.ChunkCacheThreadCoreCoefficient.Key,
+		config.NewHandler("common.threadCoreCoefficient.chunkCache", ResizeChunkCachePool))
 }
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
@@ -238,6 +248,8 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	cChunkCacheThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.ChunkCacheThreadCoreCoefficient.GetAsFloat())
+	C.InitChunkCacheThreadCoreCoefficient(cChunkCacheThreadCoreCoefficient)
 	node.RegisterSegcoreConfigWatcher()
 
 	cCPUNum := C.int(hardware.GetCPUNum())

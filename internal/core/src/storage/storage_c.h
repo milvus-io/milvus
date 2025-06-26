@@ -39,6 +39,9 @@ CleanRemoteChunkManagerSingleton();
 void
 ResizeTheadPool(int64_t priority, float ratio);
 
+void
+ShutDownThreadPools();
+
 #ifdef __cplusplus
 };
 #endif

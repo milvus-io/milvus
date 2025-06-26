@@ -54,6 +54,7 @@
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/MmapManager.h"
+#include <future>
 
 namespace milvus::segcore {
 
@@ -997,7 +998,8 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     std::vector<std::future<
         std::tuple<std::string, std::shared_ptr<ChunkedColumnBase>>>>
         futures;
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+    auto& pool =
+        ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::CHUNKCACHE);
     for (const auto& iter : path_to_column) {
         const auto& data_path = iter.first;
         auto column = std::dynamic_pointer_cast<ChunkedColumnBase>(
@@ -1763,7 +1765,6 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
                                      .count();
         monitor::internal_core_get_vector_latency.Observe(get_vector_cost /
                                                           1000);
-
         return vector;
     }
 }

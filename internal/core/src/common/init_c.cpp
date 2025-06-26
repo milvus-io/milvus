@@ -58,6 +58,14 @@ InitLowPriorityThreadCoreCoefficient(const float value) {
 }
 
 void
+InitChunkCacheThreadCoreCoefficient(const float value) {
+    std::call_once(
+        flag7,
+        [](float value) { milvus::SetChunkCacheThreadCoreCoefficient(value); },
+        value);
+}
+
+void
 InitCpuNum(const int value) {
     std::call_once(
         flag3, [](int value) { milvus::SetCpuNum(value); }, value);
