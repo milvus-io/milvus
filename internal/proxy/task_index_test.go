@@ -1167,7 +1167,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: NgramIndexName},
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
 					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"2\", \"MAX_GRAM\": \"3\"}"},
 				},
 			},
@@ -1178,7 +1178,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 		err := cit.parseIndexParams(context.TODO())
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
-			{Key: common.IndexTypeKey, Value: NgramIndexName},
+			{Key: common.IndexTypeKey, Value: "NGRAM"},
 			{Key: indexparamcheck.MinGramKey, Value: "2"},
 			{Key: indexparamcheck.MaxGramKey, Value: "3"},
 		}, cit.newIndexParams)
@@ -1189,7 +1189,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: NgramIndexName},
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
 					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"2\", \"MAX_GRAM\": \"3\"}"},
 				},
 			},
@@ -1205,7 +1205,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: NgramIndexName},
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
 					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"2\"}"},
 				},
 			},
@@ -1221,7 +1221,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: NgramIndexName},
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
 					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"a\", \"MAX_GRAM\": \"3\"}"},
 				},
 			},
@@ -1237,7 +1237,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
-					{Key: common.IndexTypeKey, Value: NgramIndexName},
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
 					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"5\", \"MAX_GRAM\": \"3\"}"},
 				},
 			},
