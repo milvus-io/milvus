@@ -404,18 +404,6 @@ func (replica *mutableReplica) DisableChannelExclusiveMode() {
 	replica.exclusiveRWNodeToChannel = make(map[int64]string)
 }
 
-// balanceConfig holds the configuration for channel balancing
-type balanceConfig struct {
-	EnableChannelExclusiveMode bool
-	channelExclusiveFactor     int
-}
-
-// channelNodeAssignment represents a channel's node assignment
-type channelNodeAssignment struct {
-	name  string
-	nodes []int64
-}
-
 // tryBalanceNodeForChannel attempts to balance nodes across channels using an improved algorithm
 func (replica *mutableReplica) tryBalanceNodeForChannel() {
 	channelNodeInfos := replica.replicaPB.GetChannelNodeInfos()
@@ -436,20 +424,12 @@ func (replica *mutableReplica) tryBalanceNodeForChannel() {
 	replica.rebalanceChannelNodes(channelNodeInfos, targetAssignments)
 }
 
-// getBalanceConfig retrieves and caches balance configuration
-func (replica *mutableReplica) getBalanceConfig() balanceConfig {
-	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
-	return balanceConfig{
-		EnableChannelExclusiveMode: balancePolicy == ChannelLevelScoreBalancerName,
-		channelExclusiveFactor:     paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.GetAsInt(),
-	}
-}
-
 // shouldEnableChannelExclusiveMode determines if channel exclusive mode should be enabled
 func (replica *mutableReplica) shouldEnableChannelExclusiveMode(channelInfos map[string]*querypb.ChannelNodeInfo) bool {
-	config := replica.getBalanceConfig()
-	return config.EnableChannelExclusiveMode &&
-		replica.RWNodesCount() >= len(channelInfos)*config.channelExclusiveFactor
+	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
+	channelExclusiveFactor := paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.GetAsInt()
+	return balancePolicy == ChannelLevelScoreBalancerName &&
+		replica.RWNodesCount() >= len(channelInfos)*channelExclusiveFactor
 }
 
 // calculateOptimalAssignments calculates the optimal node count for each channel
@@ -478,6 +458,12 @@ func (replica *mutableReplica) calculateOptimalAssignments(channelInfos map[stri
 
 // getSortedChannelsByNodeCount returns channels sorted by current node count (descending)
 func (replica *mutableReplica) getSortedChannelsByNodeCount(channelInfos map[string]*querypb.ChannelNodeInfo) []string {
+	// channelNodeAssignment represents a channel's node assignment
+	type channelNodeAssignment struct {
+		name  string
+		nodes []int64
+	}
+
 	assignments := make([]channelNodeAssignment, 0, len(channelInfos))
 	for name, channelNodeInfo := range channelInfos {
 		assignments = append(assignments, channelNodeAssignment{

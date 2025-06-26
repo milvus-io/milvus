@@ -509,34 +509,6 @@ func (suite *ReplicaSuite) TestTryBalanceNodeForChannelWithExtraNodes() {
 	suite.Equal(7, sum)
 }
 
-// TestGetBalanceConfig tests the configuration retrieval function
-func (suite *ReplicaSuite) TestGetBalanceConfig() {
-	r := newReplica(&querypb.Replica{
-		ID:            1,
-		CollectionID:  2,
-		ResourceGroup: DefaultResourceGroupName,
-	})
-	mutableReplica := r.CopyForWrite()
-
-	// Test with ChannelLevelScoreBalancer enabled
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "3")
-	defer func() {
-		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
-		paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key)
-	}()
-
-	config := mutableReplica.getBalanceConfig()
-	suite.True(config.EnableChannelExclusiveMode)
-	suite.Equal(3, config.channelExclusiveFactor)
-
-	// Test with different balancer
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, RoundRobinBalancerName)
-	config = mutableReplica.getBalanceConfig()
-	suite.False(config.EnableChannelExclusiveMode)
-	suite.Equal(3, config.channelExclusiveFactor)
-}
-
 // TestShouldEnableChannelExclusiveMode tests the condition checking function
 func (suite *ReplicaSuite) TestShouldEnableChannelExclusiveMode() {
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
