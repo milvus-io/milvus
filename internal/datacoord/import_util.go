@@ -297,7 +297,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	})
 
 	// Pre-allocate IDs for autoIDs and logIDs.
-	preAllocIDNum := (totalRows + 1) * paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
+	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
+	binlogNum := fieldsNum + 2                        // binlogs + statslog + BM25Statslog
+	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
+	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
 
 	idBegin, idEnd, err := alloc.AllocN(preAllocIDNum)
 	if err != nil {
@@ -306,6 +309,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 
 	log.Info("pre-allocate ids and ts for import task", WrapTaskLog(task,
 		zap.Int64("totalRows", totalRows),
+		zap.Int("fieldsNum", fieldsNum),
 		zap.Int64("idBegin", idBegin),
 		zap.Int64("idEnd", idEnd),
 		zap.Uint64("ts", ts))...,
