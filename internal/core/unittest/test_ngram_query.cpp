@@ -302,14 +302,16 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
             .index_params = index_params,
             .index_files = index_files,
             .schema = field_meta.field_schema,
-            .index_size = 1024 * 1024 * 1024,  // 1G index size
+            .index_size = 1024 * 1024 * 1024,
         };
 
-        uint8_t trace_id = 1;
-        uint8_t span_id = 2;
+        uint8_t trace_id[16] = {0};
+        uint8_t span_id[8] = {0};
+        trace_id[0] = 1;
+        span_id[0] = 2;
         CTraceContext trace{
-            .traceID = &trace_id,
-            .spanID = &span_id,
+            .traceID = trace_id,
+            .spanID = span_id,
             .traceFlags = 0,
         };
         auto cload_index_info = static_cast<CLoadIndexInfo>(&load_index_info);

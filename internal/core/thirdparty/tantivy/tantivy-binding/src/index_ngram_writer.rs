@@ -113,4 +113,45 @@ mod tests {
             .unwrap();
         assert_eq!(res, vec![2, 4, 5]);
     }
+
+    #[test]
+    fn test_ngram_writer_chinese() {
+        let dir = TempDir::new().unwrap();
+        let mut writer = IndexWriterWrapper::create_ngram_writer(
+            "test",
+            dir.path().to_str().unwrap(),
+            2,
+            3,
+            1,
+            15000000,
+        )
+        .unwrap();
+
+        writer.add("ngram测试", Some(0)).unwrap();
+        writer.add("测试ngram", Some(1)).unwrap();
+        writer.add("测试ngram测试", Some(2)).unwrap();
+        writer.add("你好世界", Some(3)).unwrap();
+        writer.add("ngram需要被测试", Some(4)).unwrap();
+
+        writer.commit().unwrap();
+
+        let reader = writer.create_reader(set_bitset).unwrap();
+        let mut res: Vec<u32> = vec![];
+        reader
+            .inner_match_ngram("测试", 2, 3, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0, 1, 2, 4]);
+
+        let mut res: Vec<u32> = vec![];
+        reader
+            .inner_match_ngram("m测试", 2, 3, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0, 2]);
+
+        let mut res: Vec<u32> = vec![];
+        reader
+            .inner_match_ngram("需要被测试", 2, 3, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![4]);
+    }
 }

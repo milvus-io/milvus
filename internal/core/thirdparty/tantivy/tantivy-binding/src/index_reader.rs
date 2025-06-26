@@ -309,13 +309,13 @@ impl IndexReaderWrapper {
     ) -> Result<()> {
         // literal length should be larger or equal to min_gram.
         assert!(
-            literal.len() >= min_gram,
+            literal.chars().count() >= min_gram,
             "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
             literal,
             min_gram
         );
 
-        if literal.len() <= max_gram {
+        if literal.chars().count() <= max_gram {
             return self.term_query_keyword(literal, bitset);
         }
 
