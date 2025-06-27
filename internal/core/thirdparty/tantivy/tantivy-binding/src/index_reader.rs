@@ -1,9 +1,10 @@
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
 use std::ops::Bound;
 use std::sync::Arc;
 
+use libc::c_char;
 use tantivy::fastfield::FastValue;
-use tantivy::query::{ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery};
+use tantivy::query::{BooleanQuery, ExistsQuery, Occur, Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
@@ -16,6 +17,23 @@ use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
+
+macro_rules! terms_query {
+    ($field:expr, $terms:expr, $builder:expr $(,)?) => {{
+        let term_queries: Vec<(Occur, Box<dyn Query>)> = ($terms)
+            .into_iter()
+            .map(|t| {
+                let term_query: Box<dyn Query> = Box::new(TermQuery::new(
+                    $builder($field, *t),
+                    IndexRecordOption::Basic,
+                ));
+                (Occur::Should, term_query)
+            })
+            .collect();
+
+        BooleanQuery::new(term_queries)
+    }};
+}
 
 #[allow(dead_code)]
 pub(crate) struct IndexReaderWrapper {
@@ -142,12 +160,47 @@ impl IndexReaderWrapper {
             .map_err(TantivyBindingError::TantivyError)
     }
 
-    pub fn term_query_i64(&self, term: i64, bitset: *mut c_void) -> Result<()> {
+    pub fn terms_query_bool(&self, terms: &[bool], bitset: *mut c_void) -> Result<()> {
+        let q = terms_query!(self.field, terms, |field, val| Term::from_field_bool(
+            field, val
+        ));
+        self.search(&q, bitset)
+    }
+
+    pub fn terms_query_i64(&self, terms: &[i64], bitset: *mut c_void) -> Result<()> {
+        let q = terms_query!(self.field, terms, |field, val| Term::from_field_i64(
+            field, val
+        ));
+        self.search(&q, bitset)
+    }
+
+    pub fn terms_query_f64(&self, terms: &[f64], bitset: *mut c_void) -> Result<()> {
+        let q = terms_query!(self.field, terms, |field, val| Term::from_field_f64(
+            field, val
+        ));
+        self.search(&q, bitset)
+    }
+
+    pub fn terms_query_keyword(&self, terms: &[*const c_char], bitset: *mut c_void) -> Result<()> {
+        let mut term_quries = Vec::with_capacity(terms.len());
+        for term in terms {
+            let term_str = unsafe { CStr::from_ptr(*term) }.to_str()?;
+            let term_query: Box<dyn Query> = Box::new(TermQuery::new(
+                Term::from_field_text(self.field, term_str),
+                IndexRecordOption::Basic,
+            ));
+            term_quries.push((Occur::Should, term_query));
+        }
+        let q = BooleanQuery::new(term_quries);
+        self.search(&q, bitset)
+    }
+
+    pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
         let q = TermQuery::new(
-            Term::from_field_i64(self.field, term),
+            Term::from_field_text(self.field, term),
             IndexRecordOption::Basic,
         );
-        self.search(&q, bitset)
+        self.search_i64(&q)
     }
 
     pub fn lower_bound_range_query_i64(
@@ -211,14 +264,6 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
-    pub fn term_query_f64(&self, term: f64, bitset: *mut c_void) -> Result<()> {
-        let q: TermQuery = TermQuery::new(
-            Term::from_field_f64(self.field, term),
-            IndexRecordOption::Basic,
-        );
-        self.search(&q, bitset)
-    }
-
     pub fn range_query_bool(
         &self,
         lower_bound: bool,
@@ -271,30 +316,6 @@ impl IndexReaderWrapper {
         let ub = make_bounds(Term::from_field_f64(self.field, upper_bound), ub_inclusive);
         let q = RangeQuery::new(lb, ub);
         self.search(&q, bitset)
-    }
-
-    pub fn term_query_bool(&self, term: bool, bitset: *mut c_void) -> Result<()> {
-        let q = TermQuery::new(
-            Term::from_field_bool(self.field, term),
-            IndexRecordOption::Basic,
-        );
-        self.search(&q, bitset)
-    }
-
-    pub fn term_query_keyword(&self, term: &str, bitset: *mut c_void) -> Result<()> {
-        let q = TermQuery::new(
-            Term::from_field_text(self.field, term),
-            IndexRecordOption::Basic,
-        );
-        self.search(&q, bitset)
-    }
-
-    pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
-        let q = TermQuery::new(
-            Term::from_field_text(self.field, term),
-            IndexRecordOption::Basic,
-        );
-        self.search_i64(&q)
     }
 
     pub fn lower_bound_range_query_keyword(

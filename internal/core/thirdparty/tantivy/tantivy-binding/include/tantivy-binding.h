@@ -121,7 +121,18 @@ RustResult tantivy_reload_index(void *ptr);
 
 RustResult tantivy_index_count(void *ptr);
 
-RustResult tantivy_term_query_i64(void *ptr, int64_t term, void *bitset);
+RustResult tantivy_terms_query_bool(void *ptr, const bool *terms, uintptr_t len, void *bitset);
+
+RustResult tantivy_terms_query_i64(void *ptr, const int64_t *terms, uintptr_t len, void *bitset);
+
+RustResult tantivy_terms_query_f64(void *ptr, const double *terms, uintptr_t len, void *bitset);
+
+RustResult tantivy_terms_query_keyword(void *ptr,
+                                       const char *const *terms,
+                                       uintptr_t len,
+                                       void *bitset);
+
+RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
 
 RustResult tantivy_lower_bound_range_query_i64(void *ptr,
                                                int64_t lower_bound,
@@ -157,8 +168,6 @@ RustResult tantivy_range_query_bool(void *ptr,
                                     bool ub_inclusive,
                                     void *bitset);
 
-RustResult tantivy_term_query_f64(void *ptr, double term, void *bitset);
-
 RustResult tantivy_lower_bound_range_query_f64(void *ptr,
                                                double lower_bound,
                                                bool inclusive,
@@ -175,12 +184,6 @@ RustResult tantivy_range_query_f64(void *ptr,
                                    bool lb_inclusive,
                                    bool ub_inclusive,
                                    void *bitset);
-
-RustResult tantivy_term_query_bool(void *ptr, bool term, void *bitset);
-
-RustResult tantivy_term_query_keyword(void *ptr, const char *term, void *bitset);
-
-RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
 
 RustResult tantivy_lower_bound_range_query_keyword(void *ptr,
                                                    const char *lower_bound,
