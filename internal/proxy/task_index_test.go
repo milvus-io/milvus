@@ -1168,7 +1168,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"2\", \"MAX_GRAM\": \"3\"}"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1190,7 +1190,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"2\", \"MAX_GRAM\": \"3\"}"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1206,7 +1206,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"2\"}"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1222,7 +1222,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"a\", \"MAX_GRAM\": \"3\"}"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"a\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1238,7 +1238,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"MIN_GRAM\": \"5\", \"MAX_GRAM\": \"3\"}"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"5\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
