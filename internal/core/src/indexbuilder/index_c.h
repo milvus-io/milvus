@@ -39,14 +39,12 @@ BuildTextIndex(ProtoLayoutInterface c_binary_set,
                const uint8_t* serialized_build_index_info,
                const uint64_t len);
 
-// ----------- Test Only Start ---------------------
 CStatus
 CleanLocalData(CIndex index);
 
 CStatus
 SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result);
 
-// =========== Followings are used only in test ==========
 CStatus
 CreateIndexV0(enum CDataType dtype,
               const char* serialized_type_params,
@@ -87,8 +85,6 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set);
 
 CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
-
-// ----------------- Test Only End ---------------------
 
 #ifdef __cplusplus
 };
