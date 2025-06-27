@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   publish-gpu-builder:
-    runs-on: amazon-linux-2
+    runs-on: self-hosted
     timeout-minutes: 500
     env:
       OS: ubuntu22.04
