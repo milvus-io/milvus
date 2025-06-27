@@ -905,7 +905,12 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                 vals.emplace_back(converted_val);
             }
         }
-        arg_set_ = std::make_shared<SortVectorElement<T>>(vals);
+        if constexpr (std::is_same_v<T, std::string> ||
+                      std::is_same_v<T, std::string_view>) {
+            arg_set_ = std::make_shared<SetElement<T>>(vals);
+        } else {
+            arg_set_ = std::make_shared<SortVectorElement<T>>(vals);
+        }
         arg_inited_ = true;
     }
 
