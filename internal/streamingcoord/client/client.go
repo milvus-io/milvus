@@ -42,9 +42,6 @@ type BroadcastService interface {
 
 	// Ack sends a broadcast ack to the streaming service.
 	Ack(ctx context.Context, req types.BroadcastAckRequest) error
-
-	// Close closes the broadcast service.
-	Close()
 }
 
 // Client is the interface of log service client.
