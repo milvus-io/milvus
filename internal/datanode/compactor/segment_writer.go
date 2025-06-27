@@ -91,12 +91,6 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 	schema *schemapb.CollectionSchema, params compaction.Params,
 	maxRows int64, partitionID, collectionID int64, channel string, batchSize int, rwOption ...storage.RwOption,
 ) (*MultiSegmentWriter, error) {
-	storageVersion := storage.StorageV1
-
-	if params.EnableStorageV2 {
-		storageVersion = storage.StorageV2
-	}
-
 	rwOpts := rwOption
 	if len(rwOption) == 0 {
 		rwOpts = make([]storage.RwOption, 0)
@@ -114,7 +108,7 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 		batchSize:      batchSize,
 		binLogMaxSize:  params.BinLogMaxSize,
 		res:            make([]*datapb.CompactionSegment, 0),
-		storageVersion: storageVersion,
+		storageVersion: params.StorageVersion,
 		params:         params,
 		rwOption:       rwOpts,
 	}, nil

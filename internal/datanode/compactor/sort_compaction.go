@@ -126,10 +126,7 @@ func (t *sortCompactionTask) preCompact() error {
 	}
 
 	t.insertLogs = segment.GetFieldBinlogs()
-	t.storageVersion = storage.StorageV1
-	if t.compactionParams.EnableStorageV2 {
-		t.storageVersion = storage.StorageV2
-	}
+	t.storageVersion = t.compactionParams.StorageVersion
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
