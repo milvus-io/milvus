@@ -709,7 +709,9 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [&](ChunkManager* chunk_manager, const std::string& file, bool is_field_data) {
+    auto DownloadAndDeserialize = [&](ChunkManager* chunk_manager,
+                                      const std::string& file,
+                                      bool is_field_data) {
         // TODO remove this Size() cost
         auto fileSize = chunk_manager->Size(file);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
@@ -724,7 +726,6 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     }
     return futures;
 }
-
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
@@ -1098,6 +1099,11 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         auto field_schema =
             reader->schema()->field(column_offset.col_index)->Copy();
         auto arrow_schema = arrow::schema({field_schema});
+        auto status = reader->Close();
+        AssertInfo(
+            status.ok(),
+            "failed to close file reader when get arrow schema from file: " +
+                column_group_file + " with error: " + status.ToString());
 
         // split row groups for parallel reading
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
@@ -1178,6 +1184,30 @@ ExtractGroupIdFromPath(const std::string& path) {
     size_t second_last_slash = path.find_last_of("/", last_slash - 1);
     return std::stol(
         path.substr(second_last_slash + 1, last_slash - second_last_slash - 1));
+}
+
+// if it is multi-field column group, read field id list from file metadata
+// if it is single-field column group, return the column group id
+milvus_storage::FieldIDList
+GetFieldIDList(FieldId column_group_id,
+               const std::string& filepath,
+               const std::shared_ptr<arrow::Schema>& arrow_schema,
+               milvus_storage::ArrowFileSystemPtr fs) {
+    milvus_storage::FieldIDList field_id_list;
+    if (column_group_id >= FieldId(START_USER_FIELDID)) {
+        field_id_list.Add(column_group_id.get());
+        return field_id_list;
+    }
+    auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+        fs, filepath, arrow_schema);
+    field_id_list =
+        file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
+            column_group_id.get());
+    auto status = file_reader->Close();
+    AssertInfo(status.ok(),
+               "failed to close file reader when get field id list from {}",
+               filepath);
+    return field_id_list;
 }
 
 }  // namespace milvus::storage
