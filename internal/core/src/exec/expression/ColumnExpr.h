@@ -40,8 +40,13 @@ class PhyColumnExpr : public Expr {
           segment_chunk_reader_(segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        is_indexed_ = segment->HasIndex(expr_->GetColumn().field_id_);
         if (segment->is_chunked()) {
+            auto& schema = segment->get_schema();
+            auto& field_meta = schema[expr_->GetColumn().field_id_];
+            pinned_index_ = PinIndex(segment, field_meta);
+            if (pinned_index_.get() != nullptr) {
+                is_indexed_ = true;
+            }
             num_chunk_ =
                 is_indexed_
                     ? segment->num_chunk_index(expr_->GetColumn().field_id_)
@@ -50,6 +55,7 @@ class PhyColumnExpr : public Expr {
                                 segment_chunk_reader_.SizePerChunk())
                     : segment->num_chunk_data(expr_->GetColumn().field_id_);
         } else {
+            is_indexed_ = segment->HasIndex(expr_->GetColumn().field_id_);
             num_chunk_ =
                 is_indexed_
                     ? segment->num_chunk_index(expr_->GetColumn().field_id_)
@@ -139,6 +145,7 @@ class PhyColumnExpr : public Expr {
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;
+    PinWrapper<index::IndexBase*> pinned_index_;
 };
 
 }  //namespace exec

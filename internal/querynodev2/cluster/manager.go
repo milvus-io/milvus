@@ -31,6 +31,7 @@ import (
 // Manager is the interface for worker manager.
 type Manager interface {
 	GetWorker(ctx context.Context, nodeID int64) (Worker, error)
+	GetAllWorkers() []Worker
 }
 
 // WorkerBuilder is function alias to build a worker from NodeID
@@ -72,6 +73,10 @@ func (m *grpcWorkerManager) GetWorker(ctx context.Context, nodeID int64) (Worker
 		return nil, fmt.Errorf("node is not healthy: %d", nodeID)
 	}
 	return worker, nil
+}
+
+func (m *grpcWorkerManager) GetAllWorkers() []Worker {
+	return m.workers.Values()
 }
 
 func NewWorkerManager(builder WorkerBuilder) Manager {

@@ -34,6 +34,7 @@ const (
 	ActionTypeReduce
 	ActionTypeUpdate
 	ActionTypeStatsUpdate
+	ActionTypeDropIndex
 )
 
 var ActionTypeName = map[ActionType]string{
@@ -249,4 +250,34 @@ func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
 
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	return action.rpcReturned.Load()
+}
+
+type DropIndexAction struct {
+	*BaseAction
+	fieldIDs    []int64
+	rpcReturned atomic.Bool
+}
+
+func NewDropIndexAction(nodeID typeutil.UniqueID, typ ActionType, shard string, fieldIDs []int64) *DropIndexAction {
+	return &DropIndexAction{
+		BaseAction:  NewBaseAction(nodeID, typ, shard, 0),
+		fieldIDs:    fieldIDs,
+		rpcReturned: *atomic.NewBool(false),
+	}
+}
+
+func (action *DropIndexAction) FieldIDs() []int64 {
+	return action.fieldIDs
+}
+
+func (action *DropIndexAction) IsFinished(distMgr *meta.DistributionManager) bool {
+	return action.rpcReturned.Load()
+}
+
+func (action *DropIndexAction) Desc() string {
+	return fmt.Sprintf("type:%s, node id: %d, field ids: %v", action.Type().String(), action.Node(), action.FieldIDs())
+}
+
+func (action *DropIndexAction) String() string {
+	return action.BaseAction.String() + fmt.Sprintf(`{[fieldIDs=%v]}`, action.FieldIDs())
 }

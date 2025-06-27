@@ -171,6 +171,7 @@ service QueryNode {
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+    rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 }
 
 // --------------------QueryCoord grpc request and response proto------------------
@@ -988,4 +989,10 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+message DropIndexRequest {
+    common.MsgBase base = 1;
+    string channel = 2;
+    repeated int64 fieldIDs = 3;
+    bool need_transfer = 4;
 }
