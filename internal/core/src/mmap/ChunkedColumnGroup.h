@@ -105,6 +105,18 @@ class ChunkedColumnGroup {
         return meta->num_fields_;
     }
 
+    size_t
+    memory_size() const {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        size_t memory_size = 0;
+        for (auto& size : meta->chunk_memory_size_) {
+            memory_size += size;
+        }
+        return memory_size;
+    }
+
  protected:
     mutable std::shared_ptr<CacheSlot<GroupChunk>> slot_;
     size_t num_chunks_{0};
@@ -201,13 +213,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     size_t
     DataByteSize() const override {
-        size_t total_size = 0;
-        for (int64_t i = 0; i < num_chunks(); ++i) {
-            auto group_chunk = group_->GetGroupChunk(i);
-            auto chunk = group_chunk.get()->GetChunk(field_id_);
-            total_size += chunk->Size();
-        }
-        return total_size;
+        return group_->memory_size();
     }
 
     int64_t
