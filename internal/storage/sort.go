@@ -68,6 +68,13 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		return 0, nil
 	}
 
+	// release cgo records
+	defer func() {
+		for _, rec := range records {
+			rec.Release()
+		}
+	}()
+
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return 0, err
@@ -179,6 +186,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	recs := make([]Record, len(rr))
 	advanceRecord := func(i int) error {
 		rec, err := rr[i].Next()
+		if recs[i] != nil {
+			recs[i].Release()
+		}
 		recs[i] = rec // assign nil if err
 		if err != nil {
 			return err

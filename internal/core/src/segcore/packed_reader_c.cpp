@@ -138,6 +138,7 @@ CloseReader(CPackedReader c_packed_reader) {
         auto packed_reader =
             static_cast<milvus_storage::PackedRecordBatchReader*>(
                 c_packed_reader);
+        packed_reader->Close();
         delete packed_reader;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

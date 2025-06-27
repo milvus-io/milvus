@@ -242,6 +242,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
 	}
+	defer rr.Close()
 
 	rrs := []storage.RecordReader{rr}
 	numValidRows, err := storage.Sort(st.req.GetBinlogMaxSize(), st.req.GetSchema(), rrs, srw, predicate)
