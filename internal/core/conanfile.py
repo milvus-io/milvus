@@ -47,6 +47,7 @@ class MilvusConan(ConanFile):
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
+        "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
