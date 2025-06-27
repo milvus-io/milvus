@@ -47,6 +47,7 @@ func NewStorageSerializer(metacache metacache.MetaCache, schema *schemapb.Collec
 		return nil, merr.WrapErrServiceInternal("cannot find pk field")
 	}
 	meta := &etcdpb.CollectionMeta{
+		ID:     metacache.Collection(),
 		Schema: schema,
 	}
 	inCodec := storage.NewInsertCodecWithSchema(meta)
