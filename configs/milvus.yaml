@@ -1288,14 +1288,14 @@ streaming:
     # Every time the checkpoint is persisted, the checkpoint will be sampled and used to be a candidate of truncate checkpoint.
     # More samples, more frequent truncate, more memory usage.
     sampleInterval: 30m
-    # The retention interval of wal truncate, 26h by default.
+    # The retention interval of wal truncate, 72h by default.
     # If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
     # Greater the interval, more wal storage usage, more redundant data in wal.
     # Because current query path doesn't promise the read operation not happen before the truncate point,
     # retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
     # If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
     # because the wal truncate operation is implemented by pulsar consumer.
-    retentionInterval: 26h
+    retentionInterval: 72h
 
 # Any configuration related to the knowhere vector search engine
 knowhere:
