@@ -58,16 +58,16 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
                                                     int64_t count,
                                                     const std::vector<int64_t>&
                                                         num_rows_until_chunk) {
-    std::vector<milvus::cachinglayer::cid_t> cids(count, 0);
+    std::vector<milvus::cachinglayer::cid_t> cids(count, 1);
     std::vector<int64_t> offsets_in_chunk(count);
-    int64_t len = num_rows_until_chunk.size();
+    int64_t len = num_rows_until_chunk.size() - 1;
     while (len > 1) {
         const int64_t half = len / 2;
         len -= half;
         for (size_t i = 0; i < count; ++i) {
             const bool cmp =
                 num_rows_until_chunk[cids[i] + half - 1] < offsets[i] + 1;
-            cids[i] = cmp ? cids[i] + half : cids[i];
+            cids[i] += static_cast<int64_t>(cmp) * half;
         }
     }
 
