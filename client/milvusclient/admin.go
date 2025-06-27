@@ -91,7 +91,7 @@ func (c *Client) GetPersistentSegmentInfo(ctx context.Context, option GetPersist
 			return &entity.Segment{
 				ID:           info.GetSegmentID(),
 				CollectionID: info.GetCollectionID(),
-				ParititionID: info.GetPartitionID(),
+				PartitionID:  info.GetPartitionID(),
 				NumRows:      info.GetNumRows(),
 				State:        info.GetState(),
 			}
