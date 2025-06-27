@@ -133,8 +133,9 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (any_type) {
                     return true;
                 }
-                return milvus::index::json::IsDataTypeSupported(
-                    index.cast_type, data_type, is_json_contain);
+                return index.nested_path == path &&
+                       milvus::index::json::IsDataTypeSupported(
+                           index.cast_type, data_type, is_json_contain);
             });
         return it != json_indices.end();
     }
