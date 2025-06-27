@@ -200,6 +200,11 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
     auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
         fs_, paths[0], schema_);
     auto row_group_metadata = fr->file_metadata()->GetRowGroupMetadataVector();
+    auto status = fr->Close();
+    AssertInfo(
+        status.ok(),
+        "failed to close file reader when get row group metadata from file: " +
+            paths[0] + " with error: " + status.ToString());
     std::vector<int64_t> row_groups(row_group_metadata.size());
     std::iota(row_groups.begin(), row_groups.end(), 0);
     std::vector<std::vector<int64_t>> row_group_lists = {row_groups};

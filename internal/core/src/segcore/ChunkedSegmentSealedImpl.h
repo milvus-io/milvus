@@ -405,9 +405,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column);
 
-    void
-    init_narrow_column_field_ids(const LoadFieldDataInfo& field_data_info);
-
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -439,9 +436,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
-
-    // for storage v2
-    std::vector<FieldId> narrow_column_field_ids_;
 
     SchemaPtr schema_;
     int64_t id_;

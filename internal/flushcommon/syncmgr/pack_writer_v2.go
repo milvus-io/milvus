@@ -18,13 +18,10 @@ package syncmgr
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -32,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -106,10 +102,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
-	columnGroups, err := bw.splitInsertData(pack.insertData, packed.ColumnGroupSizeThreshold)
-	if err != nil {
-		return nil, err
-	}
+	columnGroups := storagecommon.SplitBySchema(bw.schema.GetFields())
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
@@ -165,45 +158,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		return nil, err
 	}
 	return logs, nil
-}
-
-// split by row average size
-func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, splitThresHold int64) ([]storagecommon.ColumnGroup, error) {
-	groups := make([]storagecommon.ColumnGroup, 0)
-	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0), GroupID: storagecommon.DefaultShortColumnGroupID}
-	memorySizes := make(map[storage.FieldID]int64, len(insertData[0].Data))
-	rowNums := make(map[storage.FieldID]int64, len(insertData[0].Data))
-	for _, data := range insertData {
-		for fieldID, fieldData := range data.Data {
-			if _, ok := memorySizes[fieldID]; !ok {
-				memorySizes[fieldID] = 0
-				rowNums[fieldID] = 0
-			}
-			memorySizes[fieldID] += int64(fieldData.GetMemorySize())
-			rowNums[fieldID] += int64(fieldData.RowNum())
-		}
-	}
-	uniqueRows := lo.Uniq(lo.Values(rowNums))
-	if len(uniqueRows) != 1 || uniqueRows[0] == 0 {
-		return nil, errors.New("row num is not equal for each field")
-	}
-	for i, field := range bw.schema.GetFields() {
-		if _, ok := memorySizes[field.FieldID]; !ok {
-			return nil, fmt.Errorf("field %d not found in insert data", field.FieldID)
-		}
-		// Check if the field is a vector type
-		if storage.IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else if rowNums[field.FieldID] != 0 && memorySizes[field.FieldID]/rowNums[field.FieldID] >= splitThresHold {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else {
-			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
-		}
-	}
-	if len(shortColumnGroup.Columns) > 0 {
-		groups = append([]storagecommon.ColumnGroup{shortColumnGroup}, groups...)
-	}
-	return groups, nil
 }
 
 func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack) (storage.Record, error) {

@@ -450,6 +450,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::vector<int64_t> all_row_groups(row_group_num);
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
+            auto status = reader->Close();
+            AssertInfo(status.ok(),
+                       "failed to close file reader when get row group "
+                       "metadata from file: " +
+                           file + " with error: " + status.ToString());
         }
 
         // create parallel degree split strategy

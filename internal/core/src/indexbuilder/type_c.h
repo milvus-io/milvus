@@ -15,4 +15,3 @@
 
 typedef void* CIndex;
 typedef void* CIndexQueryResult;
-typedef void* CBuildIndexInfo;

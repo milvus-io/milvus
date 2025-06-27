@@ -24,15 +24,25 @@ misc:
   - when_go_sdk_status_success: &WHEN_GO_SDK_STATUS_SUCCESS
       - 'status-success=go-sdk'
       - 'status-success=milvus-sdk-go'
+      - 'status-success=ci-v2/go-sdk'
   - when_cpp_unit_test_success: &WHEN_CPP_UNIT_TEST_SUCCESS
       - 'status-success=cpp-unit-test'
       - 'status-success=UT for Cpp'
+      - 'status-success=ci-v2/ut-cpp'
   - when_go_unit_test_success: &WHEN_GO_UNIT_TEST_SUCCESS
       - 'status-success=go-unit-test'
       - 'status-success=UT for Go'
+      - 'status-success=ci-v2/ut-go'
   - when_integration_unit_test_success: &WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=integration-test'
       - 'status-success=Integration Test'
+      - 'status-success=ci-v2/integration-test'
+  - when_e2e_test_success: &WHEN_E2E_TEST_SUCCESS
+      - 'status-success=cpu-e2e'
+      - 'status-success=ci-v2/e2e-default'
+  - when_build_success: &WHEN_BUILD_SUCCESS
+      - 'status-success=Build and test AMD64 Ubuntu 22.04'
+      - 'status-success=ci-v2/build'
   
   # Branch configurations
   - branch: &BRANCHES
@@ -83,15 +93,14 @@ pull_request_rules:
   - name: Test passed for code changed on master 
     conditions:
       - *MASTER_BRANCH
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - or: *WHEN_BUILD_SUCCESS
       - or: *WHEN_GO_SDK_STATUS_SUCCESS
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - or: *WHEN_E2E_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker Amazonlinux 2023'
-      - 'status-success=cpu-e2e'
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -102,15 +111,14 @@ pull_request_rules:
   - name: Test passed for code changed on 2.* branch
     conditions:
       - *2X_BRANCH
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - or: *WHEN_BUILD_SUCCESS
       # 2.* skip WHEN_GO_SDK_STATUS_SUCCESS
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
+      - or: *WHEN_E2E_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker CentOS 7'
-      - 'status-success=cpu-e2e'
       # - 'status-success=codecov/patch'
       # - 'status-success=codecov/project'
     actions:
@@ -123,7 +131,7 @@ pull_request_rules:
     conditions:
       - or: *BRANCHES
       - -files~=^(?!tests\/python_client).+
-      - 'status-success=cpu-e2e'
+      - or: *WHEN_E2E_TEST_SUCCESS
     actions:
       label:
         add:
@@ -141,7 +149,7 @@ pull_request_rules:
   - name: Test passed for non go or c++ code changed
     conditions:
       - or: *BRANCHES
-      - 'status-success=cpu-e2e'
+      - or: *WHEN_E2E_TEST_SUCCESS
       - *no_source_code_files
     actions:
       label:
@@ -151,12 +159,11 @@ pull_request_rules:
   - name: Test passed for go unittest code changed-master
     conditions:
       - or: *BRANCHES
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - *only_go_unittest_files
+      - or: *WHEN_BUILD_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker Amazonlinux 2023'
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
-      - *only_go_unittest_files
     actions:
       label:
         add:
@@ -186,14 +193,13 @@ pull_request_rules:
   - name: Test passed for skip e2e when source code changed
     conditions:
       - or: *BRANCHES
-      - or: *Build_AND_TEST_STATUS_SUCESS_ON_UBUNTU_20_OR_UBUNTU_22
+      - or: *WHEN_BUILD_SUCCESS
       - title~=\[skip e2e\]
       - or: *WHEN_CPP_UNIT_TEST_SUCCESS
       - or: *WHEN_GO_UNIT_TEST_SUCCESS
       - or: *WHEN_INTEGRATION_UNIT_TEST_SUCCESS
       - 'status-success=Code Checker AMD64 Ubuntu 22.04'
       - 'status-success=Code Checker MacOS 13'
-      # - 'status-success=Code Checker Amazonlinux 2023'
       - *source_code_files
     actions:
       label:
@@ -205,36 +211,59 @@ pull_request_rules:
   # Remove ci-passed labels when tests fail
   # ==========================================================================
 
-  - name:  master or 2.x - Remove ci-passed label when status for code checker or ut is not success
+  # ==========================================================================
+  # CONSOLIDATED MIGRATION FAILURE HANDLING
+  # Handle failure scenarios during CI system migration with optimized rules
+  # ==========================================================================
+
+  - name: Remove ci-passed when any CI system fails during migration
     conditions:
       - or:
         - *MASTER_BRANCH
         - *2X_BRANCH
       - label!=manual-pass
       - *source_code_files
+      # Comprehensive failure logic: remove ci-passed when any required system fails
       - or:
-          - *failed_on_ubuntu_20
-          - *failed_on_ubuntu_22
-          - 'status-success!=Code Checker AMD64 Ubuntu 22.04'
-          - and:
-            - 'status-success!=cpp-unit-test'
-            - *morethan_go_unittest_files
-          - 'status-success!=UT for Go'
-          - 'status-success!=Integration Test'
-          - 'status-success!=Code Checker MacOS 13'
-          # - 'status-success!=Code Checker Amazonlinux 2023'
-    actions:
-      label:
-        remove:
-          - ci-passed
-
-  - name: Remove ci-passed label when status for jenkins job is not success
-    conditions:
-      - or: *BRANCHES
-      - label!=manual-pass
-      - -title~=\[skip e2e\]
-      - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
-      - 'status-success!=cpu-e2e'
+        # Build systems: at least one must succeed
+        - not:
+            or:
+              - status-success = Build and test AMD64 Ubuntu 22.04
+              - status-success = ci-v2/build
+        # Go unit tests: at least one must succeed  
+        - not:
+            or:
+              - status-success = UT for Go
+              - status-success = ci-v2/ut-go
+        # Integration tests: at least one must succeed
+        - not:
+            or:
+              - status-success = Integration Test
+              - status-success = ci-v2/integration-test
+        # Cpp unit tests: at least one must succeed (only when cpp files changed)
+        - and:
+          - *morethan_go_unittest_files
+          - not:
+              or:
+                - status-success = cpp-unit-test
+                - status-success = ci-v2/ut-cpp
+        # Code checker: always required (no migration logic)
+        - or:
+          - status-success != Code Checker AMD64 Ubuntu 22.04
+          - status-success != Code Checker MacOS 13
+        # E2E tests: regular case - at least one must succeed
+        - not:
+            or:
+              - status-success = cpu-e2e
+              - status-success = ci-v2/e2e-default
+        # E2E tests: required case - at least one must succeed (when not skipped)
+        - and:
+          - -title~=\[skip e2e\]
+          - files~=^(?!(.*_test\.go|.*\.md|\.github\/mergify\.yml)).*$
+          - not:
+              or:
+                - status-success = cpu-e2e
+                - status-success = ci-v2/e2e-default
     actions:
       label:
         remove:

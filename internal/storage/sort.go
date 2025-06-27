@@ -68,6 +68,13 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 		return 0, nil
 	}
 
+	// release cgo records
+	defer func() {
+		for _, rec := range records {
+			rec.Release()
+		}
+	}()
+
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return 0, err

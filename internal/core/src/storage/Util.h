@@ -35,6 +35,7 @@
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "storage/ThreadPools.h"
+#include "milvus-storage/common/metadata.h"
 
 namespace milvus::storage {
 
@@ -268,5 +269,11 @@ ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
         event_data.payload_reader->get_file_reader(),
         file_data);
 }
+
+milvus_storage::FieldIDList
+GetFieldIDList(FieldId column_group_id,
+               const std::string& filepath,
+               const std::shared_ptr<arrow::Schema>& arrow_schema,
+               milvus_storage::ArrowFileSystemPtr fs);
 
 }  // namespace milvus::storage

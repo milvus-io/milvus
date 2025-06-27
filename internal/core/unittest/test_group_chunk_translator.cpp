@@ -106,6 +106,11 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
 
     row_group_meta_list.push_back(
         fr->file_metadata()->GetRowGroupMetadataVector());
+    auto status = fr->Close();
+    AssertInfo(
+        status.ok(),
+        "failed to close file reader when get row group metadata from file: " +
+            paths_[0] + " with error: " + status.ToString());
 
     GroupChunkTranslator translator(segment_id_,
                                     field_metas,
