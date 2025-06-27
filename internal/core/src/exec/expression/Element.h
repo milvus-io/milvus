@@ -27,6 +27,7 @@
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
 #include "query/PlanProto.h"
+#include "ankerl/unordered_dense.h"
 
 namespace milvus {
 namespace exec {
@@ -223,7 +224,8 @@ class SetElement : public MultiElement {
  public:
     explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
         for (auto& value : values) {
-            values_.insert(GetValueFromProto<T>(value));
+            T v = GetValueFromProto<T>(value);
+            values_.insert(v);
         }
     }
 
@@ -256,7 +258,64 @@ class SetElement : public MultiElement {
     }
 
  public:
-    std::set<T> values_;
+    ankerl::unordered_dense::set<T> values_;
+};
+
+template <>
+class SetElement<bool> : public MultiElement {
+ public:
+    explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
+        for (auto& value : values) {
+            bool v = GetValueFromProto<bool>(value);
+            if (v) {
+                contains_true = true;
+            } else {
+                contains_false = true;
+            }
+        }
+    }
+
+    explicit SetElement(const std::vector<bool>& values) {
+        for (const auto& value : values) {
+            if (value) {
+                contains_true = true;
+            } else {
+                contains_false = true;
+            }
+        }
+    }
+
+    bool
+    Empty() const override {
+        return !contains_true && !contains_false;
+    }
+
+    bool
+    In(const ValueType& value) const override {
+        if (std::holds_alternative<bool>(value)) {
+            bool v = std::get<bool>(value);
+            return (v && contains_true) || (!v && contains_false);
+        }
+        return false;
+    }
+
+    void
+    AddElement(const bool& value) {
+        if (value) {
+            contains_true = true;
+        } else {
+            contains_false = true;
+        }
+    }
+
+    size_t
+    Size() const override {
+        return (contains_true ? 1 : 0) + (contains_false ? 1 : 0);
+    }
+
+ private:
+    bool contains_true = false;
+    bool contains_false = false;
 };
 
 }  //namespace exec
