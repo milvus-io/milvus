@@ -1144,6 +1144,7 @@ type traceConfig struct {
 	OtlpEndpoint       ParamItem `refreshable:"false"`
 	OtlpMethod         ParamItem `refreshable:"false"`
 	OtlpSecure         ParamItem `refreshable:"false"`
+	OtlpHeaders        ParamItem `refreshable:"false"`
 	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
 
@@ -1201,6 +1202,15 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
+
+	t.OtlpHeaders = ParamItem{
+		Key:          "trace.otlp.headers",
+		Version:      "2.4.0",
+		DefaultValue: "",
+		Doc:          "otlp header that encoded in base64",
+		Export:       true,
+	}
+	t.OtlpHeaders.Init(base.mgr)
 
 	t.InitTimeoutSeconds = ParamItem{
 		Key:          "trace.initTimeoutSeconds",
