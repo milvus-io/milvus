@@ -2,7 +2,6 @@
 
 This folder contains the integration test for Milvus components.
 
-
 ## How it works
 
 The Milvus integration test framework is a comprehensive testing solution that runs multiple Milvus components as separate processes to simulate a real deployment environment. It provides a `MiniClusterV3` that manages the lifecycle of core Milvus components including MixCoord, Proxy, DataNode, QueryNode and StreamingNode.
@@ -62,6 +61,18 @@ go test -run "$testCaseName^" -testify.m "$subTestifyCaseName^" -race -v
 
 ## Recommended coding style for add new cases
 
+### Should I add a new test case into integration?
+
+It's a good choice to add a new test case into integration test if:
+
+- The test case need to control the lifecycle of Milvus components, such as starting/stopping components or modifying configuration then executing some end-to-end scenarios.
+- If the test case is hard to apply in the unit-test and E2E test, such as testing in a non-default configured Milvus cluster, and need to be tested between multiple components.
+
+Should not add a new test case into integration test if: 
+
+- Function-verification that can be covered by unit test or already be covered by E2E test.
+- Performance test.
+
 ### Using `suite`
 
 MiniCluster` and `MiniClusterSuite` provides lots of comment preset tool function to execute intergration test.
@@ -95,7 +106,32 @@ func (s *NewSuite) TearDownSuite() {
 
 ```
 
-A suite will start a new empty milvus cluster, and the cluster will be reused for all test cases in the suite.
+A suite will start a new empty milvus cluster, and the cluster will be reused for all test cases in the suite. We recommend to add more useful utility methods into `MiniClusterSuite` or `MilvusClusterV3` to interact with the cluster, to speed up the integration test development.
+Some utility methods are provided in `MiniClusterSuite` to interact with the cluster:
+
+#### method of `MiniClusterSuite`
+
+
+- Use `s.WithMilvusConfig` to modify the milvus configuration at startup in `SetupSuite` method.
+- Use `s.WithOptions` to modify the test options at startup in `SetupSuite` method.
+- Use `s.Cluster` to get the `MiniClusterV3` instance, which provides methods to interact with the Milvus cluster.
+- Some useful milvus method is provided in `util_` files, such as `CreateCollection`, `Insert`, `Flush`..., 
+
+#### method of `MiniClusterV3`
+
+- Use `s.Cluster.MustModifyMilvusConfig` to modify the milvus configuration at runtime, it will return a guard function to restore the modified configuration. It doesn't promise that the configuration will be applied immediately, milvus may not support the dynamic configuration change for some configurations or some configration may be applied slowly.
+- Use `s.Cluster.Add*` to add components to the cluster, such as `AddMixCoord`, `AddProxy`, `AddDataNode`, `AddQueryNode`, `AddStreamingNode`. it will return the `MilvusProcess` object to manage the lifetime of new incoming component. It will block until the component is healthy by default, use `WithoutWaitForReady` option to avoid it.
+- Use `s.Cluster.Default*` to get the default component, such as `DefaultMixCoord`, `DefaultProxy`, `DefaultDataNode`, `DefaultQueryNode`, `DefaultStreamingNode`.
+- Use `s.*Client` to get the grpc client of the default component that can be got from `s.Cluster.Default*`, such as `s.MixCoordClient`, `s.ProxyClient`, `s.DataNodeClient`, `s.QueryNodeClient`, `s.StreamingNodeClient`.
+- Use `s.MilvusClient` to get the grpc client of the Milvus server, which is connnected to the proxy that is returned from `DefaultProxy()`.
+
+#### method of `MilvusProcess`
+
+- Use `p.MustGetClient` to get the grpc client of the component, which provides methods to interact with the component.
+- Use `p.MustWaitForReady` to wait for the component to be ready, it will block until the component is healthy.
+- Use `p.Stop` to stop the component, it will block until the component is stopped. It will perform a graceful shutdown by default. When the given deadline is excceed, `ForceStop` is performed.
+- Use `p.ForceStop` to force stop the component, it will not wait for the component to be stopped.
+- Use `p.IsWorking` to check if the component is working, it will return false if the component is stopped.
 
 ### New folder for each new scenario
 

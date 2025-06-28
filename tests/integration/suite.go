@@ -49,6 +49,7 @@ type MiniClusterSuite struct {
 }
 
 // WithMilvusConfig sets the environment variable for the given key.
+// The key can be got from the paramtable package, such as "common.QuotaConfigPath".
 func (s *MiniClusterSuite) WithMilvusConfig(key string, value string) {
 	if len(key) == 0 {
 		panic("key is empty")
@@ -61,12 +62,16 @@ func (s *MiniClusterSuite) WithMilvusConfig(key string, value string) {
 }
 
 // WithOptions set the options for the suite
+// use `WithDropAllCollectionsWhenTestTearDown` to drop all collections when test tear down.
+// use `WithoutResetDeploymentWhenTestTearDown` to not reset the default deployment when test tear down.
 func (s *MiniClusterSuite) WithOptions(options ...ClusterSuiteOption) {
 	for _, opts := range options {
 		opts(&s.opt)
 	}
 }
 
+// SetupSuite initializes the MiniClusterSuite by setting up the environment and starting the cluster.
+// After it is called, the cluster is ready for tests.
 func (s *MiniClusterSuite) SetupSuite() {
 	paramtable.Init()
 	s.T().Log("Setup test...")

@@ -293,6 +293,7 @@ func (mp *MilvusProcess) IsWorking() bool {
 }
 
 // Stop stops the Milvus process with a graceful timeout
+// If the process does not stop within the timeout, it will forcefully stop.
 func (mp *MilvusProcess) Stop(gracefulTimeout ...time.Duration) error {
 	mp.graceful.Close()
 	timeout := 10 * time.Second
@@ -328,8 +329,8 @@ func (mp *MilvusProcess) ForceStop() error {
 	return mp.notifier.BlockAndGetResult()
 }
 
-// WaitForReady waits for the Milvus process to be ready.
-func (mp *MilvusProcess) WaitForReady(ctx context.Context) error {
+// waitForReady waits for the Milvus process to be ready.
+func (mp *MilvusProcess) waitForReady(ctx context.Context) error {
 	mp.GetClient(ctx)
 	return nil
 }

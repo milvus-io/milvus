@@ -76,7 +76,7 @@ func (mp *specializedMilvusProcess[T]) MustGetClient(ctx context.Context) T {
 
 // MustWaitForReady waits for the Milvus process to be ready.
 func (mp *specializedMilvusProcess[T]) MustWaitForReady(ctx context.Context) {
-	if err := mp.MilvusProcess.WaitForReady(ctx); err != nil {
+	if err := mp.MilvusProcess.waitForReady(ctx); err != nil {
 		panic(err)
 	}
 }

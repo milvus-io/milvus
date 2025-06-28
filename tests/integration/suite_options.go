@@ -15,6 +15,7 @@ func WithDropAllCollectionsWhenTestTearDown() ClusterSuiteOption {
 }
 
 // WithoutResetDeploymentWhenTestTearDown reset deployment when test tear down
+// the reset operation will keep only 1 default component for milvus cluster.
 func WithoutResetDeploymentWhenTestTearDown() ClusterSuiteOption {
 	return func(o *clusterSuiteOption) {
 		o.notResetDeploymentWhenTestTearDown = true

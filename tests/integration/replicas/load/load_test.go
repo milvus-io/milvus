@@ -105,13 +105,13 @@ func (s *LoadTestSuite) initResourceGroup() {
 	// global 6 qn for every resource group.
 	for i := 0; i < rgNum; i++ {
 		qn := s.Cluster.AddQueryNode(cluster.WithoutWaitForReady())
-		defer qn.WaitForReady(s.Cluster.GetContext())
+		defer qn.MustWaitForReady(s.Cluster.GetContext())
 	}
 
 	// because of the sn didn't manage by rg, so we keep global 5 sn.
 	for i := 1; i < rgNum; i++ {
 		sn := s.Cluster.AddStreamingNode(cluster.WithoutWaitForReady())
-		defer sn.WaitForReady(s.Cluster.GetContext())
+		defer sn.MustWaitForReady(s.Cluster.GetContext())
 	}
 
 	s.Eventually(func() bool {

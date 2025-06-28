@@ -66,7 +66,6 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 			if !skipLog {
 				log.Ctx(ctx).Warn("failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}
-			log.Info("failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			return nil
 		}
 		if err != nil {
@@ -74,7 +73,6 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 			if !skipLog {
 				log.Ctx(ctx).Warn("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}
-			log.Info("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			return &stepStack{steps: steps}
 		}
 		// this step is done.
@@ -192,7 +190,6 @@ func (bg *bgStepExecutor) AddSteps(s *stepStack) {
 func (bg *bgStepExecutor) process(steps []*stepStack) {
 	wg := sync.WaitGroup{}
 	for i := range steps {
-		log.Info("process step", zap.Int("index", i), zap.Any("step", steps[i]))
 		s := steps[i]
 		if s == nil {
 			continue

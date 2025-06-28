@@ -217,6 +217,9 @@ func (c *MiniClusterV3) initInternalClient() {
 
 // ModifyMilvusConfig modifies the milvus config.
 // Meanwhile it will return a guard function to revert the config into default.
+// It doesn't promise that the configuration will be applied immediately,
+// milvus may not support the dynamic configuration change for some configurations or some configration may be applied slowly.
+// If you want to ensure the config is applied, you should restart the target component or wait it to be ready.
 func (c *MiniClusterV3) MustModifyMilvusConfig(kvs map[string]string) func() {
 	keys := make([]string, 0, len(kvs))
 	for key, value := range kvs {
@@ -477,6 +480,7 @@ func (c *MiniClusterV3) GetAllDataNodes() []*process.DataNodeProcess {
 }
 
 // AddMixCoord adds a mixcoord to the cluster.
+// Use WithoutWaitForReady to avoid waiting for the node to be ready.
 func (c *MiniClusterV3) AddMixCoord(opts ...ClusterOperationOpt) (mp *process.MixcoordProcess) {
 	c.Logger().Info("add mixcoord to the cluster")
 
@@ -496,6 +500,7 @@ func (c *MiniClusterV3) AddMixCoord(opts ...ClusterOperationOpt) (mp *process.Mi
 }
 
 // AddQueryNodes adds multiple query nodes to the cluster.
+// Use WithoutWaitForReady to avoid waiting for the node to be ready.
 func (c *MiniClusterV3) AddQueryNodes(num int, opts ...ClusterOperationOpt) (mps []*process.QueryNodeProcess) {
 	c.Logger().Info("add query nodes to the cluster", zap.Int("num", num))
 
@@ -521,6 +526,7 @@ func (c *MiniClusterV3) AddQueryNodes(num int, opts ...ClusterOperationOpt) (mps
 }
 
 // AddQueryNode adds a query node to the cluster.
+// Use WithoutWaitForReady to avoid waiting for the node to be ready.
 func (c *MiniClusterV3) AddQueryNode(opts ...ClusterOperationOpt) (mp *process.QueryNodeProcess) {
 	c.Logger().Info("add query node to the cluster")
 
@@ -552,6 +558,8 @@ func (c *MiniClusterV3) StopAllQueryNode(timeout ...time.Duration) {
 	wg.Wait()
 }
 
+// AddDataNode adds a data node to the cluster.
+// Use WithoutWaitForReady to avoid waiting for the node to be ready.
 func (c *MiniClusterV3) AddDataNode(opts ...ClusterOperationOpt) (mp *process.DataNodeProcess) {
 	c.Logger().Info("add data node to the cluster")
 
@@ -570,6 +578,8 @@ func (c *MiniClusterV3) AddDataNode(opts ...ClusterOperationOpt) (mp *process.Da
 	return dn
 }
 
+// AddStreamingNode adds a streaming node to the cluster.
+// Use WithoutWaitForReady to avoid waiting for the node to be ready.
 func (c *MiniClusterV3) AddStreamingNode(opts ...ClusterOperationOpt) (mp *process.StreamingNodeProcess) {
 	c.Logger().Info("add streaming node to the cluster")
 
@@ -588,6 +598,8 @@ func (c *MiniClusterV3) AddStreamingNode(opts ...ClusterOperationOpt) (mp *proce
 	return sn
 }
 
+// AddProxy adds a proxy to the cluster.
+// Use WithoutWaitForReady to avoid waiting for the node to be ready.
 func (c *MiniClusterV3) AddProxy(opts ...ClusterOperationOpt) (mp *process.ProxyProcess) {
 	c.Logger().Info("add proxy to the cluster")
 
