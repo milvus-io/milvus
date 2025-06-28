@@ -1,4 +1,3 @@
-
 // Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -133,4 +132,34 @@ TEST(Tracer, GetTraceID) {
     CloseRootSpan();
     trace_id = GetTraceID();
     ASSERT_TRUE(trace_id.empty());
+}
+
+TEST(Tracer, ParseHeaders) {
+    // Test empty headers
+    auto headers_map = parseHeaders("");
+    ASSERT_TRUE(headers_map.empty());
+    
+    // Test simple JSON headers
+    std::string json_headers = R"({"Authorization": "Bearer token123", "Content-Type": "application/json"})";
+    headers_map = parseHeaders(json_headers);
+    ASSERT_EQ(headers_map.size(), 2);
+    ASSERT_EQ(headers_map["Authorization"], "Bearer token123");
+    ASSERT_EQ(headers_map["Content-Type"], "application/json");
+    
+    // Test JSON with whitespace
+    std::string json_headers_with_spaces = R"({ "key1" : "value1" , "key2" : "value2" })";
+    headers_map = parseHeaders(json_headers_with_spaces);
+    ASSERT_EQ(headers_map.size(), 2);
+    ASSERT_EQ(headers_map["key1"], "value1");
+    ASSERT_EQ(headers_map["key2"], "value2");
+    
+    // Test invalid JSON
+    std::string invalid_json = "invalid json string";
+    headers_map = parseHeaders(invalid_json);
+    ASSERT_TRUE(headers_map.empty());
+    
+    // Test empty JSON object
+    std::string empty_json = "{}";
+    headers_map = parseHeaders(empty_json);
+    ASSERT_TRUE(headers_map.empty());
 }
