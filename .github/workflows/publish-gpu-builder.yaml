@@ -22,21 +22,11 @@ concurrency:
 
 jobs:
   publish-gpu-builder:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 500
     env:
       OS: ubuntu22.04
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        if: ${{ ! startsWith(runner.name, 'self') }} # skip this step if it is self-hosted runner
-        with:
-          root-reserve-mb: 20480
-          # overprovision-lvm: 'true'
-          swap-size-mb: 1024
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
       - name: Checkout
         uses: actions/checkout@v2
       - name: Get version from system time after release step
