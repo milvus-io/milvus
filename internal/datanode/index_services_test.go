@@ -129,7 +129,7 @@ func (s *IndexServiceSuite) SetupTest() {
 	}
 
 	var (
-		ctx     = context.TODO()
+		ctx = context.TODO()
 	)
 
 	s.node = NewDataNode(ctx)

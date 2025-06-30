@@ -137,7 +137,7 @@ type Server struct {
 	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
 
-	metricsCacheManager   *metricsinfo.MetricsCacheManager
+	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
 	notifyIndexChan chan UniqueID
