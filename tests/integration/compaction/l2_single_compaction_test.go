@@ -45,6 +45,12 @@ type L2SingleCompactionSuite struct {
 	integration.MiniClusterSuite
 }
 
+func (s *L2SingleCompactionSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key, "10")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "0")
+	s.MiniClusterSuite.SetupSuite()
+}
+
 func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -94,7 +100,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -107,14 +113,16 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
@@ -125,7 +133,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -142,7 +150,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	log.Info("Finish flush", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -154,7 +162,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	log.Info("Finish create index", zap.String("dbName", dbName), zap.String("collectionName", collectionName))
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -167,12 +175,12 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 		CollectionID:    showCollectionsResp.CollectionIds[0],
 		MajorCompaction: true,
 	}
-	compactResp, err := c.Proxy.ManualCompaction(ctx, compactReq)
+	compactResp, err := c.MilvusClient.ManualCompaction(ctx, compactReq)
 	s.NoError(err)
 	log.Info("compact", zap.Any("compactResp", compactResp))
 
 	compacted := func() bool {
-		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+		resp, err := c.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactResp.GetCompactionID(),
 		})
 		if err != nil {
@@ -186,7 +194,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	log.Info("compact done")
 
 	// delete
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           fmt.Sprintf("%s < %d", integration.Int64Field, deleteCnt),
@@ -195,7 +203,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	s.NoError(err)
 
 	// flush l0
-	flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err = c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -207,7 +215,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 
 	// wait for l0 compaction completed
 	showSegments := func() bool {
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 
@@ -236,7 +244,7 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 	}
 
 	checkQuerySegmentInfo := func() bool {
-		querySegmentInfo, err := c.Proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
+		querySegmentInfo, err := c.MilvusClient.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -271,12 +279,5 @@ func (s *L2SingleCompactionSuite) TestL2SingleCompaction() {
 }
 
 func TestL2SingleCompaction(t *testing.T) {
-	paramtable.Init()
-	// to speed up the test
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key, "10")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "0")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key)
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
-
 	suite.Run(t, new(L2SingleCompactionSuite))
 }

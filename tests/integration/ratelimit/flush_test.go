@@ -18,9 +18,7 @@ package ratelimit
 
 import (
 	"context"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -30,19 +28,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type FlushSuite struct {
-	integration.MiniClusterSuite
-
-	indexType  string
-	metricType string
-	vecType    schemapb.DataType
-}
-
-func (s *FlushSuite) TestFlush() {
+func (s *DBPropertiesSuite) TestFlush() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -53,13 +42,11 @@ func (s *FlushSuite) TestFlush() {
 		rowNum = 3000
 	)
 
-	s.indexType = integration.IndexFaissIvfFlat
-	s.metricType = metric.L2
-	s.vecType = schemapb.DataType_FloatVector
+	vecType := schemapb.DataType_FloatVector
 
 	collectionName := "TestFlush_" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, s.vecType)
+	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, vecType)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -79,7 +66,7 @@ func (s *FlushSuite) TestFlush() {
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	var fVecColumn *schemapb.FieldData
-	if s.vecType == schemapb.DataType_SparseFloatVector {
+	if vecType == schemapb.DataType_SparseFloatVector {
 		fVecColumn = integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
 	} else {
 		fVecColumn = integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -118,8 +105,4 @@ func (s *FlushSuite) TestFlush() {
 	s.NoError(err)
 
 	log.Info("TestFlush succeed")
-}
-
-func TestFlush(t *testing.T) {
-	suite.Run(t, new(FlushSuite))
 }

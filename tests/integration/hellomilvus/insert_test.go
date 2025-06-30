@@ -14,14 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package insert
+package hellomilvus
 
 import (
 	"context"
 	"slices"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -37,12 +35,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type InsertSuite struct {
-	integration.MiniClusterSuite
-}
-
-// insert request with duplicate field data should fail
-func (s *InsertSuite) TestInsertWithDuplicateField() {
+func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -57,7 +50,7 @@ func (s *InsertSuite) TestInsertWithDuplicateField() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -71,13 +64,13 @@ func (s *InsertSuite) TestInsertWithDuplicateField() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -93,7 +86,7 @@ func (s *InsertSuite) TestInsertWithDuplicateField() {
 	log.Info("Create index done")
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -107,7 +100,7 @@ func (s *InsertSuite) TestInsertWithDuplicateField() {
 
 	pkFieldData := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkFieldData, pkFieldData},
@@ -124,13 +117,15 @@ func (s *InsertSuite) TestInsertWithDuplicateField() {
 	log.Info("==================")
 }
 
-func (s *InsertSuite) TestInsertStorageV2() {
+func (s *HelloMilvusSuite) TestInsertStorageV2() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableStorageV2.Key)
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().CommonCfg.EnableStorageV2.Key: "true",
+	})
+	defer revertGuard()
 
 	prefix := "TestInsert"
 	dbName := ""
@@ -142,7 +137,7 @@ func (s *InsertSuite) TestInsertStorageV2() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -156,7 +151,7 @@ func (s *InsertSuite) TestInsertStorageV2() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -166,7 +161,7 @@ func (s *InsertSuite) TestInsertStorageV2() {
 	hashKeys := integration.GenerateHashKeys(rowNum)
 
 	// insert
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkFieldData, vecFieldData},
@@ -177,7 +172,7 @@ func (s *InsertSuite) TestInsertStorageV2() {
 	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -190,7 +185,7 @@ func (s *InsertSuite) TestInsertStorageV2() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -198,8 +193,4 @@ func (s *InsertSuite) TestInsertStorageV2() {
 			s.Equal(storage.StorageV2, segment.StorageVersion)
 		}
 	}
-}
-
-func TestInsert(t *testing.T) {
-	suite.Run(t, new(InsertSuite))
 }

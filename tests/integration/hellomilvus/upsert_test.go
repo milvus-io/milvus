@@ -14,14 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rangesearch
+package hellomilvus
 
 import (
 	"context"
 	"fmt"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -35,26 +34,23 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type RangeSearchSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *RangeSearchSuite) TestRangeSearchIP() {
+func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestRangeSearchIP"
+	prefix := "TestUpsert"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	dim := 128
 	rowNum := 3000
+	start := 0
 
-	schema := integration.ConstructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchema(collectionName, dim, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -68,25 +64,26 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
+	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, int64(start))
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	upsertResult, err := c.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
+		FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
 	s.NoError(err)
-	s.True(merr.Ok(insertResult.GetStatus()))
+	s.True(merr.Ok(upsertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -99,7 +96,7 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -107,7 +104,7 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -118,10 +115,11 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
+
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -136,17 +134,24 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	nq := 10
 	topk := 10
 	roundDecimal := -1
-	radius := 10
-	filter := 20
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.IP)
-
-	// only pass in radius when range search
-	params["radius"] = radius
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ := c.Proxy.Search(ctx, searchReq)
+	searchResult, _ := c.MilvusClient.Search(ctx, searchReq)
+	checkFunc := func(data int) error {
+		if data < start || data > start+rowNum {
+			return errors.New("upsert check pk fail")
+		}
+		return nil
+	}
+	for _, id := range searchResult.Results.Ids.GetIntId().GetData() {
+		s.NoError(checkFunc(int(id)))
+	}
+	for _, data := range searchResult.Results.FieldsData[0].GetScalars().GetLongData().GetData() {
+		s.NoError(checkFunc(int(data)))
+	}
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -154,56 +159,30 @@ func (s *RangeSearchSuite) TestRangeSearchIP() {
 	}
 	s.NoError(err)
 
-	// pass in radius and range_filter when range search
-	params["range_filter"] = filter
-	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
-
-	searchResult, _ = c.Proxy.Search(ctx, searchReq)
-
-	err = merr.Error(searchResult.GetStatus())
-	if err != nil {
-		log.Warn("searchResult fail reason", zap.Error(err))
-	}
-	s.NoError(err)
-
-	// pass in illegal radius and range_filter when range search
-	params["radius"] = filter
-	params["range_filter"] = radius
-	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
-
-	searchResult, _ = c.Proxy.Search(ctx, searchReq)
-
-	err = merr.Error(searchResult.GetStatus())
-	if err != nil {
-		log.Warn("searchResult fail reason", zap.Error(err))
-	}
-	s.Error(err)
-
-	log.Info("=========================")
-	log.Info("=========================")
-	log.Info("TestRangeSearchIP succeed")
-	log.Info("=========================")
-	log.Info("=========================")
+	log.Info("===========================")
+	log.Info("===========================")
+	log.Info("TestUpsertAutoIDFalse succeed")
+	log.Info("===========================")
+	log.Info("===========================")
 }
 
-func (s *RangeSearchSuite) TestRangeSearchL2() {
+func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	prefix := "TestRangeSearchL2"
+	prefix := "TestUpsert"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	dim := 128
 	rowNum := 3000
+	start := 0
 
 	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -217,25 +196,26 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
+	pkFieldData := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, 0)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	upsertResult, err := c.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
+		FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
 	s.NoError(err)
-	s.True(merr.Ok(insertResult.GetStatus()))
+	s.True(merr.Ok(upsertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -248,7 +228,7 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -256,21 +236,22 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.IP),
 	})
 	s.NoError(err)
 	err = merr.Error(createIndexStatus)
 	if err != nil {
 		log.Warn("createIndexStatus fail reason", zap.Error(err))
 	}
+
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -285,16 +266,24 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	nq := 10
 	topk := 10
 	roundDecimal := -1
-	radius := 20
-	filter := 10
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
-	// only pass in radius when range search
-	params["radius"] = radius
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ := c.Proxy.Search(ctx, searchReq)
+	searchResult, _ := c.MilvusClient.Search(ctx, searchReq)
+	checkFunc := func(data int) error {
+		if data >= start && data <= start+rowNum {
+			return errors.New("upsert check pk fail")
+		}
+		return nil
+	}
+	for _, id := range searchResult.Results.Ids.GetIntId().GetData() {
+		s.NoError(checkFunc(int(id)))
+	}
+	for _, data := range searchResult.Results.FieldsData[0].GetScalars().GetLongData().GetData() {
+		s.NoError(checkFunc(int(data)))
+	}
 
 	err = merr.Error(searchResult.GetStatus())
 	if err != nil {
@@ -302,40 +291,9 @@ func (s *RangeSearchSuite) TestRangeSearchL2() {
 	}
 	s.NoError(err)
 
-	// pass in radius and range_filter when range search
-	params["range_filter"] = filter
-	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
-
-	searchResult, _ = c.Proxy.Search(ctx, searchReq)
-
-	err = merr.Error(searchResult.GetStatus())
-	if err != nil {
-		log.Warn("searchResult fail reason", zap.Error(err))
-	}
-	s.NoError(err)
-
-	// pass in illegal radius and range_filter when range search
-	params["radius"] = filter
-	params["range_filter"] = radius
-	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
-
-	searchResult, _ = c.Proxy.Search(ctx, searchReq)
-
-	err = merr.Error(searchResult.GetStatus())
-	if err != nil {
-		log.Warn("searchResult fail reason", zap.Error(err))
-	}
-	s.Error(err)
-
-	log.Info("=========================")
-	log.Info("=========================")
-	log.Info("TestRangeSearchL2 succeed")
-	log.Info("=========================")
-	log.Info("=========================")
-}
-
-func TestRangeSearch(t *testing.T) {
-	suite.Run(t, new(RangeSearchSuite))
+	log.Info("===========================")
+	log.Info("===========================")
+	log.Info("TestUpsertAutoIDTrue succeed")
+	log.Info("===========================")
+	log.Info("===========================")
 }
