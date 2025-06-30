@@ -549,7 +549,7 @@ func (mr *MilvusRoles) Run() {
 	<-mr.closed
 
 	// stop coordinators first
-	coordinators := []component{rootCoord, dataCoord, indexCoord, queryCoord}
+	coordinators := []component{dataCoord, indexCoord, queryCoord, rootCoord}
 	for idx, coord := range coordinators {
 		log.Warn("stop processing")
 		if coord != nil {
