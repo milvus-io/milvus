@@ -147,7 +147,30 @@ func (lb *LBPolicyImpl) selectNode(ctx context.Context, balancer LBBalancer, wor
 			return nodeInfo{}, err
 		}
 
-		availableNodes = filterDelegator(shardLeaders[workload.channel])
+		channelShardLeaders, ok := shardLeaders[workload.channel]
+		if !ok {
+			log.Warn("no shard leader found for channel",
+				zap.Int64("collectionID", workload.collectionID),
+				zap.String("channelName", workload.channel))
+			return nodeInfo{}, merr.WrapErrChannelNotAvailable("no available shard delegator found")
+		}
+		// if all available delegator has been excluded even after refresh shard leader cache
+		// we should clear excludeNodes and try to select node again instead of failing the request at selectNode
+		if len(channelShardLeaders) > 0 && len(channelShardLeaders) <= excludeNodes.Len() {
+			allReplicaExcluded := true
+			for _, node := range channelShardLeaders {
+				if !excludeNodes.Contain(node.nodeID) {
+					allReplicaExcluded = false
+					break
+				}
+			}
+			if allReplicaExcluded {
+				log.Warn("all replicas are excluded after refresh shard leader cache, clear it and try to select node")
+				excludeNodes.Clear()
+			}
+		}
+
+		availableNodes = filterDelegator(channelShardLeaders)
 		if len(availableNodes) == 0 {
 			log.Warn("no available shard delegator found",
 				zap.Int64("collectionID", workload.collectionID),
