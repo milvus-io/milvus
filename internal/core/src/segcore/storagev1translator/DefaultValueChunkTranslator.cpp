@@ -36,6 +36,11 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
             /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);
+    virtual_chunk_config(field_data_info.row_count,
+                         1,
+                         meta_.num_rows_until_chunk_,
+                         meta_.virt_chunk_order_,
+                         meta_.vcid_to_cid_arr_);
 }
 
 DefaultValueChunkTranslator::~DefaultValueChunkTranslator() {

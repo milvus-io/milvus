@@ -27,6 +27,46 @@
 
 namespace milvus::segcore::storagev1translator {
 
+void
+virtual_chunk_config(int64_t total_row_count,
+                     int64_t nr_chunks,
+                     const std::vector<int64_t>& num_rows_until_chunk,
+                     int64_t& virt_chunk_order,
+                     std::vector<int64_t>& vcid_to_cid_arr) {
+    // if there is no chunks, just use a single virtual chunk
+    if (nr_chunks == 0) {
+        virt_chunk_order = 0;
+        vcid_to_cid_arr.resize(1);
+        vcid_to_cid_arr[0] = 0;
+        return;
+    }
+
+    // simply assume `avg_num_rows_per_chunk` is far less than 2^64, even far less than 2^32
+    auto avg_num_rows_per_chunk = total_row_count / nr_chunks;
+    virt_chunk_order = 0;
+    while (avg_num_rows_per_chunk >= 2 * (1 << virt_chunk_order)) {
+        virt_chunk_order++;
+    }
+    auto num_rows_per_virt_chunk = 1 << virt_chunk_order;
+    auto nr_virt_chunks = total_row_count / num_rows_per_virt_chunk;
+    if (total_row_count % num_rows_per_virt_chunk != 0) {
+        ++nr_virt_chunks;
+    }
+    vcid_to_cid_arr.resize(nr_virt_chunks);
+    size_t cid = 0;
+    for (size_t i = 0; i < vcid_to_cid_arr.size(); i++) {
+        // svc is the start row of the virtual chunk, it must be less than `total_row_count`
+        int64_t svc = i * num_rows_per_virt_chunk;
+        // find the first cid whose end row is greater than svc
+        // cid will not be out of range, because svc is always less than `total_row_count`
+        // and the last item of `num_rows_until_chunk` is `total_row_count`
+        while (svc >= num_rows_until_chunk[cid + 1]) {
+            ++cid;
+        }
+        vcid_to_cid_arr[i] = cid;
+    }
+}
+
 ChunkTranslator::ChunkTranslator(
     int64_t segment_id,
     FieldMeta field_meta,
@@ -63,6 +103,11 @@ ChunkTranslator::ChunkTranslator(
                            field_data_info.field_id,
                            meta_.num_rows_until_chunk_.back(),
                            field_data_info.row_count));
+    virtual_chunk_config(field_data_info.row_count,
+                         files_and_rows_.size(),
+                         meta_.num_rows_until_chunk_,
+                         meta_.virt_chunk_order_,
+                         meta_.vcid_to_cid_arr_);
 }
 
 size_t

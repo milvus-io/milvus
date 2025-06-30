@@ -45,6 +45,10 @@ using namespace milvus::cachinglayer;
 
 std::pair<size_t, size_t> inline GetChunkIDByOffset(
     int64_t offset, const std::vector<int64_t>& num_rows_until_chunk) {
+    // optimize for single chunk case
+    if (num_rows_until_chunk.size() == 2) {
+        return {0, offset};
+    }
     auto iter = std::lower_bound(
         num_rows_until_chunk.begin(), num_rows_until_chunk.end(), offset + 1);
     size_t chunk_idx = std::distance(num_rows_until_chunk.begin(), iter) - 1;
@@ -75,6 +79,38 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
         offsets_in_chunk[i] = offsets[i] - num_rows_until_chunk[--cids[i]];
     }
 
+    return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+}
+
+std::pair<std::vector<milvus::cachinglayer::cid_t>,
+          std::vector<
+              int64_t>> inline GetChunkIDsByOffsets(const int64_t* offsets,
+                                                    int64_t count,
+                                                    const std::vector<int64_t>&
+                                                        num_rows_until_chunk,
+                                                    int64_t virt_chunk_order,
+                                                    const std::vector<int64_t>&
+                                                        vcid_to_cid_arr) {
+    std::vector<milvus::cachinglayer::cid_t> cids(count, 0);
+    std::vector<int64_t> offsets_in_chunk(count);
+    // optimize for single chunk case
+    if (num_rows_until_chunk.size() == 2) {
+        for (int64_t i = 0; i < count; i++) {
+            offsets_in_chunk[i] = offsets[i];
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    }
+    for (int64_t i = 0; i < count; i++) {
+        auto offset = offsets[i];
+        auto vcid = offset >> virt_chunk_order;
+        auto scid = vcid_to_cid_arr[vcid];
+        while (scid < num_rows_until_chunk.size() - 1 && offset >= num_rows_until_chunk[scid + 1]) {
+            scid++;
+        }
+        auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+        cids[i] = scid;
+        offsets_in_chunk[i] = offset_in_chunk;
+    }
     return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
 }
 
@@ -256,8 +292,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
         auto& num_rows_until_chunk = GetNumRowsUntilChunk();
+        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(slot_->meta());
+        auto& virt_chunk_order = meta->virt_chunk_order_;
+        auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
         return ::milvus::GetChunkIDsByOffsets(
-            offsets, count, num_rows_until_chunk);
+            offsets, count, num_rows_until_chunk, virt_chunk_order, vcid_to_cid_arr);
     }
 
     PinWrapper<Chunk*>
