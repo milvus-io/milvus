@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -640,11 +641,24 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		}()
 	}
 
-	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
-	log.Debug("query segments...",
-		zap.Int("sealedNum", sealedNum),
-		zap.Int("growingNum", len(growing)),
-	)
+	if log.Core().Enabled(zap.DebugLevel) {
+		sealedIDs := lo.FlatMap(sealed, func(item SnapshotItem, _ int) []int64 {
+			return lo.Map(item.Segments, func(segment SegmentEntry, _ int) int64 {
+				return segment.SegmentID
+			})
+		})
+		slices.Sort(sealedIDs)
+		growingIDs := lo.Map(growing, func(item SegmentEntry, _ int) int64 {
+			return item.SegmentID
+		})
+		slices.Sort(growingIDs)
+		log.Debug("query segments...",
+			zap.Int64s("sealedIDs", sealedIDs),
+			zap.Int64s("growingIDs", growingIDs),
+			zap.Int64("targetVersion", sd.distribution.queryView.version),
+		)
+	}
+
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
 	if err != nil {
 		log.Warn("query organizeSubTask failed", zap.Error(err))
