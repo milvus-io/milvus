@@ -210,6 +210,49 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 }
 
 func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb.PlanNode {
+	pkTermExpr, size := createPkTermExpr(pkField, ids)
+
+	return &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: pkTermExpr,
+				},
+				IsCount: false,
+				Limit:   int64(size),
+			},
+		},
+	}
+}
+
+func CreateRequeryPlanWithPartitionKeys(pkField *schemapb.FieldSchema, ids *schemapb.IDs, partitionKeyField *schemapb.FieldSchema, partKeyValues []*planpb.GenericValue) *planpb.PlanNode {
+	pkTermExpr, size := createPkTermExpr(pkField, ids)
+	partKeyTermExpr := createFieldTermExpr(partitionKeyField, partKeyValues)
+
+	return &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: &planpb.Expr{
+					Expr: &planpb.Expr_BinaryExpr{
+						BinaryExpr: &planpb.BinaryExpr{
+							Left: &planpb.Expr{
+								Expr: pkTermExpr,
+							},
+							Right: &planpb.Expr{
+								Expr: partKeyTermExpr,
+							},
+							Op: planpb.BinaryExpr_LogicalAnd,
+						},
+					},
+				},
+				IsCount: false,
+				Limit:   int64(size),
+			},
+		},
+	}
+}
+
+func createPkTermExpr(pkField *schemapb.FieldSchema, ids *schemapb.IDs) (*planpb.Expr_TermExpr, int) {
 	var values []*planpb.GenericValue
 	switch ids.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
@@ -230,26 +273,31 @@ func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb
 		})
 	}
 
-	return &planpb.PlanNode{
-		Node: &planpb.PlanNode_Query{
-			Query: &planpb.QueryPlanNode{
-				Predicates: &planpb.Expr{
-					Expr: &planpb.Expr_TermExpr{
-						TermExpr: &planpb.TermExpr{
-							ColumnInfo: &planpb.ColumnInfo{
-								FieldId:        pkField.GetFieldID(),
-								DataType:       pkField.GetDataType(),
-								IsPrimaryKey:   true,
-								IsAutoID:       pkField.GetAutoID(),
-								IsPartitionKey: pkField.GetIsPartitionKey(),
-							},
-							Values: values,
-						},
-					},
-				},
-				IsCount: false,
-				Limit:   int64(len(values)),
+	return &planpb.Expr_TermExpr{
+		TermExpr: &planpb.TermExpr{
+			ColumnInfo: &planpb.ColumnInfo{
+				FieldId:        pkField.GetFieldID(),
+				DataType:       pkField.GetDataType(),
+				IsPrimaryKey:   true,
+				IsAutoID:       pkField.GetAutoID(),
+				IsPartitionKey: pkField.GetIsPartitionKey(),
 			},
+			Values: values,
+		},
+	}, len(values)
+}
+
+func createFieldTermExpr(field *schemapb.FieldSchema, values []*planpb.GenericValue) *planpb.Expr_TermExpr {
+	return &planpb.Expr_TermExpr{
+		TermExpr: &planpb.TermExpr{
+			ColumnInfo: &planpb.ColumnInfo{
+				FieldId:        field.GetFieldID(),
+				DataType:       field.GetDataType(),
+				IsPrimaryKey:   field.GetIsPrimaryKey(),
+				IsAutoID:       field.GetAutoID(),
+				IsPartitionKey: field.GetIsPartitionKey(),
+			},
+			Values: values,
 		},
 	}
 }
