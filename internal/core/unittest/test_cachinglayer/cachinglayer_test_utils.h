@@ -51,6 +51,12 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
             total_rows += num_rows_per_chunk[i];
         }
         key_ = key;
+        segcore::storagev1translator::virtual_chunk_config(
+            total_rows,
+            num_cells_,
+            meta_.num_rows_until_chunk_,
+            meta_.virt_chunk_order_,
+            meta_.vcid_to_cid_arr_);
     }
     ~TestChunkTranslator() override {
     }
