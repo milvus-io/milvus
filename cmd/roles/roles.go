@@ -359,8 +359,11 @@ func (mr *MilvusRoles) Run() {
 	tracer.Init()
 
 	// Initialize streaming service if enabled.
-	streaming.Init()
-	defer streaming.Release()
+
+	if !mr.EnableDataNode {
+		streaming.Init()
+		defer streaming.Release()
+	}
 
 	enableComponents := []bool{
 		mr.EnableProxy,
