@@ -1221,7 +1221,7 @@ class SegmentExpr : public Expr {
 
         // return batch size, not sure if we should use the data position.
         auto real_batch_size =
-            current_data_chunk_pos_ + batch_size_ > active_count_
+            (current_data_chunk_pos_ + batch_size_ > active_count_)
                 ? active_count_ - current_data_chunk_pos_
                 : batch_size_;
         result.append(

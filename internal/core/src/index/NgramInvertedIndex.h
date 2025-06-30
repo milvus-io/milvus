@@ -16,11 +16,9 @@
 
 #include "index/InvertedIndexTantivy.h"
 
-namespace milvus {
-namespace exec {
+namespace milvus::exec {
 class SegmentExpr;
-}
-}  // namespace milvus
+}  // namespace milvus::exec
 
 namespace milvus::index {
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
@@ -28,9 +26,6 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     explicit NgramInvertedIndex(const storage::FileManagerContext& ctx,
                                 const NgramParams& params);
 
-    ~NgramInvertedIndex() override {};
-
- public:
     IndexStatsPtr
     Upload(const Config& config = {}) override;
 

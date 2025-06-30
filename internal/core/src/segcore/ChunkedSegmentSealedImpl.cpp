@@ -173,13 +173,15 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         index.nested_path = path;
         index.field_id = field_id;
         index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-        index.cast_type = JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+        index.cast_type =
+            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
         json_indices.push_back(std::move(index));
         return;
     }
 
-    if (info.index_params.find(index::INDEX_TYPE) != info.index_params.end() &&
-        info.index_params.at(index::INDEX_TYPE) == index::NGRAM_INDEX_TYPE) {
+    if (auto it = info.index_params.find(index::INDEX_TYPE);
+        it != info.index_params.end() &&
+        it->second == index::NGRAM_INDEX_TYPE) {
         ngram_indexings_[field_id] =
             std::move(const_cast<LoadIndexInfo&>(info).cache_index);
     } else {

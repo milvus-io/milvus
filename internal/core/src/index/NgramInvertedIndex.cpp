@@ -66,10 +66,13 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                "index file paths is empty when load ngram index");
 
     auto files_value = index_files.value();
+    static const std::string suffix = "/index_null_offset";
     auto it = std::find_if(
-        files_value.begin(), files_value.end(), [](const std::string& file) {
-            return file.substr(file.find_last_of('/') + 1) ==
-                   "index_null_offset";
+        files_value.begin(),
+        files_value.end(),
+        [suffix](const std::string& file) {
+            return file.size() >= suffix.size() &&
+                   std::equal(suffix.rbegin(), suffix.rend(), file.rbegin());
         });
     if (it != files_value.end()) {
         std::vector<std::string> file;

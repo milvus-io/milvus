@@ -1961,9 +1961,10 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         cached_index_chunk_valid_res_ = std::move(valid_res);
     }
 
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size =
+        (current_data_chunk_pos_ + batch_size_ > active_count_)
+            ? active_count_ - current_data_chunk_pos_
+            : batch_size_;
     result.append(
         *cached_ngram_match_res_, current_data_chunk_pos_, real_batch_size);
     valid_result.append(cached_index_chunk_valid_res_,
