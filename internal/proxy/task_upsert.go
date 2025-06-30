@@ -205,10 +205,20 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	}
 
+	err := checkAndFlattenStructFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	if err != nil {
+		return err
+	}
+
+	allFields := make([]*schemapb.FieldSchema, 0, len(it.schema.Fields)+5)
+	allFields = append(allFields, it.schema.Fields...)
+	for _, structField := range it.schema.GetStructArrayFields() {
+		allFields = append(allFields, structField.GetFields()...)
+	}
+
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true
-	var err error
-	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	it.result.IDs, it.oldIDs, err = checkUpsertPrimaryFieldData(allFields, it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.upsertMsg.InsertMsg.CollectionName))
 	if err != nil {
 		log.Warn("check primary field data and hash primary key failed when upsert",
@@ -217,7 +227,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	// check varchar/text with analyzer was utf-8 format
-	err = checkInputUtf8Compatiable(it.schema.CollectionSchema, it.upsertMsg.InsertMsg)
+	err = checkInputUtf8Compatiable(allFields, it.upsertMsg.InsertMsg)
 	if err != nil {
 		log.Warn("check varchar/text format failed", zap.Error(err))
 		return err

@@ -282,6 +282,11 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
 	} else {
 		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+		for _, structArrayField := range loadSchema.GetStructArrayFields() {
+			for _, subField := range structArrayField.GetFields() {
+				loadFieldIDs.Insert(subField.GetFieldID())
+			}
+		}
 	}
 
 	isGpuIndex := false

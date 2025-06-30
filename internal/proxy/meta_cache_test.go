@@ -1918,6 +1918,30 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 		IsClusteringKey: true,
 	}
 
+	subIntField := &schemapb.FieldSchema{
+		FieldID:     common.StartOfUserFieldID + 7,
+		Name:        "sub_int",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int32,
+	}
+	subFloatVectorField := &schemapb.FieldSchema{
+		FieldID:     common.StartOfUserFieldID + 8,
+		Name:        "sub_float_vector",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "768"},
+		},
+	}
+	structArrayField := &schemapb.StructArrayFieldSchema{
+		FieldID: common.StartOfUserFieldID + 6,
+		Name:    "struct_array",
+		Fields: []*schemapb.FieldSchema{
+			subIntField,
+			subFloatVectorField,
+		},
+	}
+
 	testCases := []testCase{
 		{
 			tag: "default",
@@ -2075,6 +2099,72 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 			},
 			loadFields: []string{"pk", "part_key", "vector"},
 			expectErr:  true,
+		},
+		{
+			tag: "struct_array_field_default",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					clusteringKeyField,
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					structArrayField,
+				},
+			},
+			loadFields:       nil,
+			skipDynamicField: false,
+			expectResult:     []int64{},
+			expectErr:        false,
+		},
+		{
+			tag: "load_struct_array_field",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					clusteringKeyField,
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					structArrayField,
+				},
+			},
+			loadFields:       []string{"pk", "part_key", "clustering_key", "struct_array"},
+			skipDynamicField: false,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 5, common.StartOfUserFieldID + 7, common.StartOfUserFieldID + 8},
+			expectErr:        false,
+		},
+		{
+			tag: "load_struct_array_field_with_vector",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					vectorField,
+					clusteringKeyField,
+				},
+				StructArrayFields: []*schemapb.StructArrayFieldSchema{
+					structArrayField,
+				},
+			},
+			loadFields:       []string{"pk", "part_key", "clustering_key", "vector", "struct_array"},
+			skipDynamicField: false,
+			expectResult:     []int64{common.StartOfUserFieldID, common.StartOfUserFieldID + 2, common.StartOfUserFieldID + 3, common.StartOfUserFieldID + 5, common.StartOfUserFieldID + 7, common.StartOfUserFieldID + 8},
+			expectErr:        false,
 		},
 	}
 
