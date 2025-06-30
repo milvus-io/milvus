@@ -19,7 +19,6 @@ package balance
 import (
 	"context"
 	"fmt"
-	"path"
 	"strings"
 	"sync"
 	"testing"
@@ -35,10 +34,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
 const (
@@ -49,65 +48,32 @@ const (
 
 type LoadTestSuite struct {
 	integration.MiniClusterSuite
+
+	rgs []string
 }
 
 func (s *LoadTestSuite) SetupSuite() {
-	s.Require().NoError(s.SetupEmbedEtcd())
+	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "16")
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "100")
+	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.CheckNodeInReplicaInterval.Key, "1")
 
-	// setup mini cluster to use embed etcd
-	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)
-	val := strings.Join(endpoints, ",")
-	// setup env value to init etcd source
-	s.T().Setenv("etcd.endpoints", val)
-
-	for key, value := range integration.DefaultParams() {
-		s.T().Setenv(key, value)
-	}
-
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CheckNodeInReplicaInterval.Key, "5")
+	s.WithOptions(integration.WithDropAllCollectionsWhenTestTearDown())
+	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
+	s.MiniClusterSuite.SetupSuite()
+	// setup resource group
+	s.initResourceGroup()
 }
 
-func (s *LoadTestSuite) loadCollection(collectionName string, db string, replica int, rgs []string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		DbName:         db,
-		CollectionName: collectionName,
-		ReplicaNumber:  int32(replica),
-		ResourceGroups: rgs,
-	})
-	s.NoError(err)
-	s.True(merr.Ok(loadStatus))
-	s.WaitForLoadWithDB(ctx, db, collectionName)
-}
-
-func (s *LoadTestSuite) releaseCollection(db, collectionName string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// load
-	status, err := s.Cluster.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
-		DbName:         db,
-		CollectionName: collectionName,
-	})
-	s.NoError(err)
-	s.True(merr.Ok(status))
-}
-
-func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
-	ctx := context.Background()
+func (s *LoadTestSuite) initResourceGroup() {
+	ctx := s.Cluster.GetContext()
 
 	// prepare resource groups
 	rgNum := 5
 	rgs := make([]string, 0)
 	for i := 0; i < rgNum; i++ {
 		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		s.Cluster.MixCoordClient.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgs[i],
 			Config: &rgpb.ResourceGroupConfig{
 				Requests: &rgpb.ResourceGroupLimit{
@@ -131,19 +97,27 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		})
 	}
 
-	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoordClient.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
 
+	// global 6 qn for every resource group.
+	for i := 0; i < rgNum; i++ {
+		qn := s.Cluster.AddQueryNode(cluster.WithoutWaitForReady())
+		defer qn.MustWaitForReady(s.Cluster.GetContext())
+	}
+
+	// because of the sn didn't manage by rg, so we keep global 5 sn.
 	for i := 1; i < rgNum; i++ {
-		s.Cluster.AddQueryNode()
+		sn := s.Cluster.AddStreamingNode(cluster.WithoutWaitForReady())
+		defer sn.MustWaitForReady(s.Cluster.GetContext())
 	}
 
 	s.Eventually(func() bool {
 		matchCounter := 0
 		for _, rg := range rgs {
-			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+			resp1, err := s.Cluster.MixCoordClient.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 				ResourceGroup: rg,
 			})
 			s.NoError(err)
@@ -154,7 +128,42 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 		}
 		return matchCounter == rgNum
 	}, 30*time.Second, time.Second)
+	s.rgs = rgs
+}
 
+func (s *LoadTestSuite) loadCollection(collectionName string, db string, replica int, rgs []string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// load
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         db,
+		CollectionName: collectionName,
+		ReplicaNumber:  int32(replica),
+		ResourceGroups: rgs,
+	})
+	if err = merr.CheckRPCCall(loadStatus, err); err != nil {
+		panic(err)
+	}
+	s.WaitForLoadWithDB(ctx, db, collectionName)
+}
+
+func (s *LoadTestSuite) releaseCollection(db, collectionName string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// load
+	status, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+		DbName:         db,
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(status))
+}
+
+func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
+	ctx := context.Background()
+	rgs := s.rgs
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
 		Dim:              dim,
@@ -168,7 +177,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 
 	// load collection without specified replica and rgs
 	s.loadCollection(collectionName, dbName, 0, nil)
-	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+	resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -177,7 +186,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 	s.Len(resp2.GetReplicas(), 3)
 
 	// modify config, increase replica number
-	resp3, err := s.Cluster.Proxy.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+	resp3, err := s.Cluster.MilvusClient.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{
@@ -193,7 +202,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 	s.NoError(err)
 	s.True(merr.Ok(resp3))
 	s.Eventually(func() bool {
-		resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			CollectionName: collectionName,
 		})
 		s.NoError(err)
@@ -202,7 +211,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 	}, 30*time.Second, time.Second)
 
 	// modify config, decrease replica number
-	resp4, err := s.Cluster.Proxy.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+	resp4, err := s.Cluster.MilvusClient.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		CollectionName: collectionName,
 		Properties: []*commonpb.KeyValuePair{
 			{
@@ -218,11 +227,12 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 	s.NoError(err)
 	s.True(merr.Ok(resp4))
 	s.Eventually(func() bool {
-		resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			CollectionName: collectionName,
 		})
 		s.NoError(err)
 		s.True(merr.Ok(resp2.Status))
+		log.Info("get replicas", zap.Any("replicas", resp2.GetReplicas()))
 		return len(resp2.GetReplicas()) == 2
 	}, 30*time.Second, time.Second)
 
@@ -231,62 +241,10 @@ func (s *LoadTestSuite) TestLoadWithPredefineCollectionLevelConfig() {
 
 func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	ctx := context.Background()
-
-	// prepare resource groups
-	rgNum := 5
-	rgs := make([]string, 0)
-	for i := 0; i < rgNum; i++ {
-		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-			ResourceGroup: rgs[i],
-			Config: &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-
-				TransferFrom: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-				TransferTo: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-			},
-		})
-	}
-
-	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp.GetStatus()))
-	s.Len(resp.GetResourceGroups(), rgNum+1)
-
-	for i := 1; i < rgNum; i++ {
-		s.Cluster.AddQueryNode()
-	}
-
-	s.Eventually(func() bool {
-		matchCounter := 0
-		for _, rg := range rgs {
-			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
-				ResourceGroup: rg,
-			})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			if len(resp1.ResourceGroup.Nodes) == 1 {
-				matchCounter += 1
-			}
-		}
-		return matchCounter == rgNum
-	}, 30*time.Second, time.Second)
+	rgs := s.rgs
 
 	newDbName := "db_load_test_with_db_level_config"
-	resp1, err := s.Cluster.Proxy.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+	resp1, err := s.Cluster.MilvusClient.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: newDbName,
 		Properties: []*commonpb.KeyValuePair{
 			{
@@ -313,7 +271,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 
 	// load collection without specified replica and rgs
 	s.loadCollection(collectionName, newDbName, 0, nil)
-	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+	resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         newDbName,
 		CollectionName: collectionName,
 	})
@@ -322,7 +280,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	s.Len(resp2.GetReplicas(), 3)
 
 	// modify config, increase replica number
-	resp3, err := s.Cluster.Proxy.AlterDatabase(ctx, &milvuspb.AlterDatabaseRequest{
+	resp3, err := s.Cluster.MilvusClient.AlterDatabase(ctx, &milvuspb.AlterDatabaseRequest{
 		DbName: newDbName,
 		Properties: []*commonpb.KeyValuePair{
 			{
@@ -338,7 +296,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	s.NoError(err)
 	s.True(merr.Ok(resp3))
 	s.Eventually(func() bool {
-		resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         newDbName,
 			CollectionName: collectionName,
 		})
@@ -348,7 +306,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	}, 30*time.Second, time.Second)
 
 	// modify config, decrease replica number
-	resp4, err := s.Cluster.Proxy.AlterDatabase(ctx, &milvuspb.AlterDatabaseRequest{
+	resp4, err := s.Cluster.MilvusClient.AlterDatabase(ctx, &milvuspb.AlterDatabaseRequest{
 		DbName: newDbName,
 		Properties: []*commonpb.KeyValuePair{
 			{
@@ -364,7 +322,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 	s.NoError(err)
 	s.True(merr.Ok(resp4))
 	s.Eventually(func() bool {
-		resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         newDbName,
 			CollectionName: collectionName,
 		})
@@ -378,59 +336,7 @@ func (s *LoadTestSuite) TestLoadWithPredefineDatabaseLevelConfig() {
 
 func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 	ctx := context.Background()
-
-	// prepare resource groups
-	rgNum := 5
-	rgs := make([]string, 0)
-	for i := 0; i < rgNum; i++ {
-		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-			ResourceGroup: rgs[i],
-			Config: &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-
-				TransferFrom: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-				TransferTo: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-			},
-		})
-	}
-
-	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp.GetStatus()))
-	s.Len(resp.GetResourceGroups(), rgNum+1)
-
-	for i := 1; i < rgNum; i++ {
-		s.Cluster.AddQueryNode()
-	}
-
-	s.Eventually(func() bool {
-		matchCounter := 0
-		for _, rg := range rgs {
-			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
-				ResourceGroup: rg,
-			})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			if len(resp1.ResourceGroup.Nodes) == 1 {
-				matchCounter += 1
-			}
-		}
-		return matchCounter == rgNum
-	}, 30*time.Second, time.Second)
+	rgs := s.rgs
 
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
@@ -440,12 +346,15 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 		SegmentNum:       3,
 		RowNumPerSegment: 2000,
 	})
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "3")
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, strings.Join(rgs[:3], ","))
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key:  "3",
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key: strings.Join(rgs[:3], ","),
+	})
+	defer revertGuard()
 
 	// load collection without specified replica and rgs
 	s.loadCollection(collectionName, dbName, 0, nil)
-	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+	resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -453,17 +362,14 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 	s.True(merr.Ok(resp2.Status))
 	s.Len(resp2.GetReplicas(), 3)
 
-	paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
-	paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
-
+	revertGuard()
+	revertGuard = s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key:  "5",
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key: strings.Join(rgs, ","),
+	})
 	// modify load config, increase replicas
-	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)
-	configPrefix := path.Join(paramtable.Get().EtcdCfg.RootPath.GetValue(), "config")
-	log.Info("endpoints", zap.Strings("endpoints", endpoints), zap.String("configPrefix", configPrefix))
-	s.Cluster.EtcdCli.Put(ctx, path.Join(configPrefix, paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key), "5")
-	s.Cluster.EtcdCli.Put(ctx, path.Join(configPrefix, paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key), strings.Join(rgs, ","))
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -472,13 +378,16 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 		return len(resp3.GetReplicas()) == 5
 	}, 30*time.Second, 1*time.Second)
 
+	revertGuard()
+	revertGuard = s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key:  "2",
+		paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key: strings.Join(rgs[:2], ","),
+	})
+	defer revertGuard()
+
 	// modify load config, decrease replicas
-	endpoints = etcd.GetEmbedEtcdEndpoints(s.EtcdServer)
-	log.Info("endpoints", zap.Strings("endpoints", endpoints), zap.String("configPrefix", configPrefix))
-	s.Cluster.EtcdCli.Put(ctx, path.Join(configPrefix, paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key), "2")
-	s.Cluster.EtcdCli.Put(ctx, path.Join(configPrefix, paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key), strings.Join(rgs[:2], ","))
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -492,6 +401,8 @@ func (s *LoadTestSuite) TestLoadWithPredefineClusterLevelConfig() {
 
 func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 	ctx := context.Background()
+	rgs := s.rgs
+
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
 		Dim:              dim,
@@ -501,64 +412,9 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		RowNumPerSegment: 2000,
 	})
 
-	// prepare resource groups
-	rgNum := 5
-	rgs := make([]string, 0)
-	for i := 0; i < rgNum; i++ {
-		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-			ResourceGroup: rgs[i],
-			Config: &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-
-				TransferFrom: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-				TransferTo: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-			},
-		})
-	}
-
-	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp.GetStatus()))
-	s.Len(resp.GetResourceGroups(), rgNum+1)
-
-	for i := 1; i < rgNum; i++ {
-		s.Cluster.AddQueryNode()
-	}
-
-	nodesInRG := make(map[string][]int64)
-	s.Eventually(func() bool {
-		matchCounter := 0
-		for _, rg := range rgs {
-			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
-				ResourceGroup: rg,
-			})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			if len(resp1.ResourceGroup.Nodes) == 1 {
-				matchCounter += 1
-				nodesInRG[rg] = []int64{resp1.ResourceGroup.Nodes[0].NodeId}
-			}
-		}
-		return matchCounter == rgNum
-	}, 30*time.Second, time.Second)
-
 	// load collection
 	s.loadCollection(collectionName, dbName, 5, rgs)
-	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+	resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -569,7 +425,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 	// test load collection with dynamic update
 	s.loadCollection(collectionName, dbName, 3, rgs[:3])
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -580,7 +436,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 
 	s.Eventually(func() bool {
 		segmentNum, channelNum := 0, 0
-		for _, qn := range s.Cluster.GetAllQueryNodes() {
+		for _, qn := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
 			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp.Status))
@@ -592,7 +448,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 
 	s.loadCollection(collectionName, dbName, 2, rgs[3:])
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -603,7 +459,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 
 	s.Eventually(func() bool {
 		segmentNum, channelNum := 0, 0
-		for _, qn := range s.Cluster.GetAllQueryNodes() {
+		for _, qn := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
 			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp.Status))
@@ -616,7 +472,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 	// test load collection with dynamic update
 	s.loadCollection(collectionName, dbName, 5, rgs)
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -630,6 +486,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 
 func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithoutRG() {
 	ctx := context.Background()
+
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
 		Dim:              dim,
@@ -641,12 +498,21 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithoutRG() {
 
 	// prepare resource groups
 	for i := 1; i < 5; i++ {
-		s.Cluster.AddQueryNode()
+		qn := s.Cluster.AddQueryNode(cluster.WithoutWaitForReady())
+		defer qn.Stop(10 * time.Second)
 	}
+	s.Eventually(func() bool {
+		resp, err := s.Cluster.MilvusClient.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{
+			ResourceGroup: "__default_resource_group",
+		})
+		s.NoError(err)
+		s.True(merr.Ok(resp.Status))
+		return len(resp.ResourceGroup.Nodes) == 5
+	}, 30*time.Second, time.Second)
 
 	// load collection
 	s.loadCollection(collectionName, dbName, 5, nil)
-	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+	resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -657,7 +523,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithoutRG() {
 	// test load collection with dynamic update
 	s.loadCollection(collectionName, dbName, 3, nil)
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -669,7 +535,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithoutRG() {
 	// test load collection with dynamic update
 	s.loadCollection(collectionName, dbName, 5, nil)
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -683,6 +549,8 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithoutRG() {
 
 func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	ctx := context.Background()
+	rgs := s.rgs
+
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
 		Dim:              dim,
@@ -691,10 +559,9 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		SegmentNum:       3,
 		RowNumPerSegment: 2000,
 	})
-
 	// load collection
 	s.loadCollection(collectionName, dbName, 1, nil)
-	resp2, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+	resp2, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -702,66 +569,11 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.True(merr.Ok(resp2.Status))
 	s.Len(resp2.GetReplicas(), 1)
 
-	recycleRG := "__recycle_rg"
-	s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-		ResourceGroup: recycleRG,
-		Config: &rgpb.ResourceGroupConfig{
-			Requests: &rgpb.ResourceGroupLimit{
-				NodeNum: 0,
-			},
-			Limits: &rgpb.ResourceGroupLimit{
-				NodeNum: 100,
-			},
-		},
-	})
-	// prepare resource groups
-	rgNum := 5
-	rgs := make([]string, 0)
-	for i := 0; i < rgNum; i++ {
-		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-			ResourceGroup: rgs[i],
-			Config: &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				TransferFrom: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: recycleRG,
-					},
-				},
-				TransferTo: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: recycleRG,
-					},
-				},
-			},
-		})
-	}
-
-	s.Cluster.MixCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
-		ResourceGroups: map[string]*rgpb.ResourceGroupConfig{
-			meta.DefaultResourceGroupName: {
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-			},
-		},
-	})
-
-	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp.GetStatus()))
-	s.Len(resp.GetResourceGroups(), rgNum+2)
+	// Stop all query nodes to create a lack of node situation
+	s.Cluster.StopAllQueryNode()
 
 	// test load collection with dynamic update
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(3),
@@ -770,7 +582,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -779,7 +591,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		return len(resp3.GetReplicas()) == 3
 	}, 30*time.Second, 1*time.Second)
 
-	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(2),
@@ -788,7 +600,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -798,7 +610,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	}, 30*time.Second, 1*time.Second)
 
 	// test load collection with dynamic update
-	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(5),
@@ -807,7 +619,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -817,27 +629,12 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 	}, 30*time.Second, 1*time.Second)
 
 	// add qn back,  expect each replica has shard leaders
-	for i := 0; i < rgNum; i++ {
-		s.Cluster.AddQueryNode()
+	for i := 0; i < len(rgs)+1; i++ {
+		s.Cluster.AddQueryNode(cluster.WithoutWaitForReady())
 	}
 
 	s.Eventually(func() bool {
-		matchCounter := 0
-		for _, rg := range rgs {
-			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
-				ResourceGroup: rg,
-			})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			if len(resp1.ResourceGroup.Nodes) == 1 {
-				matchCounter += 1
-			}
-		}
-		return matchCounter == rgNum
-	}, 30*time.Second, time.Second)
-
-	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -845,7 +642,8 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithRGLackOfNode() {
 		s.True(merr.Ok(resp3.Status))
 		s.Equal(5, len(resp3.GetReplicas()))
 		for _, replica := range resp3.GetReplicas() {
-			if len(replica.GetNodeIds()) != 1 {
+			if len(replica.GetNodeIds()) != 2 { // one sn and one qn at least
+				log.Info("get replica info", zap.Any("replica", replica))
 				return false
 			}
 		}
@@ -866,63 +664,16 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 		RowNumPerSegment: 2000,
 	})
 
-	// prepare resource groups
-	rgNum := 10
-	rgs := make([]string, 0)
-	for i := 0; i < rgNum; i++ {
-		rgs = append(rgs, fmt.Sprintf("rg_%d", i))
-		s.Cluster.MixCoord.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
-			ResourceGroup: rgs[i],
-			Config: &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: 1,
-				},
+	rgs := s.rgs
+	rgNum := len(s.rgs)
 
-				TransferFrom: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-				TransferTo: []*rgpb.ResourceGroupTransfer{
-					{
-						ResourceGroup: meta.DefaultResourceGroupName,
-					},
-				},
-			},
-		})
-	}
-
-	resp, err := s.Cluster.MixCoord.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MixCoordClient.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.GetStatus()))
 	s.Len(resp.GetResourceGroups(), rgNum+1)
 
-	for i := 1; i < rgNum; i++ {
-		s.Cluster.AddQueryNode()
-	}
-
-	nodesInRG := make(map[string][]int64)
-	s.Eventually(func() bool {
-		matchCounter := 0
-		for _, rg := range rgs {
-			resp1, err := s.Cluster.MixCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
-				ResourceGroup: rg,
-			})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			if len(resp1.ResourceGroup.Nodes) == 1 {
-				matchCounter += 1
-				nodesInRG[rg] = []int64{resp1.ResourceGroup.Nodes[0].NodeId}
-			}
-		}
-		return matchCounter == rgNum
-	}, 30*time.Second, time.Second)
-
 	// trigger collection loading, and modify collection's load config during loading
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  1,
@@ -930,7 +681,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	})
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
-	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  3,
@@ -938,17 +689,17 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 	})
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
-	loadStatus, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  5,
-		ResourceGroups: rgs[4:9],
+		ResourceGroups: rgs,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(loadStatus))
 
 	s.Eventually(func() bool {
-		resp3, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp3, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -959,13 +710,14 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 
 	s.Eventually(func() bool {
 		segmentNum, channelNum := 0, 0
-		for _, qn := range s.Cluster.GetAllQueryNodes() {
+		for _, qn := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
 			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp.Status))
 			segmentNum += len(resp.Segments)
 			channelNum += len(resp.Channels)
 		}
+		log.Info("get data distribution", zap.Int("segmentNum", segmentNum), zap.Int("channelNum", channelNum))
 		return segmentNum == 5 && channelNum == 5
 	}, 30*time.Second, 1*time.Second)
 
@@ -1000,7 +752,7 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 				return
 			default:
 				s.InsertAndFlush(ctx, dbName, collName, 2000, dim)
-				_, err := s.Cluster.Proxy.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+				_, err := s.Cluster.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
 					CollectionName: collName,
 				})
 				s.NoError(err)
@@ -1016,7 +768,7 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 
 	// Verify the collection is loaded
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		resp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			CollectionNames: []string{collName},
 			Type:            milvuspb.ShowType_InMemory,
 		})
@@ -1032,7 +784,5 @@ func (s *LoadTestSuite) TestLoadWithCompact() {
 }
 
 func TestReplicas(t *testing.T) {
-	g := integration.WithoutStreamingService()
-	defer g()
 	suite.Run(t, new(LoadTestSuite))
 }

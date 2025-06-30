@@ -14,16 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package streaming
+package hellomilvus
 
 import (
 	"context"
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -39,19 +37,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type HelloStreamingSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *HelloStreamingSuite) SetupSuite() {
-	s.MiniClusterSuite.SetupSuite()
-}
-
-func (s *HelloStreamingSuite) TeardownSuite() {
-	s.MiniClusterSuite.TearDownSuite()
-}
-
-func (s *HelloStreamingSuite) TestHelloStreaming() {
+func (s *HelloMilvusSuite) TestHelloStreaming() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
@@ -73,7 +59,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.NoError(err)
 
 	// create collection
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
 		CollectionName:   collectionName,
 		Schema:           marshaledSchema,
@@ -85,7 +71,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 
 	// show collection
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -94,7 +80,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
@@ -106,7 +92,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.Equal(int64(rowNum), insertResult.GetInsertCnt())
 
 	// delete
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           integration.Int64Field + " in [1, 2]",
@@ -115,7 +101,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.NoError(err)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -131,7 +117,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -141,7 +127,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	flushedSegment := lo.Filter(segments, func(info *datapb.SegmentInfo, i int) bool {
@@ -151,7 +137,7 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -168,13 +154,13 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 
 	// query
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -185,20 +171,16 @@ func (s *HelloStreamingSuite) TestHelloStreaming() {
 	s.Equal(int64(rowNum-2), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
 
 	// release collection
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
 	// drop collection
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
-}
-
-func TestHelloStreamingNode(t *testing.T) {
-	suite.Run(t, new(HelloStreamingSuite))
 }

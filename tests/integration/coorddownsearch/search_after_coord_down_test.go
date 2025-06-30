@@ -30,13 +30,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -61,7 +59,7 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
 		CollectionName:   collectionName,
 		Schema:           marshaledSchema,
@@ -73,7 +71,9 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 	err = merr.Error(createCollectionStatus)
 	s.NoError(err)
 
-	showCollectionsResp, err := c.Proxy.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 
@@ -85,7 +85,7 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 		}
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 		hashKeys := integration.GenerateHashKeys(rowNum)
-		insertResult, err := c.Proxy.Insert(context.TODO(), &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -98,7 +98,7 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 	log.Info("=========================Data insertion finished=========================")
 
 	// flush
-	flushResp, err := c.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -111,13 +111,13 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 	s.True(has)
 
 	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("=========================Data flush finished=========================")
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -130,7 +130,7 @@ func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 	log.Info("=========================Index created=========================")
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -146,13 +146,13 @@ func (s *CoordDownSearch) checkCollections() bool {
 		DbName:    "",
 		TimeStamp: 0, // means now
 	}
-	resp, err := s.Cluster.Proxy.ShowCollections(context.TODO(), req)
+	resp, err := s.Cluster.MilvusClient.ShowCollections(context.TODO(), req)
 	s.NoError(err)
 	s.Equal(len(resp.CollectionIds), numCollections)
 	notLoaded := 0
 	loaded := 0
 	for _, name := range resp.CollectionNames {
-		loadProgress, err := s.Cluster.Proxy.GetLoadingProgress(context.TODO(), &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := s.Cluster.MilvusClient.GetLoadingProgress(context.TODO(), &milvuspb.GetLoadingProgressRequest{
 			DbName:         "",
 			CollectionName: name,
 		})
@@ -182,7 +182,7 @@ func (s *CoordDownSearch) search(collectionName string, dim int, consistencyLeve
 		GuaranteeTimestamp: 0,
 		ConsistencyLevel:   consistencyLevel,
 	}
-	queryResult, err := c.Proxy.Query(context.TODO(), queryReq)
+	queryResult, err := c.MilvusClient.Query(context.TODO(), queryReq)
 	s.NoError(err)
 	s.Equal(len(queryResult.FieldsData), 1)
 	numEntities := queryResult.FieldsData[0].GetScalars().GetLongData().Data[0]
@@ -201,7 +201,7 @@ func (s *CoordDownSearch) search(collectionName string, dim int, consistencyLeve
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk,
 		roundDecimal, false, consistencyLevel)
 
-	searchResult, _ := c.Proxy.Search(context.TODO(), searchReq)
+	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	s.NoError(err)
@@ -221,7 +221,7 @@ func (s *CoordDownSearch) searchFailed(collectionName string, dim int, consisten
 		GuaranteeTimestamp: 0,
 		ConsistencyLevel:   consistencyLevel,
 	}
-	queryResp, err := c.Proxy.Query(context.TODO(), queryReq)
+	queryResp, err := c.MilvusClient.Query(context.TODO(), queryReq)
 	s.NoError(err)
 	err = merr.Error(queryResp.GetStatus())
 	s.Error(err)
@@ -239,7 +239,7 @@ func (s *CoordDownSearch) searchFailed(collectionName string, dim int, consisten
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk,
 		roundDecimal, false, consistencyLevel)
 
-	searchResult, err := c.Proxy.Search(context.TODO(), searchReq)
+	searchResult, err := c.MilvusClient.Search(context.TODO(), searchReq)
 	s.NoError(err)
 	err = merr.Error(searchResult.GetStatus())
 	s.Error(err)
@@ -277,25 +277,18 @@ func (s *CoordDownSearch) setupData() {
 func (s *CoordDownSearch) searchAfterCoordDown() float64 {
 	c := s.Cluster
 
-	params := paramtable.Get()
-	paramtable.Init()
-
 	start := time.Now()
 
 	log.Info("=========================Root Coordinators stopped=========================")
-	c.StopMixCoord()
-	params.Save(params.CommonCfg.GracefulTime.Key, "60000")
+	c.DefaultMixCoord().Stop()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
-	params.Reset(params.CommonCfg.GracefulTime.Key)
 	failedStart := time.Now()
 	s.searchFailed(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
 	log.Info(fmt.Sprintf("=========================Failed search cost: %fs=========================", time.Since(failedStart).Seconds()))
 
-	testutil.ResetEnvironment()
-
 	log.Info("=========================restart Root Coordinators=========================")
-	c.StartMixCoord()
+	c.AddMixCoord()
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Eventually)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Bounded)
 	s.search(searchCollectionName, Dim, commonpb.ConsistencyLevel_Strong)
@@ -313,7 +306,5 @@ func (s *CoordDownSearch) TestSearchAfterCoordDown() {
 }
 
 func TestCoordDownSearch(t *testing.T) {
-	g := integration.WithoutStreamingService()
-	defer g()
 	suite.Run(t, new(CoordDownSearch))
 }

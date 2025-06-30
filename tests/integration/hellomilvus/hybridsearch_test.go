@@ -1,13 +1,11 @@
-package hybridsearch
+package hellomilvus
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -23,11 +21,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type HybridSearchSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *HybridSearchSuite) TestHybridSearch() {
+func (s *HelloMilvusSuite) TestHybridSearch() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -47,7 +41,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -61,7 +55,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -70,7 +64,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	bVecColumn := integration.NewBinaryVectorFieldData(integration.BinVecField, rowNum, dim)
 	sparseVecColumn := integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, sparseVecColumn},
@@ -81,7 +75,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -94,7 +88,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -102,7 +96,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	}
 
 	// load without index on vector fields
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -110,7 +104,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.Error(merr.Error(loadStatus))
 
 	// create index for float vector
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default_float",
@@ -124,7 +118,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load with index on partial vector fields
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -132,7 +126,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.Error(merr.Error(loadStatus))
 
 	// create index for binary vector
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.BinVecField,
 		IndexName:      "_default_binary",
@@ -146,7 +140,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, integration.BinVecField, "_default_binary")
 
 	// load with index on partial vector fields
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -154,7 +148,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.Error(merr.Error(loadStatus))
 
 	// create index for sparse float vector
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default_sparse",
@@ -168,7 +162,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, integration.SparseFloatVecField, "_default_sparse")
 
 	// load with index on all vector fields
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -217,7 +211,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 		{Key: proxy.RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 	}
 
-	searchResult, err := c.Proxy.HybridSearch(ctx, hSearchReq)
+	searchResult, err := c.MilvusClient.HybridSearch(ctx, hSearchReq)
 
 	s.NoError(merr.CheckRPCCall(searchResult, err))
 
@@ -242,7 +236,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 		{Key: proxy.LimitKey, Value: strconv.Itoa(topk)},
 	}
 
-	searchResult, err = c.Proxy.HybridSearch(ctx, hSearchReq)
+	searchResult, err = c.MilvusClient.HybridSearch(ctx, hSearchReq)
 
 	s.NoError(merr.CheckRPCCall(searchResult, err))
 
@@ -250,7 +244,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 }
 
 // this is special case to verify the correctness of hybrid search reduction
-func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
+func (s *HelloMilvusSuite) TestHybridSearchSingleSubReq() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -268,7 +262,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -282,14 +276,14 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	}
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -300,7 +294,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	s.True(merr.Ok(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -313,7 +307,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -321,7 +315,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	}
 
 	// load without index on vector fields
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -329,7 +323,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	s.Error(merr.Error(loadStatus))
 
 	// create index for float vector
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default_float",
@@ -343,7 +337,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load with index on vector fields
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -382,7 +376,7 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 		{Key: proxy.RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 	}
 
-	searchResult, err := c.Proxy.HybridSearch(ctx, hSearchReq)
+	searchResult, err := c.MilvusClient.HybridSearch(ctx, hSearchReq)
 
 	s.NoError(merr.CheckRPCCall(searchResult, err))
 
@@ -407,15 +401,11 @@ func (s *HybridSearchSuite) TestHybridSearchSingleSubReq() {
 		{Key: proxy.LimitKey, Value: strconv.Itoa(topk)},
 	}
 
-	searchResult, err = c.Proxy.HybridSearch(ctx, hSearchReq)
+	searchResult, err = c.MilvusClient.HybridSearch(ctx, hSearchReq)
 
 	s.NoError(merr.CheckRPCCall(searchResult, err))
 	s.Equal(topk, len(searchResult.GetResults().GetIds().GetIntId().Data))
 	s.Equal(topk, len(searchResult.GetResults().GetScores()))
 	s.Equal(int64(nq), searchResult.GetResults().GetNumQueries())
 	log.Info("TestHybridSearchSingleSubRequest succeed")
-}
-
-func TestHybridSearch(t *testing.T) {
-	suite.Run(t, new(HybridSearchSuite))
 }

@@ -54,8 +54,10 @@ func (s *CompactionSuite) TestL0Compaction() {
 		vecType    = schemapb.DataType_FloatVector
 	)
 
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key: "1",
+	})
+	defer revertGuard()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
 
@@ -64,7 +66,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.NoError(err)
 
 	// create collection
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
 		CollectionName:   collectionName,
 		Schema:           marshaledSchema,
@@ -76,7 +78,9 @@ func (s *CompactionSuite) TestL0Compaction() {
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 
 	// show collection
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -85,7 +89,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
@@ -97,7 +101,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.Equal(int64(rowNum), insertResult.GetInsertCnt())
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -112,7 +116,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -122,7 +126,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	// stats task happened
@@ -130,7 +134,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -139,7 +143,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.WaitForLoad(ctx, collectionName)
 
 	// delete
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           fmt.Sprintf("%s < %d", integration.Int64Field, deleteCnt),
@@ -148,7 +152,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.NoError(err)
 
 	// flush l0
-	flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err = c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -159,7 +163,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// query
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -171,7 +175,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 
 	// wait for l0 compaction completed
 	showSegments := func() bool {
-		segments, err = c.MetaWatcher.ShowSegments()
+		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 		log.Info("ShowSegments result", zap.Any("segments", segments))
@@ -205,13 +209,13 @@ func (s *CompactionSuite) TestL0Compaction() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 
 	// query
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -222,14 +226,14 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.Equal(int64(rowNum-deleteCnt), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
 
 	// release collection
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
 	// drop collection
-	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	// status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 	// 	CollectionName: collectionName,
 	// })
 	// err = merr.CheckRPCCall(status, err)

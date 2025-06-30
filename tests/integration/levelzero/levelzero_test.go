@@ -41,15 +41,10 @@ type LevelZeroSuite struct {
 }
 
 func (s *LevelZeroSuite) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableStatsTask.Key, "false")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableStatsTask.Key, "false")
+
 	s.MiniClusterSuite.SetupSuite()
 	s.dim = 768
-}
-
-func (s *LevelZeroSuite) TearDownSuite() {
-	s.MiniClusterSuite.TearDownSuite()
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableStatsTask.Key)
 }
 
 func TestLevelZero(t *testing.T) {
@@ -73,7 +68,7 @@ func (s *LevelZeroSuite) buildCreateCollectionRequest(
 }
 
 func (s *LevelZeroSuite) createCollection(req *milvuspb.CreateCollectionRequest) {
-	status, err := s.Cluster.Proxy.CreateCollection(context.TODO(), req)
+	status, err := s.Cluster.MilvusClient.CreateCollection(context.TODO(), req)
 	s.Require().NoError(err)
 	s.Require().True(merr.Ok(status))
 	log.Info("CreateCollection result", zap.Any("status", status))
@@ -104,7 +99,7 @@ func (s *LevelZeroSuite) generateSegment(collection string, numRows int, startPk
 	log.Info("=========================Start generate one segment=========================")
 	fieldData := s.buildFieldDataBySchema(s.schema, numRows, startPk, partitionKey)
 	hashKeys := integration.GenerateHashKeys(numRows)
-	insertResult, err := s.Cluster.Proxy.Insert(context.TODO(), &milvuspb.InsertRequest{
+	insertResult, err := s.Cluster.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
 		CollectionName: collection,
 		FieldsData:     fieldData,
 		HashKeys:       hashKeys,
@@ -131,7 +126,7 @@ func (s *LevelZeroSuite) generateSegment(collection string, numRows int, startPk
 }
 
 func (s *LevelZeroSuite) Flush(collection string) {
-	flushResp, err := s.Cluster.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 		CollectionNames: []string{collection},
 	})
 	s.NoError(err)

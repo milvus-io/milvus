@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package cluster
 
 import (
 	"context"
@@ -37,7 +37,7 @@ import (
 // MetaWatcher to observe meta data of milvus cluster
 type MetaWatcher interface {
 	ShowSessions() ([]*sessionutil.SessionRaw, error)
-	ShowSegments() ([]*datapb.SegmentInfo, error)
+	ShowSegments(collectionID int64) ([]*datapb.SegmentInfo, error)
 	ShowReplicas() ([]*querypb.Replica, error)
 }
 
@@ -52,8 +52,8 @@ func (watcher *EtcdMetaWatcher) ShowSessions() ([]*sessionutil.SessionRaw, error
 	return listSessionsByPrefix(watcher.etcdCli, metaPath)
 }
 
-func (watcher *EtcdMetaWatcher) ShowSegments() ([]*datapb.SegmentInfo, error) {
-	metaBasePath := path.Join(watcher.rootPath, "/meta/datacoord-meta/s/") + "/"
+func (watcher *EtcdMetaWatcher) ShowSegments(collectionID int64) ([]*datapb.SegmentInfo, error) {
+	metaBasePath := path.Join(watcher.rootPath, "/meta/datacoord-meta/s/", fmt.Sprintf("%d", collectionID))
 	return listSegments(watcher.etcdCli, watcher.rootPath, metaBasePath, func(s *datapb.SegmentInfo) bool {
 		return true
 	})

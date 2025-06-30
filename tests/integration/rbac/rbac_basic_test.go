@@ -17,6 +17,8 @@ package rbac
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -29,24 +31,24 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
+const defaultAuth = "root:Milvus"
+
 type RBACBasicTestSuite struct {
 	integration.MiniClusterSuite
 }
 
 func (s *RBACBasicTestSuite) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
+	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *RBACBasicTestSuite) TestDropRole() {
-	ctx := GetContext(context.Background(), "root:123456")
+	ctx := GetContext(context.Background(), defaultAuth)
 
 	createRole := func(name string) {
-		resp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		resp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
 			Entity: &milvuspb.RoleEntity{Name: name},
 		})
 		s.NoError(err)
@@ -54,7 +56,7 @@ func (s *RBACBasicTestSuite) TestDropRole() {
 	}
 
 	operatePrivilege := func(role, privilege, objectName, dbName string, operateType milvuspb.OperatePrivilegeType) {
-		resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+		resp, err := s.Cluster.MilvusClient.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
 			Type: operateType,
 			Entity: &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
@@ -72,34 +74,36 @@ func (s *RBACBasicTestSuite) TestDropRole() {
 		s.True(merr.Ok(resp))
 	}
 
-	// test empty rbac content
-	emptyBackupRBACResp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(emptyBackupRBACResp.GetStatus()))
-	s.Equal("", emptyBackupRBACResp.GetRBACMeta().String())
-
 	// generate some rbac content
 	// create role test_role
-	roleName := "test_role"
+	roleName := fmt.Sprintf("test_role_%d", rand.Int31n(1000000))
 	createRole(roleName)
 
-	// grant collection level search privilege to role test_role
+	// grant collection level search privilege to role test_role_2
 	operatePrivilege(roleName, "Search", util.AnyWord, "db1", milvuspb.OperatePrivilegeType_Grant)
 
-	// drop role test_role
-	dropRoleResp, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	// drop role test_role_2
+	dropRoleResp, err := s.Cluster.MilvusClient.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName: roleName,
 	})
 	s.NoError(err)
 	s.False(merr.Ok(dropRoleResp))
 
 	// force delete role when grants exist
-	dropRoleResp, err = s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	dropRoleResp, err = s.Cluster.MilvusClient.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName:  roleName,
 		ForceDrop: true,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropRoleResp))
+
+	// test empty rbac content
+	backupRBACResp, err := s.Cluster.MilvusClient.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(backupRBACResp.GetStatus()))
+	for _, role := range backupRBACResp.GetRBACMeta().Roles {
+		s.NotEqual(roleName, role.GetName())
+	}
 }
 
 func TestRBAC(t *testing.T) {

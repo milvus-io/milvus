@@ -57,7 +57,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	s.NoError(err)
 
 	// create collection
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
 		CollectionName:   collectionName,
 		Schema:           marshaledSchema,
@@ -69,7 +69,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -80,7 +80,9 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// show collection
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	err = merr.CheckRPCCall(showCollectionsResp, err)
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -89,7 +91,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		// insert
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, batch, dim)
 		hashKeys := integration.GenerateHashKeys(batch)
-		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -101,7 +103,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 		s.Equal(int64(batch), insertResult.GetInsertCnt())
 
 		// flush
-		flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
 		})
@@ -119,7 +121,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 	}
 
 	showSegments := func() {
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 		// The stats task of segments will create a new segment, potentially triggering compaction simultaneously,
@@ -135,7 +137,7 @@ func (s *CompactionSuite) assertMixCompaction(ctx context.Context, collectionNam
 
 	// wait for compaction completed
 	waitCompaction := func() bool {
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 
@@ -180,7 +182,7 @@ func (s *CompactionSuite) assertQuery(ctx context.Context, collectionName string
 	)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -197,13 +199,13 @@ func (s *CompactionSuite) assertQuery(ctx context.Context, collectionName string
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 
 	// query
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -214,7 +216,7 @@ func (s *CompactionSuite) assertQuery(ctx context.Context, collectionName string
 	s.Equal(int64(rowNum), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
 
 	// release collection
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
@@ -230,7 +232,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 	s.assertQuery(ctx, collectionName)
 
 	// drop collection
-	// status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	// status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 	//	 CollectionName: collectionName,
 	// })
 	// err = merr.CheckRPCCall(status, err)
@@ -240,11 +242,11 @@ func (s *CompactionSuite) TestMixCompaction() {
 }
 
 func (s *CompactionSuite) TestMixCompactionV2() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableStorageV2.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableStorageV2.Key)
-	// disable index based compaction for v2 because we don't support v2 reader yet.
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().CommonCfg.EnableStorageV2.Key:         "true",
+		paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key: "false",
+	})
+	defer revertGuard()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()

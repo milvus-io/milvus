@@ -44,19 +44,11 @@ type BloomFilterTestSuit struct {
 }
 
 func (s *BloomFilterTestSuit) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
+	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
 
-	// disable compaction
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
-}
-
-func (s *BloomFilterTestSuit) TearDownSuite() {
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
-	s.MiniClusterSuite.TearDownSuite()
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int, segmentDeleteNum int) {
@@ -72,7 +64,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -82,7 +74,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	s.True(merr.Ok(createCollectionStatus))
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -90,14 +82,20 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	for i := 0; i < segmentNum; i++ {
 		// change bf type in real time
 		if i%2 == 0 {
-			paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterType.Key, "BasicBloomFilter")
+			revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+				paramtable.Get().CommonCfg.BloomFilterType.Key: "BasicBloomFilter",
+			})
+			defer revertGuard()
 		} else {
-			paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterType.Key, "BlockedBloomFilter")
+			revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+				paramtable.Get().CommonCfg.BloomFilterType.Key: "BlockedBloomFilter",
+			})
+			defer revertGuard()
 		}
 
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, segmentRowNum, dim)
 		hashKeys := integration.GenerateHashKeys(segmentRowNum)
-		insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -119,7 +117,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 
 			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 
-			deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+			deleteResp, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
 				Expr:           expr,
 			})
@@ -129,7 +127,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 		}
 
 		// flush
-		flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
 		})
@@ -144,7 +142,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	}
 
 	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -159,7 +157,7 @@ func (s *BloomFilterTestSuit) initCollection(collectionName string, replica int,
 	}
 
 	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(replica),
@@ -176,7 +174,7 @@ func (s *BloomFilterTestSuit) TestLoadAndQuery() {
 	s.initCollection(name, 1, 2, 10, 2000, 500)
 
 	ctx := context.Background()
-	queryResult, err := s.Cluster.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         "",
 		CollectionName: name,
 		Expr:           "",

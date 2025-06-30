@@ -19,24 +19,17 @@ package integration
 import (
 	"context"
 	"flag"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/suite"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
 var caseTimeout time.Duration
@@ -46,140 +39,90 @@ func init() {
 	streamingutil.SetStreamingServiceEnabled()
 }
 
-// WithoutStreamingService run the test not in streaming service
-func WithoutStreamingService() func() {
-	oldVersion := common.Version
-	common.Version = semver.MustParse("2.5.9")
-	streamingutil.UnsetStreamingServiceEnabled()
-	return func() {
-		common.Version = oldVersion
-		streamingutil.SetStreamingServiceEnabled()
-	}
-}
-
-// EmbedEtcdSuite contains embed setup & teardown related logic
-type EmbedEtcdSuite struct {
-	EtcdServer *embed.Etcd
-	EtcdDir    string
-}
-
-func (s *EmbedEtcdSuite) SetupEmbedEtcd() error {
-	server, folder, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		return err
-	}
-
-	log.Info("wait for etcd server ready...")
-	select {
-	case <-server.Server.ReadyNotify():
-		s.EtcdServer = server
-		s.EtcdDir = folder
-		log.Info("etcd server ready")
-		return nil
-	case <-time.After(30 * time.Second):
-		server.Server.Stop() // trigger a shutdown
-		log.Fatal("Etcd server took too long to start!")
-	}
-	return nil
-}
-
-func (s *EmbedEtcdSuite) TearDownEmbedEtcd() {
-	defer os.RemoveAll(s.EtcdDir)
-	if s.EtcdServer != nil {
-		log.Info("start to stop etcd server")
-		s.EtcdServer.Close()
-		select {
-		case <-s.EtcdServer.Server.StopNotify():
-			log.Info("etcd server stopped")
-			return
-		case err := <-s.EtcdServer.Err():
-			log.Warn("etcd server has crashed", zap.Error(err))
-		}
-	}
-}
-
 type MiniClusterSuite struct {
 	suite.Suite
-	EmbedEtcdSuite
 
-	Cluster    *MiniClusterV2
+	envConfigs map[string]string
+	Cluster    *cluster.MiniClusterV3
 	cancelFunc context.CancelFunc
+	opt        clusterSuiteOption
 }
 
+// WithMilvusConfig sets the environment variable for the given key.
+// The key can be got from the paramtable package, such as "common.QuotaConfigPath".
+func (s *MiniClusterSuite) WithMilvusConfig(key string, value string) {
+	if len(key) == 0 {
+		panic("key is empty")
+	}
+	if s.envConfigs == nil {
+		s.envConfigs = make(map[string]string)
+	}
+	envKey := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	s.envConfigs[envKey] = value
+}
+
+// WithOptions set the options for the suite
+// use `WithDropAllCollectionsWhenTestTearDown` to drop all collections when test tear down.
+// use `WithoutResetDeploymentWhenTestTearDown` to not reset the default deployment when test tear down.
+func (s *MiniClusterSuite) WithOptions(options ...ClusterSuiteOption) {
+	for _, opts := range options {
+		opts(&s.opt)
+	}
+}
+
+// SetupSuite initializes the MiniClusterSuite by setting up the environment and starting the cluster.
+// After it is called, the cluster is ready for tests.
 func (s *MiniClusterSuite) SetupSuite() {
-	s.Require().NoError(s.SetupEmbedEtcd())
-}
-
-func (s *MiniClusterSuite) TearDownSuite() {
-	s.TearDownEmbedEtcd()
-}
-
-func (s *MiniClusterSuite) SetupTest() {
-	log.SetLevel(zapcore.InfoLevel)
+	paramtable.Init()
 	s.T().Log("Setup test...")
-	// setup mini cluster to use embed etcd
-	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)
-	val := strings.Join(endpoints, ",")
-	// setup env value to init etcd source
-	s.T().Setenv("etcd.endpoints", val)
-
 	s.T().Log("Setup case timeout", caseTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout)
 	s.cancelFunc = cancel
-	c, err := StartMiniClusterV2(ctx, func(c *MiniClusterV2) {
-		// change config etcd endpoints
-		c.params[params.EtcdCfg.Endpoints.Key] = val
-	})
-	s.Require().NoError(err)
-	s.Cluster = c
 
-	checkWg := sync.WaitGroup{}
-	checkWg.Add(1)
-	// start mini cluster
-	nodeIDCheckReport := func() {
-		defer checkWg.Done()
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
+	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs))
+}
 
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("node id check timeout")
-				return
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				s.T().Log("node id report info: ", reportInfo)
-				s.Equal(hookutil.OpTypeNodeID, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.NodeIDKey])
-				return
-			}
-		}
-	}
-	go nodeIDCheckReport()
-	s.Require().NoError(s.Cluster.Start())
-	checkWg.Wait()
+func (s *MiniClusterSuite) SetupTest() {
 }
 
 func (s *MiniClusterSuite) TearDownTest() {
-	resp, err := s.Cluster.Proxy.ShowCollections(context.Background(), &milvuspb.ShowCollectionsRequest{
+	if !s.opt.notResetDeploymentWhenTestTearDown {
+		s.Cluster.Reset()
+	}
+	if s.opt.dropAllCollectionsWhenTestTearDown {
+		s.DropAllCollections()
+	}
+}
+
+func (s *MiniClusterSuite) TearDownSuite() {
+	resp, err := s.Cluster.MilvusClient.ShowCollections(context.Background(), &milvuspb.ShowCollectionsRequest{
 		Type: milvuspb.ShowType_InMemory,
 	})
 	if err == nil {
+		wg := sync.WaitGroup{}
 		for idx, collectionName := range resp.GetCollectionNames() {
-			if resp.GetInMemoryPercentages()[idx] == 100 || resp.GetQueryServiceAvailable()[idx] {
-				status, err := s.Cluster.Proxy.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
-					CollectionName: collectionName,
-				})
-				err = merr.CheckRPCCall(status, err)
-				s.NoError(err)
-				collectionID := resp.GetCollectionIds()[idx]
-				s.CheckCollectionCacheReleased(collectionID)
-			}
+			wg.Add(1)
+			idx := idx
+			collectionName := collectionName
+			func() {
+				defer wg.Done()
+				if resp.GetInMemoryPercentages()[idx] == 100 || resp.GetQueryServiceAvailable()[idx] {
+					status, err := s.Cluster.MilvusClient.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
+						CollectionName: collectionName,
+					})
+					err = merr.CheckRPCCall(status, err)
+					s.NoError(err)
+					collectionID := resp.GetCollectionIds()[idx]
+					s.CheckCollectionCacheReleased(collectionID)
+				}
+			}()
 		}
+		wg.Wait()
 	}
 	s.T().Log("Tear Down test...")
 	defer s.cancelFunc()
 	if s.Cluster != nil {
 		s.Cluster.Stop()
+		s.Cluster = nil
 	}
 }

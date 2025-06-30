@@ -59,7 +59,7 @@ func (s *MiniClusterSuite) WaitForLoad(ctx context.Context, collection string) {
 func (s *MiniClusterSuite) WaitForSortedSegmentLoaded(ctx context.Context, dbName, collection string) {
 	cluster := s.Cluster
 	getSegmentsSorted := func() bool {
-		querySegmentInfo, err := cluster.Proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
+		querySegmentInfo, err := cluster.MilvusClient.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
 			DbName:         dbName,
 			CollectionName: collection,
 		})
@@ -89,7 +89,7 @@ func (s *MiniClusterSuite) WaitForSortedSegmentLoaded(ctx context.Context, dbNam
 func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, collection string) {
 	cluster := s.Cluster
 	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
-		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := cluster.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			DbName:         dbName,
 			CollectionName: collection,
 		})
@@ -112,7 +112,7 @@ func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, coll
 func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, collection string) {
 	cluster := s.Cluster
 	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
-		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := cluster.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			DbName:         dbName,
 			CollectionName: collection,
 		})
@@ -134,8 +134,10 @@ func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, colle
 
 // CheckCollectionCacheReleased checks if the collection cache was released from querynodes.
 func (s *MiniClusterSuite) CheckCollectionCacheReleased(collectionID int64) {
-	for _, qn := range s.Cluster.GetAllQueryNodes() {
+	for _, qn2 := range s.Cluster.GetAllQueryNodes() {
 		s.Eventually(func() bool {
+			qn := qn2.MustGetClient(context.Background())
+
 			state, err := qn.GetComponentStates(context.Background(), &milvuspb.GetComponentStatesRequest{})
 			s.NoError(err)
 			if state.GetState().GetStateCode() != commonpb.StateCode_Healthy {
@@ -144,7 +146,7 @@ func (s *MiniClusterSuite) CheckCollectionCacheReleased(collectionID int64) {
 			}
 			req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 			s.NoError(err)
-			resp, err := qn.GetQueryNode().GetMetrics(context.Background(), req)
+			resp, err := qn.GetMetrics(context.Background(), req)
 			err = merr.CheckRPCCall(resp.GetStatus(), err)
 			s.NoError(err)
 			infos := metricsinfo.QueryNodeInfos{}
@@ -152,11 +154,11 @@ func (s *MiniClusterSuite) CheckCollectionCacheReleased(collectionID int64) {
 			s.NoError(err)
 			for _, id := range infos.QuotaMetrics.Effect.CollectionIDs {
 				if id == collectionID {
-					s.T().Logf("collection %d was not released in querynode %d", collectionID, qn.GetQueryNode().GetNodeID())
+					s.T().Logf("collection %d was not released in querynode %d", collectionID, qn2.GetNodeID())
 					return false
 				}
 			}
-			s.T().Logf("collection %d has been released from querynode %d", collectionID, qn.GetQueryNode().GetNodeID())
+			s.T().Logf("collection %d has been released from querynode %d", collectionID, qn2.GetNodeID())
 			return true
 		}, 3*time.Minute, 200*time.Millisecond)
 	}

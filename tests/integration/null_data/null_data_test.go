@@ -99,7 +99,7 @@ func (s *NullDataSuite) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -112,7 +112,7 @@ func (s *NullDataSuite) run() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -130,7 +130,7 @@ func (s *NullDataSuite) run() {
 	nullableFidData := integration.NewInt64FieldDataNullableWithStart(nullableFid.GetName(), rowNum, start)
 	fieldsData = append(fieldsData, nullableFidData)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     fieldsData,
@@ -141,7 +141,7 @@ func (s *NullDataSuite) run() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -154,7 +154,7 @@ func (s *NullDataSuite) run() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -162,7 +162,7 @@ func (s *NullDataSuite) run() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      fVecColumn.FieldName,
 		IndexName:      "_default",
@@ -176,13 +176,13 @@ func (s *NullDataSuite) run() {
 
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
 
-	desCollResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	desCollResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	s.Equal(desCollResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-	compactResp, err := c.Proxy.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+	compactResp, err := c.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
 		CollectionID: desCollResp.GetCollectionID(),
 	})
 
@@ -190,7 +190,7 @@ func (s *NullDataSuite) run() {
 	s.Equal(compactResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	compacted := func() bool {
-		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+		resp, err := c.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactResp.GetCompactionID(),
 		})
 		if err != nil {
@@ -203,7 +203,7 @@ func (s *NullDataSuite) run() {
 	}
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -224,12 +224,12 @@ func (s *NullDataSuite) run() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		fVecColumn.FieldName, s.vecType, []string{"nullableFid"}, s.metricType, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.checkNullableFieldData(nullableFid.GetName(), searchResult.GetResults().GetFieldsData(), start)
 
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           expr,
@@ -261,7 +261,7 @@ func (s *NullDataSuite) run() {
 		ValidData: make([]bool, rowNum),
 	}
 	fieldsDataForUpsert = append(fieldsDataForUpsert, nullableFidDataForUpsert)
-	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     fieldsData,
@@ -271,7 +271,7 @@ func (s *NullDataSuite) run() {
 	s.NoError(err)
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-	upsertResult, err := c.Proxy.Upsert(ctx, &milvuspb.UpsertRequest{
+	upsertResult, err := c.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     fieldsDataForUpsert,
@@ -282,7 +282,7 @@ func (s *NullDataSuite) run() {
 	s.Equal(upsertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// create index
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      fVecColumn.FieldName,
 		IndexName:      "_default",
@@ -296,13 +296,13 @@ func (s *NullDataSuite) run() {
 
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
 
-	desCollResp, err = c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	desCollResp, err = c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	s.Equal(desCollResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-	compactResp, err = c.Proxy.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
+	compactResp, err = c.MilvusClient.ManualCompaction(ctx, &milvuspb.ManualCompactionRequest{
 		CollectionID: desCollResp.GetCollectionID(),
 	})
 
@@ -310,7 +310,7 @@ func (s *NullDataSuite) run() {
 	s.Equal(compactResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	compacted = func() bool {
-		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+		resp, err := c.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactResp.GetCompactionID(),
 		})
 		if err != nil {
@@ -323,7 +323,7 @@ func (s *NullDataSuite) run() {
 	}
 
 	// load
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -335,7 +335,7 @@ func (s *NullDataSuite) run() {
 	s.WaitForLoad(ctx, collectionName)
 
 	// flush
-	flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err = c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -348,7 +348,7 @@ func (s *NullDataSuite) run() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err = c.MetaWatcher.ShowSegments()
+	segments, err = c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -356,12 +356,12 @@ func (s *NullDataSuite) run() {
 	}
 
 	// search
-	searchResult, err = c.Proxy.Search(ctx, searchReq)
+	searchResult, err = c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.checkNullableFieldData(nullableFid.GetName(), searchResult.GetResults().GetFieldsData(), start)
 
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           expr,
@@ -375,7 +375,7 @@ func (s *NullDataSuite) run() {
 	s.checkNullableFieldData(nullableFid.GetName(), queryResult.GetFieldsData(), start)
 
 	// // expr will not select null data
-	// exprResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	// exprResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 	// 	DbName:         dbName,
 	// 	CollectionName: collectionName,
 	// 	Expr:           "nullableFid in [0,1000]",
@@ -390,7 +390,7 @@ func (s *NullDataSuite) run() {
 	// s.Equal(len(target.GetScalars().GetLongData().GetData()), 1)
 	// s.Equal(len(target.GetValidData()), 1)
 
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           integration.Int64Field + " in [1, 2]",
@@ -401,13 +401,13 @@ func (s *NullDataSuite) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
 
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)

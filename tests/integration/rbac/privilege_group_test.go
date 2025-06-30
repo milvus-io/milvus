@@ -18,44 +18,30 @@ package rbac
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
-	"testing"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type PrivilegeGroupTestSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *PrivilegeGroupTestSuite) SetupSuite() {
-	s.MiniClusterSuite.SetupSuite()
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
-}
-
-func (s *PrivilegeGroupTestSuite) TestBuiltinPrivilegeGroup() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestBuiltinPrivilegeGroup() {
+	ctx := GetContext(context.Background(), "root:Milvus")
 
 	// Test empty RBAC content
-	backupResp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	backupResp, err := s.Cluster.MilvusClient.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(backupResp.GetStatus()))
 	s.Equal("", backupResp.GetRBACMeta().String())
 
 	// Generate some RBAC content
-	roleName := "test_role"
-	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+	roleName := fmt.Sprintf("test_role_%d", rand.Int31n(1000000))
+	createRoleResp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
 		Entity: &milvuspb.RoleEntity{Name: roleName},
 	})
 	s.NoError(err)
@@ -74,56 +60,56 @@ func (s *PrivilegeGroupTestSuite) TestBuiltinPrivilegeGroup() {
 	}
 }
 
-func (s *PrivilegeGroupTestSuite) TestInvalidPrivilegeGroup() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestInvalidPrivilegeGroup() {
+	ctx := GetContext(context.Background(), defaultAuth)
 
-	createResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	createResp, err := s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: "",
 	})
 	s.NoError(err)
 	s.False(merr.Ok(createResp))
 
 	// create group %$ will fail
-	createResp, _ = s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	createResp, _ = s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: "%$",
 	})
 	s.False(merr.Ok(createResp))
 
-	createResp, _ = s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	createResp, _ = s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: "a&",
 	})
 	s.False(merr.Ok(createResp))
 
-	createResp, _ = s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	createResp, _ = s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: strings.Repeat("a", 300),
 	})
 	s.False(merr.Ok(createResp))
 
 	// drop group %$ will fail
-	dropResp, _ := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropResp, _ := s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: "%$",
 	})
 	s.False(merr.Ok(dropResp))
 
-	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropResp, err = s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: "group1",
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropResp))
 
-	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropResp, err = s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: "",
 	})
 	s.NoError(err)
 	s.False(merr.Ok(dropResp))
 
-	operateResp, err := s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+	operateResp, err := s.Cluster.MilvusClient.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 		GroupName: "",
 	})
 	s.NoError(err)
 	s.False(merr.Ok(operateResp))
 
-	operateResp, err = s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+	operateResp, err = s.Cluster.MilvusClient.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 		GroupName:  "group1",
 		Privileges: []*milvuspb.PrivilegeEntity{{Name: "123"}},
 	})
@@ -131,8 +117,8 @@ func (s *PrivilegeGroupTestSuite) TestInvalidPrivilegeGroup() {
 	s.False(merr.Ok(operateResp))
 }
 
-func (s *PrivilegeGroupTestSuite) TestInvalidGrantV2() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestInvalidGrantV2() {
+	ctx := GetContext(context.Background(), defaultAuth)
 
 	// invalid operate privilege type
 	resp, _ := s.operatePrivilegeV2(ctx, "role", "Insert", util.AnyWord, util.AnyWord, milvuspb.OperatePrivilegeType(-1))
@@ -147,11 +133,11 @@ func (s *PrivilegeGroupTestSuite) TestInvalidGrantV2() {
 	s.False(merr.Ok(resp))
 }
 
-func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
+	ctx := GetContext(context.Background(), defaultAuth)
 
-	roleName := "test_role"
-	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+	roleName := fmt.Sprintf("test_role_%d", rand.Int31n(1000000))
+	createRoleResp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
 		Entity: &milvuspb.RoleEntity{Name: roleName},
 	})
 	s.NoError(err)
@@ -182,12 +168,12 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2BuiltinPrivilegeGroup() {
 	s.False(merr.Ok(resp))
 }
 
-func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestGrantV2CustomPrivilegeGroup() {
+	ctx := GetContext(context.Background(), defaultAuth)
 
 	// Helper function to operate on privilege groups
 	operatePrivilegeGroup := func(groupName string, operateType milvuspb.OperatePrivilegeGroupType, privileges []*milvuspb.PrivilegeEntity) {
-		resp, err := s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+		resp, err := s.Cluster.MilvusClient.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 			GroupName:  groupName,
 			Type:       operateType,
 			Privileges: privileges,
@@ -198,7 +184,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 
 	// Helper function to list privilege groups and return the target group and its privileges
 	validatePrivilegeGroup := func(groupName string, privileges int) []*milvuspb.PrivilegeEntity {
-		resp, err := s.Cluster.Proxy.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
+		resp, err := s.Cluster.MilvusClient.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
 		s.NoError(err)
 		for _, privGroup := range resp.PrivilegeGroups {
 			if privGroup.GroupName == groupName {
@@ -210,7 +196,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	}
 
 	// create group1: query, search
-	createResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	createResp, err := s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: "group1",
 	})
 	s.NoError(err)
@@ -224,7 +210,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 
 	// grant insert to role -> role: insert
 	role := "role1"
-	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+	createRoleResp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
 		Entity: &milvuspb.RoleEntity{Name: role},
 	})
 	s.NoError(err)
@@ -241,7 +227,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	s.Len(selectResp.GetEntities(), 1)
 
 	// create group2: query, delete
-	createResp2, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	createResp2, err := s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: "group2",
 	})
 	s.NoError(err)
@@ -270,7 +256,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 
 	// add different privilege group level privileges to group1 is not allowed
 	s.Equal(milvuspb.PrivilegeLevel_Database.String(), util.GetPrivilegeLevel("CreateCollection"))
-	resp, _ = s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+	resp, _ = s.Cluster.MilvusClient.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 		GroupName:  "group1",
 		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
 		Privileges: []*milvuspb.PrivilegeEntity{{Name: "CreateCollection"}},
@@ -286,7 +272,7 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	s.Len(selectResp.GetEntities(), 2)
 
 	// Drop the group during any role usage will cause error
-	dropResp, _ := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropResp, _ := s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: "group1",
 	})
 	s.Error(merr.Error(dropResp))
@@ -300,20 +286,20 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	s.True(merr.Ok(resp))
 
 	// Drop the privilege group after revoking the privilege will succeed
-	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropResp, err = s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: "group1",
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropResp))
 
-	dropResp, err = s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropResp, err = s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: "group2",
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropResp))
 
 	// Validate the group was dropped
-	listResp, err := s.Cluster.Proxy.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
+	listResp, err := s.Cluster.MilvusClient.ListPrivilegeGroups(ctx, &milvuspb.ListPrivilegeGroupsRequest{})
 	s.NoError(err)
 	s.Equal(len(paramtable.Get().RbacConfig.GetDefaultPrivilegeGroupNames()), len(listResp.PrivilegeGroups))
 
@@ -331,23 +317,23 @@ func (s *PrivilegeGroupTestSuite) TestGrantV2CustomPrivilegeGroup() {
 	s.False(merr.Ok(resp))
 
 	// Drop the role
-	dropRoleResp, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	dropRoleResp, err := s.Cluster.MilvusClient.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName: role,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropRoleResp))
 }
 
-func (s *PrivilegeGroupTestSuite) TestVersionCrossed() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestVersionCrossed() {
+	ctx := GetContext(context.Background(), defaultAuth)
 
 	role := "role1"
-	createRoleResp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+	createRoleResp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
 		Entity: &milvuspb.RoleEntity{Name: role},
 	})
 	s.NoError(err)
 	s.True(merr.Ok(createRoleResp))
-	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+	resp, err := s.Cluster.MilvusClient.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
 		Type: milvuspb.OperatePrivilegeType_Grant,
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: role},
@@ -362,7 +348,7 @@ func (s *PrivilegeGroupTestSuite) TestVersionCrossed() {
 	})
 	s.NoError(err)
 	s.True(merr.Ok(resp))
-	selectResp, err := s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+	selectResp, err := s.Cluster.MilvusClient.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: role},
 			Object:     nil,
@@ -378,7 +364,7 @@ func (s *PrivilegeGroupTestSuite) TestVersionCrossed() {
 	s.NoError(err)
 	s.True(merr.Ok(revoke))
 
-	selectResp, err = s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+	selectResp, err = s.Cluster.MilvusClient.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: role},
 			Object:     nil,
@@ -391,8 +377,8 @@ func (s *PrivilegeGroupTestSuite) TestVersionCrossed() {
 	s.Len(selectResp.GetEntities(), 0)
 }
 
-func (s *PrivilegeGroupTestSuite) operatePrivilege(ctx context.Context, role, privilege, objectType string, operateType milvuspb.OperatePrivilegeType) (*commonpb.Status, error) {
-	resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+func (s *RBACBasicTestSuite) operatePrivilege(ctx context.Context, role, privilege, objectType string, operateType milvuspb.OperatePrivilegeType) (*commonpb.Status, error) {
+	resp, err := s.Cluster.MilvusClient.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
 		Type: operateType,
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: role},
@@ -408,8 +394,8 @@ func (s *PrivilegeGroupTestSuite) operatePrivilege(ctx context.Context, role, pr
 	return resp, err
 }
 
-func (s *PrivilegeGroupTestSuite) operatePrivilegeV2(ctx context.Context, role, privilege, dbName, collectionName string, operateType milvuspb.OperatePrivilegeType) (*commonpb.Status, error) {
-	resp, err := s.Cluster.Proxy.OperatePrivilegeV2(ctx, &milvuspb.OperatePrivilegeV2Request{
+func (s *RBACBasicTestSuite) operatePrivilegeV2(ctx context.Context, role, privilege, dbName, collectionName string, operateType milvuspb.OperatePrivilegeType) (*commonpb.Status, error) {
+	resp, err := s.Cluster.MilvusClient.OperatePrivilegeV2(ctx, &milvuspb.OperatePrivilegeV2Request{
 		Role: &milvuspb.RoleEntity{Name: role},
 		Grantor: &milvuspb.GrantorEntity{
 			User:      &milvuspb.UserEntity{Name: util.UserRoot},
@@ -422,8 +408,8 @@ func (s *PrivilegeGroupTestSuite) operatePrivilegeV2(ctx context.Context, role, 
 	return resp, err
 }
 
-func (s *PrivilegeGroupTestSuite) validateGrants(ctx context.Context, roleName, objectType, database, resource string) (*milvuspb.SelectGrantResponse, error) {
-	resp, err := s.Cluster.Proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+func (s *RBACBasicTestSuite) validateGrants(ctx context.Context, roleName, objectType, database, resource string) (*milvuspb.SelectGrantResponse, error) {
+	resp, err := s.Cluster.MilvusClient.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
 		Entity: &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: roleName},
 			Object:     &milvuspb.ObjectEntity{Name: objectType},
@@ -436,12 +422,8 @@ func (s *PrivilegeGroupTestSuite) validateGrants(ctx context.Context, roleName, 
 	return resp, err
 }
 
-func (s *PrivilegeGroupTestSuite) marshalGrants(selectResp *milvuspb.SelectGrantResponse) map[string]*milvuspb.GrantEntity {
+func (s *RBACBasicTestSuite) marshalGrants(selectResp *milvuspb.SelectGrantResponse) map[string]*milvuspb.GrantEntity {
 	return lo.SliceToMap(selectResp.GetEntities(), func(e *milvuspb.GrantEntity) (string, *milvuspb.GrantEntity) {
 		return fmt.Sprintf("%s-%s-%s-%s", e.Object.Name, e.Grantor.Privilege.Name, e.DbName, e.ObjectName), e
 	})
-}
-
-func TestPrivilegeGroup(t *testing.T) {
-	suite.Run(t, new(PrivilegeGroupTestSuite))
 }

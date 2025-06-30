@@ -14,17 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jsonexpr
+package hellomilvus
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"testing"
 	"time"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -39,11 +37,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type JSONExprSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
+func (s *HelloMilvusSuite) TestJsonEnableDynamicSchema() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -94,7 +88,7 @@ func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -107,12 +101,12 @@ func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
 	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
@@ -125,7 +119,7 @@ func (s *JSONExprSuite) TestJsonEnableDynamicSchema() {
 	s.checkSearch(collectionName, common.MetaFieldName, dim)
 }
 
-func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
+func (s *HelloMilvusSuite) TestJSON_InsertWithoutDynamicData() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -177,7 +171,7 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -190,12 +184,12 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
 	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
@@ -215,7 +209,7 @@ func (s *JSONExprSuite) TestJSON_InsertWithoutDynamicData() {
 	log.Info("GT expression run successfully")
 }
 
-func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
+func (s *HelloMilvusSuite) TestJSON_DynamicSchemaWithJSON() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -273,7 +267,7 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -286,12 +280,12 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
 	s.Equal(3, len(describeCollectionResp.GetSchema().GetFields()))
@@ -367,7 +361,7 @@ func (s *JSONExprSuite) TestJSON_DynamicSchemaWithJSON() {
 	log.Info("nested path expression run successfully")
 }
 
-func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
+func (s *HelloMilvusSuite) checkSearch(collectionName, fieldName string, dim int) {
 	expr := ""
 	// search
 	expr = `$meta["A"] > 90`
@@ -721,9 +715,9 @@ func (s *JSONExprSuite) checkSearch(collectionName, fieldName string, dim int) {
 	s.doSearchWithInvalidExpr(collectionName, []string{fieldName}, expr, dim)
 }
 
-func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collectionName string, rowNum int, dim int, fieldData []*schemapb.FieldData) {
+func (s *HelloMilvusSuite) insertFlushIndexLoad(ctx context.Context, dbName, collectionName string, rowNum int, dim int, fieldData []*schemapb.FieldData) {
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     fieldData,
@@ -734,7 +728,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	s.NoError(merr.Error(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -747,7 +741,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := s.Cluster.MetaWatcher.ShowSegments()
+	segments, err := s.Cluster.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -755,7 +749,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	}
 
 	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -787,7 +781,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -799,7 +793,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	s.Require().NoError(err)
 
 	for {
-		loadProgress, err := s.Cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := s.Cluster.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
 		})
 
@@ -812,7 +806,7 @@ func (s *JSONExprSuite) insertFlushIndexLoad(ctx context.Context, dbName, collec
 	}
 }
 
-func (s *JSONExprSuite) doSearch(collectionName string, outputField []string, expr string, dim int, checkFunc func(results *milvuspb.SearchResults)) {
+func (s *HelloMilvusSuite) doSearch(collectionName string, outputField []string, expr string, dim int, checkFunc func(results *milvuspb.SearchResults)) {
 	nq := 1
 	topk := 10
 	roundDecimal := -1
@@ -821,7 +815,7 @@ func (s *JSONExprSuite) doSearch(collectionName string, outputField []string, ex
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, outputField, metric.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := s.Cluster.Proxy.Search(context.Background(), searchReq)
+	searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
@@ -889,7 +883,7 @@ func newJSONData(fieldName string, rowNum int) *schemapb.FieldData {
 	}
 }
 
-func (s *JSONExprSuite) doSearchWithInvalidExpr(collectionName string, outputField []string, expr string, dim int) {
+func (s *HelloMilvusSuite) doSearchWithInvalidExpr(collectionName string, outputField []string, expr string, dim int) {
 	nq := 1
 	topk := 10
 	roundDecimal := -1
@@ -898,7 +892,7 @@ func (s *JSONExprSuite) doSearchWithInvalidExpr(collectionName string, outputFie
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, outputField, metric.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := s.Cluster.Proxy.Search(context.Background(), searchReq)
+	searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 
 	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
@@ -907,7 +901,7 @@ func (s *JSONExprSuite) doSearchWithInvalidExpr(collectionName string, outputFie
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 }
 
-func (s *JSONExprSuite) TestJsonWithEscapeString() {
+func (s *HelloMilvusSuite) TestJsonWithEscapeString() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -959,7 +953,7 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -972,12 +966,12 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
 	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
@@ -1027,7 +1021,7 @@ func (s *JSONExprSuite) TestJsonWithEscapeString() {
 	//s.doSearch(collectionName, []string{common.MetaFieldName}, expr, dim, checkFunc)
 }
 
-func (s *JSONExprSuite) TestJsonContains() {
+func (s *HelloMilvusSuite) TestJsonContains() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -1078,7 +1072,7 @@ func (s *JSONExprSuite) TestJsonContains() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -1091,12 +1085,12 @@ func (s *JSONExprSuite) TestJsonContains() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
 	s.NoError(err)
 	s.True(describeCollectionResp.Schema.EnableDynamicField)
 	s.Equal(2, len(describeCollectionResp.GetSchema().GetFields()))
@@ -1150,8 +1144,4 @@ func (s *JSONExprSuite) TestJsonContains() {
 		}
 	}
 	s.doSearch(collectionName, []string{"A"}, expr, dim, checkFunc)
-}
-
-func TestJsonExpr(t *testing.T) {
-	suite.Run(t, new(JSONExprSuite))
 }

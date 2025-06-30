@@ -55,7 +55,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 	log.Info("========================delete expr==================",
 		zap.String("expr", expr),
 	)
-	deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResp, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collection,
 		Expr:           expr,
 	})
@@ -65,7 +65,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 
 	log.Info("=========================Data flush=========================")
 
-	flushResp, err := s.Cluster.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 		CollectionNames: []string{collection},
 	})
 	s.NoError(err)
@@ -88,7 +88,7 @@ func (s *CompactionSuite) deleteAndFlush(pks []int64, collection string) {
 func (s *CompactionSuite) compactAndReboot(collection string) {
 	ctx := context.Background()
 	// create index and wait for index done
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collection,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -102,7 +102,7 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 	s.WaitForIndexBuilt(ctxTimeout, collection, integration.FloatVecField)
 
 	// get collectionID
-	coll, err := s.Cluster.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	coll, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collection,
 	})
 	s.Require().NoError(err)
@@ -110,7 +110,7 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 	s.Require().EqualValues(coll.GetCollectionName(), collection)
 
 	collID := coll.GetCollectionID()
-	compactionResp, err := s.Cluster.Proxy.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
+	compactionResp, err := s.Cluster.MilvusClient.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 		CollectionID: collID,
 	})
 	s.Require().NoError(err)
@@ -120,7 +120,7 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 	s.Require().EqualValues(1, compactionResp.GetCompactionPlanCount())
 
 	compactID := compactionResp.GetCompactionID()
-	stateResp, err := s.Cluster.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+	stateResp, err := s.Cluster.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 		CompactionID: compactID,
 	})
 
@@ -128,7 +128,7 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 	s.Require().True(merr.Ok(stateResp.GetStatus()))
 
 	compactionSubmitted := func() bool {
-		resp, err := s.Cluster.DataNode.GetCompactionState(ctx, &datapb.CompactionStateRequest{})
+		resp, err := s.Cluster.DataNodeClient.GetCompactionState(ctx, &datapb.CompactionStateRequest{})
 		s.Require().NoError(err)
 		s.Require().True(merr.Ok(resp.GetStatus()))
 		return len(resp.GetResults()) > 0
@@ -142,7 +142,7 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 		}
 	}
 
-	planResp, err := s.Cluster.Proxy.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{
+	planResp, err := s.Cluster.MilvusClient.GetCompactionStateWithPlans(ctx, &milvuspb.GetCompactionPlansRequest{
 		CompactionID: compactID,
 	})
 	s.Require().NoError(err)
@@ -151,10 +151,10 @@ func (s *CompactionSuite) compactAndReboot(collection string) {
 
 	// Reboot
 	if planResp.GetMergeInfos()[0].GetTarget() == int64(-1) {
-		s.Cluster.StopMixCoord()
-		s.Cluster.StartMixCoord()
+		s.Cluster.DefaultMixCoord().Stop()
+		s.Cluster.AddMixCoord()
 
-		stateResp, err = s.Cluster.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+		stateResp, err = s.Cluster.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactID,
 		})
 
@@ -174,7 +174,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 	marshaledSchema, err := proto.Marshal(schema)
 	s.Require().NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		CollectionName: collection,
 		Schema:         marshaledSchema,
 		ShardsNum:      1,
@@ -189,7 +189,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 		log.Info("=========================Data insertion=========================", zap.Any("count", i))
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, s.dim)
 		hashKeys := integration.GenerateHashKeys(rowNum)
-		insertResult, err := c.Proxy.Insert(context.TODO(), &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
 			CollectionName: collection,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
 			HashKeys:       hashKeys,
@@ -203,7 +203,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 		pks = append(pks, insertResult.GetIDs().GetIntId().GetData()...)
 
 		log.Info("=========================Data flush=========================", zap.Any("count", i))
-		flushResp, err := c.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
+		flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 			CollectionNames: []string{collection},
 		})
 		s.NoError(err)
@@ -223,7 +223,7 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 	}
 	log.Info("=========================Data insertion finished=========================")
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collection)
 	s.Require().NoError(err)
 	s.Require().Equal(segmentCount, len(segments))
 	lo.ForEach(segments, func(info *datapb.SegmentInfo, _ int) {

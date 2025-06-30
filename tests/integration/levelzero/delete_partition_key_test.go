@@ -45,7 +45,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	c := s.Cluster
 
 	// create index and load
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -54,7 +54,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	err = merr.CheckRPCCall(createIndexStatus, err)
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(loadStatus, err)
@@ -69,7 +69,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	var segments []*datapb.SegmentInfo
 	assert.Eventually(s.T(), func() bool {
 		var err error
-		segments, err = c.MetaWatcher.ShowSegments()
+		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		if len(segments) == 2 {
 			for _, segment := range segments {
@@ -88,7 +88,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 
 	checkRowCount := func(rowCount int) {
 		// query
-		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			CollectionName: collectionName,
 			OutputFields:   []string{"count(*)"},
 		})
@@ -102,7 +102,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	// expr: partition_key == 1001 && pk >= 0
 	//  - for previous implementation, the delete pk >= 0 will touch every segments and leave only 1 numRows
 	//  - for latest enhancements, the expr "pk >= 0" will only touch partitions that contains partition key == 1001
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collectionName,
 		Expr:           fmt.Sprintf("partition_key == 1001 && %s >= 0", integration.Int64Field),
 	})
@@ -114,7 +114,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	// Flush will generates 2 Flushed L1 segments and 1 Flushed L0 segment
 	s.Flush(collectionName)
 
-	segments, err = s.Cluster.MetaWatcher.ShowSegments()
+	segments, err = s.Cluster.ShowSegments(collectionName)
 	s.Require().NoError(err)
 	s.Require().EqualValues(len(segments), 3)
 	for _, segment := range segments {
@@ -129,7 +129,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	}
 
 	l0Dropped := func() bool {
-		segments, err := s.Cluster.MetaWatcher.ShowSegments()
+		segments, err := s.Cluster.ShowSegments(collectionName)
 		s.Require().NoError(err)
 		s.Require().EqualValues(len(segments), 3)
 

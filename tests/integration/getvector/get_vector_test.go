@@ -62,7 +62,7 @@ func (s *TestGetVectorSuite) run() {
 	)
 
 	if len(s.dbName) > 0 {
-		createDataBaseStatus, err := s.Cluster.Proxy.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		createDataBaseStatus, err := s.Cluster.MilvusClient.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 			DbName: s.dbName,
 		})
 		s.Require().NoError(err)
@@ -108,7 +108,7 @@ func (s *TestGetVectorSuite) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.Require().NoError(err)
 
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 		Schema:         marshaledSchema,
@@ -139,7 +139,7 @@ func (s *TestGetVectorSuite) run() {
 	}
 	fieldsData = append(fieldsData, vecFieldData)
 	hashKeys := integration.GenerateHashKeys(NB)
-	_, err = s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	_, err = s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 		FieldsData:     fieldsData,
@@ -150,7 +150,7 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          s.dbName,
 		CollectionNames: []string{collection},
 	})
@@ -163,12 +163,12 @@ func (s *TestGetVectorSuite) run() {
 	s.Require().True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, s.dbName, collection)
-	segments, err := s.Cluster.MetaWatcher.ShowSegments()
+	segments, err := s.Cluster.ShowSegments(collection)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(segments)
 
 	// create index
-	_, err = s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	_, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 		FieldName:      vecFieldName,
@@ -181,7 +181,7 @@ func (s *TestGetVectorSuite) run() {
 	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, vecFieldName)
 
 	// load
-	_, err = s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	_, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 	})
@@ -198,7 +198,7 @@ func (s *TestGetVectorSuite) run() {
 	searchReq := integration.ConstructSearchRequest(s.dbName, collection, "",
 		vecFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
 
-	searchResp, err := s.Cluster.Proxy.Search(ctx, searchReq)
+	searchResp, err := s.Cluster.MilvusClient.Search(ctx, searchReq)
 	s.Require().NoError(err)
 	s.Require().Equal(commonpb.ErrorCode_Success, searchResp.GetStatus().GetErrorCode())
 
@@ -341,7 +341,7 @@ func (s *TestGetVectorSuite) run() {
 		}
 	}
 
-	status, err := s.Cluster.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err := s.Cluster.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 	})

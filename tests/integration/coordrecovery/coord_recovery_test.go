@@ -30,7 +30,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -60,7 +59,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -71,7 +70,9 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	err = merr.Error(createCollectionStatus)
 	s.NoError(err)
 
-	showCollectionsResp, err := c.Proxy.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 
@@ -83,7 +84,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 		}
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 		hashKeys := integration.GenerateHashKeys(rowNum)
-		insertResult, err := c.Proxy.Insert(context.TODO(), &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -96,7 +97,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	log.Info("=========================Data insertion finished=========================")
 
 	// flush
-	flushResp, err := c.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -109,13 +110,13 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	s.True(has)
 
 	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("=========================Data flush finished=========================")
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -128,7 +129,7 @@ func (s *CoordSwitchSuite) loadCollection(collectionName string, dim int) {
 	log.Info("=========================Index created=========================")
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -144,13 +145,13 @@ func (s *CoordSwitchSuite) checkCollections() bool {
 		DbName:    "",
 		TimeStamp: 0, // means now
 	}
-	resp, err := s.Cluster.Proxy.ShowCollections(context.TODO(), req)
+	resp, err := s.Cluster.MilvusClient.ShowCollections(context.TODO(), req)
 	s.Require().NoError(merr.CheckRPCCall(resp, err))
 	s.Require().Equal(len(resp.CollectionIds), numCollections)
 	notLoaded := 0
 	loaded := 0
 	for _, name := range resp.CollectionNames {
-		loadProgress, err := s.Cluster.Proxy.GetLoadingProgress(context.TODO(), &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := s.Cluster.MilvusClient.GetLoadingProgress(context.TODO(), &milvuspb.GetLoadingProgressRequest{
 			DbName:         "",
 			CollectionName: name,
 		})
@@ -179,7 +180,7 @@ func (s *CoordSwitchSuite) search(collectionName string, dim int) {
 		TravelTimestamp:    0,
 		GuaranteeTimestamp: 0,
 	}
-	queryResult, err := c.Proxy.Query(context.TODO(), queryReq)
+	queryResult, err := c.MilvusClient.Query(context.TODO(), queryReq)
 	s.Require().NoError(merr.CheckRPCCall(queryResult, err))
 	s.Equal(len(queryResult.FieldsData), 1)
 	numEntities := queryResult.FieldsData[0].GetScalars().GetLongData().Data[0]
@@ -197,7 +198,7 @@ func (s *CoordSwitchSuite) search(collectionName string, dim int) {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(context.TODO(), searchReq)
+	searchResult, err := c.MilvusClient.Search(context.TODO(), searchReq)
 
 	s.NoError(merr.CheckRPCCall(searchResult, err))
 }
@@ -237,13 +238,11 @@ func (s *CoordSwitchSuite) switchCoord() float64 {
 	c := s.Cluster
 	start := time.Now()
 	log.Info("=========================Stopping Coordinators========================")
-	c.StopMixCoord()
+	c.DefaultMixCoord().Stop()
 	log.Info("=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
 	start = time.Now()
 
-	testutil.ResetEnvironment()
-
-	c.StartMixCoord()
+	c.AddMixCoord()
 	log.Info("=========================RootCoord restarted=========================")
 
 	for i := 0; i < 1000; i++ {

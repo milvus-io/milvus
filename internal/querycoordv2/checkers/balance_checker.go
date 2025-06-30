@@ -114,7 +114,7 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 			replicas := b.meta.ReplicaManager.GetByCollection(ctx, cid)
 			stoppingReplicas := make([]int64, 0)
 			for _, replica := range replicas {
-				if replica.RONodesCount() > 0 {
+				if replica.RONodesCount()+replica.ROSQNodesCount() > 0 {
 					stoppingReplicas = append(stoppingReplicas, replica.GetID())
 				}
 			}

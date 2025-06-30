@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
 const (
@@ -58,7 +59,7 @@ func (s *MiniClusterSuite) WaitForIndexBuiltWithIndexName(ctx context.Context, c
 
 func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName, collection, field, indexName string) {
 	getIndexBuilt := func() bool {
-		resp, err := s.Cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+		resp, err := s.Cluster.MilvusClient.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 			DbName:         dbName,
 			CollectionName: collection,
 			FieldName:      field,
@@ -90,9 +91,9 @@ func (s *MiniClusterSuite) waitForIndexBuiltInternal(ctx context.Context, dbName
 	}
 }
 
-func waitingForIndexBuilt(ctx context.Context, cluster *MiniClusterV2, t *testing.T, collection, field string) {
+func waitingForIndexBuilt(ctx context.Context, cluster *cluster.MiniClusterV3, t *testing.T, collection, field string) {
 	getIndexBuilt := func() bool {
-		resp, err := cluster.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+		resp, err := cluster.MilvusClient.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 			CollectionName: collection,
 			FieldName:      field,
 		})

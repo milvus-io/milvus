@@ -37,8 +37,10 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	c := s.Cluster
 
 	// make sure L0 segment are flushed per msgpack
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key)
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key: "1",
+	})
+	defer revertGuard()
 
 	const (
 		indexType  = integration.IndexFaissIvfFlat
@@ -52,7 +54,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	s.createCollection(req)
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -63,7 +65,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(loadStatus, err)
@@ -76,7 +78,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 
 	checkRowCount := func(rowCount int) {
 		// query
-		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			CollectionName: collectionName,
 			OutputFields:   []string{"count(*)"},
 		})
@@ -87,7 +89,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	checkRowCount(5)
 
 	// delete
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collectionName,
 		Expr:           fmt.Sprintf("%s > -1", integration.Int64Field),
 	})
@@ -97,7 +99,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	checkRowCount(0)
 
 	l0Exist := func() ([]*datapb.SegmentInfo, bool) {
-		segments, err := s.Cluster.MetaWatcher.ShowSegments()
+		segments, err := s.Cluster.ShowSegments(collectionName)
 		s.Require().NoError(err)
 		s.Require().Greater(len(segments), 0)
 		for _, segment := range segments {
@@ -132,12 +134,12 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	checkL0Exist()
 
 	// release collection
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collectionName})
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: collectionName})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
 	// load
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(loadStatus, err)
@@ -147,7 +149,7 @@ func (s *LevelZeroSuite) TestDeleteOnGrowing() {
 	checkRowCount(0)
 
 	// drop collection
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)

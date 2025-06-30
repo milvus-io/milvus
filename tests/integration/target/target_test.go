@@ -18,7 +18,6 @@ package target
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -50,11 +49,9 @@ type TargetTestSuit struct {
 }
 
 func (s *TargetTestSuit) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
+	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *TargetTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int) {
@@ -65,7 +62,7 @@ func (s *TargetTestSuit) initCollection(collectionName string, replica int, chan
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -75,7 +72,7 @@ func (s *TargetTestSuit) initCollection(collectionName string, replica int, chan
 	s.True(merr.Ok(createCollectionStatus))
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -85,7 +82,7 @@ func (s *TargetTestSuit) initCollection(collectionName string, replica int, chan
 	}
 
 	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -100,7 +97,7 @@ func (s *TargetTestSuit) initCollection(collectionName string, replica int, chan
 	}
 
 	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(replica),
@@ -115,7 +112,7 @@ func (s *TargetTestSuit) initCollection(collectionName string, replica int, chan
 func (s *TargetTestSuit) insertToCollection(ctx context.Context, dbName string, collectionName string, rowCount int, dim int) {
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowCount, dim)
 	hashKeys := integration.GenerateHashKeys(rowCount)
-	insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -126,7 +123,7 @@ func (s *TargetTestSuit) insertToCollection(ctx context.Context, dbName string, 
 	s.True(merr.Ok(insertResult.Status))
 
 	// flush
-	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -147,7 +144,7 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 	s.initCollection(name, 1, 2, 2, 2000)
 
 	ctx := context.Background()
-	info, err := s.Cluster.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	info, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base:           commonpbutil.NewMsgBase(),
 		CollectionName: name,
 	})
@@ -158,7 +155,7 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 	// wait until all shards are ready
 	// cause showCollections won't just wait all collection becomes loaded, proxy will use retry to block until all shard are ready
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+		resp, err := s.Cluster.MixCoordClient.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 			Base:         commonpbutil.NewMsgBase(),
 			CollectionID: collectionID,
 		})
@@ -166,7 +163,7 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 	}, 60*time.Second, 1*time.Second)
 
 	// trigger old coord stop
-	s.Cluster.StopMixCoord()
+	go s.Cluster.DefaultMixCoord().Stop()
 
 	// keep insert, make segment list change every 3 seconds
 	closeInsertCh := make(chan struct{})
@@ -189,19 +186,15 @@ func (s *TargetTestSuit) TestQueryCoordRestart() {
 	// sleep 30s, wait new flushed segment generated
 	time.Sleep(30 * time.Second)
 
-	port, err := s.Cluster.GetAvailablePort()
-	s.NoError(err)
-	paramtable.Get().Save(paramtable.Get().QueryCoordGrpcServerCfg.Port.Key, fmt.Sprint(port))
-
 	// start a new QC
-	s.Cluster.StartMixCoord()
+	s.Cluster.AddMixCoord()
 
 	// after new QC become Active, expected the new target is ready immediately, and get shard leader success
 	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoord.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		resp, err := s.Cluster.MixCoordClient.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		s.NoError(err)
 		if resp.IsHealthy {
-			resp, err := s.Cluster.MixCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+			resp, err := s.Cluster.MixCoordClient.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
 				Base:         commonpbutil.NewMsgBase(),
 				CollectionID: collectionID,
 			})

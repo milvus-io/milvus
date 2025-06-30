@@ -14,13 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package alias
+package hellomilvus
 
 import (
 	"context"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -32,11 +30,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type AliasSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *AliasSuite) TestAliasOperations() {
+func (s *HelloMilvusSuite) TestAliasOperations() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -55,7 +49,7 @@ func (s *AliasSuite) TestAliasOperations() {
 	schema1 := integration.ConstructSchema(collectionName1, dim, true)
 	marshaledSchema1, err := proto.Marshal(schema1)
 	s.NoError(err)
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName1,
 		Schema:         marshaledSchema1,
@@ -66,7 +60,7 @@ func (s *AliasSuite) TestAliasOperations() {
 	schema2 := integration.ConstructSchema(collectionName2, dim, true)
 	marshaledSchema2, err := proto.Marshal(schema2)
 	s.NoError(err)
-	createCollectionStatus2, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus2, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName2,
 		Schema:         marshaledSchema2,
@@ -76,7 +70,7 @@ func (s *AliasSuite) TestAliasOperations() {
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName1,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -85,7 +79,7 @@ func (s *AliasSuite) TestAliasOperations() {
 	})
 	s.NoError(err)
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	insertResult2, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult2, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName2,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -96,7 +90,7 @@ func (s *AliasSuite) TestAliasOperations() {
 	s.Equal(insertResult2.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName1},
 	})
@@ -109,7 +103,7 @@ func (s *AliasSuite) TestAliasOperations() {
 	s.Require().True(has)
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName1)
 
-	flushResp2, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp2, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName2},
 	})
@@ -126,26 +120,26 @@ func (s *AliasSuite) TestAliasOperations() {
 	// alias11 -> collection1
 	// alias12 -> collection1
 	// alias21 -> collection2
-	createAliasResp1, err := c.Proxy.CreateAlias(ctx, &milvuspb.CreateAliasRequest{
+	createAliasResp1, err := c.MilvusClient.CreateAlias(ctx, &milvuspb.CreateAliasRequest{
 		CollectionName: collectionName1,
 		Alias:          "alias11",
 	})
 	s.NoError(err)
 	s.Equal(createAliasResp1.GetErrorCode(), commonpb.ErrorCode_Success)
-	createAliasResp2, err := c.Proxy.CreateAlias(ctx, &milvuspb.CreateAliasRequest{
+	createAliasResp2, err := c.MilvusClient.CreateAlias(ctx, &milvuspb.CreateAliasRequest{
 		CollectionName: collectionName1,
 		Alias:          "alias12",
 	})
 	s.NoError(err)
 	s.Equal(createAliasResp2.GetErrorCode(), commonpb.ErrorCode_Success)
-	createAliasResp3, err := c.Proxy.CreateAlias(ctx, &milvuspb.CreateAliasRequest{
+	createAliasResp3, err := c.MilvusClient.CreateAlias(ctx, &milvuspb.CreateAliasRequest{
 		CollectionName: collectionName2,
 		Alias:          "alias21",
 	})
 	s.NoError(err)
 	s.Equal(createAliasResp3.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	describeAliasResp1, err := c.Proxy.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
+	describeAliasResp1, err := c.MilvusClient.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
 		Alias: "alias11",
 	})
 	s.NoError(err)
@@ -155,7 +149,7 @@ func (s *AliasSuite) TestAliasOperations() {
 		zap.String("alias", describeAliasResp1.GetAlias()),
 		zap.String("collection", describeAliasResp1.GetCollection()))
 
-	describeAliasResp2, err := c.Proxy.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
+	describeAliasResp2, err := c.MilvusClient.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
 		Alias: "alias12",
 	})
 	s.NoError(err)
@@ -165,7 +159,7 @@ func (s *AliasSuite) TestAliasOperations() {
 		zap.String("alias", describeAliasResp2.GetAlias()),
 		zap.String("collection", describeAliasResp2.GetCollection()))
 
-	describeAliasResp3, err := c.Proxy.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
+	describeAliasResp3, err := c.MilvusClient.DescribeAlias(ctx, &milvuspb.DescribeAliasRequest{
 		Alias: "alias21",
 	})
 	s.NoError(err)
@@ -175,26 +169,26 @@ func (s *AliasSuite) TestAliasOperations() {
 		zap.String("alias", describeAliasResp3.GetAlias()),
 		zap.String("collection", describeAliasResp3.GetCollection()))
 
-	listAliasesResp, err := c.Proxy.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+	listAliasesResp, err := c.MilvusClient.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
 	s.NoError(err)
 	s.Equal(listAliasesResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	s.Equal(3, len(listAliasesResp.Aliases))
 
 	log.Info("listAliasesResp", zap.Strings("aliases", listAliasesResp.Aliases))
 
-	dropAliasResp1, err := c.Proxy.DropAlias(ctx, &milvuspb.DropAliasRequest{
+	dropAliasResp1, err := c.MilvusClient.DropAlias(ctx, &milvuspb.DropAliasRequest{
 		Alias: "alias11",
 	})
 	s.NoError(err)
 	s.Equal(dropAliasResp1.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	dropAliasResp3, err := c.Proxy.DropAlias(ctx, &milvuspb.DropAliasRequest{
+	dropAliasResp3, err := c.MilvusClient.DropAlias(ctx, &milvuspb.DropAliasRequest{
 		Alias: "alias21",
 	})
 	s.NoError(err)
 	s.Equal(dropAliasResp3.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	listAliasesRespNew, err := c.Proxy.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
+	listAliasesRespNew, err := c.MilvusClient.ListAliases(ctx, &milvuspb.ListAliasesRequest{})
 	s.NoError(err)
 	s.Equal(listAliasesRespNew.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	s.Equal(1, len(listAliasesRespNew.Aliases))
@@ -205,8 +199,4 @@ func (s *AliasSuite) TestAliasOperations() {
 	log.Info("TestAliasOperations succeed")
 	log.Info("======================")
 	log.Info("======================")
-}
-
-func TestAliasOperations(t *testing.T) {
-	suite.Run(t, new(AliasSuite))
 }

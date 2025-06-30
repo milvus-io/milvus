@@ -53,6 +53,7 @@ const (
 	DefaultIDKey                        = "id"
 	SupportedLabelPrefix                = "MILVUS_SERVER_LABEL_"
 	LabelStreamingNodeEmbeddedQueryNode = "QUERYNODE_STREAMING-EMBEDDED"
+	MilvusNodeIDForTesting              = "MILVUS_NODE_ID_FOR_TESTING"
 )
 
 // SessionEventType session event type
@@ -377,6 +378,10 @@ func (s *Session) checkIDExist() {
 }
 
 func (s *Session) getServerIDWithKey(key string) (int64, error) {
+	if os.Getenv(MilvusNodeIDForTesting) != "" {
+		log.Info("use node id for testing", zap.String("nodeID", os.Getenv(MilvusNodeIDForTesting)))
+		return strconv.ParseInt(os.Getenv(MilvusNodeIDForTesting), 10, 64)
+	}
 	log := log.Ctx(s.ctx)
 	for {
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))

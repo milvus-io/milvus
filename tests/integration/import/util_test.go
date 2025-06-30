@@ -17,11 +17,12 @@
 package importv2
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"os"
+	"path"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
@@ -42,7 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
 const dim = 128
@@ -58,55 +60,60 @@ func CheckLogID(fieldBinlogs []*datapb.FieldBinlog) error {
 	return nil
 }
 
-func GenerateParquetFile(filePath string, schema *schemapb.CollectionSchema, numRows int) error {
-	_, err := GenerateParquetFileAndReturnInsertData(filePath, schema, numRows)
-	return err
+func GenerateParquetFile(c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, numRows int) (string, error) {
+	_, filePath, err := GenerateParquetFileAndReturnInsertData(c, schema, numRows)
+	return filePath, err
 }
 
-func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.CollectionSchema, numRows int) (*storage.InsertData, error) {
-	w, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+func GenerateParquetFileAndReturnInsertData(c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, numRows int) (*storage.InsertData, string, error) {
+	insertData, err := testutil.CreateInsertData(schema, numRows)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
+
+	buf, err := searilizeParquetFile(schema, insertData, numRows)
+	if err != nil {
+		panic(err)
+	}
+
+	filePath := path.Join(c.RootPath(), "parquet", uuid.New().String()+".parquet")
+	if err := c.ChunkManager.Write(context.Background(), filePath, buf.Bytes()); err != nil {
+		return nil, "", err
+	}
+	return insertData, filePath, err
+}
+
+func searilizeParquetFile(schema *schemapb.CollectionSchema, insertData *storage.InsertData, numRows int) (*bytes.Buffer, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 10240))
 
 	pqSchema, err := pq.ConvertToArrowSchema(schema, false)
 	if err != nil {
 		return nil, err
 	}
-	fw, err := pqarrow.NewFileWriter(pqSchema, w, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())
+	fw, err := pqarrow.NewFileWriter(pqSchema, buf, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())
 	if err != nil {
 		return nil, err
 	}
 	defer fw.Close()
 
-	insertData, err := testutil.CreateInsertData(schema, numRows)
-	if err != nil {
-		return nil, err
-	}
-
 	columns, err := testutil.BuildArrayData(schema, insertData, false)
 	if err != nil {
 		return nil, err
 	}
-
 	recordBatch := array.NewRecord(pqSchema, columns, int64(numRows))
-	return insertData, fw.Write(recordBatch)
+	if err := fw.Write(recordBatch); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
-func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
+func GenerateNumpyFiles(c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
 	writeFn := func(path string, data interface{}) error {
-		f, err := os.Create(path)
-		if err != nil {
+		buf := bytes.NewBuffer(make([]byte, 0, 10240))
+		if err := npyio.Write(buf, data); err != nil {
 			return err
 		}
-		defer f.Close()
-
-		err = npyio.Write(f, data)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return c.ChunkManager.Write(context.Background(), path, buf.Bytes())
 	}
 
 	insertData, err := testutil.CreateInsertData(schema, rowCount)
@@ -120,7 +127,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 		if field.GetAutoID() && field.GetIsPrimaryKey() {
 			continue
 		}
-		path := fmt.Sprintf("%s/%s.npy", cm.RootPath(), field.GetName())
+		path := path.Join(c.RootPath(), "numpy", uuid.New().String(), field.GetName()+".npy")
 
 		fieldID := field.GetFieldID()
 		fieldData := insertData.Data[fieldID]
@@ -190,9 +197,8 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			data = insertData.Data[fieldID].GetDataRows()
 		}
 
-		err := writeFn(path, data)
-		if err != nil {
-			return nil, err
+		if err := writeFn(path, data); err != nil {
+			panic(err)
 		}
 		paths = append(paths, path)
 	}
@@ -201,7 +207,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 	}, nil
 }
 
-func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) {
+func GenerateJSONFile(t *testing.T, c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, count int) string {
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
 
@@ -211,11 +217,17 @@ func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.Collection
 	jsonBytes, err := json.Marshal(rows)
 	assert.NoError(t, err)
 
-	err = os.WriteFile(filePath, jsonBytes, 0o644) // nolint
-	assert.NoError(t, err)
+	filePath := path.Join(c.RootPath(), "json", uuid.New().String()+".json")
+
+	if err = c.ChunkManager.Write(context.Background(), filePath, jsonBytes); err != nil {
+		panic(err)
+	}
+	return filePath
 }
 
-func GenerateCSVFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) rune {
+func GenerateCSVFile(t *testing.T, c *cluster.MiniClusterV3, schema *schemapb.CollectionSchema, count int) (string, rune) {
+	filePath := path.Join(c.RootPath(), "csv", uuid.New().String()+".csv")
+
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
 
@@ -225,21 +237,22 @@ func GenerateCSVFile(t *testing.T, filePath string, schema *schemapb.CollectionS
 	csvData, err := testutil.CreateInsertDataForCSV(schema, insertData, nullkey)
 	assert.NoError(t, err)
 
-	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
-	assert.NoError(t, err)
-
-	writer := csv.NewWriter(wf)
+	buf := bytes.NewBuffer(make([]byte, 0, 10240))
+	writer := csv.NewWriter(buf)
 	writer.Comma = sep
 	writer.WriteAll(csvData)
 	writer.Flush()
 	assert.NoError(t, err)
 
-	return sep
+	if err = c.ChunkManager.Write(context.Background(), filePath, buf.Bytes()); err != nil {
+		panic(err)
+	}
+	return filePath, sep
 }
 
-func WaitForImportDone(ctx context.Context, c *integration.MiniClusterV2, jobID string) error {
+func WaitForImportDone(ctx context.Context, c *cluster.MiniClusterV3, jobID string) error {
 	for {
-		resp, err := c.Proxy.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
+		resp, err := c.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
 			JobID: jobID,
 		})
 		if err != nil {
