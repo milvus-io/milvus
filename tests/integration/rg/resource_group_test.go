@@ -179,7 +179,7 @@ func (s *ResourceGroupTestSuite) TestWithReplica() {
 	// // transfer one of replica in c3 from rg2 into DEFAULT rg.
 	// s.collections["c3"].resourceGroups = []string{DefaultResourceGroup, "rg2"}
 	//
-	//	status, err := s.Cluster.Proxy.TransferReplica(ctx, &milvuspb.TransferReplicaRequest{
+	//	status, err := s.Cluster.MilvusClient.TransferReplica(ctx, &milvuspb.TransferReplicaRequest{
 	//		DbName:              s.collections["c3"].createCfg.DBName,
 	//		CollectionName:      s.collections["c3"].createCfg.CollectionName,
 	//		SourceResourceGroup: "rg2",
@@ -211,7 +211,7 @@ func (s *ResourceGroupTestSuite) syncResourceConfig(ctx context.Context) {
 	for rgName, cfg := range s.rgs {
 		req.ResourceGroups[rgName] = cfg.rgCfg
 	}
-	status, err := s.Cluster.Proxy.UpdateResourceGroups(ctx, req)
+	status, err := s.Cluster.MilvusClient.UpdateResourceGroups(ctx, req)
 	s.NoError(err)
 	s.True(merr.Ok(status))
 
@@ -220,13 +220,13 @@ func (s *ResourceGroupTestSuite) syncResourceConfig(ctx context.Context) {
 }
 
 func (s *ResourceGroupTestSuite) assertResourceGroup(ctx context.Context) {
-	resp, err := s.Cluster.Proxy.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+	resp, err := s.Cluster.MilvusClient.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(resp.Status))
 	s.ElementsMatch(resp.ResourceGroups, lo.Keys(s.rgs))
 
 	for _, rg := range resp.ResourceGroups {
-		resp, err := s.Cluster.Proxy.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{
+		resp, err := s.Cluster.MilvusClient.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{
 			ResourceGroup: rg,
 		})
 		s.NoError(err)
@@ -238,7 +238,7 @@ func (s *ResourceGroupTestSuite) assertResourceGroup(ctx context.Context) {
 }
 
 func (s *ResourceGroupTestSuite) initResourceGroup(ctx context.Context) {
-	status, err := s.Cluster.Proxy.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+	status, err := s.Cluster.MilvusClient.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 		ResourceGroup: RecycleResourceGroup,
 		Config:        s.rgs[RecycleResourceGroup].rgCfg,
 	})
@@ -249,7 +249,7 @@ func (s *ResourceGroupTestSuite) initResourceGroup(ctx context.Context) {
 		if rgName == RecycleResourceGroup || rgName == DefaultResourceGroup {
 			continue
 		}
-		status, err := s.Cluster.Proxy.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		status, err := s.Cluster.MilvusClient.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: rgName,
 			Config:        cfg.rgCfg,
 		})
@@ -257,7 +257,7 @@ func (s *ResourceGroupTestSuite) initResourceGroup(ctx context.Context) {
 		s.True(merr.Ok(status))
 	}
 
-	status, err = s.Cluster.Proxy.UpdateResourceGroups(ctx, &milvuspb.UpdateResourceGroupsRequest{
+	status, err = s.Cluster.MilvusClient.UpdateResourceGroups(ctx, &milvuspb.UpdateResourceGroupsRequest{
 		ResourceGroups: map[string]*rgpb.ResourceGroupConfig{
 			DefaultResourceGroup: s.rgs[DefaultResourceGroup].rgCfg,
 		},
@@ -274,7 +274,7 @@ func (s *ResourceGroupTestSuite) createAndLoadCollections(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			s.CreateCollectionWithConfiguration(ctx, cfg.createCfg)
-			loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 				DbName:         cfg.createCfg.DBName,
 				CollectionName: cfg.createCfg.CollectionName,
 				ReplicaNumber:  int32(len(cfg.resourceGroups)),
@@ -290,7 +290,7 @@ func (s *ResourceGroupTestSuite) createAndLoadCollections(ctx context.Context) {
 
 func (s *ResourceGroupTestSuite) assertReplica(ctx context.Context) bool {
 	for _, cfg := range s.collections {
-		resp, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+		resp, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
 			CollectionName: cfg.createCfg.CollectionName,
 			DbName:         cfg.createCfg.DBName,
 		})
@@ -348,7 +348,5 @@ func newCreateCollectionConfig(collectionName string) *integration.CreateCollect
 }
 
 func TestResourceGroup(t *testing.T) {
-	g := integration.WithoutStreamingService()
-	defer g()
 	suite.Run(t, new(ResourceGroupTestSuite))
 }
