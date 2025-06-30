@@ -1651,7 +1651,7 @@ func isPartitionLoaded(ctx context.Context, mc types.MixCoordClient, collID int6
 	return true, nil
 }
 
-func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
+func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool, skipDynamicField bool) error {
 	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
 	autoGenFieldNum := 0
@@ -1682,7 +1682,9 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			autoGenFieldNum++
 		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) || IsBM25FunctionOutputField(fieldSchema, schema) {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert) ||
+				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				(skipDynamicField && fieldSchema.GetIsDynamic()) {
 				// autoGenField
 				continue
 			}
@@ -1726,7 +1728,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(schema, insertMsg, true); err != nil {
+	if err := checkFieldsDataBySchema(schema, insertMsg, true, false); err != nil {
 		return nil, err
 	}
 
@@ -1827,7 +1829,7 @@ func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *m
 		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(schema, insertMsg, false); err != nil {
+	if err := checkFieldsDataBySchema(schema, insertMsg, false, false); err != nil {
 		return nil, nil, err
 	}
 

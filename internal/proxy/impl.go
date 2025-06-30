@@ -2938,6 +2938,8 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		chMgr:           node.chMgr,
 		chTicker:        node.chTicker,
 		schemaTimestamp: request.SchemaTimestamp,
+		mixCoord:        node.mixCoord,
+		node:            node,
 	}
 	var enqueuedTask task = it
 	if streamingutil.IsStreamingServiceEnabled() {
