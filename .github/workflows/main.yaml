@@ -44,7 +44,7 @@ concurrency:
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu 22.04
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, self-runner]
     steps:
       - name: 'Setup $HOME'
         # hot fix
@@ -96,7 +96,7 @@ jobs:
           kind: 'cpp'
       - name: Build
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp"
+          ./build/builder.sh /bin/bash -c "cat /proc/sys/kernel/core_pattern && ulimit -a && make USE_ASAN=${{env.useasan}} build-cpp"
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code
@@ -168,7 +168,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, self-runner]
     timeout-minutes: 90
     steps:
       - name: Maximize build space
@@ -196,11 +196,27 @@ jobs:
         shell: bash
         run: |
           docker compose up -d pulsar etcd minio azurite gcpnative
+          docker ps
       - name: UT
         run: |
+          sudo mkdir -p /cores
+          sudo chmod 777 /cores
+          cat /proc/sys/kernel/core_pattern
+          sudo bash -c 'echo "/cores/%e.%p.%t" > /proc/sys/kernel/core_pattern'
+          cat /proc/sys/kernel/core_pattern
+          ulimit -a
+          ulimit -c unlimited
+          ulimit -a
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
-          ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
+          docker ps
+          sudo ./build/builder.sh /bin/bash -c "cat /proc/sys/kernel/core_pattern && ulimit -c unlimited && echo '/cores/%e.%p.%t' > /proc/sys/kernel/core_pattern && cat /proc/sys/kernel/core_pattern && ulimit -a && make codecov-go-without-build"
+      - name: Upload core dump
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: core-dump
+          path: /cores
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
