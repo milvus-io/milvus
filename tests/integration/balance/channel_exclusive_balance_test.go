@@ -54,6 +54,7 @@ func (s *ChannelExclusiveBalanceSuit) SetupSuite() {
 
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CheckNodeInReplicaInterval.Key, "3")
 
 	// disable compaction
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")

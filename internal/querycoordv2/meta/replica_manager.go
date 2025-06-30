@@ -140,18 +140,17 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 				return nil, err
 			}
 
-			channelExclusiveNodeInfo := make(map[string]*querypb.ChannelNodeInfo)
+			replica := newReplica(&querypb.Replica{
+				ID:            id,
+				CollectionID:  collection,
+				ResourceGroup: rgName,
+			})
 			if enableChannelExclusiveMode {
-				for _, channel := range channels {
-					channelExclusiveNodeInfo[channel] = &querypb.ChannelNodeInfo{}
-				}
+				mutableReplica := replica.CopyForWrite()
+				mutableReplica.TryEnableChannelExclusiveMode(channels...)
+				replica = mutableReplica.IntoReplica()
 			}
-			replicas = append(replicas, newReplica(&querypb.Replica{
-				ID:               id,
-				CollectionID:     collection,
-				ResourceGroup:    rgName,
-				ChannelNodeInfos: channelExclusiveNodeInfo,
-			}))
+			replicas = append(replicas, replica)
 		}
 	}
 	if err := m.put(ctx, replicas...); err != nil {
@@ -438,7 +437,10 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.Int64s("newRONodes", roNodes),
 				zap.Int64s("roToRWNodes", recoverableNodes),
-				zap.Int64s("newIncomingNodes", incomingNode))
+				zap.Int64s("newIncomingNodes", incomingNode),
+				zap.Bool("enableChannelExclusiveMode", mutableReplica.IsChannelExclusiveModeEnabled()),
+				zap.Any("channelNodeInfos", mutableReplica.replicaPB.GetChannelNodeInfos()),
+			)
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
 	})
