@@ -10,22 +10,21 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+#include <memory>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <cstddef>
-#include "common/File.h"
+#include <string>
+#include <utility>
+#include "common/EasyAssert.h"
+#include "storage/FileWriter.h"
+
 namespace milvus {
 class ChunkTarget {
  public:
     virtual void
-    write(const void* data, size_t size, bool append = true) = 0;
-
-    virtual void
-    skip(size_t size) = 0;
-
-    virtual void
-    seek(size_t offset) = 0;
+    write(const void* data, size_t size) = 0;
 
     virtual std::pair<char*, size_t>
     get() = 0;
@@ -37,48 +36,17 @@ class ChunkTarget {
 };
 
 class MmapChunkTarget : public ChunkTarget {
-    struct Buffer {
-        char buf[1 << 14];
-        size_t pos = 0;
-
-        bool
-        sufficient(size_t size) {
-            return pos + size <= sizeof(buf);
-        }
-
-        void
-        write(const void* data, size_t size) {
-            memcpy(buf + pos, data, size);
-            pos += size;
-        }
-
-        void
-        clear() {
-            pos = 0;
-        }
-
-        void
-        write(uint32_t value) {
-            *reinterpret_cast<uint32_t*>(buf + pos) = value;
-            pos += sizeof(uint32_t);
-        }
-    };
-
  public:
-    MmapChunkTarget(File& file, size_t offset) : file_(file), offset_(offset) {
+    explicit MmapChunkTarget(std::string file_path)
+        : file_path_(std::move(file_path)) {
+        file_writer_ = std::make_unique<storage::FileWriter>(file_path_);
     }
 
     void
     flush();
 
     void
-    write(const void* data, size_t size, bool append = true) override;
-
-    void
-    skip(size_t size) override;
-
-    void
-    seek(size_t offset) override;
+    write(const void* data, size_t size) override;
 
     std::pair<char*, size_t>
     get() override;
@@ -87,10 +55,9 @@ class MmapChunkTarget : public ChunkTarget {
     tell() override;
 
  private:
-    File& file_;
-    size_t offset_ = 0;
+    std::unique_ptr<storage::FileWriter> file_writer_{nullptr};
+    std::string file_path_{};
     size_t size_ = 0;
-    Buffer buffer_;
 };
 
 class MemChunkTarget : public ChunkTarget {
@@ -110,13 +77,7 @@ class MemChunkTarget : public ChunkTarget {
     }
 
     void
-    write(const void* data, size_t size, bool append = true) override;
-
-    void
-    skip(size_t size) override;
-
-    void
-    seek(size_t offset) override;
+    write(const void* data, size_t size) override;
 
     std::pair<char*, size_t>
     get() override;

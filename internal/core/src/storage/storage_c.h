@@ -39,6 +39,9 @@ CleanRemoteChunkManagerSingleton();
 void
 ResizeTheadPool(int64_t priority, float ratio);
 
+CStatus
+InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads);
+
 #ifdef __cplusplus
 };
 #endif
