@@ -796,7 +796,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
 	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
 	log.Info("Start loading fields...",
-		// zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
+		zap.Int("indexedFields count", len(indexedFieldInfos)),
 		zap.Int64s("indexed text fields", lo.Keys(textIndexes)),
 		zap.Int64s("unindexed text fields", lo.Keys(unindexedTextFields)),
 		zap.Int64s("indexed json key fields", lo.Keys(jsonKeyStats)),
@@ -1742,6 +1742,10 @@ func (loader *segmentLoader) LoadJSONIndex(ctx context.Context,
 	segment, ok := seg.(*LocalSegment)
 	if !ok {
 		return merr.WrapErrParameterInvalid("LocalSegment", fmt.Sprintf("%T", seg))
+	}
+
+	if len(loadInfo.GetJsonKeyStatsLogs()) == 0 {
+		return nil
 	}
 
 	collection := segment.GetCollection()

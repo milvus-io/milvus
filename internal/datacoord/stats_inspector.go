@@ -195,8 +195,8 @@ func (si *statsInspector) enableBM25() bool {
 }
 
 func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted()) {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
+		!segment.GetIsSorted() {
 		return false
 	}
 
@@ -212,12 +212,15 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 }
 
 func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted()) {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
+		!segment.GetIsSorted() {
 		return false
 	}
 
 	for _, fieldID := range fieldIDs {
+		if segment.GetJsonKeyStats() == nil {
+			return true
+		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}

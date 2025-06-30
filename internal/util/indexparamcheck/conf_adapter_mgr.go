@@ -58,6 +58,7 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[IndexHybrid] = newHYBRIDChecker()
 	mgr.checkers["marisa-trie"] = newTRIEChecker()
 	mgr.checkers[AutoIndex] = newAUTOINDEXChecker()
+	mgr.checkers[IndexNGRAM] = newNgramIndexChecker()
 }
 
 func newIndexCheckerMgr() *indexCheckerMgrImpl {

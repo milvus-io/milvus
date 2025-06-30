@@ -58,6 +58,7 @@ DiskFileManagerImpl::~DiskFileManagerImpl() {
     RemoveIndexFiles();
     RemoveTextLogFiles();
     RemoveJsonKeyIndexFiles();
+    RemoveNgramIndexFiles();
 }
 
 bool
@@ -317,6 +318,16 @@ DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
         priority);
 }
 
+void
+DiskFileManagerImpl::CacheNgramIndexToDisk(
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
+    return CacheIndexToDiskInternal(
+        remote_files,
+        [this]() { return GetLocalNgramIndexPrefix(); },
+        priority);
+}
+
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(const Config& config) {
@@ -525,6 +536,13 @@ DiskFileManagerImpl::RemoveJsonKeyIndexFiles() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveNgramIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalNgramIndexPrefix());
 }
 
 template <DataType T>
@@ -801,6 +819,30 @@ DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
                                            field_meta_.partition_id,
                                            field_meta_.segment_id,
                                            field_meta_.field_id);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id,
+                               false);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalTempNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id,
+                               true);
 }
 
 std::string

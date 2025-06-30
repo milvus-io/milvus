@@ -94,6 +94,13 @@ class IndexFactory {
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
+    // Create ngram index
+    IndexBasePtr
+    CreateNgramIndex(DataType data_type,
+                     const NgramParams& params,
+                     const storage::FileManagerContext& file_manager_context =
+                         storage::FileManagerContext());
+
     // For types like array, struct, union, etc
     IndexBasePtr
     CreateCompositeScalarIndex(

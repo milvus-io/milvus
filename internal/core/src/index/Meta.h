@@ -52,6 +52,9 @@ constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
 constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 constexpr uint32_t TANTIVY_INDEX_MINIMUM_VERSION = 5;
 constexpr const char* INDEX_NON_ENCODING = "index.nonEncoding";
+constexpr const char* NGRAM_INDEX_TYPE = "NGRAM";
+constexpr const char* MIN_GRAM = "min_gram";
+constexpr const char* MAX_GRAM = "max_gram";
 
 // index meta
 constexpr const char* COLLECTION_ID = "collection_id";
