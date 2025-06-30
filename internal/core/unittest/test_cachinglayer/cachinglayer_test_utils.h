@@ -50,6 +50,20 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
             total_rows += num_rows_per_chunk[i];
         }
         key_ = key;
+        meta_.avg_num_rows_per_chunk_ = total_rows / num_cells_;
+        meta_.virt_chunk_to_file_idx_.resize(total_rows / meta_.avg_num_rows_per_chunk_);
+        size_t nruc_idx = 0;
+        for (size_t i = 0; i < meta_.virt_chunk_to_file_idx_.size(); i++) {
+            int64_t svc = i * meta_.avg_num_rows_per_chunk_;
+            if (svc < meta_.num_rows_until_chunk_[nruc_idx+1]) {
+                meta_.virt_chunk_to_file_idx_[i] = nruc_idx;
+            } else {
+                while (svc >= meta_.num_rows_until_chunk_[nruc_idx+1]) {
+                    ++nruc_idx;
+                }
+                meta_.virt_chunk_to_file_idx_[i] = nruc_idx;
+            }
+        }
     }
     ~TestChunkTranslator() override {
     }

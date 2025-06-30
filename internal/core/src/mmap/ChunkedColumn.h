@@ -78,6 +78,38 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
     return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
 }
 
+std::pair<std::vector<milvus::cachinglayer::cid_t>,
+          std::vector<
+              int64_t>> inline GetChunkIDsByOffsets(const int64_t* offsets,
+                                                    int64_t count,
+                                                    const std::vector<int64_t>&
+                                                        num_rows_until_chunk,
+                                                    int64_t avg_num_rows_per_chunk,
+                                                    const std::vector<int64_t>&
+                                                        virt_chunk_to_file_idx) {
+    std::vector<milvus::cachinglayer::cid_t> cids(count, 0);
+    std::vector<int64_t> offsets_in_chunk(count);
+    // optimize for single chunk case
+    if (num_rows_until_chunk.size() == 2) {
+        for (int64_t i = 0; i < count; i++) {
+            offsets_in_chunk[i] = offsets[i];
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    }
+    for (int64_t i = 0; i < count; i++) {
+        auto offset = offsets[i];
+        auto vcid = offset / avg_num_rows_per_chunk;
+        auto scid = virt_chunk_to_file_idx[vcid];
+        while (scid < num_rows_until_chunk.size() - 1 && offset >= num_rows_until_chunk[scid + 1]) {
+            scid++;
+        }
+        auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+        cids[i] = scid;
+        offsets_in_chunk[i] = offset_in_chunk;
+    }
+    return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+}
+
 class ChunkedColumnBase : public ChunkedColumnInterface {
  public:
     explicit ChunkedColumnBase(std::unique_ptr<Translator<Chunk>> translator,
@@ -255,8 +287,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
         auto& num_rows_until_chunk = GetNumRowsUntilChunk();
+        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(slot_->meta());
+        auto& avg_num_rows_per_chunk = meta->avg_num_rows_per_chunk_;
+        auto& virt_chunk_to_file_idx = meta->virt_chunk_to_file_idx_;
         return ::milvus::GetChunkIDsByOffsets(
-            offsets, count, num_rows_until_chunk);
+            offsets, count, num_rows_until_chunk, avg_num_rows_per_chunk, virt_chunk_to_file_idx);
     }
 
     PinWrapper<Chunk*>

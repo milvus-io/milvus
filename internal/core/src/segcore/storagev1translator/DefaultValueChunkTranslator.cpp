@@ -35,6 +35,20 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
             /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);
+    meta_.avg_num_rows_per_chunk_ = field_data_info.row_count;
+    meta_.virt_chunk_to_file_idx_.resize(1);
+    size_t nruc_idx = 0;
+    for (size_t i = 0; i < meta_.virt_chunk_to_file_idx_.size(); i++) {
+        int64_t svc = i * meta_.avg_num_rows_per_chunk_;
+        if (svc < meta_.num_rows_until_chunk_[nruc_idx+1]) {
+            meta_.virt_chunk_to_file_idx_[i] = nruc_idx;
+        } else {
+            while (svc >= meta_.num_rows_until_chunk_[nruc_idx+1]) {
+                ++nruc_idx;
+            }
+            meta_.virt_chunk_to_file_idx_[i] = nruc_idx;
+        }
+    }
 }
 
 DefaultValueChunkTranslator::~DefaultValueChunkTranslator() {

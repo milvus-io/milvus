@@ -24,6 +24,8 @@ namespace milvus::segcore::storagev1translator {
 
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
+    int64_t avg_num_rows_per_chunk_;
+    std::vector<int64_t> virt_chunk_to_file_idx_;
     CTMeta(milvus::cachinglayer::StorageType storage_type,
            CacheWarmupPolicy cache_warmup_policy,
            bool support_eviction)
