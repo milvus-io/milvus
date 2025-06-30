@@ -269,7 +269,10 @@ func (node *DataNode) Init() error {
 		node.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = pipeline.NewFlowgraphManager()
 
-		index.InitSegcore()
+		err = index.InitSegcore()
+		if err != nil {
+			initError = err
+		}
 		// init storage v2 file system.
 		err = initcore.InitStorageV2FileSystem(paramtable.Get())
 		if err != nil {

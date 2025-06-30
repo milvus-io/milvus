@@ -21,27 +21,27 @@ namespace milvus::storage {
 
 milvus::SegcoreError
 BinlogReader::Read(int64_t nbytes, void* out) {
-    auto remain = size_ - tell_;
+    auto remain = size_ - tail_;
     if (nbytes > remain) {
         return SegcoreError(milvus::UnexpectedError,
                             "out range of binlog data");
     }
-    std::memcpy(out, data_.get() + tell_, nbytes);
-    tell_ += nbytes;
+    std::memcpy(out, data_.get() + tail_, nbytes);
+    tail_ += nbytes;
     return SegcoreError(milvus::Success, "");
 }
 
 std::pair<milvus::SegcoreError, std::shared_ptr<uint8_t[]>>
 BinlogReader::Read(int64_t nbytes) {
-    auto remain = size_ - tell_;
+    auto remain = size_ - tail_;
     if (nbytes > remain) {
         return std::make_pair(
             SegcoreError(milvus::UnexpectedError, "out range of binlog data"),
             nullptr);
     }
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-    auto res = std::shared_ptr<uint8_t[]>(data_.get() + tell_, deleter);
-    tell_ += nbytes;
+    auto res = std::shared_ptr<uint8_t[]>(data_.get() + tail_, deleter);
+    tail_ += nbytes;
     return std::make_pair(SegcoreError(milvus::Success, ""), res);
 }
 
