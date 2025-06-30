@@ -56,6 +56,9 @@ func (s *BalanceTestSuit) SetupSuite() {
 	// disable compaction
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
 
+	// speed up assign node to replica
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CheckNodeInReplicaInterval.Key, "5")
+
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 

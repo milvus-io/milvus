@@ -1,9 +1,11 @@
 package meta
 
 import (
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -418,6 +420,7 @@ func (replica *mutableReplica) tryBalanceNodeForChannel() {
 					}
 				}
 				replica.replicaPB.ChannelNodeInfos[channelName].RwNodes = currentNodes
+				log.Info("assign exclusive node to channel", zap.String("channelName", channelName), zap.Int64s("nodes", currentNodes))
 			}
 		}
 	}
