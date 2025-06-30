@@ -10,7 +10,11 @@ Go MilvusClient for [Milvus](https://github.com/milvus-io/milvus). To contribute
 
 ### Prerequisites
 
+<<<<<<< HEAD
 Go 1.21 or higher
+=======
+Go 1.24.4 or higher
+>>>>>>> 6b7cc28bca... Upgrade go version to 1.24.4 to fix CVEs
 
 ### Install Milvus Go SDK
 
