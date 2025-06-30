@@ -244,7 +244,7 @@ type commonConfig struct {
 
 	DiskWriteMode         ParamItem `refreshable:"true"`
 	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
-	DiskWriteNrThreads    ParamItem `refreshable:"true"`
+	DiskWriteNumThreads   ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
@@ -655,7 +655,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
-		Version:      "2.5.14",
+		Version:      "2.6.0",
 		DefaultValue: "buffered",
 		Doc: `This parameter controls the write mode of the local disk, which is used to write temporary data downloaded from remote storage.
 Currently, only QueryNode uses 'common.diskWrite*' parameters. Support for other components will be added in the future.
@@ -666,24 +666,26 @@ The options include 'direct' and 'buffered'. The default value is 'buffered'.`,
 
 	p.DiskWriteBufferSizeKb = ParamItem{
 		Key:          "common.diskWriteBufferSizeKb",
-		Version:      "2.5.14",
+		Version:      "2.6.0",
 		DefaultValue: "64",
-		Doc:          "Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB",
-		Export:       true,
+		Doc: `Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.`,
+		Export: true,
 	}
 	p.DiskWriteBufferSizeKb.Init(base.mgr)
 
-	p.DiskWriteNrThreads = ParamItem{
-		Key:          "common.diskWriteNrThreads",
-		Version:      "2.5.14",
+	p.DiskWriteNumThreads = ParamItem{
+		Key:          "common.diskWriteNumThreads",
+		Version:      "2.6.0",
 		DefaultValue: "0",
 		Doc: `This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
 It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
 For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
-The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool. In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
+The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
+In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
 		Export: true,
 	}
-	p.DiskWriteNrThreads.Init(base.mgr)
+	p.DiskWriteNumThreads.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",

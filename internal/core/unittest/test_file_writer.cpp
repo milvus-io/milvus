@@ -137,6 +137,29 @@ TEST_F(FileWriterTest, UnalignedToBufferSizeWriteWithDirectIO) {
     EXPECT_EQ(content, std::vector<char>(large_data.begin(), large_data.end()));
 }
 
+// Test writing data with direct IO without finishing
+TEST_F(FileWriterTest, WriteWithoutFinishWithDirectIO) {
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    FileWriter::SetBufferSize(kBufferSize);
+
+    std::vector<char> data(kBufferSize * 2 + 10);
+    std::generate(data.begin(), data.end(), std::rand);
+    std::string filename = (test_dir_ / "write_without_finish.txt").string();
+    {
+        FileWriter writer(filename);
+        writer.Write(data.data(), data.size());
+    }
+
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> content((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
+
+    EXPECT_NE(content.size(), data.size());
+    EXPECT_EQ(content.size(), kBufferSize * 2);
+    EXPECT_NE(content, std::vector<char>(data.begin(), data.end()));
+    EXPECT_EQ(content, std::vector<char>(data.begin(), data.begin() + kBufferSize * 2));
+}
+
 // Test writing data with size slightly less than buffer size
 TEST_F(FileWriterTest, SlightlyLessThanBufferSizeWriteWithDirectIO) {
     FileWriter::SetMode(FileWriter::WriteMode::DIRECT);

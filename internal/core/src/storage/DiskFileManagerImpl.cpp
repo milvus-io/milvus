@@ -324,7 +324,7 @@ DiskFileManagerImpl::CacheNgramIndexToDisk(
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files,
-        [this]() { return GetLocalNgramIndexPrefix(); },
+        GetLocalNgramIndexPrefix(),
         priority);
 }
 

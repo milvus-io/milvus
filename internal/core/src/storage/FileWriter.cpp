@@ -29,7 +29,7 @@ FileWriter::FileWriter(std::string filename) : filename_(std::move(filename)) {
         // check if the file is aligned to the alignment size
         size_t buf_size = GetBufferSize();
         AssertInfo(
-            !(buf_size == 0 || (buf_size % ALIGNMENT_BYTES) != 0),
+            buf_size != 0 && (buf_size % ALIGNMENT_BYTES) == 0,
             "Buffer size must be greater than 0 and aligned to the alignment "
             "size, buf_size: {}, alignment size: {}, error: {}",
             buf_size,
@@ -233,14 +233,6 @@ FileWriter::Write(const void* data, size_t nbyte) {
 }
 
 void
-FileWriter::FlushWithBufferedIO() {
-    PositionedWriteWithCheck(aligned_buf_, offset_, file_size_);
-    file_size_ += offset_;
-    offset_ = 0;
-    monitor::disk_write_total_bytes_buffered.Increment(offset_);
-}
-
-void
 FileWriter::FlushWithDirectIO() {
     size_t nearest_aligned_offset =
         (offset_ + ALIGNMENT_MASK) & ~ALIGNMENT_MASK;
@@ -249,7 +241,7 @@ FileWriter::FlushWithDirectIO() {
            nearest_aligned_offset - offset_);
     PositionedWriteWithCheck(aligned_buf_, nearest_aligned_offset, file_size_);
     file_size_ += offset_;
-    offset_ = 0;
+    monitor::disk_write_total_bytes_direct.Increment(offset_);
     // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
     if (ftruncate(fd_, file_size_) != 0) {
         Cleanup();
@@ -258,7 +250,7 @@ FileWriter::FlushWithDirectIO() {
                   filename_,
                   strerror(errno));
     }
-    monitor::disk_write_total_bytes_direct.Increment(offset_);
+    offset_ = 0;
 }
 
 size_t
@@ -273,8 +265,6 @@ FileWriter::Finish() {
             try {
                 if (use_direct_io_) {
                     FlushWithDirectIO();
-                } else {
-                    FlushWithBufferedIO();
                 }
                 promise->setValue(folly::Unit{});
             } catch (...) {
@@ -296,8 +286,6 @@ FileWriter::Finish() {
         } else {
             if (use_direct_io_) {
                 FlushWithDirectIO();
-            } else {
-                FlushWithBufferedIO();
             }
         }
     }
