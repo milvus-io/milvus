@@ -2,7 +2,7 @@ import logging
 import random
 import time
 import pytest
-from pymilvus import DataType, Function, FunctionType
+from pymilvus import DataType, Function, FunctionType, FieldSchema, CollectionSchema
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 import numpy as np
 from pathlib import Path
@@ -2696,7 +2696,7 @@ class TestImportWithFunctionNegative(TestcaseBase):
 
     @pytest.mark.parametrize("file_format", ["json", "parquet"])
     @pytest.mark.tags(CaseLabel.L2)
-    def test_import_for_bm25_function_with_output_field(self, tei_endpoint, minio_host, file_format):
+    def test_import_for_bm25_function_with_output_field(self, minio_host, file_format):
         """
         target: test import data for bm25 with output field
         method: 1. create collection
