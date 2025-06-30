@@ -347,10 +347,10 @@ mod tests {
         let mut rng = rand::thread_rng();
         let json_offsets = (0..100)
             .map(|_| {
-                let count = rng.gen_range(0, 1000);
+                let count = rng.random_range(0..1000);
                 total_count += count;
                 (0..count)
-                    .map(|_| rng.gen_range(0, i64::MAX))
+                    .map(|_| rng.random_range(0..i64::MAX))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
