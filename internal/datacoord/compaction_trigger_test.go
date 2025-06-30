@@ -73,7 +73,7 @@ func (h *spyCompactionInspector) removeTasksByChannel(channel string) {}
 
 // enqueueCompaction start to execute plan and return immediately
 func (h *spyCompactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
-	t := newMixCompactionTask(task, nil, h.meta)
+	t := newMixCompactionTask(task, nil, h.meta, newMockVersionManager())
 	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
 	plan, err := t.BuildCompactionRequest()
