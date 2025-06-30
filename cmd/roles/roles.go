@@ -360,7 +360,8 @@ func (mr *MilvusRoles) Run() {
 
 	// Initialize streaming service if enabled.
 
-	if !mr.EnableDataNode {
+	if mr.ServerType == typeutil.StandaloneRole || !mr.EnableDataNode {
+		// only datanode does not init streaming service
 		streaming.Init()
 		defer streaming.Release()
 	}
