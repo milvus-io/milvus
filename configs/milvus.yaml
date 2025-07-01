@@ -758,7 +758,7 @@ dataNode:
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
-    useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
+    useMergeSort: false # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   slot:
