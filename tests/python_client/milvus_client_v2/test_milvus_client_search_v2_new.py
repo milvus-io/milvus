@@ -161,6 +161,8 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
                                index_type=self.binary_vector_index,
                                params={"nlist": 128})
         self.create_index(client, self.collection_name, index_params=index_params)
+        self.wait_for_index_ready(client, self.collection_name, index_name=self.float_vector_field_name)
+        self.wait_for_index_ready(client, self.collection_name, index_name=self.bfloat16_vector_field_name)
 
         # Load collection
         self.load_collection(client, self.collection_name)
@@ -378,7 +380,8 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_with_output_fields(self):
+    @pytest.mark.parametrize("consistency_level", ["Strong", "Session", "Bounded", "Eventually"])
+    def test_search_with_output_fields_and_consistency_level(self, consistency_level):
         """
         target: test search with output fields
         method: 1. connect and create a collection
@@ -400,6 +403,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             anns_field=self.float_vector_field_name,
             search_params=search_params,
             limit=default_limit,
+            consistency_level=consistency_level,
             output_fields=[ct.default_string_field_name, self.dyna_filed_name1, self.dyna_filed_name2],
             check_task=CheckTasks.check_search_results,
             check_items={"enable_milvus_client_api": True,
@@ -1220,3 +1224,250 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                          "nq": ct.default_nq,
                          "pk_name": "id",
                          "limit": ct.default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[:6])
+    def test_each_index_with_mmap_enabled_search(self, index):
+        """
+        target: test each index with mmap enabled search
+        method: test each index with mmap enabled search
+        expected: search success
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # fast create collection
+        dim = 32
+        schema = self.create_schema(client)[0]
+        schema.add_field('id', DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field('vector', DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data
+        data = []
+        for i in range(ct.default_nb):
+            data.append({
+                "id": i,
+                "vector": cf.gen_vectors(1, dim)[0]
+            })
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        # create index
+        index_params = self.prepare_index_params(client)[0]
+        params = cf.get_index_params_params(index)
+        index_params.add_index(field_name='vector', index_type=index, params=params, metric_type='L2')
+        self.create_index(client, collection_name, index_params=index_params)
+        self.wait_for_index_ready(client, collection_name, index_name='vector')
+        
+        # alter mmap index
+        self.alter_index_properties(client, collection_name, index_name='vector', properties={"mmap.enabled": True})
+        index_info = self.describe_index(client, collection_name, index_name='vector')
+        assert index_info[0]["mmap.enabled"] == 'True'
+        # search
+        self.load_collection(client, collection_name)
+        search_params = {}
+        vector = cf.gen_vectors(ct.default_nq, dim)
+        self.search(client, collection_name, vector, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    output_fields=["*"],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": ct.default_nq,
+                                 "limit": ct.default_limit})
+        # disable mmap
+        self.release_collection(client, collection_name)
+        self.alter_index_properties(client, collection_name, index_name='vector', properties={"mmap.enabled": False})
+        index_info = self.describe_index(client, collection_name, index_name='vector')
+        assert index_info[0]["mmap.enabled"] == 'False'
+        self.load_collection(client, collection_name)
+        self.search(client, collection_name, vector, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    output_fields=["*"],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": ct.default_nq,
+                                 "limit": ct.default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ct.all_index_types[8:10])
+    def test_enable_mmap_search_for_binary_indexes(self, index):
+        """
+        Test enabling mmap for binary indexes in Milvus.
+        
+        This test verifies that:
+        1. Binary vector indexes can be successfully created with mmap enabled
+        2. Search operations work correctly with mmap enabled
+        3. Mmap can be properly disabled and search still works
+        
+        The test performs following steps:
+        - Creates a collection with binary vectors
+        - Inserts test data
+        - Creates index with mmap enabled
+        - Verifies mmap status
+        - Performs search with mmap enabled
+        - Disables mmap and verifies search still works
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # fast create collection
+        dim = 64
+        schema = self.create_schema(client)[0]
+        schema.add_field('id', DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field('vector', DataType.BINARY_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert data
+        data = []
+        for i in range(ct.default_nb):
+            data.append({
+                "id": i,
+                "vector": cf.gen_binary_vectors(1, dim)[1][0]
+            })
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        # create index
+        index_params = self.prepare_index_params(client)[0]
+        params = cf.get_index_params_params(index)
+        index_params.add_index(field_name='vector', index_type=index, params=params, metric_type='JACCARD')
+        self.create_index(client, collection_name, index_params=index_params)
+        self.wait_for_index_ready(client, collection_name, index_name='vector')
+        # alter mmap index
+        self.alter_index_properties(client, collection_name, index_name='vector', properties={"mmap.enabled": True})
+        index_info = self.describe_index(client, collection_name, index_name='vector')
+        assert index_info[0]["mmap.enabled"] == 'True'
+        # load collection
+        self.load_collection(client, collection_name)
+        # search
+        binary_vectors = cf.gen_binary_vectors(ct.default_nq, dim)[1]
+        params = cf.get_search_params_params(index)
+        search_params = {"metric_type": "JACCARD", "params": params}
+        output_fields = ["*"]
+        self.search(client, collection_name, binary_vectors, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": ct.default_nq,
+                                 "limit": ct.default_limit})
+        # disable mmap
+        self.release_collection(client, collection_name)
+        self.alter_index_properties(client, collection_name, index_name='vector', properties={"mmap.enabled": False})
+        index_info = self.describe_index(client, collection_name, index_name='vector')
+        assert index_info[0]["mmap.enabled"] == 'False'
+        self.load_collection(client, collection_name)
+        self.search(client, collection_name, binary_vectors, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    output_fields=output_fields,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": ct.default_nq,
+                                 "limit": ct.default_limit})
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("num_shards", [-256, 0, ct.max_shards_num // 2, ct.max_shards_num])
+    def test_search_with_non_default_shard_nums(self, num_shards):
+        """
+        Test search functionality with non-default shard numbers.
+        
+        This test verifies that:
+        1. Collections are created with default shard numbers when num_shards <= 0
+        2. Collections are created with specified shard numbers when num_shards > 0
+        3. Search operations work correctly with different shard configurations
+        
+        The test follows these steps:
+        1. Creates a collection with specified shard numbers
+        2. Inserts test data
+        3. Builds an index
+        4. Performs a search operation
+        5. Validates the results
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+
+        # create collection
+        dim = 32
+        schema = self.create_schema(client)[0]
+        schema.add_field('id', DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field('vector', DataType.FLOAT_VECTOR, dim=dim)
+        # create collection
+        self.create_collection(client, collection_name, schema=schema, num_shards=num_shards)
+        collection_info = self.describe_collection(client, collection_name)[0]
+        expected_num_shards = ct.default_shards_num if num_shards <= 0 else num_shards
+        assert collection_info["num_shards"] == expected_num_shards
+        # insert
+        data = []
+        for i in range(ct.default_nb):
+            data.append({
+                "id": i,
+                "vector": cf.gen_vectors(1, dim)[0]
+            })
+        self.insert(client, collection_name, data)
+        # create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name='vector', index_type='HNSW', metric_type='COSINE')
+        self.create_index(client, collection_name, index_params=index_params)
+        self.wait_for_index_ready(client, collection_name, index_name='vector')
+        # load
+        self.load_collection(client, collection_name)
+        # search
+        vectors = cf.gen_vectors(ct.default_nq, dim)
+        search_params = {}
+        self.search(client, collection_name, vectors, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": ct.default_nq,
+                                 "limit": ct.default_limit})
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_HNSW_index_with_redundant_param(self):
+        """
+        Test search functionality with HNSW index and redundant parameters.
+        
+        This test verifies that:
+        1. HNSW index can be created with redundant parameters
+        2. Search operations work correctly with redundant parameters
+        3. Redundant parameters are ignored
+        
+        The test performs following steps:
+        1. Creates a collection with float vectors
+        2. Inserts test data
+        3. Creates HNSW index with redundant parameters
+        4. Performs a search operation
+        5. Validates the results
+        """
+        dim = 16
+        index = "HNSW"
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client)[0]
+        schema.add_field('id', DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field('vector', DataType.FLOAT_VECTOR, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # insert
+        data = []
+        for i in range(ct.default_nb):
+            data.append({
+                "id": i,
+                "vector": cf.gen_vectors(1, dim)[0]
+            })
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        # create index
+        index_params = self.prepare_index_params(client)[0]
+        params = cf.get_index_params_params(index)
+        params["nlist"] = 100        # nlist is redundant parameter    
+        index_params.add_index(field_name='vector', index_type=index,
+                               metric_type='COSINE', params=params)
+        self.create_index(client, collection_name, index_params=index_params)
+        self.wait_for_index_ready(client, collection_name, index_name='vector')
+        index_info = self.describe_index(client, collection_name, index_name='vector')
+        assert index_info[0]["nlist"] == '100'
+        # load
+        self.load_collection(client, collection_name)
+        # search
+        vectors = cf.gen_vectors(ct.default_nq, dim)
+        search_params = {}
+        self.search(client, collection_name, vectors, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"nq": ct.default_nq,
+                                 "limit": ct.default_limit})
+    
