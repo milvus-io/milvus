@@ -3171,7 +3171,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		lb:                     node.lbPolicy,
 		enableMaterializedView: node.enableMaterializedView,
 		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		requeryFunc:            requeryImpl,
 	}
 
 	log := log.Ctx(ctx).With( // TODO: it might cause some cpu consumption
@@ -3414,7 +3413,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		node:                node,
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		requeryFunc:         requeryImpl,
 	}
 
 	log := log.Ctx(ctx).With(
