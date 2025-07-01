@@ -59,7 +59,7 @@ func (s *TestArrayStructSuite) run() {
 	)
 
 	if len(s.dbName) > 0 {
-		createDataBaseStatus, err := s.Cluster.Proxy.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
+		createDataBaseStatus, err := s.Cluster.MilvusClient.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 			DbName: s.dbName,
 		})
 		s.Require().NoError(err)
@@ -133,7 +133,7 @@ func (s *TestArrayStructSuite) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.Require().NoError(err)
 
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 		Schema:         marshaledSchema,
@@ -151,7 +151,7 @@ func (s *TestArrayStructSuite) run() {
 	fieldsData = append(fieldsData, integration.NewStructArrayFieldData(structField, structFieldName, NB, dim))
 	hashKeys := integration.GenerateHashKeys(NB)
 
-	insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         s.dbName,
 		CollectionName: collection,
 		FieldsData:     fieldsData,
@@ -162,7 +162,7 @@ func (s *TestArrayStructSuite) run() {
 	s.Require().Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          s.dbName,
 		CollectionNames: []string{collection},
 	})
@@ -175,7 +175,7 @@ func (s *TestArrayStructSuite) run() {
 	s.Require().True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, s.dbName, collection)
-	segments, err := s.Cluster.MetaWatcher.ShowSegments()
+	segments, err := s.Cluster.ShowSegments(collection)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(segments)
 

@@ -100,7 +100,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -111,7 +111,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	err = merr.Error(createCollectionStatus)
 	s.NoError(err)
 
-	showCollectionsResp, err := c.Proxy.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(context.TODO(), &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.GetStatus()))
 
@@ -125,7 +125,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	s.generatedFieldData[structColumn.GetStructArrays().Fields[0].FieldId] = structColumn.GetStructArrays().Fields[0]
 	s.generatedFieldData[structColumn.GetStructArrays().Fields[1].FieldId] = structColumn.GetStructArrays().Fields[1]
 
-	insertResult, err := c.Proxy.Insert(context.TODO(), &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(context.TODO(), &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn, structColumn},
@@ -137,7 +137,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	log.Info("=========================Data insertion finished=========================")
 
 	// flush
-	flushResp, err := c.Proxy.Flush(context.TODO(), &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(context.TODO(), &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -150,13 +150,13 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	s.True(has)
 
 	s.WaitForFlush(context.TODO(), ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("=========================Data flush finished=========================")
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -169,7 +169,7 @@ func (s *ArrayStructDataNodeSuite) loadCollection(collectionName string) {
 	log.Info("=========================Index created=========================")
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(context.TODO(), &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -185,13 +185,13 @@ func (s *ArrayStructDataNodeSuite) checkCollections() bool {
 		DbName:    "",
 		TimeStamp: 0, // means now
 	}
-	resp, err := s.Cluster.Proxy.ShowCollections(context.TODO(), req)
+	resp, err := s.Cluster.MilvusClient.ShowCollections(context.TODO(), req)
 	s.NoError(err)
 	s.Equal(len(resp.CollectionIds), 1)
 	notLoaded := 0
 	loaded := 0
 	for _, name := range resp.CollectionNames {
-		loadProgress, err := s.Cluster.Proxy.GetLoadingProgress(context.TODO(), &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := s.Cluster.MilvusClient.GetLoadingProgress(context.TODO(), &milvuspb.GetLoadingProgressRequest{
 			DbName:         "",
 			CollectionName: name,
 		})
@@ -270,7 +270,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 			},
 		},
 	}
-	queryResult, err := c.Proxy.Query(context.TODO(), queryReq)
+	queryResult, err := c.MilvusClient.Query(context.TODO(), queryReq)
 	s.NoError(err)
 	s.Equal(len(queryResult.FieldsData), 3)
 	s.checkFieldsData(queryResult.FieldsData)
@@ -290,7 +290,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 			},
 		},
 	}
-	queryResult, err = c.Proxy.Query(context.TODO(), queryReq)
+	queryResult, err = c.MilvusClient.Query(context.TODO(), queryReq)
 	s.NoError(err)
 	// struct array field + pk
 	s.Equal(len(queryResult.FieldsData), 2)
@@ -308,7 +308,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, s.dim, topk, roundDecimal)
 
-	searchResult, _ := c.Proxy.Search(context.TODO(), searchReq)
+	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 
 	err = merr.Error(searchResult.GetStatus())
 	s.NoError(err)
@@ -324,8 +324,5 @@ func (s *ArrayStructDataNodeSuite) TestSwapQN() {
 }
 
 func TestArrayStructDataNodeUtil(t *testing.T) {
-	// node id conflict when running multiple node
-	g := integration.WithoutStreamingService()
-	defer g()
 	suite.Run(t, new(ArrayStructDataNodeSuite))
 }
