@@ -121,7 +121,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasNgramIndex(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
-        return ngram_indexings_.find(field_id) != ngram_indexings_.end();
+        return ngram_fields_.find(field_id) != ngram_fields_.end();
     }
 
     PinWrapper<index::NgramInvertedIndex*>
@@ -433,8 +433,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;
 
-    // ngram field index
-    std::unordered_map<FieldId, index::CacheIndexBasePtr> ngram_indexings_;
+    // fields that has ngram index
+    std::unordered_set<FieldId> ngram_fields_{};
 
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
