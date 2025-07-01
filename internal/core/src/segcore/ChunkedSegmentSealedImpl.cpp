@@ -181,8 +181,15 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         return;
     }
 
-    scalar_indexings_[field_id] =
-        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+    if (auto it = info.index_params.find(index::INDEX_TYPE);
+        it != info.index_params.end() &&
+        it->second == index::NGRAM_INDEX_TYPE) {
+        ngram_indexings_[field_id] =
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+    } else {
+        scalar_indexings_[field_id] =
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+    }
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -598,13 +605,34 @@ ChunkedSegmentSealedImpl::chunk_view_by_offsets(
 PinWrapper<const index::IndexBase*>
 ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                                            int64_t chunk_id) const {
+    std::shared_lock lck(mutex_);
     AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
                "Cannot find scalar_indexing with field_id: " +
                    std::to_string(field_id.get()));
     auto slot = scalar_indexings_.at(field_id);
+    lck.unlock();
+
     auto ca = SemiInlineGet(slot->PinCells({0}));
     auto index = ca->get_cell_of(0);
     return PinWrapper<const index::IndexBase*>(ca, index);
+}
+
+PinWrapper<index::NgramInvertedIndex*>
+ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    auto iter = ngram_indexings_.find(field_id);
+    if (iter == ngram_indexings_.end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+    auto slot = iter->second.get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache is corrupted, field_id: {}",
+               field_id.get());
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
 int64_t
