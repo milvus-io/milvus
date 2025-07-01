@@ -1,10 +1,12 @@
+use log::info;
 use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use tantivy::fastfield::FastValue;
-use tantivy::query::{ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery};
+use tantivy::query::{BooleanQuery, ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
+use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
@@ -295,6 +297,41 @@ impl IndexReaderWrapper {
             IndexRecordOption::Basic,
         );
         self.search_i64(&q)
+    }
+
+    // **Note**: literal length must be larger or equal to min_gram.
+    pub fn inner_match_ngram(
+        &self,
+        literal: &str,
+        min_gram: usize,
+        max_gram: usize,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        // literal length should be larger or equal to min_gram.
+        assert!(
+            literal.chars().count() >= min_gram,
+            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
+            literal,
+            min_gram
+        );
+
+        if literal.chars().count() <= max_gram {
+            return self.term_query_keyword(literal, bitset);
+        }
+
+        let mut terms = vec![];
+        // So, str length is larger than 'max_gram' parse 'str' by 'max_gram'-gram and search all of them with boolean intersection
+        // nivers
+        let mut term_queries: Vec<Box<dyn Query>> = vec![];
+        let mut tokenizer = NgramTokenizer::new(max_gram, max_gram, false).unwrap();
+        let mut token_stream = tokenizer.token_stream(literal);
+        token_stream.process(&mut |token| {
+            let term = Term::from_field_text(self.field, &token.text);
+            term_queries.push(Box::new(TermQuery::new(term, IndexRecordOption::Basic)));
+            terms.push(token.text.clone());
+        });
+        let query = BooleanQuery::intersection(term_queries);
+        self.search(&query, bitset)
     }
 
     pub fn lower_bound_range_query_keyword(
