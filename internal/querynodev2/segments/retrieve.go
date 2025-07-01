@@ -67,6 +67,25 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		if err != nil {
 			return err
 		}
+
+		log := log.Ctx(ctx)
+		if log.Core().Enabled(zap.DebugLevel) && req.GetReq().GetIsCount() {
+			allRetrieveCount := result.AllRetrieveCount
+			countRet := result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
+			if allRetrieveCount != countRet {
+				log.Debug("count segment done with delete",
+					zap.String("channel", s.LoadInfo().GetInsertChannel()),
+					zap.Int64("segmentID", s.ID()),
+					zap.Int64("allRetrieveCount", allRetrieveCount),
+					zap.Int64("countRet", countRet))
+			} else {
+				log.Debug("count segment done",
+					zap.String("channel", s.LoadInfo().GetInsertChannel()),
+					zap.Int64("segmentID", s.ID()),
+					zap.Int64("allRetrieveCount", allRetrieveCount),
+					zap.Int64("countRet", countRet))
+			}
+		}
 		resultCh <- RetrieveSegmentResult{
 			result,
 			s,
