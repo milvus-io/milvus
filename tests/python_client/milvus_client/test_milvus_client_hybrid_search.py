@@ -289,8 +289,14 @@ class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim)
-        # 2. hybrid search
+        # 2. insert
         rng = np.random.default_rng(seed=19530)
+        rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_vector_field_name+"new": list(rng.random((1, default_dim))[0]),
+             default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 2. hybrid search
         vectors_to_search = rng.random((1, default_dim))
         sub_search1 = AnnSearchRequest(vectors_to_search, "vector", {"level": 1}, 20, expr="id<100")
         ranker = WeightedRanker(0.2, 0.8)
