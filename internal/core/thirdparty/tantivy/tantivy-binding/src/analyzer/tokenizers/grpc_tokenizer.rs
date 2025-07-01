@@ -4,6 +4,8 @@ use once_cell::sync::Lazy;
 use tokio::runtime::{Runtime};
 use tantivy::tokenizer::{Token, Tokenizer, TokenStream};
 use tonic::transport::Channel;
+use tonic::transport::{ClientTlsConfig, Certificate, Identity};
+use log::warn;
 use crate::error::TantivyBindingError;
 
 pub mod tokenizer {
@@ -33,6 +35,7 @@ pub struct GrpcTokenStream {
 
 const ENDPOINTKEY: &str = "endpoint";
 const PARAMTERSKEY: &str = "parameters";
+const TLSKEY: &str = "tls";
 
 impl TokenStream for GrpcTokenStream {
     fn advance(&mut self) -> bool {
@@ -127,18 +130,88 @@ impl GrpcTokenizer {
             }
         }
 
-        let client = match TOKIO_RT.block_on(async {
-            TokenizerClient::connect(endpoint.to_string()).await
+        let channel = match TOKIO_RT.block_on(async {
+            let endpoint_domain = url::Url::parse(endpoint)
+                .ok()
+                .and_then(|u| u.host_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| endpoint.to_string());
+            // if the endpoint starts with "https://", we need to configure TLS
+            if endpoint.starts_with("https://") {
+                let tls_config = match params.get(TLSKEY) {
+                    Some(tls_val) => {
+                        let domain = tls_val.get("domain")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| endpoint_domain);
+
+                        let mut tls = ClientTlsConfig::new()
+                            .domain_name(domain);
+
+                        // Read the CA certificate from the file system
+                        if let Some(ca_cert_path) = tls_val.get("ca_cert") {
+                            if ca_cert_path.is_string() {
+                                let ca_cert_path = ca_cert_path.as_str().unwrap();
+                                let ca_cert = std::fs::read(ca_cert_path)
+                                    .map(|cert| Certificate::from_pem(cert));
+                                if let Ok(ca_cert) = ca_cert {
+                                    tls = tls.ca_certificate(ca_cert);
+                                } else {
+                                    warn!("grpc tokenizer tls ca_cert read error: {}", ca_cert_path);
+                                }
+                            } else {
+                                warn!("grpc tokenizer tls ca_cert must be a string. skip loading CA certificate.");
+                            }
+                        }
+
+                        if let (Some(client_cert_path), Some(client_key_path)) = (
+                            tls_val.get("client_cert").and_then(|v| v.as_str()),
+                            tls_val.get("client_key").and_then(|v| v.as_str()
+                            )
+                        ) {
+                            let cert = std::fs::read(client_cert_path)
+                                .unwrap_or_else(|e| {
+                                    warn!("grpc tokenizer tls client_cert read error: {}", e);
+                                    vec![]
+                                });
+                            let key = std::fs::read(client_key_path)
+                                .unwrap_or_else(|e| {
+                                    warn!("grpc tokenizer tls client_key read error: {}", e);
+                                    vec![]
+                                });
+                            if !cert.is_empty() && !key.is_empty() {
+                                tls = tls.identity(Identity::from_pem(cert, key));
+                            } else {
+                                warn!("grpc tokenizer tls client_cert or client_key is empty. skip loading client identity.");
+                            }
+                        }
+                        tls
+                    }
+                    None => ClientTlsConfig::new()
+                        .domain_name(endpoint_domain),
+                };
+
+                tonic::transport::Endpoint::new(endpoint.to_string())?
+                    .tls_config(tls_config)?
+                    .connect()
+                    .await
+            } else {
+                tonic::transport::Endpoint::new(endpoint.to_string())?
+                    .connect()
+                    .await
+            }
         }) {
             Ok(client) => client,
             Err(e) => {
-                eprintln!("failed to connect to gRPC server: {}, error: {}", endpoint, e);
+                warn!("failed to connect to gRPC server: {}, error: {}", endpoint, e);
                 return Err(TantivyBindingError::InvalidArgument(format!(
                     "failed to connect to gRPC server: {}, error: {}",
                     endpoint, e
                 )));
             }
         };
+
+        // Create a new gRPC client using the channel
+        let client = TokenizerClient::new(channel);
 
         Ok(GrpcTokenizer {
             endpoint: endpoint.to_string(),
@@ -163,7 +236,7 @@ impl GrpcTokenizer {
                 match client.tokenize(request).await {
                     Ok(resp) => Some(resp),
                     Err(e) => {
-                        eprintln!("gRPC tokenizer request error: {}", e);
+                        warn!("gRPC tokenizer request error: {}", e);
                         None
                     }
                 }
@@ -233,5 +306,4 @@ mod tests {
 
         assert!(tokenizer.is_err());
     }
-
 }

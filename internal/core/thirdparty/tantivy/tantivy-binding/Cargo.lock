@@ -3590,6 +3590,7 @@ version = "0.23.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fb9263ab4eb695e42321db096e3b8fbd715a59b154d5c88d82db2175b681ba7"
 dependencies = [
+ "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
@@ -4065,6 +4066,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-build",
+ "url",
  "whatlang",
  "zstd-sys",
 ]
@@ -4503,6 +4505,7 @@ dependencies = [
  "prost",
  "socket2",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tower",
  "tower-layer",
