@@ -14,15 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sparse_test
+package hellomilvus
 
 import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -35,13 +33,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
-type SparseTestSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *SparseTestSuite) createCollection(ctx context.Context, c *integration.MiniClusterV2, dbName string) string {
+func (s *HelloMilvusSuite) createCollection(ctx context.Context, c *cluster.MiniClusterV3, dbName string) string {
 	collectionName := "TestSparse" + funcutil.GenRandomStr()
 
 	pk := &schemapb.FieldSchema{
@@ -72,7 +67,7 @@ func (s *SparseTestSuite) createCollection(ctx context.Context, c *integration.M
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -81,14 +76,14 @@ func (s *SparseTestSuite) createCollection(ctx context.Context, c *integration.M
 	s.NoError(err)
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 	return collectionName
 }
 
-func (s *SparseTestSuite) TestSparse_should_not_speficy_dim() {
+func (s *HelloMilvusSuite) TestSparse_should_not_speficy_dim() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -133,7 +128,7 @@ func (s *SparseTestSuite) TestSparse_should_not_speficy_dim() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -143,7 +138,7 @@ func (s *SparseTestSuite) TestSparse_should_not_speficy_dim() {
 	s.NotEqual(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 }
 
-func (s *SparseTestSuite) TestSparse_invalid_insert() {
+func (s *HelloMilvusSuite) TestSparse_invalid_insert() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -158,7 +153,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 	// valid insert
 	fVecColumn := integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -172,7 +167,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 
 	// of each row, length of indices and data must equal
 	sparseVecs.Contents[0] = append(sparseVecs.Contents[0], make([]byte, 4)...)
-	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -185,7 +180,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 
 	// empty row is allowed
 	sparseVecs.Contents[0] = []byte{}
-	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -199,7 +194,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 	sparseVecs.Contents[0] = make([]byte, 16)
 	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 0, 20, 0.1)
 	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 1, 10, 0.2)
-	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -210,7 +205,7 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 	s.NotEqual(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 }
 
-func (s *SparseTestSuite) TestSparse_invalid_index_build() {
+func (s *HelloMilvusSuite) TestSparse_invalid_index_build() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -225,7 +220,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 	// valid insert
 	fVecColumn := integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -236,7 +231,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -249,7 +244,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -268,7 +263,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 		},
 	}
 
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default",
@@ -289,7 +284,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 		},
 	}
 
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default",
@@ -310,7 +305,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 		},
 	}
 
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default",
@@ -335,7 +330,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 		},
 	}
 
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default",
@@ -360,7 +355,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 		},
 	}
 
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default",
@@ -370,7 +365,7 @@ func (s *SparseTestSuite) TestSparse_invalid_index_build() {
 	s.NotEqual(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 }
 
-func (s *SparseTestSuite) TestSparse_invalid_search_request() {
+func (s *HelloMilvusSuite) TestSparse_invalid_search_request() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -385,7 +380,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	// valid insert
 	fVecColumn := integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -396,7 +391,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -409,7 +404,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -434,7 +429,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 		},
 	}
 
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.SparseFloatVecField,
 		IndexName:      "_default",
@@ -446,7 +441,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.SparseFloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -498,7 +493,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	var newIdx int32 = -10
 	binary.LittleEndian.PutUint32(sparseVecs.Contents[0][0:], uint32(newIdx))
 	replaceQuery(sparseVecs)
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 	binary.LittleEndian.PutUint32(sparseVecs.Contents[0][0:], oldIdx)
@@ -506,7 +501,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	// of each row, length of indices and data must equal
 	sparseVecs.Contents[0] = append(sparseVecs.Contents[0], make([]byte, 4)...)
 	replaceQuery(sparseVecs)
-	searchResult, err = c.Proxy.Search(ctx, searchReq)
+	searchResult, err = c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 	sparseVecs.Contents[0] = sparseVecs.Contents[0][:len(sparseVecs.Contents[0])-4]
@@ -514,7 +509,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	// empty row is not allowed
 	sparseVecs.Contents[0] = []byte{}
 	replaceQuery(sparseVecs)
-	searchResult, err = c.Proxy.Search(ctx, searchReq)
+	searchResult, err = c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 
@@ -523,11 +518,7 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 0, 20, 0.1)
 	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 1, 10, 0.2)
 	replaceQuery(sparseVecs)
-	searchResult, err = c.Proxy.Search(ctx, searchReq)
+	searchResult, err = c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	s.NotEqual(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
-}
-
-func TestSparse(t *testing.T) {
-	suite.Run(t, new(SparseTestSuite))
 }

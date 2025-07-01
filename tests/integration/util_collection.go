@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -31,7 +32,7 @@ type CreateCollectionConfig struct {
 func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectionName string, rowNum, dim int) error {
 	fVecColumn := NewFloatVectorFieldData(FloatVecField, rowNum, dim)
 	hashKeys := GenerateHashKeys(rowNum)
-	insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -45,11 +46,11 @@ func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectio
 		return merr.Error(insertResult.Status)
 	}
 
-	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	if err != nil {
+	if err := merr.CheckRPCCall(flushResp.GetStatus(), err); err != nil {
 		return err
 	}
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
@@ -77,7 +78,7 @@ func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context
 	s.NoError(err)
 	s.NotNil(marshaledSchema)
 
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         cfg.DBName,
 		CollectionName: cfg.CollectionName,
 		Schema:         marshaledSchema,
@@ -97,7 +98,7 @@ func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context
 	s.True(merr.Ok(createCollectionStatus))
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{DbName: cfg.DBName})
+	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{DbName: cfg.DBName})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -108,7 +109,7 @@ func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context
 	}
 
 	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		DbName:         cfg.DBName,
 		CollectionName: cfg.CollectionName,
 		FieldName:      FloatVecField,
@@ -118,4 +119,29 @@ func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context
 	s.NoError(err)
 	s.True(merr.Ok(createIndexStatus))
 	s.WaitForIndexBuiltWithDB(ctx, cfg.DBName, cfg.CollectionName, FloatVecField)
+}
+
+func (s *MiniClusterSuite) DropAllCollections() {
+	ctx := s.Cluster.GetContext()
+	collections, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	s.NoError(err)
+	s.True(merr.Ok(collections.Status))
+
+	for _, collection := range collections.CollectionNames {
+		releaseStatus, err := s.Cluster.MilvusClient.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
+			DbName:         "",
+			CollectionName: collection,
+		})
+		if err := merr.CheckRPCCall(releaseStatus, err); err != nil {
+			panic(fmt.Sprintf("failed to release collection %s", collection))
+		}
+
+		dropStatus, err := s.Cluster.MilvusClient.DropCollection(context.Background(), &milvuspb.DropCollectionRequest{
+			DbName:         "",
+			CollectionName: collection,
+		})
+		if err := merr.CheckRPCCall(dropStatus, err); err != nil {
+			panic(fmt.Sprintf("failed to drop collection %s", collection))
+		}
+	}
 }

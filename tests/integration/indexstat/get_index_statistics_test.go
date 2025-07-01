@@ -40,7 +40,7 @@ func (s *GetIndexStatisticsSuite) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -54,7 +54,7 @@ func (s *GetIndexStatisticsSuite) run() {
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -65,7 +65,7 @@ func (s *GetIndexStatisticsSuite) run() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -80,7 +80,7 @@ func (s *GetIndexStatisticsSuite) run() {
 
 	// create index
 	indexName := "_default"
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -94,7 +94,7 @@ func (s *GetIndexStatisticsSuite) run() {
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	getIndexStatisticsResponse, err := c.Proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
+	getIndexStatisticsResponse, err := c.MilvusClient.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
 		CollectionName: collectionName,
 		IndexName:      indexName,
 	})
@@ -107,7 +107,7 @@ func (s *GetIndexStatisticsSuite) run() {
 	// skip second insert case for now
 	// the result is not certain
 	/*
-		insertResult2, err := c.proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult2, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -117,7 +117,7 @@ func (s *GetIndexStatisticsSuite) run() {
 		s.NoError(err)
 		s.Equal(insertResult2.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-		_, err = c.proxy.Flush(ctx, &milvuspb.FlushRequest{
+		_, err = c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
 		})
@@ -128,7 +128,7 @@ func (s *GetIndexStatisticsSuite) run() {
 		s.Equal(true, has2)
 		waitingForFlush(ctx, c, ids2)
 
-			loadStatus, err := c.proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 				DbName:         dbName,
 				CollectionName: collectionName,
 			})
@@ -143,7 +143,7 @@ func (s *GetIndexStatisticsSuite) run() {
 
 		waitingForIndexBuilt(ctx,  collectionName, integration.FloatVecField)
 
-		getIndexStatisticsResponse2, err := c.proxy.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
+		getIndexStatisticsResponse2, err := c.MilvusClient.GetIndexStatistics(ctx, &milvuspb.GetIndexStatisticsRequest{
 			CollectionName: collectionName,
 			IndexName:      indexName,
 		})

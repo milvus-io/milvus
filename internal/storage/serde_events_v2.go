@@ -345,31 +345,10 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	return nil
 }
 
-func (pw *PackedBinlogRecordWriter) splitColumnByRecord(r Record) []storagecommon.ColumnGroup {
-	groups := make([]storagecommon.ColumnGroup, 0)
-	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0), GroupID: storagecommon.DefaultShortColumnGroupID}
-	for i, field := range pw.schema.Fields {
-		arr := r.Column(field.FieldID)
-		size := arr.Data().SizeInBytes()
-		rows := uint64(arr.Len())
-		if IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else if rows != 0 && int64(size/rows) >= packed.ColumnGroupSizeThreshold {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else {
-			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
-		}
-	}
-	if len(shortColumnGroup.Columns) > 0 {
-		groups = append([]storagecommon.ColumnGroup{shortColumnGroup}, groups...)
-	}
-	return groups
-}
-
 func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	if pw.writer == nil {
 		if len(pw.columnGroups) == 0 {
-			pw.columnGroups = pw.splitColumnByRecord(r)
+			pw.columnGroups = storagecommon.SplitBySchema(pw.schema.Fields)
 		}
 		logIdStart, _, err := pw.allocator.Alloc(uint32(len(pw.columnGroups)))
 		if err != nil {

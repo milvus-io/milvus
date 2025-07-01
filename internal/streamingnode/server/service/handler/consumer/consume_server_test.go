@@ -13,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_walmanager"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -32,6 +33,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestCreateConsumeServer(t *testing.T) {
+	resource.InitForTest(t)
 	manager := mock_walmanager.NewMockManager(t)
 	grpcConsumeServer := mock_streamingpb.NewMockStreamingNodeHandlerService_ConsumeServer(t)
 

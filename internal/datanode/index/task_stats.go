@@ -242,6 +242,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
 	}
+	defer rr.Close()
 
 	rrs := []storage.RecordReader{rr}
 	numValidRows, err := storage.Sort(st.req.GetBinlogMaxSize(), st.req.GetSchema(), rrs, srw, predicate)
@@ -430,6 +431,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
+		if st.req.GetStorageVersion() == storage.StorageV2 {
+			return []string{}, nil
+		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
@@ -461,7 +465,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, 0)
+		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
+		req.InsertLogs = insertBinlogs
+		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, 0)
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {
@@ -521,6 +527,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
+		if st.req.GetStorageVersion() == storage.StorageV2 {
+			return []string{}, nil
+		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
@@ -551,7 +560,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, tantivyMemory)
+		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
+		req.InsertLogs = insertBinlogs
+		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, tantivyMemory)
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
 		if err != nil {
@@ -614,7 +625,9 @@ func buildIndexParams(
 			req.GetStorageConfig(),
 			req.GetCollectionID(),
 			req.GetPartitionID(),
-			req.GetTargetSegmentID())
+			req.GetTargetSegmentID(),
+		)
+		log.Info("build index params", zap.Any("segment insert files", params.SegmentInsertFiles))
 	}
 
 	return params

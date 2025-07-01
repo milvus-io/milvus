@@ -216,25 +216,3 @@ func TestCalculateArraySize(t *testing.T) {
 		})
 	}
 }
-
-func TestIsVectorDataType(t *testing.T) {
-	tests := []struct {
-		name string
-		dt   schemapb.DataType
-		want bool
-	}{
-		{"test float vector", schemapb.DataType_FloatVector, true},
-		{"test binary vector", schemapb.DataType_BinaryVector, true},
-		{"test float16 vector", schemapb.DataType_Float16Vector, true},
-		{"test bfloat16 vector", schemapb.DataType_BFloat16Vector, true},
-		{"test int8 vector", schemapb.DataType_Int8Vector, true},
-		{"test sparse float vector", schemapb.DataType_SparseFloatVector, true},
-		{"test sparse binary vector", schemapb.DataType_String, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsVectorDataType(tt.dt)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}

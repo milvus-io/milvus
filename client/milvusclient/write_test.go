@@ -147,6 +147,12 @@ func (s *WriteSuite) TestInsert() {
 	s.Run("bad_input", func() {
 		collName := fmt.Sprintf("coll_%s", s.randString(6))
 		s.setupCache(collName, s.schema)
+		// bs, err := proto.Marshal(s.schema.ProtoMessage())
+		// s.Require().NoError(err)
+		s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			CollectionName: collName,
+			Schema:         s.schema.ProtoMessage(),
+		}, nil)
 
 		type badCase struct {
 			tag   string

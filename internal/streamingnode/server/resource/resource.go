@@ -19,9 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-var r = &resourceImpl{
-	logger: log.With(log.FieldModule(typeutil.StreamingNodeRole)),
-} // singleton resource instance
+var r *resourceImpl // singleton resource instance
 
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
@@ -66,20 +64,27 @@ func Apply(opts ...optResourceInit) {
 }
 
 // Done finish all initialization of resources.
-func Done() {
-	r.segmentStatsManager = stats.NewStatsManager()
-	r.timeTickInspector = tinspector.NewTimeTickSyncInspector()
-	r.syncMgr = syncmgr.NewSyncManager(r.chunkManager)
-	r.wbMgr = writebuffer.NewManager(r.syncMgr)
-	r.wbMgr.Start()
-	assertNotNil(r.ChunkManager())
-	assertNotNil(r.TSOAllocator())
-	assertNotNil(r.MixCoordClient())
-	assertNotNil(r.StreamingNodeCatalog())
-	assertNotNil(r.SegmentStatsManager())
-	assertNotNil(r.TimeTickInspector())
-	assertNotNil(r.SyncManager())
-	assertNotNil(r.WriteBufferManager())
+func Init(opts ...optResourceInit) {
+	newR := &resourceImpl{}
+	for _, opt := range opts {
+		opt(newR)
+	}
+
+	newR.logger = log.With(log.FieldModule(typeutil.StreamingNodeRole))
+	newR.segmentStatsManager = stats.NewStatsManager()
+	newR.timeTickInspector = tinspector.NewTimeTickSyncInspector()
+	newR.syncMgr = syncmgr.NewSyncManager(newR.chunkManager)
+	newR.wbMgr = writebuffer.NewManager(newR.syncMgr)
+	newR.wbMgr.Start()
+	assertNotNil(newR.ChunkManager())
+	assertNotNil(newR.TSOAllocator())
+	assertNotNil(newR.MixCoordClient())
+	assertNotNil(newR.StreamingNodeCatalog())
+	assertNotNil(newR.SegmentStatsManager())
+	assertNotNil(newR.TimeTickInspector())
+	assertNotNil(newR.SyncManager())
+	assertNotNil(newR.WriteBufferManager())
+	r = newR
 }
 
 // Release releases the singleton of resources.

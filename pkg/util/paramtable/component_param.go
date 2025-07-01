@@ -5524,8 +5524,9 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.compaction.useMergeSort",
 		Version:      "2.5.0",
 		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
-		DefaultValue: "false",
-		Export:       true,
+		DefaultValue: "true",
+		// Enable by default start from 2.6.0
+		Export: true,
 	}
 	p.UseMergeSort.Init(base.mgr)
 
@@ -5910,14 +5911,14 @@ More samples, more frequent truncate, more memory usage.`,
 	p.WALTruncateRetentionInterval = ParamItem{
 		Key:     "streaming.walTruncate.retentionInterval",
 		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 26h by default.
+		Doc: `The retention interval of wal truncate, 72h by default.
 If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
 Greater the interval, more wal storage usage, more redundant data in wal.
 Because current query path doesn't promise the read operation not happen before the truncate point,
 retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
 If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
 because the wal truncate operation is implemented by pulsar consumer.`,
-		DefaultValue: "26h",
+		DefaultValue: "72h",
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)

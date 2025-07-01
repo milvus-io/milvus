@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
 type MetaWatcherSuite struct {
@@ -41,7 +42,7 @@ type MetaWatcherSuite struct {
 }
 
 func (s *MetaWatcherSuite) TestShowSessions() {
-	sessions, err := s.Cluster.MetaWatcher.ShowSessions()
+	sessions, err := s.Cluster.ShowSessions()
 	s.NoError(err)
 	for _, session := range sessions {
 		log.Info("ShowSessions result", zap.Any("session", session))
@@ -102,7 +103,7 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -112,14 +113,14 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := NewFloatVectorFieldData(floatVecField, rowNum, dim)
 	hashKeys := GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -130,7 +131,7 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -144,7 +145,7 @@ func (s *MetaWatcherSuite) TestShowSegments() {
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	assert.Eventually(s.T(), func() bool {
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		if len(segments) != 0 {
 			for _, segment := range segments {
@@ -209,7 +210,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -222,14 +223,14 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	fVecColumn := NewFloatVectorFieldData(floatVecField, rowNum, dim)
 	hashKeys := GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -240,14 +241,14 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
 
 	assert.Eventually(s.T(), func() bool {
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		if len(segments) != 0 {
 			for _, segment := range segments {
@@ -266,7 +267,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      floatVecField,
 		IndexName:      "_default",
@@ -298,7 +299,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	waitingForIndexBuilt(ctx, c, s.T(), collectionName, floatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -308,7 +309,7 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 	}
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
-		loadProgress, err := c.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+		loadProgress, err := c.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
 		})
 		if err != nil {
@@ -320,11 +321,11 @@ func (s *MetaWatcherSuite) TestShowReplicas() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	replicas, err := c.MetaWatcher.ShowReplicas()
+	replicas, err := c.ShowReplicas()
 	s.NoError(err)
 	s.NotEmpty(replicas)
 	for _, replica := range replicas {
-		log.Info("ShowReplicas result", zap.String("replica", PrettyReplica(replica)))
+		log.Info("ShowReplicas result", zap.String("replica", cluster.PrettyReplica(replica)))
 	}
 
 	log.Info("TestShowReplicas succeed")

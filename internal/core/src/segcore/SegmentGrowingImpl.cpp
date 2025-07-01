@@ -450,6 +450,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::vector<int64_t> all_row_groups(row_group_num);
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
+            auto status = reader->Close();
+            AssertInfo(status.ok(),
+                       "failed to close file reader when get row group "
+                       "metadata from file: " +
+                           file + " with error: " + status.ToString());
         }
 
         // create parallel degree split strategy
@@ -1269,16 +1274,17 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     // loading old segment with new schema will have meta appended
     if (!insert_record_.is_data_exist(field_id)) {
         insert_record_.append_field_meta(
-            field_id, field_meta, size_per_chunk());
+            field_id, field_meta, size_per_chunk(), mmap_descriptor_);
     }
 
     auto total_row_num = insert_record_.size();
 
     auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
-    insert_record_.get_data_base(field_id)->set_data_raw(
-        0, total_row_num, data.get(), field_meta);
     insert_record_.get_valid_data(field_id)->set_data_raw(
         total_row_num, data.get(), field_meta);
+    insert_record_.get_data_base(field_id)->set_data_raw(
+        0, total_row_num, data.get(), field_meta);
+
     LOG_INFO("Growing segment {} fill empty field {} done",
              this->get_segment_id(),
              field_meta.get_id().get());
