@@ -403,34 +403,34 @@ func (mr *MilvusRoles) Run() {
 	var proxy, dataNode, queryNode, streamingNode component
 
 	if (mr.EnableRootCoord && mr.EnableDataCoord && mr.EnableQueryCoord) || mr.EnableMixCoord {
+		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
 		mixCoord = mr.runMixCoord(ctx, local, &wg)
 		componentMap[typeutil.MixCoordRole] = mixCoord
-		paramtable.SetLocalComponentEnabled(typeutil.MixCoordRole)
 	}
 
 	if mr.EnableQueryNode {
+		paramtable.SetLocalComponentEnabled(typeutil.QueryNodeRole)
 		queryNode = mr.runQueryNode(ctx, local, &wg)
 		componentMap[typeutil.QueryNodeRole] = queryNode
-		paramtable.SetLocalComponentEnabled(typeutil.QueryNodeRole)
 	}
 
 	if mr.EnableDataNode {
+		paramtable.SetLocalComponentEnabled(typeutil.DataNodeRole)
 		dataNode = mr.runDataNode(ctx, local, &wg)
 		componentMap[typeutil.DataNodeRole] = dataNode
-		paramtable.SetLocalComponentEnabled(typeutil.DataNodeRole)
 	}
 
 	if mr.EnableProxy {
+		paramtable.SetLocalComponentEnabled(typeutil.ProxyRole)
 		proxy = mr.runProxy(ctx, local, &wg)
 		componentMap[typeutil.ProxyRole] = proxy
-		paramtable.SetLocalComponentEnabled(typeutil.ProxyRole)
 	}
 
 	if mr.EnableStreamingNode {
 		// Before initializing the local streaming node, make sure the local registry is ready.
+		paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 		streamingNode = mr.runStreamingNode(ctx, local, &wg)
 		componentMap[typeutil.StreamingNodeRole] = streamingNode
-		paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 	}
 
 	wg.Wait()

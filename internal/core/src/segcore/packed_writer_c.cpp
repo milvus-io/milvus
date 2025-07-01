@@ -23,6 +23,7 @@
 #include <arrow/filesystem/filesystem.h>
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "monitor/scope_metric.h"
 
 CStatus
 NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
@@ -33,6 +34,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                  CColumnGroups column_groups,
                                  CStorageConfig c_storage_config,
                                  CPackedWriter* c_packed_writer) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
 
@@ -95,6 +98,8 @@ NewPackedWriter(struct ArrowSchema* schema,
                 int64_t part_upload_size,
                 CColumnGroups column_groups,
                 CPackedWriter* c_packed_writer) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
 
@@ -128,6 +133,8 @@ CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
                  struct ArrowArray* array,
                  struct ArrowSchema* schema) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto packed_writer =
             static_cast<milvus_storage::PackedRecordBatchWriter*>(
@@ -147,6 +154,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
 
 CStatus
 CloseWriter(CPackedWriter c_packed_writer) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto packed_writer =
             static_cast<milvus_storage::PackedRecordBatchWriter*>(

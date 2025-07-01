@@ -20,9 +20,12 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/ThreadPools.h"
+#include "monitor/scope_metric.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto local_chunk_manager =
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
