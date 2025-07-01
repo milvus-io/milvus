@@ -811,7 +811,6 @@ ChunkedSegmentSealedImpl::DropFieldData(const FieldId field_id) {
 
 void
 ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
-    LOG_INFO("[remove] drop index {}", field_id.get());
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Field id:" + std::to_string(field_id.get()) +
                    " isn't one of system type when drop index");
@@ -833,7 +832,6 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
             indices->erase(itr);
         }
     } else {
-        LOG_INFO("[remove] drop index");
         scalar_indexings_.wlock()->erase(field_id);
     }
     set_bit(index_ready_bitset_, field_id, false);

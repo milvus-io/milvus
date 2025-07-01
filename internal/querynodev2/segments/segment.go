@@ -518,7 +518,6 @@ func (s *LocalSegment) DropIndex(ctx context.Context, fieldID int64) error {
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
 		if value.IndexInfo.FieldID == fieldID {
 			s.fieldIndexes.Remove(key)
-			log.Info("[remove] segment remove index", zap.Int64("fieldID", fieldID), zap.Int64("indexID", key))
 		}
 		return true
 	})
