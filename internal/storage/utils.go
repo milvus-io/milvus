@@ -383,7 +383,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 	}
 
 	if len(collSchema.StructArrayFields) > 0 {
-		panic("struct fields are not implemented in row based insert data")
+		return nil, errors.New("struct fields are not implemented in row based insert data")
 	}
 
 	for _, field := range collSchema.Fields {
