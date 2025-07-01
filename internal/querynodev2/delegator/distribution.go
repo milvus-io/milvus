@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -68,6 +69,8 @@ type channelQueryView struct {
 
 	loadedRatio            *atomic.Float64 // loaded ratio of current query view, set serviceable to true if loadedRatio == 1.0
 	unloadedSealedSegments []SegmentEntry  // workerID -> -1
+
+	syncedByCoord bool // if the query view is synced by coord
 }
 
 func NewChannelQueryView(growings []int64, sealedSegmentRowCount map[int64]int64, partitions []int64, version int64) *channelQueryView {
@@ -85,7 +88,16 @@ func (q *channelQueryView) GetVersion() int64 {
 }
 
 func (q *channelQueryView) Serviceable() bool {
-	return q.loadedRatio.Load() >= 1.0
+	dataReady := q.loadedRatio.Load() >= 1.0
+	// for now, we only support collection level target(data view), so we need to wait for the query view is synced by coord
+	// incase of delegator become serviceable before current target is ready when memory is not enough.
+	// if current target is not ready, segment on delegator will be released at any time, serviceable state is not reliable.
+	// Note: after we support channel level target(data view), we can remove this flag
+	viewReady := q.syncedByCoord
+
+	// if partial result is enabled, we can skip the viewReady check
+	enablePartialResult := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat() < 1.0
+	return dataReady && (viewReady || enablePartialResult)
 }
 
 func (q *channelQueryView) GetLoadedRatio() float64 {
@@ -378,6 +390,7 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		partitions:            typeutil.NewUniqueSet(partitions...),
 		version:               action.GetTargetVersion(),
 		loadedRatio:           atomic.NewFloat64(0),
+		syncedByCoord:         true,
 	}
 
 	sealedSet := typeutil.NewUniqueSet(action.GetSealedInTarget()...)
