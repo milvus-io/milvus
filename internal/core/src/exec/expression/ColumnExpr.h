@@ -44,9 +44,8 @@ class PhyColumnExpr : public Expr {
             auto& schema = segment->get_schema();
             auto& field_meta = schema[expr_->GetColumn().field_id_];
             pinned_index_ = PinIndex(segment, field_meta);
-            if (pinned_index_.get() != nullptr) {
-                is_indexed_ = true;
-            }
+            is_indexed_ = pinned_index_.get() != nullptr;
+
             num_chunk_ =
                 is_indexed_
                     ? segment->num_chunk_index(expr_->GetColumn().field_id_)

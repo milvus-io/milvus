@@ -146,12 +146,8 @@ class PhyCompareFilterExpr : public Expr {
             auto& right_field_meta = schema[right_field_];
             pinned_index_left_ = PinIndex(segment, left_field_meta);
             pinned_index_right_ = PinIndex(segment, right_field_meta);
-            if (pinned_index_left_.get() != nullptr) {
-                is_left_indexed_ = true;
-            }
-            if (pinned_index_right_.get() != nullptr) {
-                is_right_indexed_ = true;
-            }
+            is_left_indexed_ = pinned_index_left_.get() != nullptr;
+            is_right_indexed_ = pinned_index_right_.get() != nullptr;
             left_num_chunk_ =
                 is_left_indexed_
                     ? segment->num_chunk_index(expr_->left_field_id_)

@@ -750,7 +750,6 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		zap.String("indexName", req.GetIndexName()),
 		zap.Uint64("timestamp", req.GetTimestamp()),
 	)
-	log.Info("[remove] receive DescribeIndex request", zap.String("indexName", req.GetIndexName()), zap.Any("collectionID", req.GetCollectionID()), zap.Any("timestamp", req.GetTimestamp()))
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
 		return &indexpb.DescribeIndexResponse{
