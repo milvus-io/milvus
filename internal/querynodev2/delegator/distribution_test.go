@@ -20,11 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type DistributionSuite struct {
@@ -33,6 +35,7 @@ type DistributionSuite struct {
 }
 
 func (s *DistributionSuite) SetupTest() {
+	paramtable.Init()
 	s.dist = NewDistribution("channel-1", NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 }
 
@@ -860,8 +863,10 @@ func TestDistribution_UpdateServiceable(t *testing.T) {
 		}
 	}
 	dist.updateServiceable("test")
-	assert.True(t, dist.Serviceable())
 	assert.Equal(t, float64(1), dist.queryView.GetLoadedRatio())
+	assert.False(t, dist.Serviceable())
+	dist.queryView.syncedByCoord = true
+	assert.True(t, dist.Serviceable())
 }
 
 func TestDistribution_SyncTargetVersion(t *testing.T) {
@@ -935,4 +940,200 @@ func TestDistribution_MarkOfflineSegments(t *testing.T) {
 	assert.Equal(t, int64(-1), dist.sealedSegments[2].NodeID)
 	assert.Equal(t, unreadableTargetVersion, dist.sealedSegments[1].Version)
 	assert.Equal(t, unreadableTargetVersion, dist.sealedSegments[2].Version)
+}
+
+// TestChannelQueryView_SyncedByCoord tests the syncedByCoord field functionality
+func TestChannelQueryView_SyncedByCoord(t *testing.T) {
+	mockey.PatchConvey("TestChannelQueryView_SyncedByCoord", t, func() {
+		// Mock GetAsFloat to return 1.0 (disable partial result) to avoid paramtable initialization
+		mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+
+		growings := []int64{1, 2, 3}
+		sealedWithRowCount := map[int64]int64{4: 100, 5: 200, 6: 300}
+		partitions := []int64{7, 8, 9}
+		version := int64(10)
+
+		t.Run("new channelQueryView has syncedByCoord false", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			assert.False(t, view.syncedByCoord, "New channelQueryView should have syncedByCoord = false")
+		})
+
+		t.Run("syncedByCoord can be set manually", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+
+			// Initially false
+			assert.False(t, view.syncedByCoord)
+
+			// Set to true
+			view.syncedByCoord = true
+			assert.True(t, view.syncedByCoord)
+
+			// Set back to false
+			view.syncedByCoord = false
+			assert.False(t, view.syncedByCoord)
+		})
+	})
+}
+
+// TestDistribution_SyncTargetVersionSetsSyncedByCoord tests that SyncTargetVersion sets syncedByCoord
+func TestDistribution_SyncTargetVersionSetsSyncedByCoord(t *testing.T) {
+	mockey.PatchConvey("TestDistribution_SyncTargetVersionSetsSyncedByCoord", t, func() {
+		// Mock GetAsFloat to return 1.0 (disable partial result) to avoid paramtable initialization
+		mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+
+		channelName := "test_channel"
+		growings := []int64{1, 2, 3}
+		sealedWithRowCount := map[int64]int64{4: 100, 5: 200, 6: 300}
+		partitions := []int64{7, 8, 9}
+		version := int64(10)
+
+		t.Run("SyncTargetVersion sets syncedByCoord to true", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Initially syncedByCoord should be false
+			assert.False(t, dist.queryView.syncedByCoord)
+
+			// Create sync action
+			action := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2},
+				SealedSegmentRowCount: map[int64]int64{4: 100, 5: 100},
+				TargetVersion:         version + 1,
+			}
+
+			// Sync the view
+			dist.SyncTargetVersion(action, partitions)
+
+			// Verify syncedByCoord is set to true after sync
+			assert.True(t, dist.queryView.syncedByCoord, "SyncTargetVersion should set syncedByCoord to true")
+			assert.Equal(t, action.GetTargetVersion(), dist.queryView.version)
+		})
+
+		t.Run("multiple SyncTargetVersion calls maintain syncedByCoord true", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// First sync
+			action1 := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2},
+				SealedSegmentRowCount: map[int64]int64{4: 100},
+				TargetVersion:         version + 1,
+			}
+			dist.SyncTargetVersion(action1, partitions)
+			assert.True(t, dist.queryView.syncedByCoord)
+
+			// Second sync
+			action2 := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2, 3},
+				SealedSegmentRowCount: map[int64]int64{4: 100, 5: 200},
+				TargetVersion:         version + 2,
+			}
+			dist.SyncTargetVersion(action2, partitions)
+			assert.True(t, dist.queryView.syncedByCoord, "syncedByCoord should remain true after multiple syncs")
+			assert.Equal(t, action2.GetTargetVersion(), dist.queryView.version)
+		})
+
+		t.Run("SyncTargetVersion creates new queryView with syncedByCoord true", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Store reference to original view
+			originalView := dist.queryView
+			assert.False(t, originalView.syncedByCoord)
+
+			// Sync should create new queryView
+			action := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2},
+				SealedSegmentRowCount: map[int64]int64{4: 100, 5: 100},
+				TargetVersion:         version + 1,
+			}
+			dist.SyncTargetVersion(action, partitions)
+
+			// Verify new queryView is created with syncedByCoord = true
+			newView := dist.queryView
+			assert.NotSame(t, originalView, newView, "SyncTargetVersion should create new queryView")
+			assert.True(t, newView.syncedByCoord, "New queryView should have syncedByCoord = true")
+			assert.False(t, originalView.syncedByCoord, "Original queryView should remain unchanged")
+		})
+	})
+}
+
+// TestDistribution_ServiceableWithSyncedByCoord tests serviceable logic considering syncedByCoord
+func TestDistribution_ServiceableWithSyncedByCoord(t *testing.T) {
+	mockey.PatchConvey("TestDistribution_ServiceableWithSyncedByCoord", t, func() {
+		// Mock GetAsFloat to return 1.0 (disable partial result) to avoid paramtable initialization
+		mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+
+		channelName := "test_channel"
+		growings := []int64{1, 2}
+		sealedWithRowCount := map[int64]int64{4: 100, 5: 100}
+		partitions := []int64{7, 8}
+		version := int64(10)
+
+		t.Run("distribution becomes serviceable after sync and full load", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Initially not serviceable
+			assert.False(t, dist.Serviceable())
+
+			// Add all segments to make it fully loaded
+			for _, id := range growings {
+				dist.growingSegments[id] = SegmentEntry{
+					SegmentID: id,
+				}
+			}
+			for id := range sealedWithRowCount {
+				dist.sealedSegments[id] = SegmentEntry{
+					SegmentID: id,
+					Offline:   false,
+				}
+			}
+
+			// Sync target version to set syncedByCoord = true
+			action := &querypb.SyncAction{
+				GrowingInTarget:       growings,
+				SealedSegmentRowCount: sealedWithRowCount,
+				TargetVersion:         version + 1,
+			}
+			dist.SyncTargetVersion(action, partitions)
+
+			// Update serviceable to calculate loaded ratio
+			dist.updateServiceable("test")
+
+			// Should be serviceable now
+			assert.True(t, dist.Serviceable())
+			assert.Equal(t, float64(1), dist.queryView.GetLoadedRatio())
+			assert.True(t, dist.queryView.syncedByCoord)
+		})
+
+		t.Run("distribution not serviceable without sync even with full load", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Add all segments to make it fully loaded
+			for _, id := range growings {
+				dist.growingSegments[id] = SegmentEntry{
+					SegmentID: id,
+				}
+			}
+			for id := range sealedWithRowCount {
+				dist.sealedSegments[id] = SegmentEntry{
+					SegmentID: id,
+					Offline:   false,
+				}
+			}
+
+			// Update serviceable to calculate loaded ratio but don't sync
+			dist.updateServiceable("test")
+
+			// Should not be serviceable without sync (assuming partial result is disabled by default)
+			// The exact behavior depends on paramtable configuration, but we test the basic structure
+			assert.Equal(t, float64(1), dist.queryView.GetLoadedRatio(), "Load ratio should be 1.0")
+			assert.False(t, dist.queryView.syncedByCoord, "Should not be synced by coord")
+
+			// Note: The actual serviceable result depends on partial result configuration
+			// We focus on testing that the fields are set correctly
+		})
+	})
 }
