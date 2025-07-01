@@ -30,6 +30,7 @@ fi
 
 set -e
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}
+echo "MILVUS_WORK_DIR: $MILVUS_WORK_DIR"
 
 # starting the timer
 beginTime=`date +%s`

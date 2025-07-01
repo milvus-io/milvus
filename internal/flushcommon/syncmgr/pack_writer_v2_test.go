@@ -127,6 +127,7 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 	s.NoError(err)
 	s.Equal(gotInserts[0].Binlogs[0].GetEntriesNum(), int64(rows))
 	s.Equal(gotInserts[0].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/0/1")
+	s.Equal(gotInserts[101].Binlogs[0].GetLogPath(), "/tmp/insert_log/123/456/789/101/2")
 }
 
 func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {

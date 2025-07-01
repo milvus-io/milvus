@@ -150,7 +150,7 @@ class JsonKeyStatsInvertedIndex : public InvertedIndexTantivy<std::string> {
     Reload();
 
     void
-    CreateReader();
+    CreateReader(SetBitsetFn set_bitset);
 
     bool
     has_escape_sequence(const std::string& str) {

@@ -2896,7 +2896,6 @@ type queryNodeConfig struct {
 
 	// Idf Oracle
 	IDFEnableDisk       ParamItem `refreshable:"true"`
-	IDFLocalPath        ParamItem `refreshable:"true"`
 	IDFWriteConcurrenct ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
@@ -2910,14 +2909,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "true",
 	}
 	p.IDFEnableDisk.Init(base.mgr)
-
-	p.IDFLocalPath = ParamItem{
-		Key:          "queryNode.idfOracle.localPath",
-		Version:      "2.6.0",
-		Export:       true,
-		DefaultValue: "/var/lib/milvus/bm25_logs",
-	}
-	p.IDFLocalPath.Init(base.mgr)
 
 	p.IDFWriteConcurrenct = ParamItem{
 		Key:          "queryNode.idfOracle.writeConcurrency",
@@ -5191,7 +5182,8 @@ type dataNodeConfig struct {
 	// index services config
 	BuildParallel ParamItem `refreshable:"false"`
 
-	WorkerSlotUnit ParamItem `refreshable:"true"`
+	WorkerSlotUnit      ParamItem `refreshable:"true"`
+	StandaloneSlotRatio ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -5532,8 +5524,9 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.compaction.useMergeSort",
 		Version:      "2.5.0",
 		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
-		DefaultValue: "false",
-		Export:       true,
+		DefaultValue: "true",
+		// Enable by default start from 2.6.0
+		Export: true,
 	}
 	p.UseMergeSort.Init(base.mgr)
 
@@ -5618,6 +5611,14 @@ if this parameter <= 0, will set it as 10`,
 		Doc:          "Indicates how many slots each worker occupies per 2c8g",
 	}
 	p.WorkerSlotUnit.Init(base.mgr)
+
+	p.StandaloneSlotRatio = ParamItem{
+		Key:          "dataNode.standaloneSlotFactor",
+		Version:      "2.5.14",
+		DefaultValue: "0.25",
+		Doc:          "Offline task slot ratio in standalone mode",
+	}
+	p.StandaloneSlotRatio.Init(base.mgr)
 }
 
 type streamingConfig struct {
@@ -5625,6 +5626,7 @@ type streamingConfig struct {
 	WALBalancerTriggerInterval        ParamItem `refreshable:"true"`
 	WALBalancerBackoffInitialInterval ParamItem `refreshable:"true"`
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
+	WALBalancerBackoffMaxInterval     ParamItem `refreshable:"true"`
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
 
 	// balancer Policy
@@ -5678,9 +5680,9 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 	p.WALBalancerBackoffInitialInterval = ParamItem{
 		Key:     "streaming.walBalancer.backoffInitialInterval",
 		Version: "2.6.0",
-		Doc: `The initial interval of balance task trigger backoff, 50 ms by default.
+		Doc: `The initial interval of balance task trigger backoff, 10 ms by default.
 It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
-		DefaultValue: "50ms",
+		DefaultValue: "10ms",
 		Export:       true,
 	}
 	p.WALBalancerBackoffInitialInterval.Init(base.mgr)
@@ -5692,12 +5694,21 @@ It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDura
 		Export:       true,
 	}
 	p.WALBalancerBackoffMultiplier.Init(base.mgr)
+	p.WALBalancerBackoffMaxInterval = ParamItem{
+		Key:     "streaming.walBalancer.backoffMaxInterval",
+		Version: "2.6.0",
+		Doc: `The max interval of balance task trigger backoff, 5s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration`,
+		DefaultValue: "5s",
+		Export:       true,
+	}
+	p.WALBalancerBackoffMaxInterval.Init(base.mgr)
 	p.WALBalancerOperationTimeout = ParamItem{
 		Key:     "streaming.walBalancer.operationTimeout",
 		Version: "2.6.0",
-		Doc: `The timeout of wal balancer operation, 10s by default.
+		Doc: `The timeout of wal balancer operation, 30s by default.
 If the operation exceeds this timeout, it will be canceled.`,
-		DefaultValue: "10s",
+		DefaultValue: "30s",
 		Export:       true,
 	}
 	p.WALBalancerOperationTimeout.Init(base.mgr)
@@ -5900,14 +5911,14 @@ More samples, more frequent truncate, more memory usage.`,
 	p.WALTruncateRetentionInterval = ParamItem{
 		Key:     "streaming.walTruncate.retentionInterval",
 		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 26h by default.
+		Doc: `The retention interval of wal truncate, 72h by default.
 If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
 Greater the interval, more wal storage usage, more redundant data in wal.
 Because current query path doesn't promise the read operation not happen before the truncate point,
 retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
 If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
 because the wal truncate operation is implemented by pulsar consumer.`,
-		DefaultValue: "26h",
+		DefaultValue: "72h",
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)

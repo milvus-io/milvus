@@ -11,10 +11,14 @@ use crate::{
 pub(crate) type SetBitsetFn = extern "C" fn(*mut c_void, *const u32, usize);
 
 #[no_mangle]
-pub extern "C" fn tantivy_load_index(path: *const c_char, set_bitset: SetBitsetFn) -> RustResult {
+pub extern "C" fn tantivy_load_index(
+    path: *const c_char,
+    load_in_mmap: bool,
+    set_bitset: SetBitsetFn,
+) -> RustResult {
     assert!(tantivy_index_exist(path));
     let path_str = cstr_to_str!(path);
-    match IndexReaderWrapper::load(path_str, set_bitset) {
+    match IndexReaderWrapper::load(path_str, load_in_mmap, set_bitset) {
         Ok(w) => RustResult::from_ptr(create_binding(w)),
         Err(e) => RustResult::from_error(e.to_string()),
     }
@@ -227,6 +231,25 @@ pub extern "C" fn tantivy_term_query_keyword_i64(
     let real = ptr as *mut IndexReaderWrapper;
     let term = cstr_to_str!(term);
     unsafe { (*real).term_query_keyword_i64(term).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_inner_match_ngram(
+    ptr: *mut c_void,
+    literal: *const c_char,
+    min_gram: usize,
+    max_gram: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let literal = cstr_to_str!(literal);
+
+    let now = std::time::Instant::now();
+    unsafe {
+        (*real)
+            .inner_match_ngram(literal, min_gram, max_gram, bitset)
+            .into()
+    }
 }
 
 #[no_mangle]

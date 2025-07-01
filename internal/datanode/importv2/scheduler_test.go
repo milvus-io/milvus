@@ -60,6 +60,11 @@ type mockReader struct {
 	io.Closer
 	io.ReaderAt
 	io.Seeker
+	size int64
+}
+
+func (mr *mockReader) Size() (int64, error) {
+	return mr.size, nil
 }
 
 type SchedulerSuite struct {
@@ -197,12 +202,6 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 	s.NoError(err)
 
 	cm := mocks.NewChunkManager(s.T())
-	type mockReader struct {
-		io.Reader
-		io.Closer
-		io.ReaderAt
-		io.Seeker
-	}
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
@@ -247,7 +246,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
 	s.cm = cm
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, nil
 		})
@@ -308,7 +307,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader, Closer: io.NopCloser(ioReader)}, nil)
 	s.cm = cm
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, errors.New("mock err")
 		})
@@ -385,7 +384,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 }
 
 func (s *SchedulerSuite) TestScheduler_ImportFile() {
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, nil
 		})
@@ -444,7 +443,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 		}
 	}
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
+	s.syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task, cm storage.ChunkManager, callbacks ...func(error) error) (*conc.Future[struct{}], error) {
 		future := conc.Go(func() (struct{}, error) {
 			return struct{}{}, nil
 		})

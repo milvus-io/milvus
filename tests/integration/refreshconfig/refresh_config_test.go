@@ -44,7 +44,7 @@ func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 
-	resp, err := c.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+	resp, err := c.MilvusClient.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 		Username: "test",
 		Password: "1234",
 	})
@@ -59,7 +59,7 @@ func (s *RefreshConfigSuite) TestRefreshPasswordLength() {
 	log.Debug("etcd put result", zap.Any("resp", r), zap.Error(e))
 
 	s.Eventually(func() bool {
-		resp, err = c.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+		resp, err = c.MilvusClient.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 			Username: "test",
 			Password: "1234",
 		})
@@ -73,7 +73,7 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
 	params := paramtable.Get()
-	c.EtcdCli.KV.Put(ctx, fmt.Sprintf("%s/config/common/defaultIndexName", params.EtcdCfg.RootPath.GetValue()), "a_index")
+	c.EtcdCli.Put(ctx, fmt.Sprintf("%s/config/common/defaultIndexName", params.EtcdCfg.RootPath.GetValue()), "a_index")
 
 	s.Eventually(func() bool {
 		return params.CommonCfg.DefaultIndexName.GetValue() == "a_index"
@@ -88,7 +88,7 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.Require().NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         "default",
 		CollectionName: "test",
 		Schema:         marshaledSchema,
@@ -102,7 +102,7 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	_, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	_, err = c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -112,7 +112,7 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 	s.NoError(err)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -126,14 +126,14 @@ func (s *RefreshConfigSuite) TestRefreshDefaultIndexName() {
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-	_, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	_, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
 	})
 	s.NoError(err)
 
-	resp, err := c.Proxy.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+	resp, err := c.MilvusClient.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})

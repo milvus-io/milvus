@@ -55,14 +55,10 @@ DiskFileManagerImpl::DiskFileManagerImpl(
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    local_chunk_manager->RemoveDir(GetIndexPathPrefixWithBuildID(
-        local_chunk_manager, index_meta_.build_id));
-    local_chunk_manager->RemoveDir(GetTextIndexPathPrefixWithBuildID(
-        local_chunk_manager, index_meta_.build_id));
-    local_chunk_manager->RemoveDir(GetJsonKeyIndexPathPrefixWithBuildID(
-        local_chunk_manager, index_meta_.build_id));
+    RemoveIndexFiles();
+    RemoveTextLogFiles();
+    RemoveJsonKeyIndexFiles();
+    RemoveNgramIndexFiles();
 }
 
 bool
@@ -226,7 +222,8 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 void
 DiskFileManagerImpl::CacheIndexToDiskInternal(
     const std::vector<std::string>& remote_files,
-    const std::function<std::string()>& get_local_index_prefix) {
+    const std::function<std::string()>& get_local_index_prefix,
+    milvus::proto::common::LoadPriority priority) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
 
@@ -267,7 +264,9 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
 
         auto appendIndexFiles = [&]() {
             auto index_chunks_futures =
-                GetObjectData(rcm_.get(), batch_remote_files);
+                GetObjectData(rcm_.get(),
+                              batch_remote_files,
+                              milvus::PriorityForLoad(priority));
             for (auto& chunk_future : index_chunks_futures) {
                 auto chunk_codec = chunk_future.get();
                 file.Write(chunk_codec->PayloadData(),
@@ -293,23 +292,40 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
 
 void
 DiskFileManagerImpl::CacheIndexToDisk(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalIndexObjectPrefix(); });
+        remote_files,
+        [this]() { return GetLocalIndexObjectPrefix(); },
+        priority);
 }
 
 void
 DiskFileManagerImpl::CacheTextLogToDisk(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalTextIndexPrefix(); });
+        remote_files, [this]() { return GetLocalTextIndexPrefix(); }, priority);
 }
 
 void
 DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
-    const std::vector<std::string>& remote_files) {
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalJsonKeyIndexPrefix(); });
+        remote_files,
+        [this]() { return GetLocalJsonKeyIndexPrefix(); },
+        priority);
+}
+
+void
+DiskFileManagerImpl::CacheNgramIndexToDisk(
+    const std::vector<std::string>& remote_files,
+    milvus::proto::common::LoadPriority priority) {
+    return CacheIndexToDiskInternal(
+        remote_files,
+        [this]() { return GetLocalNgramIndexPrefix(); },
+        priority);
 }
 
 template <typename DataType>
@@ -501,6 +517,34 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     return local_data_path;
 }
 
+void
+DiskFileManagerImpl::RemoveIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalIndexObjectPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveTextLogFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalTextIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveJsonKeyIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalJsonKeyIndexPrefix());
+}
+
+void
+DiskFileManagerImpl::RemoveNgramIndexFiles() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    local_chunk_manager->RemoveDir(GetLocalNgramIndexPrefix());
+}
+
 template <DataType T>
 bool
 WriteOptFieldIvfDataImpl(
@@ -683,25 +727,38 @@ DiskFileManagerImpl::GetFileName(const std::string& localfile) {
 std::string
 DiskFileManagerImpl::GetIndexIdentifier() {
     return GenIndexPathIdentifier(index_meta_.build_id,
-                                  index_meta_.index_version);
+                                  index_meta_.index_version,
+                                  index_meta_.segment_id,
+                                  index_meta_.field_id);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenIndexPathPrefix(
-        local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
+    return GenIndexPathPrefix(local_chunk_manager,
+                              index_meta_.build_id,
+                              index_meta_.index_version,
+                              index_meta_.segment_id,
+                              index_meta_.field_id,
+                              false);
 }
 
+// temporary path used during index building
 std::string
-DiskFileManagerImpl::GetTextIndexIdentifier() {
-    return std::to_string(index_meta_.build_id) + "/" +
-           std::to_string(index_meta_.index_version) + "/" +
-           std::to_string(field_meta_.segment_id) + "/" +
-           std::to_string(field_meta_.field_id);
+DiskFileManagerImpl::GetLocalTempIndexObjectPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenIndexPathPrefix(local_chunk_manager,
+                              index_meta_.build_id,
+                              index_meta_.index_version,
+                              index_meta_.segment_id,
+                              index_meta_.field_id,
+                              true);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalTextIndexPrefix() {
     auto local_chunk_manager =
@@ -710,19 +767,24 @@ DiskFileManagerImpl::GetLocalTextIndexPrefix() {
                                   index_meta_.build_id,
                                   index_meta_.index_version,
                                   field_meta_.segment_id,
-                                  field_meta_.field_id);
+                                  field_meta_.field_id,
+                                  false);
 }
 
+// temporary path used during index building
 std::string
-DiskFileManagerImpl::GetJsonKeyIndexIdentifier() {
-    return GenJsonKeyIndexPathIdentifier(index_meta_.build_id,
-                                         index_meta_.index_version,
-                                         field_meta_.collection_id,
-                                         field_meta_.partition_id,
-                                         field_meta_.segment_id,
-                                         field_meta_.field_id);
+DiskFileManagerImpl::GetLocalTempTextIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenIndexPathPrefix(local_chunk_manager,
+                              index_meta_.build_id,
+                              index_meta_.index_version,
+                              field_meta_.segment_id,
+                              field_meta_.field_id,
+                              true);
 }
 
+// path to store pre-built index contents downloaded from remote storage
 std::string
 DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     auto local_chunk_manager =
@@ -730,21 +792,57 @@ DiskFileManagerImpl::GetLocalJsonKeyIndexPrefix() {
     return GenJsonKeyIndexPathPrefix(local_chunk_manager,
                                      index_meta_.build_id,
                                      index_meta_.index_version,
-                                     field_meta_.collection_id,
-                                     field_meta_.partition_id,
                                      field_meta_.segment_id,
-                                     field_meta_.field_id);
+                                     field_meta_.field_id,
+                                     false);
+}
+
+// temporary path used during index building
+std::string
+DiskFileManagerImpl::GetLocalTempJsonKeyIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenJsonKeyIndexPathPrefix(local_chunk_manager,
+                                     index_meta_.build_id,
+                                     index_meta_.index_version,
+                                     field_meta_.segment_id,
+                                     field_meta_.field_id,
+                                     true);
 }
 
 std::string
 DiskFileManagerImpl::GetRemoteJsonKeyLogPrefix() {
-    return GenJsonKeyIndexPathPrefix(rcm_,
-                                     index_meta_.build_id,
-                                     index_meta_.index_version,
-                                     field_meta_.collection_id,
-                                     field_meta_.partition_id,
-                                     field_meta_.segment_id,
-                                     field_meta_.field_id);
+    return GenRemoteJsonKeyIndexPathPrefix(rcm_,
+                                           index_meta_.build_id,
+                                           index_meta_.index_version,
+                                           field_meta_.collection_id,
+                                           field_meta_.partition_id,
+                                           field_meta_.segment_id,
+                                           field_meta_.field_id);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id,
+                               false);
+}
+
+std::string
+DiskFileManagerImpl::GetLocalTempNgramIndexPrefix() {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    return GenNgramIndexPrefix(local_chunk_manager,
+                               index_meta_.build_id,
+                               index_meta_.index_version,
+                               field_meta_.segment_id,
+                               field_meta_.field_id,
+                               true);
 }
 
 std::string

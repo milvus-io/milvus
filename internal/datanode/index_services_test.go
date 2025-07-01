@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -95,6 +96,7 @@ func Test_IndexServiceSuite(t *testing.T) {
 }
 
 func (s *IndexServiceSuite) SetupTest() {
+	streamingutil.SetStreamingServiceEnabled()
 	s.collID = 1
 	s.partID = 2
 	s.segID = 3
@@ -134,10 +136,7 @@ func (s *IndexServiceSuite) SetupTest() {
 		ctx     = context.TODO()
 	)
 
-	cm := mocks.NewChunkManager(s.T())
-
 	factory.EXPECT().Init(mock.Anything).Return()
-	factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(cm, nil)
 
 	s.node = NewDataNode(ctx, factory)
 

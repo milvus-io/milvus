@@ -495,6 +495,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -608,6 +609,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -706,6 +708,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -771,6 +774,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -813,6 +817,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming, 0),
 		)
 		suite.NoError(err)
@@ -920,6 +925,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
@@ -1020,6 +1026,7 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
@@ -1102,6 +1109,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -1190,6 +1198,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -1427,19 +1436,19 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
-	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica)
+	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, commonpb.LoadPriority_LOW)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	channelAction := NewChannelAction(0, 0, "fake-channel1")
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, channelAction)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, commonpb.LoadPriority_LOW, channelAction)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	segmentAction1 := NewSegmentAction(0, 0, "", 0)
 	segmentAction2 := NewSegmentAction(0, 0, "", 1)
 
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, segmentAction1, segmentAction2)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, commonpb.LoadPriority_LOW, segmentAction1, segmentAction2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
@@ -1460,6 +1469,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		suite.NoError(err)
@@ -1477,6 +1487,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		suite.NoError(err)
@@ -1496,6 +1507,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		suite.NoError(err)
@@ -1538,6 +1550,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
+			commonpb.LoadPriority_LOW,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
@@ -1801,6 +1814,7 @@ func (suite *TaskSuite) TestGetTasksJSON() {
 		WrapIDSource(0),
 		suite.collection,
 		suite.replica,
+		commonpb.LoadPriority_LOW,
 		NewSegmentAction(1, ActionTypeGrow, "", 1),
 	)
 	suite.NoError(err)
@@ -1842,6 +1856,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
+		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", segmentID, querypb.DataScope_Historical, 100),
 	)
 	task1.SetID(1)
@@ -1871,6 +1886,7 @@ func (suite *TaskSuite) TestCalculateTaskDelta() {
 		WrapIDSource(0),
 		coll2,
 		suite.replica,
+		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID2, ActionTypeGrow, "", segmentID2, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
@@ -1990,6 +2006,7 @@ func (suite *TaskSuite) TestRemoveTaskWithError() {
 		WrapIDSource(0),
 		coll,
 		suite.replica,
+		commonpb.LoadPriority_LOW,
 		NewSegmentActionWithScope(nodeID, ActionTypeGrow, "", 1, querypb.DataScope_Historical, 100),
 	)
 	suite.NoError(err)
@@ -2014,4 +2031,188 @@ func newReplicaDefaultRG(replicaID int64) *meta.Replica {
 		},
 		typeutil.NewUniqueSet(),
 	)
+}
+
+func (suite *TaskSuite) TestSegmentTaskShardLeaderID() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+
+	// Create a segment task
+	action := NewSegmentActionWithScope(1, ActionTypeGrow, "", 100, querypb.DataScope_Historical, 100)
+	segmentTask, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		action,
+	)
+	suite.NoError(err)
+
+	// Test initial shard leader ID (should be -1)
+	suite.Equal(int64(-1), segmentTask.ShardLeaderID())
+
+	// Test setting shard leader ID
+	expectedLeaderID := int64(123)
+	segmentTask.SetShardLeaderID(expectedLeaderID)
+	suite.Equal(expectedLeaderID, segmentTask.ShardLeaderID())
+
+	// Test setting another value
+	anotherLeaderID := int64(456)
+	segmentTask.SetShardLeaderID(anotherLeaderID)
+	suite.Equal(anotherLeaderID, segmentTask.ShardLeaderID())
+
+	// Test with zero value
+	segmentTask.SetShardLeaderID(0)
+	suite.Equal(int64(0), segmentTask.ShardLeaderID())
+}
+
+func (suite *TaskSuite) TestExecutor_MoveSegmentTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	sourceNode := int64(2)
+	targetNode := int64(3)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
+	}
+
+	suite.meta.CollectionManager.PutCollection(ctx, utils.CreateTestCollection(suite.collection, 1))
+	suite.meta.ReplicaManager.Put(ctx, utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{sourceNode, targetNode}))
+
+	// Create move task with both grow and reduce actions to simulate TaskTypeMove
+	segmentID := suite.loadSegments[0]
+	growAction := NewSegmentAction(targetNode, ActionTypeGrow, channel.ChannelName, segmentID)
+	reduceAction := NewSegmentAction(sourceNode, ActionTypeReduce, channel.ChannelName, segmentID)
+
+	// Create a move task that has both actions
+	moveTask, err := NewSegmentTask(
+		ctx,
+		timeout,
+		WrapIDSource(0),
+		suite.collection,
+		suite.replica,
+		commonpb.LoadPriority_LOW,
+		growAction,
+		reduceAction,
+	)
+	suite.NoError(err)
+
+	// Mock cluster expectations for load segment
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(merr.Success(), nil)
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, suite.collection).RunAndReturn(func(ctx context.Context, i int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Schema: &schemapb.CollectionSchema{
+				Name: "TestMoveSegmentTask",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+				},
+			},
+		}, nil
+	})
+	suite.broker.EXPECT().ListIndexes(mock.Anything, suite.collection).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: suite.collection,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segmentID).Return([]*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   -1,
+			InsertChannel: channel.ChannelName,
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segmentID).Return(nil, nil)
+
+	// Set up distribution with leader view
+	view := &meta.LeaderView{
+		ID:           targetNode,
+		CollectionID: suite.collection,
+		Channel:      channel.ChannelName,
+		Segments:     make(map[int64]*querypb.SegmentDist),
+		Status:       &querypb.LeaderViewStatus{Serviceable: true},
+	}
+
+	suite.dist.ChannelDistManager.Update(targetNode, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         targetNode,
+		Version:      1,
+		View:         view,
+	})
+
+	// Add segments to original node distribution for release
+	segments := []*meta.Segment{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  suite.collection,
+				PartitionID:   1,
+				InsertChannel: channel.ChannelName,
+			},
+		},
+	}
+	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
+
+	// Set up broker expectations
+	segmentInfos := []*datapb.SegmentInfo{
+		{
+			ID:            segmentID,
+			CollectionID:  suite.collection,
+			PartitionID:   1,
+			InsertChannel: channel.ChannelName,
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segmentInfos, nil)
+	suite.target.UpdateCollectionNextTarget(ctx, suite.collection)
+
+	// Test that move task sets shard leader ID during load step
+	suite.Equal(TaskTypeMove, GetTaskType(moveTask))
+	suite.Equal(int64(-1), moveTask.ShardLeaderID()) // Initial value
+
+	// Set up task executor
+	executor := NewExecutor(suite.meta,
+		suite.dist,
+		suite.broker,
+		suite.target,
+		suite.cluster,
+		suite.nodeMgr)
+
+	// Verify shard leader ID was set for load action in move task
+	executor.executeSegmentAction(moveTask, 0)
+	suite.Equal(targetNode, moveTask.ShardLeaderID())
+	suite.NoError(moveTask.Err())
+
+	// expect release action will execute successfully
+	executor.executeSegmentAction(moveTask, 1)
+	suite.Equal(targetNode, moveTask.ShardLeaderID())
+	suite.True(moveTask.actions[0].IsFinished(suite.dist))
+	suite.NoError(moveTask.Err())
+
+	// test shard leader change before release action
+	newLeaderID := sourceNode
+	view1 := &meta.LeaderView{
+		ID:           newLeaderID,
+		CollectionID: suite.collection,
+		Channel:      channel.ChannelName,
+		Segments:     make(map[int64]*querypb.SegmentDist),
+		Status:       &querypb.LeaderViewStatus{Serviceable: true},
+		Version:      100,
+	}
+
+	suite.dist.ChannelDistManager.Update(newLeaderID, &meta.DmChannel{
+		VchannelInfo: channel,
+		Node:         newLeaderID,
+		Version:      100,
+		View:         view1,
+	})
+
+	// expect release action will skip and task will fail
+	suite.broker.ExpectedCalls = nil
+	executor.executeSegmentAction(moveTask, 1)
+	suite.True(moveTask.actions[1].IsFinished(suite.dist))
+	suite.ErrorContains(moveTask.Err(), "shard leader changed")
 }

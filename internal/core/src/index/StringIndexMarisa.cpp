@@ -228,7 +228,8 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(
+        index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     LoadWithoutAssemble(binary_set, config);
@@ -264,7 +265,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
         }
     }
     // NotIn(null) and In(null) is both false, need to mask with IsNotNull operate
-    SetNull(bitset);
+    ResetNull(bitset);
     return bitset;
 }
 
@@ -280,6 +281,15 @@ StringIndexMarisa::SetNull(TargetBitmap& bitset) {
     for (size_t i = 0; i < bitset.size(); i++) {
         if (str_ids_[i] == MARISA_NULL_KEY_ID) {
             bitset.set(i);
+        }
+    }
+}
+
+void
+StringIndexMarisa::ResetNull(TargetBitmap& bitset) {
+    for (size_t i = 0; i < bitset.size(); i++) {
+        if (str_ids_[i] == MARISA_NULL_KEY_ID) {
+            bitset.reset(i);
         }
     }
 }

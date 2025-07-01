@@ -16,10 +16,9 @@
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::index {
-constexpr const char* TMP_TEXT_LOG_PREFIX = "/tmp/milvus/text-log/";
-
 TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
                                const char* unique_id,
                                const char* tokenizer_name,
@@ -67,8 +66,7 @@ TextMatchIndex::TextMatchIndex(const storage::FileManagerContext& ctx,
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
 
-    auto prefix = disk_file_manager_->GetTextIndexIdentifier();
-    path_ = std::string(TMP_TEXT_LOG_PREFIX) + prefix;
+    path_ = disk_file_manager_->GetLocalTempTextIndexPrefix();
 
     boost::filesystem::create_directories(path_);
     d_type_ = TantivyDataType::Text;
@@ -135,7 +133,7 @@ TextMatchIndex::Upload(const Config& config) {
 void
 TextMatchIndex::Load(const Config& config) {
     auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load text log index");
     auto prefix = disk_file_manager_->GetLocalTextIndexPrefix();
@@ -149,7 +147,8 @@ TextMatchIndex::Load(const Config& config) {
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(file);
+        auto index_datas = mem_file_manager_->LoadIndexToMemory(
+            file, config[milvus::LOAD_PRIORITY]);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         auto index_valid_data = binary_set.GetByName("index_null_offset");
@@ -159,11 +158,21 @@ TextMatchIndex::Load(const Config& config) {
                index_valid_data->data.get(),
                (size_t)index_valid_data->size);
     }
-    disk_file_manager_->CacheTextLogToDisk(files_value);
+    disk_file_manager_->CacheTextLogToDisk(files_value,
+                                           config[milvus::LOAD_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(prefix.c_str()), "index not exist: {}", prefix);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(prefix.c_str(),
-                                                     milvus::index::SetBitset);
+
+    auto load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        prefix.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+
+    if (!load_in_mmap) {
+        // the index is loaded in ram, so we can remove files in advance
+        disk_file_manager_->RemoveTextLogFiles();
+    }
 }
 
 void
@@ -282,8 +291,8 @@ TextMatchIndex::Reload() {
 }
 
 void
-TextMatchIndex::CreateReader() {
-    wrapper_->create_reader();
+TextMatchIndex::CreateReader(SetBitsetFn set_bitset) {
+    wrapper_->create_reader(set_bitset);
 }
 
 void

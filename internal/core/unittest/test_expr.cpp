@@ -4097,6 +4097,77 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     std::cout << "end compare test" << std::endl;
 }
 
+TEST_P(ExprTest, TestBinaryArithOpEvalRangeExpr_forbigint_mod) {
+    // test (bigint mod 10 == 0)
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(int64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    size_t N = 1000;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    {
+        // insert pk fid
+        auto field_meta = schema->operator[](int64_fid);
+        std::vector<int64_t> data(N);
+        for (int i = 0; i < N; i++) {
+            data[i] = i;
+        }
+        InsertCol(insert_data.get(), data, field_meta, false);
+    }
+
+    BitsetType expect(N, false);
+    {
+        auto field_meta = schema->operator[](json_fid);
+        std::vector<std::string> data(N);
+
+        auto start = 1ULL << 54;
+        for (int i = 0; i < N; i++) {
+            data[i] = R"({"meta":)" + std::to_string(start + i) + "}";
+            std::cout << "data[i]: " << data[i] << std::endl;
+            if ((start + i) % 10 == 0) {
+                expect.set(i);
+            }
+        }
+        InsertCol(insert_data.get(), data, field_meta, false);
+    }
+
+    GeneratedData raw_data;
+    raw_data.schema_ = schema;
+    raw_data.raw_ = insert_data.release();
+    raw_data.raw_->set_num_rows(N);
+    for (int i = 0; i < N; ++i) {
+        raw_data.row_ids_.push_back(i);
+        raw_data.timestamps_.push_back(i);
+    }
+
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
+
+    query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+
+    proto::plan::GenericValue val1;
+    val1.set_int64_val(10);
+    proto::plan::GenericValue val2;
+    val2.set_int64_val(0);
+    auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"meta"}),
+        proto::plan::OpType::Equal,
+        proto::plan::ArithOpType::Mod,
+        val2,
+        val1);
+
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.size(), expect.size())
+        << "final size: " << final.size() << " expect size: " << expect.size();
+    for (auto i = 0; i < final.size(); i++) {
+        EXPECT_EQ(final[i], expect[i])
+            << "i: " << i << " final: " << final[i] << " expect: " << expect[i];
+    }
+}
+
 TEST_P(ExprTest, TestMutiInConvert) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("id", DataType::INT64);
@@ -16480,12 +16551,16 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, this->json_path}};
+    // load_index_info.index = std::move(json_index);
+    load_index_info.index_params = {
+        {JSON_PATH, this->json_path},
+        {JSON_CAST_TYPE, this->cast_type.ToString()}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test_cache_index", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16614,12 +16689,14 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
 
     json_index->BuildWithFieldData({json_field, json_field2});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16717,12 +16794,14 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, json_index_path}};
+    load_index_info.index_params = {{JSON_PATH, json_index_path},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16895,12 +16974,14 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, GetParam().ToString()}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()

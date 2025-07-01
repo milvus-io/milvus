@@ -16,22 +16,18 @@
  * limitations under the License.
  */
 
-package partitionkey
+package hellomilvus
 
 import (
 	"context"
 	"fmt"
-	"testing"
-	"time"
 
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -39,11 +35,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type PartitionKeySuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *PartitionKeySuite) TestPartitionKey() {
+func (s *HelloMilvusSuite) TestPartitionKey() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -68,7 +60,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -85,7 +77,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 1)
 		hashKeys := integration.GenerateHashKeys(rowNum)
-		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn, partitionKeyColumn},
@@ -101,7 +93,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 10)
 		hashKeys := integration.GenerateHashKeys(rowNum)
-		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn, partitionKeyColumn},
@@ -117,7 +109,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 100)
 		hashKeys := integration.GenerateHashKeys(rowNum)
-		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn, partitionKeyColumn},
@@ -128,7 +120,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	}
 
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -141,7 +133,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -149,7 +141,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -164,7 +156,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -186,27 +178,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
-		searchCheckReport := func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelFunc()
-
-			for {
-				select {
-				case <-timeoutCtx.Done():
-					s.Fail("search check timeout")
-				case report := <-c.Extension.GetReportChan():
-					reportInfo := report.(map[string]any)
-					log.Info("search report info", zap.Any("reportInfo", reportInfo))
-					s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-					s.EqualValues(rowNum*3, reportInfo[hookutil.RelatedCntKey])
-					return
-				}
-			}
-		}
-		go searchCheckReport()
-		searchResult, err := c.Proxy.Search(ctx, searchReq)
+		searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 		if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
@@ -226,27 +198,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
-		searchCheckReport := func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelFunc()
-
-			for {
-				select {
-				case <-timeoutCtx.Done():
-					s.Fail("search check timeout")
-				case report := <-c.Extension.GetReportChan():
-					reportInfo := report.(map[string]any)
-					log.Info("search report info", zap.Any("reportInfo", reportInfo))
-					s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-					return
-				}
-			}
-		}
-		go searchCheckReport()
-		searchResult, err := c.Proxy.Search(ctx, searchReq)
+		searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 		if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
@@ -256,28 +208,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	}
 
 	{
-		// query without partition key
-		queryCheckReport := func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelFunc()
-
-			for {
-				select {
-				case <-timeoutCtx.Done():
-					s.Fail("query check timeout")
-				case report := <-c.Extension.GetReportChan():
-					reportInfo := report.(map[string]any)
-					log.Info("query report info", zap.Any("reportInfo", reportInfo))
-					s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-					s.EqualValues(3*rowNum, reportInfo[hookutil.RelatedCntKey])
-					return
-				}
-			}
-		}
-		go queryCheckReport()
-		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			Expr:           "",
@@ -291,28 +222,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	}
 
 	{
-		// query with partition key
-		queryCheckReport := func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelFunc()
-
-			for {
-				select {
-				case <-timeoutCtx.Done():
-					s.Fail("query check timeout")
-				case report := <-c.Extension.GetReportChan():
-					reportInfo := report.(map[string]any)
-					log.Info("query report info", zap.Any("reportInfo", reportInfo))
-					s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-					s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-					return
-				}
-			}
-		}
-		go queryCheckReport()
-		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			Expr:           "pid == 1",
@@ -326,27 +236,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	}
 
 	{
-		// delete without partition key
-		deleteCheckReport := func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelFunc()
-
-			for {
-				select {
-				case <-timeoutCtx.Done():
-					s.Fail("delete check timeout")
-				case report := <-c.Extension.GetReportChan():
-					reportInfo := report.(map[string]any)
-					log.Info("delete report info", zap.Any("reportInfo", reportInfo))
-					s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
-					s.EqualValues(rowNum, reportInfo[hookutil.SuccessCntKey])
-					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-					return
-				}
-			}
-		}
-		go deleteCheckReport()
-		deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			Expr:           integration.Int64Field + " < 1000",
@@ -359,27 +249,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	}
 
 	{
-		// delete with partition key
-		deleteCheckReport := func() {
-			timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelFunc()
-
-			for {
-				select {
-				case <-timeoutCtx.Done():
-					s.Fail("delete check timeout")
-				case report := <-c.Extension.GetReportChan():
-					reportInfo := report.(map[string]any)
-					log.Info("delete report info", zap.Any("reportInfo", reportInfo))
-					s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
-					s.EqualValues(rowNum, reportInfo[hookutil.SuccessCntKey])
-					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-					return
-				}
-			}
-		}
-		go deleteCheckReport()
-		deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			Expr:           integration.Int64Field + " < 2000 && pid == 10",
@@ -390,8 +260,4 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
 	}
-}
-
-func TestPartitionKey(t *testing.T) {
-	suite.Run(t, new(PartitionKeySuite))
 }

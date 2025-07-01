@@ -67,27 +67,34 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalIndexObjectPrefix();
 
-    // Different from user index, a text index task may have multiple text fields sharing same build_id/task_id. So
-    // segment_id and field_id are required to identify a unique text index, in case that we support multiple index task
-    // in the same indexnode at the same time later.
     std::string
-    GetTextIndexIdentifier();
+    GetLocalTempIndexObjectPrefix();
 
     // Similar to GetTextIndexIdentifier, segment_id and field_id is also required.
     std::string
     GetLocalTextIndexPrefix();
 
-    // Used for building index, using this index identifier mode to construct tmp building-index dir.
     std::string
-    GetJsonKeyIndexIdentifier();
+    GetLocalTempTextIndexPrefix();
 
     // Used for loading index, using this index prefix dir to store index.
     std::string
     GetLocalJsonKeyIndexPrefix();
 
+    std::string
+    GetLocalTempJsonKeyIndexPrefix();
+
     // Used for upload index to remote storage, using this index prefix dir as remote storage directory
     std::string
     GetRemoteJsonKeyLogPrefix();
+
+    // Used for upload index to remote storage, using this index prefix dir as remote storage directory
+    std::string
+    GetLocalNgramIndexPrefix();
+
+    // Used for loading index, using this index prefix dir to store index.
+    std::string
+    GetLocalTempNgramIndexPrefix();
 
     std::string
     GetLocalRawDataObjectPrefix();
@@ -103,13 +110,32 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     void
-    CacheIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheIndexToDisk(const std::vector<std::string>& remote_files,
+                     milvus::proto::common::LoadPriority priority);
 
     void
-    CacheTextLogToDisk(const std::vector<std::string>& remote_files);
+    CacheTextLogToDisk(const std::vector<std::string>& remote_files,
+                       milvus::proto::common::LoadPriority priority);
 
     void
-    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files);
+    CacheJsonKeyIndexToDisk(const std::vector<std::string>& remote_files,
+                            milvus::proto::common::LoadPriority priority);
+
+    void
+    CacheNgramIndexToDisk(const std::vector<std::string>& remote_files,
+                          milvus::proto::common::LoadPriority priority);
+
+    void
+    RemoveIndexFiles();
+
+    void
+    RemoveTextLogFiles();
+
+    void
+    RemoveJsonKeyIndexFiles();
+
+    void
+    RemoveNgramIndexFiles();
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -160,7 +186,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     void
     CacheIndexToDiskInternal(
         const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix);
+        const std::function<std::string()>& get_local_index_prefix,
+        milvus::proto::common::LoadPriority priority =
+            milvus::proto::common::LoadPriority::HIGH);
 
     template <typename DataType>
     std::string

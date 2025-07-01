@@ -2951,7 +2951,10 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 		return merr.Status(err), nil
 	}
 
-	log := log.Ctx(ctx).With(zap.String("oldCollectionName", req.GetOldName()), zap.String("newCollectionName", req.GetNewName()))
+	log := log.Ctx(ctx).With(zap.String("oldCollectionName", req.GetOldName()),
+		zap.String("newCollectionName", req.GetNewName()),
+		zap.String("oldDbName", req.GetDbName()),
+		zap.String("newDbName", req.GetNewDBName()))
 	log.Info("received request to rename collection")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.TotalLabel).Inc()

@@ -64,7 +64,12 @@ func (gcs *GcpNativeObjectStorage) GetObject(ctx context.Context, bucketName, ob
 	if err != nil {
 		return nil, checkObjectStorageError(objectName, err)
 	}
-	return &GcsReader{reader: reader, obj: obj}, nil
+
+	return &GcsReader{
+		reader:     reader,
+		obj:        obj,
+		objectSize: reader.Attrs.Size,
+	}, nil
 }
 
 func (gcs *GcpNativeObjectStorage) PutObject(ctx context.Context, bucketName, objectName string,
@@ -165,9 +170,10 @@ func (gcs *GcpNativeObjectStorage) DeleteBucket(ctx context.Context, bucketName 
 }
 
 type GcsReader struct {
-	reader   *storage.Reader
-	obj      *storage.ObjectHandle
-	position int64
+	reader     *storage.Reader
+	obj        *storage.ObjectHandle
+	position   int64
+	objectSize int64
 }
 
 func (gcsReader *GcsReader) Read(p []byte) (n int, err error) {
@@ -236,4 +242,8 @@ func (gcsReader *GcsReader) Seek(offset int64, whence int) (int64, error) {
 	gcsReader.reader = newReader
 	gcsReader.position = newOffset
 	return newOffset, nil
+}
+
+func (gcsReader *GcsReader) Size() (int64, error) {
+	return gcsReader.objectSize, nil
 }

@@ -1554,6 +1554,11 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 // ReportDataNodeTtMsgs gets timetick messages from datanode.
 func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	if streamingutil.IsStreamingServiceEnabled() {
+		// milvus with streaming service will not handle timetick anymore.
+		return merr.Success(), nil
+	}
+
 	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil

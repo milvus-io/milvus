@@ -34,6 +34,18 @@ type MinioObjectStorage struct {
 	*minio.Client
 }
 
+type ObjectReader struct {
+	*minio.Object
+}
+
+func (or *ObjectReader) Size() (int64, error) {
+	stat, err := or.Stat()
+	if err != nil {
+		return -1, err
+	}
+	return stat.Size, nil
+}
+
 func newMinioObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*MinioObjectStorage, error) {
 	minIOClient, err := objectstorage.NewMinioClient(ctx, c)
 	if err != nil {
@@ -55,7 +67,9 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 	if err != nil {
 		return nil, checkObjectStorageError(objectName, err)
 	}
-	return object, nil
+	return &ObjectReader{
+		Object: object,
+	}, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
