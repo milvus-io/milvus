@@ -567,6 +567,10 @@ class ResponseChecker:
         exp_res = check_items.get("exp_res", None)
         with_vec = check_items.get("with_vec", False)
         exp_limit = check_items.get("exp_limit", None)
+        count = check_items.get("count(*)", None)
+        if count is not None:
+            assert count == query_res[0].get("count(*)", None)
+            return True
         if exp_limit is None and exp_res is None:
             raise Exception(f"No expected values would be checked in the check task")
         if exp_limit is not None:
