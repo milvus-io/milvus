@@ -162,6 +162,10 @@ type shardDelegator struct {
 
 	// current forward policy
 	l0ForwardPolicy string
+
+	// schema version
+	schemaChangeMutex sync.RWMutex
+	schemaVersion     uint64
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -997,11 +1001,14 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	log.Info("delegator received update schema event")
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0)
-	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
-		return err
-	}
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+
+	// set updated schema version as load barrier
+	// prevent concurrent load segment with old schema
+	sd.schemaVersion = schVersion
+
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
 	defer sd.distribution.Unpin(version)
 
 	log.Info("update schema targets...",
