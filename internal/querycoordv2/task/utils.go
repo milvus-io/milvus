@@ -101,7 +101,7 @@ func GetTaskType(task Task) Type {
 	return 0
 }
 
-func mergeCollectonProps(schemaProps []*commonpb.KeyValuePair, collectionProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+func mergeCollectionProps(schemaProps []*commonpb.KeyValuePair, collectionProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	// Merge the collectionProps and schemaProps maps, giving priority to the values in schemaProps if there are duplicate keys.
 	props := make(map[string]string)
 	for _, p := range collectionProps {
@@ -142,7 +142,7 @@ func packLoadSegmentRequest(
 		loadScope = querypb.LoadScope_Delta
 	}
 
-	applyCollectionMmapSetting(schema, collectionProperties)
+	schema = applyCollectionMmapSetting(schema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -199,7 +199,7 @@ func packSubChannelRequest(
 	channel *meta.DmChannel,
 	indexInfo []*indexpb.IndexInfo,
 ) *querypb.WatchDmChannelsRequest {
-	applyCollectionMmapSetting(schema, collectionProperties)
+	schema = applyCollectionMmapSetting(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
@@ -260,8 +260,9 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 
 func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 	collectionProperties []*commonpb.KeyValuePair,
-) {
-	schema.Properties = mergeCollectonProps(schema.Properties, collectionProperties)
+) *schemapb.CollectionSchema {
+	schema = typeutil.Clone(schema)
+	schema.Properties = mergeCollectionProps(schema.Properties, collectionProperties)
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
 	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
 	for _, field := range schema.GetFields() {
@@ -274,4 +275,5 @@ func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 			})
 		}
 	}
+	return schema
 }
