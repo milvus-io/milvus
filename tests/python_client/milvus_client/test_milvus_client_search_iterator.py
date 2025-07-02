@@ -54,7 +54,7 @@ def external_filter_with_outputs(hits):
     results = []
     for hit in hits:
         # equals filter nothing if there are output_fields
-        if hit.distance < 1.0 and len(hit.fields) > 0:
+        if hit.distance <= 4.0 and len(hit.fields) > 0:
             results.append(hit)
     return results
 
