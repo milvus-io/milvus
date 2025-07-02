@@ -152,11 +152,10 @@ func (st *statsTask) UpdateVersion(ctx context.Context, nodeID int64, meta *meta
 		if !compactionHandler.checkAndSetSegmentStating(st.req.GetInsertChannel(), st.segmentID) {
 			log.Warn("segment is contains by l0 compaction, skip stats", zap.Int64("taskID", st.taskID),
 				zap.Int64("segmentID", st.segmentID))
-			// Retry stats task if segment is contains by l0 compaction.
-			st.SetState(indexpb.JobState_JobStateRetry, "segment is contains by l0 compaction")
 			// reset compacting
 			meta.SetSegmentsCompacting(ctx, []UniqueID{st.segmentID}, false)
 			st.SetStartTime(time.Now())
+			// Return err and keep task state as init to trigger retry.
 			return errors.New("segment is contains by l0 compaction")
 		}
 	}
