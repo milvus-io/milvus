@@ -53,6 +53,8 @@
 #include "storage/Util.h"
 #include "monitor/prometheus_client.h"
 
+#include "storage/FileWriter.h"
+
 namespace milvus::index {
 
 template <typename T>
@@ -519,13 +521,15 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 
 template <typename T>
 void VectorMemIndex<T>::LoadFromFile(const Config& config) {
-    auto filepath = GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
-    AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
+    auto local_filepath =
+        GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+    AssertInfo(local_filepath.has_value(),
+               "mmap filepath is empty when load index");
 
     std::filesystem::create_directories(
-        std::filesystem::path(filepath.value()).parent_path());
+        std::filesystem::path(local_filepath.value()).parent_path());
 
-    auto file = File::Open(filepath.value(), O_CREAT | O_TRUNC | O_RDWR);
+    auto file_writer = storage::FileWriter(local_filepath.value());
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
@@ -542,11 +546,12 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     // try to read slice meta first
     std::string slice_meta_filepath;
-    for (auto& file : pending_index_files) {
-        auto file_name = file.substr(file.find_last_of('/') + 1);
+    for (auto& idx_filepath : pending_index_files) {
+        auto file_name =
+            idx_filepath.substr(idx_filepath.find_last_of('/') + 1);
         if (file_name == INDEX_FILE_SLICE_META) {
-            slice_meta_filepath = file;
-            pending_index_files.erase(file);
+            slice_meta_filepath = idx_filepath;
+            pending_index_files.erase(idx_filepath);
             break;
         }
     }
@@ -582,15 +587,9 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto&& data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    auto written =
-                        file.Write(data->PayloadData(), data->PayloadSize());
+                    file_writer.Write(data->PayloadData(), data->PayloadSize());
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
-                    AssertInfo(
-                        written == data->PayloadSize(),
-                        fmt::format("failed to write index data to disk {}: {}",
-                                    filepath->data(),
-                                    strerror(errno)));
                 }
                 for (auto& file : batch) {
                     pending_index_files.erase(file);
@@ -619,7 +618,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
         for (auto& [_, index_data] : result) {
-            file.Write(index_data->PayloadData(), index_data->PayloadSize());
+            file_writer.Write(index_data->PayloadData(),
+                              index_data->PayloadSize());
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);
@@ -631,14 +631,14 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         std::chrono::duration_cast<std::chrono::milliseconds>(
             write_disk_duration_sum)
             .count());
-    file.Close();
+    file_writer.Finish();
 
     LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(MMAP_FILE_PATH);
     conf[ENABLE_MMAP] = true;
     auto start_deserialize = std::chrono::system_clock::now();
-    auto stat = index_.DeserializeFromFile(filepath.value(), conf);
+    auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
     auto deserialize_duration =
         std::chrono::system_clock::now() - start_deserialize;
     if (stat != knowhere::Status::success) {
@@ -654,11 +654,12 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
-    this->mmap_file_raii_ = std::make_unique<MmapFileRAII>(filepath.value());
+    this->mmap_file_raii_ =
+        std::make_unique<MmapFileRAII>(local_filepath.value());
     LOG_INFO(
         "load vector index done, mmap_file_path:{}, download_duration:{}, "
         "write_files_duration:{}, deserialize_duration:{}",
-        filepath.value(),
+        local_filepath.value(),
         std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
             .count(),
         std::chrono::duration_cast<std::chrono::milliseconds>(

@@ -16,24 +16,15 @@
 #include "common/EasyAssert.h"
 #include <sys/mman.h>
 #include <unistd.h>
+#include "File.h"
 
 const uint32_t SYS_PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace milvus {
 void
-MemChunkTarget::write(const void* data, size_t size, bool append) {
+MemChunkTarget::write(const void* data, size_t size) {
     AssertInfo(size + size_ <= cap_, "can not exceed target capacity");
     std::memcpy(data_ + size_, data, size);
-    size_ += append ? size : 0;
-}
-
-void
-MemChunkTarget::skip(size_t size) {
     size_ += size;
-}
-
-void
-MemChunkTarget::seek(size_t offset) {
-    size_ = offset;
 }
 
 std::pair<char*, size_t>
@@ -48,69 +39,26 @@ MemChunkTarget::tell() {
 
 void
 MmapChunkTarget::flush() {
-    if (buffer_.pos == 0) {
-        return;
-    }
-
-    auto n = file_.Write(buffer_.buf, buffer_.pos);
-    AssertInfo(n != -1, "failed to write data to file");
-    buffer_.clear();
+    file_writer_->Finish();
 }
 
 void
-MmapChunkTarget::write(const void* data, size_t size, bool append) {
-    if (buffer_.sufficient(size)) {
-        buffer_.write(data, size);
-        size_ += append ? size : 0;
-        return;
-    }
-
-    flush();
-
-    if (buffer_.sufficient(size)) {
-        buffer_.write(data, size);
-        size_ += append ? size : 0;
-        return;
-    }
-
-    auto n = file_.Write(data, size);
-    AssertInfo(n != -1, "failed to write data to file");
-    size_ += append ? size : 0;
-}
-
-void
-MmapChunkTarget::skip(size_t size) {
-    flush();
-    file_.Seek(size, SEEK_CUR);
+MmapChunkTarget::write(const void* data, size_t size) {
+    file_writer_->Write(data, size);
     size_ += size;
-}
-
-void
-MmapChunkTarget::seek(size_t offset) {
-    flush();
-    file_.Seek(offset_ + offset, SEEK_SET);
 }
 
 std::pair<char*, size_t>
 MmapChunkTarget::get() {
-    // Write padding to align with the page size, ensuring the offset_ aligns with the page size.
-    auto padding_size =
-        (size_ / SYS_PAGE_SIZE + (size_ % SYS_PAGE_SIZE != 0)) * SYS_PAGE_SIZE -
-        size_;
-    char padding[padding_size];
-    memset(padding, 0, sizeof(padding));
-    write(padding, padding_size);
-
     flush();
 
-    auto m = mmap(
-        nullptr, size_, PROT_READ, MAP_SHARED, file_.Descriptor(), offset_);
+    auto file = File::Open(file_path_, O_RDWR);
+    auto m = mmap(nullptr, size_, PROT_READ, MAP_SHARED, file.Descriptor(), 0);
     AssertInfo(m != MAP_FAILED,
-               "failed to map: {}, map_size={}, offset={}",
+               "failed to map: {}, map_size={}",
                strerror(errno),
-               size_,
-               offset_);
-    return {(char*)m, size_};
+               size_);
+    return {static_cast<char*>(m), size_};
 }
 
 size_t
