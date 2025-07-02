@@ -44,16 +44,22 @@ namespace milvus {
 using namespace milvus::cachinglayer;
 
 std::pair<size_t, size_t> inline GetChunkIDByOffset(
-    int64_t offset, const std::vector<int64_t>& num_rows_until_chunk) {
+    int64_t offset,
+    const std::vector<int64_t>& num_rows_until_chunk,
+    int64_t virt_chunk_order,
+    const std::vector<int64_t>& vcid_to_cid_arr) {
     // optimize for single chunk case
     if (num_rows_until_chunk.size() == 2) {
         return {0, offset};
     }
-    auto iter = std::lower_bound(
-        num_rows_until_chunk.begin(), num_rows_until_chunk.end(), offset + 1);
-    size_t chunk_idx = std::distance(num_rows_until_chunk.begin(), iter) - 1;
-    size_t offset_in_chunk = offset - num_rows_until_chunk[chunk_idx];
-    return {chunk_idx, offset_in_chunk};
+    auto vcid = offset >> virt_chunk_order;
+    auto scid = vcid_to_cid_arr[vcid];
+    while (scid < num_rows_until_chunk.size() - 1 &&
+           offset >= num_rows_until_chunk[scid + 1]) {
+        scid++;
+    }
+    auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+    return {scid, offset_in_chunk};
 }
 
 std::pair<std::vector<milvus::cachinglayer::cid_t>,
@@ -104,7 +110,8 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
         auto offset = offsets[i];
         auto vcid = offset >> virt_chunk_order;
         auto scid = vcid_to_cid_arr[vcid];
-        while (scid < num_rows_until_chunk.size() - 1 && offset >= num_rows_until_chunk[scid + 1]) {
+        while (scid < num_rows_until_chunk.size() - 1 &&
+               offset >= num_rows_until_chunk[scid + 1]) {
             scid++;
         }
         auto offset_in_chunk = offset - num_rows_until_chunk[scid];
@@ -232,9 +239,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
     void
-    BulkValueAt(void* dst,
-                const int64_t* offsets,
-                int64_t count) override {
+    BulkValueAt(void* dst, const int64_t* offsets, int64_t count) override {
         PanicInfo(ErrorCode::Unsupported,
                   "BulkValueAt only supported for ChunkedColumn");
     }
@@ -284,18 +289,27 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         //            "offset {} is out of range, num_rows: {}",
         //            offset,
         //            num_rows_);
-        auto& num_rows_until_chunk = GetNumRowsUntilChunk();
-        return ::milvus::GetChunkIDByOffset(offset, num_rows_until_chunk);
+        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(
+            slot_->meta());
+        auto& num_rows_until_chunk = meta->num_rows_until_chunk_;
+        auto& virt_chunk_order = meta->virt_chunk_order_;
+        auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
+        return ::milvus::GetChunkIDByOffset(
+            offset, num_rows_until_chunk, virt_chunk_order, vcid_to_cid_arr);
     }
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
-        auto& num_rows_until_chunk = GetNumRowsUntilChunk();
-        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(slot_->meta());
+        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(
+            slot_->meta());
+        auto& num_rows_until_chunk = meta->num_rows_until_chunk_;
         auto& virt_chunk_order = meta->virt_chunk_order_;
         auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
-        return ::milvus::GetChunkIDsByOffsets(
-            offsets, count, num_rows_until_chunk, virt_chunk_order, vcid_to_cid_arr);
+        return ::milvus::GetChunkIDsByOffsets(offsets,
+                                              count,
+                                              num_rows_until_chunk,
+                                              virt_chunk_order,
+                                              vcid_to_cid_arr);
     }
 
     PinWrapper<Chunk*>
@@ -352,17 +366,15 @@ class ChunkedColumn : public ChunkedColumnBase {
     }
 
     void
-    BulkValueAt(void* dst,
-                const int64_t* offsets,
-                int64_t count) override {
+    BulkValueAt(void* dst, const int64_t* offsets, int64_t count) override {
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = slot_->PinCells(cids);
         auto typed_dst = static_cast<T*>(dst);
         for (int64_t i = 0; i < count; i++) {
             auto chunk = ca->get_ith_cell(cids[i]);
             auto value = chunk->ValueAt(offsets_in_chunk[i]);
-            typed_dst[i] = *static_cast<const T*>(
-                static_cast<const void*>(value));
+            typed_dst[i] =
+                *static_cast<const T*>(static_cast<const void*>(value));
         }
     }
 
@@ -404,9 +416,7 @@ class ChunkedColumn<void> : public ChunkedColumnBase {
     }
 
     void
-    BulkValueAt(void* dst,
-                const int64_t* offsets,
-                int64_t count) override {
+    BulkValueAt(void* dst, const int64_t* offsets, int64_t count) override {
         PanicInfo(ErrorCode::Unsupported,
                   "BulkValueAt is not supported for ChunkedColumn<void>");
     }
@@ -636,19 +646,19 @@ MakeChunkedColumnBase(DataType data_type,
         case DataType::INT8:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<int8_t>>(std::move(translator),
-                                                       field_meta));
+                                                        field_meta));
         case DataType::INT16:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<int16_t>>(std::move(translator),
-                                                       field_meta));
+                                                         field_meta));
         case DataType::INT32:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<int32_t>>(std::move(translator),
-                                                       field_meta));
+                                                         field_meta));
         case DataType::INT64:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<int64_t>>(std::move(translator),
-                                                       field_meta));
+                                                         field_meta));
         case DataType::FLOAT:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<float>>(std::move(translator),
@@ -656,15 +666,15 @@ MakeChunkedColumnBase(DataType data_type,
         case DataType::DOUBLE:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<double>>(std::move(translator),
-                                                       field_meta));
+                                                        field_meta));
         case DataType::BOOL:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<bool>>(std::move(translator),
-                                                       field_meta));
+                                                      field_meta));
         default:
             return std::static_pointer_cast<ChunkedColumnInterface>(
                 std::make_shared<ChunkedColumn<void>>(std::move(translator),
-                                                       field_meta));
+                                                      field_meta));
     }
 }
 

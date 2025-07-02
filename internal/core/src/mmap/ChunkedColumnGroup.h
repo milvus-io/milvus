@@ -99,6 +99,60 @@ class ChunkedColumnGroup {
         return meta->num_rows_until_chunk_;
     }
 
+    std::pair<size_t, size_t>
+    GetChunkIDByOffset(int64_t offset) const {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        auto& num_rows_until_chunk = meta->num_rows_until_chunk_;
+        // optimize for single chunk case
+        if (num_rows_until_chunk.size() == 2) {
+            return {0, offset};
+        }
+        auto& virt_chunk_order = meta->virt_chunk_order_;
+        auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
+        auto vcid = offset >> virt_chunk_order;
+        auto scid = vcid_to_cid_arr[vcid];
+        while (scid < num_rows_until_chunk.size() - 1 &&
+               offset >= num_rows_until_chunk[scid + 1]) {
+            scid++;
+        }
+        auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+        return {scid, offset_in_chunk};
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const {
+        std::vector<milvus::cachinglayer::cid_t> cids(count);
+        std::vector<int64_t> offsets_in_chunk(count);
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        auto& num_rows_until_chunk = meta->num_rows_until_chunk_;
+        // optimize for single chunk case
+        if (num_rows_until_chunk.size() == 2) {
+            for (int64_t i = 0; i < count; i++) {
+                offsets_in_chunk[i] = offsets[i];
+            }
+            return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+        }
+        auto& virt_chunk_order = meta->virt_chunk_order_;
+        auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
+        for (int64_t i = 0; i < count; i++) {
+            auto offset = offsets[i];
+            auto vcid = offset >> virt_chunk_order;
+            auto scid = vcid_to_cid_arr[vcid];
+            while (scid < num_rows_until_chunk.size() - 1 &&
+                   offset >= num_rows_until_chunk[scid + 1]) {
+                scid++;
+            }
+            auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+            cids[i] = scid;
+            offsets_in_chunk[i] = offset_in_chunk;
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    }
+
     size_t
     NumFieldsInGroup() const {
         auto meta =
@@ -293,27 +347,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const override {
-        int64_t current_offset = 0;
-        for (int64_t i = 0; i < num_chunks(); ++i) {
-            auto rows = chunk_row_nums(i);
-            if (current_offset + rows > offset) {
-                return {i, offset - current_offset};
-            }
-            current_offset += rows;
-        }
-        return {num_chunks() - 1, chunk_row_nums(num_chunks() - 1) - 1};
+        return group_->GetChunkIDByOffset(offset);
     }
 
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
-        std::vector<milvus::cachinglayer::cid_t> cids(count);
-        std::vector<int64_t> offsets_in_chunk(count);
-        for (int64_t i = 0; i < count; i++) {
-            auto [chunk_idx, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
-            cids[i] = chunk_idx;
-            offsets_in_chunk[i] = offset_in_chunk;
-        }
-        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+        return group_->GetChunkIDsByOffsets(offsets, count);
     }
 
     PinWrapper<Chunk*>

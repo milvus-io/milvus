@@ -22,6 +22,8 @@ namespace milvus::segcore::storagev2translator {
 struct GroupCTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
     std::vector<int64_t> chunk_memory_size_;
+    int64_t virt_chunk_order_;
+    std::vector<int64_t> vcid_to_cid_arr_;
     size_t num_fields_;
     GroupCTMeta(size_t num_fields,
                 milvus::cachinglayer::StorageType storage_type,
