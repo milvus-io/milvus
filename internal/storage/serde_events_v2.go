@@ -380,8 +380,10 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	if err := pw.writeBm25Stats(); err != nil {
 		return err
 	}
-	if err := pw.writer.Close(); err != nil {
-		return err
+	if pw.writer != nil {
+		if err := pw.writer.Close(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
