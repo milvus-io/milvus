@@ -1127,33 +1127,6 @@ def gen_schema_multi_string_fields(string_fields):
                                                                     primary_field=primary_field, auto_id=False)
     return schema
 
-
-def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
-    vectors = []
-    if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-    elif vector_data_type == DataType.FLOAT16_VECTOR:
-        vectors = gen_fp16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.BFLOAT16_VECTOR:
-        vectors = gen_bf16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-        vectors = gen_sparse_vectors(nb, dim)
-    elif vector_data_type == ct.text_sparse_vector:
-        vectors = gen_text_vectors(nb) # for Full Text Search
-    elif vector_data_type == DataType.INT8_VECTOR:
-        vectors = gen_int8_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.BINARY_VECTOR:
-        vectors = gen_binary_vectors(nb, dim)[1]
-    else:
-        log.error(f"Invalid vector data type: {vector_data_type}")
-        raise Exception(f"Invalid vector data type: {vector_data_type}")
-    if dim > 1:
-        if vector_data_type == DataType.FLOAT_VECTOR:
-            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-            vectors = vectors.tolist()
-    return vectors
-
-
 def gen_string(nb):
     string_values = [str(random.random()) for _ in range(nb)]
     return string_values
@@ -3613,7 +3586,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
 def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
     vectors = []
     if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+        vectors = [[random.uniform(-1, 1) for _ in range(dim)] for _ in range(nb)]
     elif vector_data_type == DataType.FLOAT16_VECTOR:
         vectors = gen_fp16_vectors(nb, dim)[1]
     elif vector_data_type == DataType.BFLOAT16_VECTOR:
