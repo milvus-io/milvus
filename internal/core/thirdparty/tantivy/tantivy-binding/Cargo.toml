@@ -32,7 +32,7 @@ icu_segmenter = "2.0.0-beta2"
 whatlang = "0.16.4"
 lingua = "1.7.1"
 fancy-regex = "0.14.0"
-tonic = { features = ["_tls-any"],version = "0.13.1" }
+tonic = { features = ["_tls-any", "tls-ring"], version = "0.13.1" }
 url = "2.5.4"
 prost = "0.13.5"
 tokio = "1.43.0"
