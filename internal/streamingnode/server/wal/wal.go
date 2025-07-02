@@ -31,6 +31,9 @@ type ROWAL interface {
 	// WALName returns the name of the wal.
 	WALName() string
 
+	// BalanceAttrs returns the balance attributes of the wal.
+	BalanceAttrs() types.PChannelBalanceAttrs
+
 	// Channel returns the channel assignment info of the wal.
 	Channel() types.PChannelInfo
 

@@ -115,24 +115,23 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	return nopCloseWAL{l}, nil
 }
 
-// GetAllAvailableChannels returns all available channel info.
-func (m *managerImpl) GetAllAvailableChannels() ([]types.PChannelInfo, error) {
-	// reject operation if manager is closing.
+// BalanceAttrs returns the balance attributes of the wal instances.
+func (m *managerImpl) BalanceAttrs() (*types.StreamingNodeBalanceAttrs, error) {
 	if !m.lifetime.AddIf(isGetable) {
 		return nil, errWALManagerClosed
 	}
 	defer m.lifetime.Done()
 
-	// collect all available wal info.
-	infos := make([]types.PChannelInfo, 0)
+	attrs := &types.StreamingNodeBalanceAttrs{
+		ChannelBalanceAttrs: make(map[types.ChannelID]types.PChannelBalanceAttrs),
+	}
 	m.wltMap.Range(func(channel string, lt *walLifetime) bool {
 		if l := lt.GetWAL(); l != nil {
-			info := l.Channel()
-			infos = append(infos, info)
+			attrs.ChannelBalanceAttrs[l.Channel().ChannelID()] = l.BalanceAttrs()
 		}
 		return true
 	})
-	return infos, nil
+	return attrs, nil
 }
 
 // Close these manager and release all managed WAL.

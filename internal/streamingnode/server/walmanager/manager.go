@@ -20,8 +20,8 @@ type Manager interface {
 	// Return nil if the wal instance is not found.
 	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
 
-	// GetAllAvailableWALInfo returns all available channel info.
-	GetAllAvailableChannels() ([]types.PChannelInfo, error)
+	// BalanceAttrs returns the balance attributes of the wal instances.
+	BalanceAttrs() (*types.StreamingNodeBalanceAttrs, error)
 
 	// Remove removes the wal instance for the channel.
 	// Return `IgnoreOperation` error if the channel is not found.

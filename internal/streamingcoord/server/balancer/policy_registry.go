@@ -3,23 +3,43 @@ package balancer
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // policiesBuilders is a map of registered balancer policiesBuilders.
 var policiesBuilders typeutil.ConcurrentMap[string, PolicyBuilder]
 
+// newCommonBalancePolicyConfig returns the common balance policy config.
+func newCommonBalancePolicyConfig() CommonBalancePolicyConfig {
+	params := paramtable.Get()
+	return CommonBalancePolicyConfig{
+		AllowRebalance:                     params.StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool(),
+		AllowRebalanceRecoveryLagThreshold: params.StreamingCfg.WALBalancerPolicyAllowRebalanceRecoveryLagThreshold.GetAsDurationByParse(),
+		MinRebalanceIntervalThreshold:      params.StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.GetAsDurationByParse(),
+	}
+}
+
+// CommonBalancePolicyConfig is the config for balance policy.
+type CommonBalancePolicyConfig struct {
+	AllowRebalance                     bool          // Whether to allow rebalance.
+	AllowRebalanceRecoveryLagThreshold time.Duration // The threshold of recovery lag for balance.
+	MinRebalanceIntervalThreshold      time.Duration // The min interval of rebalance.
+}
+
 // CurrentLayout is the full topology of streaming node and pChannel.
 type CurrentLayout struct {
+	Config             CommonBalancePolicyConfig
 	Channels           map[channel.ChannelID]types.PChannelInfo
 	Stats              map[channel.ChannelID]channel.PChannelStatsView
-	AllNodesInfo       map[int64]types.StreamingNodeInfo      // AllNodesInfo is the full information of all available streaming nodes and related pchannels (contain the node not assign anything on it).
+	AllNodesInfo       map[int64]types.StreamingNodeStatus    // AllNodesInfo is the full information of all available streaming nodes and related pchannels (contain the node not assign anything on it).
 	ChannelsToNodes    map[types.ChannelID]int64              // ChannelsToNodes maps assigned channel name to node id.
 	ExpectedAccessMode map[channel.ChannelID]types.AccessMode // ExpectedAccessMode is the expected access mode of all channel.
 }
@@ -52,6 +72,44 @@ func (layout *CurrentLayout) TotalVChannelsOfCollection() map[int64]int {
 // TotalNodes returns the total number of nodes in the layout.
 func (layout *CurrentLayout) TotalNodes() int {
 	return len(layout.AllNodesInfo)
+}
+
+// AllowRebalance returns true if the balance of the pchannel is allowed.
+func (layout *CurrentLayout) AllowRebalance(channelID channel.ChannelID) bool {
+	if !layout.Config.AllowRebalance {
+		// If rebalance is not allowed, return false directly.
+		return false
+	}
+
+	// If the last assign timestamp is too close to the current time, rebalance is not allowed.
+	if time.Since(layout.Stats[channelID].LastAssignTimestamp) < layout.Config.MinRebalanceIntervalThreshold {
+		return false
+	}
+
+	// If reach the recovery lag threshold, rebalance is not allowed.
+	return !layout.isReachTheRecoveryLagThreshold(channelID)
+}
+
+// isReachTheRecoveryLagThreshold returns true if the recovery lag of the pchannel is greater than the recovery lag threshold.
+func (layout *CurrentLayout) isReachTheRecoveryLagThreshold(channelID channel.ChannelID) bool {
+	balanceAttr := layout.GetPChannelBalanceAttrs(channelID)
+	if balanceAttr == nil {
+		return false
+	}
+	r, ok := balanceAttr.(types.RWChannelBalanceAttrs)
+	if !ok {
+		return false
+	}
+	return r.RecoveryLag > layout.Config.AllowRebalanceRecoveryLagThreshold
+}
+
+// GetPChannelBalanceAttrs returns the balance attributes of the pchannel.
+func (layout *CurrentLayout) GetPChannelBalanceAttrs(channelID channel.ChannelID) types.PChannelBalanceAttrs {
+	node, ok := layout.ChannelsToNodes[channelID]
+	if !ok {
+		return nil
+	}
+	return layout.AllNodesInfo[node].BalanceAttrs.ChannelBalanceAttrs[channelID]
 }
 
 // GetAllPChannelsSortedByVChannelCountDesc returns all pchannels sorted by vchannel count in descending order.

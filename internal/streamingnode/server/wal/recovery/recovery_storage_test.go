@@ -131,6 +131,7 @@ func TestRecoveryStorage(t *testing.T) {
 		msgs := b.generateStreamMessage()
 		for _, msg := range msgs {
 			rs.ObserveMessage(context.Background(), msg)
+			assert.NotNil(t, rs.GetRecoveryCheckpoint())
 		}
 		rs.Close()
 		var partitionNum int

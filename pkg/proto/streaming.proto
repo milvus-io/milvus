@@ -60,6 +60,7 @@ message PChannelMeta {
     PChannelMetaState state = 3;  // state of the channel.
     repeated PChannelAssignmentLog histories =
         4;  // keep the meta info assignment log that used to be assigned to.
+    uint64 last_assign_timestamp_seconds = 5; // The last assigned timestamp in seconds.
 }
 
 // StreamingVersion is the version of the streaming service.
@@ -487,7 +488,22 @@ message StreamingNodeManagerRemoveResponse {}
 message StreamingNodeManagerCollectStatusRequest {}
 
 message StreamingNodeBalanceAttributes {
-    // TODO: traffic of pchannel or other things.
+    repeated StreamingNodePChannelBalanceAttributes pchannels = 1;
+}
+
+message StreamingNodePChannelBalanceAttributes {
+    PChannelInfo info = 1;
+    oneof attrs {
+        StreamingNodeRWPChannelBalanceAttributes rw_attrs = 2;
+        StreamingNodeROChannelBalanceAttributes ro_attrs = 3;
+    };
+}
+
+message StreamingNodeRWPChannelBalanceAttributes {
+    uint64 recovery_lag_milliseconds = 1; // The lag between the write-side and recovery-side of one pchannel in milliseconds.
+}
+
+message StreamingNodeROChannelBalanceAttributes {
 }
 
 message StreamingNodeManagerCollectStatusResponse {

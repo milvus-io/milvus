@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -94,6 +95,20 @@ type walAdaptorImpl struct {
 	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
+}
+
+// BalanceAttrs returns the balance attributes of the wal.
+func (w *walAdaptorImpl) BalanceAttrs() types.PChannelBalanceAttrs {
+	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
+	recoveryCheckpoint := w.flusher.GetRecoveryCheckpoint()
+	recoveryLag := tsoutil.PhysicalTime(currentMVCC.Timetick).Sub(tsoutil.PhysicalTime(recoveryCheckpoint.TimeTick))
+	if recoveryLag < 0 {
+		recoveryLag = 0
+	}
+	return types.RWChannelBalanceAttrs{
+		ChannelInfo: w.Channel(),
+		RecoveryLag: recoveryLag,
+	}
 }
 
 // GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.

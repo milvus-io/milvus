@@ -60,6 +60,9 @@ type RecoveryStream interface {
 
 // RecoveryStorage is an interface that is used to observe the messages from the WAL.
 type RecoveryStorage interface {
+	// GetRecoveryCheckpoint returns the recovery checkpoint of the recovery storage.
+	GetRecoveryCheckpoint() *WALCheckpoint
+
 	// ObserveMessage observes the message from the WAL.
 	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
 

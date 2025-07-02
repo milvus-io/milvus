@@ -1222,6 +1222,13 @@ streaming:
     operationTimeout: 30s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
+      # Whether to allow rebalance, true by default.
+      # If the rebalance is not allowed, only the lost wal recovery will be executed, the rebalance (move a pchannel from one node to another node) will be skipped.
+      allowRebalance: true
+      minRebalanceIntervalThreshold: 5m # The max interval of rebalance for each wal, 5m by default.
+      # The threshold of recovery lag for rebalance, 1s by default.
+      # If the recovery lag is greater than this threshold, the rebalance of current pchannel is not allowed.
+      allowRebalanceRecoveryLagThreshold: 1s
       vchannelFair:
         # The weight of pchannel count in vchannelFair balance policy,
         # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default

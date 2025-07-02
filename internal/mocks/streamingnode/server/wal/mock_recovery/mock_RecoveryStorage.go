@@ -56,6 +56,53 @@ func (_c *MockRecoveryStorage_Close_Call) RunAndReturn(run func()) *MockRecovery
 	return _c
 }
 
+// GetRecoveryCheckpoint provides a mock function with no fields
+func (_m *MockRecoveryStorage) GetRecoveryCheckpoint() *recovery.WALCheckpoint {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRecoveryCheckpoint")
+	}
+
+	var r0 *recovery.WALCheckpoint
+	if rf, ok := ret.Get(0).(func() *recovery.WALCheckpoint); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*recovery.WALCheckpoint)
+		}
+	}
+
+	return r0
+}
+
+// MockRecoveryStorage_GetRecoveryCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRecoveryCheckpoint'
+type MockRecoveryStorage_GetRecoveryCheckpoint_Call struct {
+	*mock.Call
+}
+
+// GetRecoveryCheckpoint is a helper method to define mock.On call
+func (_e *MockRecoveryStorage_Expecter) GetRecoveryCheckpoint() *MockRecoveryStorage_GetRecoveryCheckpoint_Call {
+	return &MockRecoveryStorage_GetRecoveryCheckpoint_Call{Call: _e.mock.On("GetRecoveryCheckpoint")}
+}
+
+func (_c *MockRecoveryStorage_GetRecoveryCheckpoint_Call) Run(run func()) *MockRecoveryStorage_GetRecoveryCheckpoint_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockRecoveryStorage_GetRecoveryCheckpoint_Call) Return(_a0 *recovery.WALCheckpoint) *MockRecoveryStorage_GetRecoveryCheckpoint_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRecoveryStorage_GetRecoveryCheckpoint_Call) RunAndReturn(run func() *recovery.WALCheckpoint) *MockRecoveryStorage_GetRecoveryCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ObserveMessage provides a mock function with given fields: ctx, msg
 func (_m *MockRecoveryStorage) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	ret := _m.Called(ctx, msg)

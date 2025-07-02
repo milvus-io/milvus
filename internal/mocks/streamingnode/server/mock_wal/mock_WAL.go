@@ -167,6 +167,53 @@ func (_c *MockWAL_Available_Call) RunAndReturn(run func() <-chan struct{}) *Mock
 	return _c
 }
 
+// BalanceAttrs provides a mock function with no fields
+func (_m *MockWAL) BalanceAttrs() types.PChannelBalanceAttrs {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for BalanceAttrs")
+	}
+
+	var r0 types.PChannelBalanceAttrs
+	if rf, ok := ret.Get(0).(func() types.PChannelBalanceAttrs); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(types.PChannelBalanceAttrs)
+		}
+	}
+
+	return r0
+}
+
+// MockWAL_BalanceAttrs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BalanceAttrs'
+type MockWAL_BalanceAttrs_Call struct {
+	*mock.Call
+}
+
+// BalanceAttrs is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) BalanceAttrs() *MockWAL_BalanceAttrs_Call {
+	return &MockWAL_BalanceAttrs_Call{Call: _e.mock.On("BalanceAttrs")}
+}
+
+func (_c *MockWAL_BalanceAttrs_Call) Run(run func()) *MockWAL_BalanceAttrs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWAL_BalanceAttrs_Call) Return(_a0 types.PChannelBalanceAttrs) *MockWAL_BalanceAttrs_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWAL_BalanceAttrs_Call) RunAndReturn(run func() types.PChannelBalanceAttrs) *MockWAL_BalanceAttrs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Channel provides a mock function with no fields
 func (_m *MockWAL) Channel() types.PChannelInfo {
 	ret := _m.Called()

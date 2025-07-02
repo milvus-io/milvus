@@ -39,6 +39,13 @@ func (w *roWALAdaptorImpl) Channel() types.PChannelInfo {
 	return w.roWALImpls.Channel()
 }
 
+// BalanceAttrs returns the balance attributes of the wal.
+func (w *roWALAdaptorImpl) BalanceAttrs() types.PChannelBalanceAttrs {
+	return types.ROChannelBalanceAttrs{
+		ChannelInfo: w.Channel(),
+	}
+}
+
 func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
 	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
 }

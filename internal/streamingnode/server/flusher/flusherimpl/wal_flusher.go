@@ -56,6 +56,11 @@ type WALFlusherImpl struct {
 	rs                recovery.RecoveryStorage
 }
 
+// GetRecoveryCheckpoint returns the recovery checkpoint of the recovery storage.
+func (impl *WALFlusherImpl) GetRecoveryCheckpoint() *recovery.WALCheckpoint {
+	return impl.rs.GetRecoveryCheckpoint()
+}
+
 // Execute starts the wal flusher.
 func (impl *WALFlusherImpl) Execute(recoverSnapshot *recovery.RecoverySnapshot) (err error) {
 	defer func() {

@@ -93,6 +93,13 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *RecoverySnapshot
 }
 
+// GetRecoveryCheckpoint returns the recovery checkpoint of the recovery storage.
+func (r *recoveryStorageImpl) GetRecoveryCheckpoint() *WALCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.checkpoint.Clone()
+}
+
 // UpdateFlusherCheckpoint updates the checkpoint of flusher.
 // TODO: should be removed in future, after merge the flusher logic into recovery storage.
 func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint) {
