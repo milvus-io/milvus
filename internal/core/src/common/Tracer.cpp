@@ -297,8 +297,15 @@ parseHeaders(const std::string& headers) {
     if (headers.empty()) {
         return {};
     }    
-    nlohmann::json json = nlohmann::json::parse(headers);
-    return json.get<std::map<std::string, std::string>>();
+    
+    try {
+        nlohmann::json json = nlohmann::json::parse(headers);
+        return json.get<std::map<std::string, std::string>>();
+    } catch (const std::exception& e) {
+        // Log the parsing error and return empty map
+        LOG_ERROR("Failed to parse headers as JSON: {}, error: {}", headers, e.what());
+        return {};
+    }
 }
 
 }  // namespace milvus::tracer
