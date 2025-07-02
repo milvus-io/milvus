@@ -31,7 +31,7 @@ TEST(test_chunked_column, test_get_chunkid) {
         num_rows_per_chunk, "test", std::move(chunks));
     FieldMeta field_meta(
         FieldName("test"), FieldId(1), DataType::INT64, false, std::nullopt);
-    ChunkedColumn<int64_t> column(std::move(translator), field_meta);
+    ChunkedColumn column(std::move(translator), field_meta);
 
     int offset = 0;
     for (int i = 0; i < num_chunks; ++i) {

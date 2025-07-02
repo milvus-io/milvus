@@ -126,6 +126,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     explicit ChunkedColumnBase(std::unique_ptr<Translator<Chunk>> translator,
                                const FieldMeta& field_meta)
         : nullable_(field_meta.is_nullable()),
+          data_type_(field_meta.get_data_type()),
           num_chunks_(translator->num_cells()),
           slot_(Manager::GetInstance().CreateCacheSlot(
               std::move(translator), CellIdMappingMode::IDENTICAL)) {
@@ -239,9 +240,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
     void
-    BulkValueAt(void* dst, const int64_t* offsets, int64_t count) override {
+    BulkPrimitiveValueAt(void* dst,
+                         const int64_t* offsets,
+                         int64_t count) override {
         PanicInfo(ErrorCode::Unsupported,
-                  "BulkValueAt only supported for ChunkedColumn");
+                  "BulkPrimitiveValueAt only supported for ChunkedColumn");
     }
 
     void
@@ -333,27 +336,21 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
  protected:
     bool nullable_{false};
+    DataType data_type_{DataType::NONE};
     size_t num_rows_{0};
     size_t num_chunks_{0};
     mutable std::shared_ptr<CacheSlot<Chunk>> slot_;
 };
 
-template <typename T>
 class ChunkedColumn : public ChunkedColumnBase {
  public:
-    static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                      std::is_same_v<T, int32_t> ||
-                      std::is_same_v<T, int64_t> || std::is_same_v<T, float> ||
-                      std::is_same_v<T, double> || std::is_same_v<T, bool>,
-                  "ChunkedColumn only supports int8_t, int16_t, int32_t, "
-                  "int64_t, float, double, bool types");
-
     // memory mode ctor
     explicit ChunkedColumn(std::unique_ptr<Translator<Chunk>> translator,
                            const FieldMeta& field_meta)
         : ChunkedColumnBase(std::move(translator), field_meta) {
     }
 
+    // BulkValueAt() is used for custom data type in the future
     void
     BulkValueAt(std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
@@ -365,8 +362,16 @@ class ChunkedColumn : public ChunkedColumnBase {
         }
     }
 
+    template <typename T>
     void
-    BulkValueAt(void* dst, const int64_t* offsets, int64_t count) override {
+    BulkPrimitiveValueAtImpl(void* dst, const int64_t* offsets, int64_t count) {
+        static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                          std::is_same_v<T, int32_t> ||
+                          std::is_same_v<T, int64_t> ||
+                          std::is_same_v<T, float> ||
+                          std::is_same_v<T, double> || std::is_same_v<T, bool>,
+                      "BulkPrimitiveValueAtImpl only supports int8_t, int16_t, "
+                      "int32_t, int64_t, float, double, bool types");
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = slot_->PinCells(cids);
         auto typed_dst = static_cast<T*>(dst);
@@ -379,46 +384,46 @@ class ChunkedColumn : public ChunkedColumnBase {
     }
 
     void
-    BulkVectorValueAt(void* dst,
-                      const int64_t* offsets,
-                      int64_t element_sizeof,
-                      int64_t count) override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "BulkVectorValueAt is not supported for ChunkedColumn<T>");
-    }
-
-    PinWrapper<SpanBase>
-    Span(int64_t chunk_id) const override {
-        auto ca = slot_->PinCells({chunk_id});
-        auto chunk = ca->get_ith_cell(chunk_id);
-        return PinWrapper<SpanBase>(
-            ca, static_cast<FixedWidthChunk*>(chunk)->Span());
-    }
-};
-
-template <>
-class ChunkedColumn<void> : public ChunkedColumnBase {
- public:
-    explicit ChunkedColumn(std::unique_ptr<Translator<Chunk>> translator,
-                           const FieldMeta& field_meta)
-        : ChunkedColumnBase(std::move(translator), field_meta) {
-    }
-
-    void
-    BulkValueAt(std::function<void(const char*, size_t)> fn,
-                const int64_t* offsets,
-                int64_t count) override {
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = slot_->PinCells(cids);
-        for (int64_t i = 0; i < count; i++) {
-            fn(ca->get_ith_cell(cids[i])->ValueAt(offsets_in_chunk[i]), i);
+    BulkPrimitiveValueAt(void* dst,
+                         const int64_t* offsets,
+                         int64_t count) override {
+        switch (data_type_) {
+            case DataType::INT8: {
+                BulkPrimitiveValueAtImpl<int8_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT16: {
+                BulkPrimitiveValueAtImpl<int16_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT32: {
+                BulkPrimitiveValueAtImpl<int32_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT64: {
+                BulkPrimitiveValueAtImpl<int64_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::FLOAT: {
+                BulkPrimitiveValueAtImpl<float>(dst, offsets, count);
+                break;
+            }
+            case DataType::DOUBLE: {
+                BulkPrimitiveValueAtImpl<double>(dst, offsets, count);
+                break;
+            }
+            case DataType::BOOL: {
+                BulkPrimitiveValueAtImpl<bool>(dst, offsets, count);
+                break;
+            }
+            default: {
+                PanicInfo(
+                    ErrorCode::Unsupported,
+                    "BulkScalarValueAt is not supported for unknown scalar "
+                    "data type: {}",
+                    data_type_);
+            }
         }
-    }
-
-    void
-    BulkValueAt(void* dst, const int64_t* offsets, int64_t count) override {
-        PanicInfo(ErrorCode::Unsupported,
-                  "BulkValueAt is not supported for ChunkedColumn<void>");
     }
 
     void
@@ -642,40 +647,8 @@ MakeChunkedColumnBase(DataType data_type,
                                                        field_meta));
     }
 
-    switch (data_type) {
-        case DataType::INT8:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<int8_t>>(std::move(translator),
-                                                        field_meta));
-        case DataType::INT16:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<int16_t>>(std::move(translator),
-                                                         field_meta));
-        case DataType::INT32:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<int32_t>>(std::move(translator),
-                                                         field_meta));
-        case DataType::INT64:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<int64_t>>(std::move(translator),
-                                                         field_meta));
-        case DataType::FLOAT:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<float>>(std::move(translator),
-                                                       field_meta));
-        case DataType::DOUBLE:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<double>>(std::move(translator),
-                                                        field_meta));
-        case DataType::BOOL:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<bool>>(std::move(translator),
-                                                      field_meta));
-        default:
-            return std::static_pointer_cast<ChunkedColumnInterface>(
-                std::make_shared<ChunkedColumn<void>>(std::move(translator),
-                                                      field_meta));
-    }
+    return std::static_pointer_cast<ChunkedColumnInterface>(
+        std::make_shared<ChunkedColumn>(std::move(translator), field_meta));
 }
 
 }  // namespace milvus

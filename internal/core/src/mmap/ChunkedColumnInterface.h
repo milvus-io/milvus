@@ -93,7 +93,8 @@ class ChunkedColumnInterface {
     virtual std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const = 0;
 
-    virtual std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    virtual std::pair<std::vector<milvus::cachinglayer::cid_t>,
+                      std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const = 0;
 
     virtual PinWrapper<Chunk*>
@@ -113,9 +114,7 @@ class ChunkedColumnInterface {
                 int64_t count) = 0;
 
     virtual void
-    BulkValueAt(void* dst,
-                const int64_t* offsets,
-                int64_t count) = 0;
+    BulkPrimitiveValueAt(void* dst, const int64_t* offsets, int64_t count) = 0;
 
     virtual void
     BulkVectorValueAt(void* dst,
@@ -160,6 +159,14 @@ class ChunkedColumnInterface {
         PanicInfo(
             ErrorCode::Unsupported,
             "BulkVectorArrayAt only supported for ChunkedVectorArrayColumn");
+    }
+
+    static bool
+    IsPrimitiveDataType(DataType data_type) {
+        return data_type == DataType::INT8 || data_type == DataType::INT16 ||
+               data_type == DataType::INT32 || data_type == DataType::INT64 ||
+               data_type == DataType::FLOAT || data_type == DataType::DOUBLE ||
+               data_type == DataType::BOOL;
     }
 
     static bool
