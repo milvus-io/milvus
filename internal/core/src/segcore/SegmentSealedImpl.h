@@ -46,7 +46,6 @@ class SegmentSealedImpl : public SegmentSealed {
                                IndexMetaPtr index_meta,
                                const SegcoreConfig& segcore_config,
                                int64_t segment_id,
-                               bool TEST_skip_index_for_retrieve = false,
                                bool is_sorted_by_pk = false);
     ~SegmentSealedImpl() override;
     void
@@ -420,10 +419,6 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SegmentStats stats_{};
 
-    // for sparse vector unit test only! Once a type of sparse index that
-    // doesn't has raw data is added, this should be removed.
-    bool TEST_skip_index_for_retrieve_ = false;
-
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;
 
@@ -439,24 +434,14 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = nullptr,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false,
     bool is_sorted_by_pk = false,
     bool is_multi_chunk = false) {
     if (!is_multi_chunk) {
-        return std::make_unique<SegmentSealedImpl>(schema,
-                                                   index_meta,
-                                                   segcore_config,
-                                                   segment_id,
-                                                   TEST_skip_index_for_retrieve,
-                                                   is_sorted_by_pk);
+        return std::make_unique<SegmentSealedImpl>(
+            schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
     } else {
         return std::make_unique<ChunkedSegmentSealedImpl>(
-            schema,
-            index_meta,
-            segcore_config,
-            segment_id,
-            TEST_skip_index_for_retrieve,
-            is_sorted_by_pk);
+            schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
     }
 }
 

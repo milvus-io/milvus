@@ -61,7 +61,7 @@ TEST(chunk, test_int64_field) {
 
     FieldMeta field_meta(
         FieldName("a"), milvus::FieldId(1), DataType::INT64, false);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
     auto span = std::dynamic_pointer_cast<FixedWidthChunk>(chunk)->Span();
     EXPECT_EQ(span.row_count(), data.size());
     for (size_t i = 0; i < data.size(); ++i) {
@@ -99,7 +99,7 @@ TEST(chunk, test_variable_field) {
 
     FieldMeta field_meta(
         FieldName("a"), milvus::FieldId(1), DataType::STRING, false);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
     auto views = std::dynamic_pointer_cast<StringChunk>(chunk)->StringViews(
         std::nullopt);
     for (size_t i = 0; i < data.size(); ++i) {
@@ -149,7 +149,7 @@ TEST(chunk, test_json_field) {
         // nullable=false
         FieldMeta field_meta(
             FieldName("a"), milvus::FieldId(1), DataType::JSON, false);
-        auto chunk = create_chunk(field_meta, 1, rb_reader);
+        auto chunk = create_chunk(field_meta, rb_reader);
         {
             auto [views, valid] =
                 std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
@@ -177,7 +177,7 @@ TEST(chunk, test_json_field) {
         // nullable=true
         FieldMeta field_meta(
             FieldName("a"), milvus::FieldId(1), DataType::JSON, true);
-        auto chunk = create_chunk(field_meta, 1, rb_reader);
+        auto chunk = create_chunk(field_meta, rb_reader);
         {
             auto [views, valid] =
                 std::dynamic_pointer_cast<JSONChunk>(chunk)->StringViews(
@@ -255,7 +255,7 @@ TEST(chunk, test_null_field) {
 
     FieldMeta field_meta(
         FieldName("a"), milvus::FieldId(1), DataType::INT64, true);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
     auto span = std::dynamic_pointer_cast<FixedWidthChunk>(chunk)->Span();
     EXPECT_EQ(span.row_count(), data.size());
     data = {1, 2, 0, 0, 5};
@@ -306,7 +306,7 @@ TEST(chunk, test_array) {
                          DataType::ARRAY,
                          DataType::STRING,
                          false);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
     auto [views, valid] =
         std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
     EXPECT_EQ(views.size(), 1);
@@ -361,8 +361,7 @@ TEST(chunk, test_array_views) {
                          DataType::ARRAY,
                          DataType::STRING,
                          true);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
-
+    auto chunk = create_chunk(field_meta, rb_reader);
     {
         auto [views, valid] =
             std::dynamic_pointer_cast<ArrayChunk>(chunk)->Views(std::nullopt);
@@ -447,7 +446,7 @@ TEST(chunk, test_sparse_float) {
                          kTestSparseDim,
                          "IP",
                          false);
-    auto chunk = create_chunk(field_meta, kTestSparseDim, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
     auto vec = std::dynamic_pointer_cast<SparseFloatVectorChunk>(chunk)->Vec();
     for (size_t i = 0; i < n_rows; ++i) {
         auto v1 = vec[i];
@@ -457,70 +456,4 @@ TEST(chunk, test_sparse_float) {
             EXPECT_EQ(v1[j].val, v2[j].val);
         }
     }
-}
-
-class TempDir {
- public:
-    TempDir() {
-        auto path = boost::filesystem::unique_path("%%%%_%%%%");
-        auto abs_path = boost::filesystem::temp_directory_path() / path;
-        boost::filesystem::create_directory(abs_path);
-        dir_ = abs_path;
-    }
-
-    ~TempDir() {
-        boost::filesystem::remove_all(dir_);
-    }
-
-    std::string
-    dir() {
-        return dir_.string();
-    }
-
- private:
-    boost::filesystem::path dir_;
-};
-
-TEST(chunk, multiple_chunk_mmap) {
-    TempDir temp;
-    std::string temp_dir = temp.dir();
-    auto file = File::Open(temp_dir + "/multi_chunk_mmap", O_CREAT | O_RDWR);
-
-    FixedVector<int64_t> data = {1, 2, 3, 4, 5};
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::INT64);
-    field_data->FillFieldData(data.data(), data.size());
-    storage::InsertEventData event_data;
-    auto payload_reader =
-        std::make_shared<milvus::storage::PayloadReader>(field_data);
-    event_data.payload_reader = payload_reader;
-    auto ser_data = event_data.Serialize();
-    auto buffer = std::make_shared<arrow::io::BufferReader>(
-        ser_data.data() + 2 * sizeof(milvus::Timestamp),
-        ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-    parquet::arrow::FileReaderBuilder reader_builder;
-    auto s = reader_builder.Open(buffer);
-    EXPECT_TRUE(s.ok());
-    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-    s = reader_builder.Build(&arrow_reader);
-    EXPECT_TRUE(s.ok());
-
-    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-    s = arrow_reader->GetRecordBatchReader(&rb_reader);
-    EXPECT_TRUE(s.ok());
-
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::INT64, false);
-    int file_offset = 0;
-    auto page_size = sysconf(_SC_PAGESIZE);
-    auto chunk = create_chunk(field_meta, 1, file, file_offset, rb_reader);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
-    file_offset += chunk->Size();
-
-    std::shared_ptr<::arrow::RecordBatchReader> rb_reader2;
-    s = arrow_reader->GetRecordBatchReader(&rb_reader2);
-    EXPECT_TRUE(s.ok());
-    auto chunk2 = create_chunk(field_meta, 1, file, file_offset, rb_reader2);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
 }
