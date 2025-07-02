@@ -1128,7 +1128,7 @@ def gen_schema_multi_string_fields(string_fields):
 def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
     vectors = []
     if vector_data_type == "FLOAT_VECTOR":
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+        vectors = [[random.uniform(-1, 1) for _ in range(dim)] for _ in range(nb)]
     elif vector_data_type == "FLOAT16_VECTOR":
         vectors = gen_fp16_vectors(nb, dim)[1]
     elif vector_data_type == "BFLOAT16_VECTOR":
@@ -3302,7 +3302,7 @@ def gen_vectors_based_on_vector_type(num, dim, vector_data_type=ct.float_type):
     return: raw_vectors and fp16_vectors
     """
     if vector_data_type == ct.float_type:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(num)]
+        vectors = [[random.uniform(-1, 1) for _ in range(dim)] for _ in range(num)]
     elif vector_data_type == ct.float16_type:
         vectors = gen_fp16_vectors(num, dim)[1]
     elif vector_data_type == ct.bfloat16_type:
