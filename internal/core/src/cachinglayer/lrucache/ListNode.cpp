@@ -69,7 +69,7 @@ bool
 ListNode::manual_evict() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
     if (state_ == State::ERROR || state_ == State::LOADING) {
-        LOG_ERROR("manual_evict() called on a {} cell",
+        LOG_ERROR("[MCL] manual_evict() called on a {} cell",
                   state_to_string(state_));
         return true;
     }
@@ -78,7 +78,7 @@ ListNode::manual_evict() {
     }
     if (pin_count_.load() > 0) {
         LOG_ERROR(
-            "manual_evict() called on a LOADED and pinned cell, aborting "
+            "[MCL] manual_evict() called on a LOADED and pinned cell, aborting "
             "eviction.");
         return false;
     }
@@ -227,12 +227,21 @@ ListNode::clear_data() {
                       2 * dlist_->eviction_config().cache_touch_window;
     }
     unload();
+    LOG_TRACE(
+        "[MCL] ListNode evicted: key={}, size={}", key(), size_.ToString());
     state_ = State::NOT_LOADED;
 }
 
 void
 ListNode::unload() {
     // Default implementation does nothing
+}
+
+void
+ListNode::remove_self_from_loading_resource() {
+    if (dlist_) {
+        dlist_->removeLoadingResource(size_);
+    }
 }
 
 }  // namespace milvus::cachinglayer::internal

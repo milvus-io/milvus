@@ -249,6 +249,9 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 try {
                     auto start = std::chrono::high_resolution_clock::now();
                     std::vector<cid_t> cids_vec(cids.begin(), cids.end());
+                    LOG_TRACE("[MCL] CacheSlot loading cells: key={}, cell_ids=[{}]",
+                             translator_->key(),
+                             fmt::join(cids_vec.begin(), cids_vec.end(), ","));
                     auto results = translator_->get_cells(cids_vec);
                     auto latency =
                         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -290,7 +293,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         }
         ~CacheCell() {
             if (state_ == State::LOADING) {
-                LOG_ERROR("CacheSlot Cell {} destroyed while loading", key());
+                LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading", key());
             }
         }
 

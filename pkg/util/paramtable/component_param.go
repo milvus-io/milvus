@@ -2788,10 +2788,8 @@ type queryNodeConfig struct {
 	TieredWarmupVectorIndex        ParamItem `refreshable:"false"`
 	TieredMemoryLowWatermarkRatio  ParamItem `refreshable:"false"`
 	TieredMemoryHighWatermarkRatio ParamItem `refreshable:"false"`
-	TieredMemoryMaxRatio           ParamItem `refreshable:"false"`
 	TieredDiskLowWatermarkRatio    ParamItem `refreshable:"false"`
 	TieredDiskHighWatermarkRatio   ParamItem `refreshable:"false"`
-	TieredDiskMaxRatio             ParamItem `refreshable:"false"`
 	TieredEvictionEnabled          ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs       ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs       ParamItem `refreshable:"false"`
@@ -3013,9 +3011,9 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		},
 		Doc: `If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
 eviction is necessary and the amount of data to evict from memory/disk.
-- The max ratio is the max amount of memory/disk that can be used for cache.
 - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
-  until the memory/disk usage is below the low watermark.`,
+  until the memory/disk usage is below the low watermark.
+- The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.`,
 		Export: true,
 	}
 	p.TieredMemoryLowWatermarkRatio.Init(base.mgr)
@@ -3034,21 +3032,6 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: true,
 	}
 	p.TieredMemoryHighWatermarkRatio.Init(base.mgr)
-
-	p.TieredMemoryMaxRatio = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.memoryMaxRatio",
-		Version:      "2.6.0",
-		DefaultValue: "0.9",
-		Formatter: func(v string) string {
-			ratio := getAsFloat(v)
-			if ratio < 0 || ratio > 1 {
-				return "0.9"
-			}
-			return fmt.Sprintf("%f", ratio)
-		},
-		Export: true,
-	}
-	p.TieredMemoryMaxRatio.Init(base.mgr)
 
 	p.TieredDiskLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
@@ -3079,21 +3062,6 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: true,
 	}
 	p.TieredDiskHighWatermarkRatio.Init(base.mgr)
-
-	p.TieredDiskMaxRatio = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.diskMaxRatio",
-		Version:      "2.6.0",
-		DefaultValue: "0.9",
-		Formatter: func(v string) string {
-			ratio := getAsFloat(v)
-			if ratio < 0 || ratio > 1 {
-				return "0.9"
-			}
-			return fmt.Sprintf("%f", ratio)
-		},
-		Export: true,
-	}
-	p.TieredDiskMaxRatio.Init(base.mgr)
 
 	p.TieredCacheTouchWindowMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.cacheTouchWindowMs",

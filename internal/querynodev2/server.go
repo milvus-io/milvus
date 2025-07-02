@@ -321,10 +321,10 @@ func (node *QueryNode) InitSegcore() error {
 
 	memoryLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
 	memoryHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
-	memoryMaxRatio := paramtable.Get().QueryNodeCfg.TieredMemoryMaxRatio.GetAsFloat()
+	memoryMaxRatio := paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()
 	diskLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
 	diskHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
-	diskMaxRatio := paramtable.Get().QueryNodeCfg.TieredDiskMaxRatio.GetAsFloat()
+	diskMaxRatio := paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
 
 	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
 		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")

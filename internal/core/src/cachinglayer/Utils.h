@@ -42,6 +42,21 @@ SemiInlineGet(folly::SemiFuture<T>&& future) {
     return std::move(future).via(&folly::InlineExecutor::instance()).get();
 }
 
+inline std::string
+FormatBytes(int64_t bytes) {
+    if (bytes < 1024) {
+        return fmt::format("{} B", bytes);
+    } else if (bytes < 1024 * 1024) {
+        return fmt::format("{} B ({:.2f} KB)", bytes, bytes / 1024.0);
+    } else if (bytes < 1024 * 1024 * 1024) {
+        return fmt::format(
+            "{} B ({:.2f} MB)", bytes, bytes / (1024.0 * 1024.0));
+    } else {
+        return fmt::format(
+            "{} B ({:.2f} GB)", bytes, bytes / (1024.0 * 1024.0 * 1024.0));
+    }
+}
+
 struct ResourceUsage {
     int64_t memory_bytes{0};
     int64_t file_bytes{0};
@@ -87,7 +102,12 @@ struct ResourceUsage {
     }
 
     bool
-    GEZero() const {
+    AnyGTZero() const {
+        return memory_bytes > 0 || file_bytes > 0;
+    }
+
+    bool
+    AllGEZero() const {
         return memory_bytes >= 0 && file_bytes >= 0;
     }
 
@@ -106,18 +126,15 @@ struct ResourceUsage {
 
     std::string
     ToString() const {
-        return fmt::format(
-            "memory {} bytes ({:.2} GB), disk {} bytes ({:.2} GB)",
-            memory_bytes,
-            memory_bytes / 1024.0 / 1024.0 / 1024.0,
-            file_bytes,
-            file_bytes / 1024.0 / 1024.0 / 1024.0);
+        return fmt::format("memory {}, disk {}",
+                           FormatBytes(memory_bytes),
+                           FormatBytes(file_bytes));
     }
 };
 
 inline std::ostream&
 operator<<(std::ostream& os, const ResourceUsage& usage) {
-    os << "memory=" << usage.memory_bytes << ", disk=" << usage.file_bytes;
+    os << usage.ToString();
     return os;
 }
 
@@ -206,14 +223,32 @@ struct EvictionConfig {
     // Use cache_touch_window_ms to reduce the frequency of touching and reduce contention.
     std::chrono::milliseconds cache_touch_window;
     std::chrono::milliseconds eviction_interval;
+    // Physical memory protection configuration
+    double physical_memory_protection_ratio;
+    bool enable_physical_memory_protection;
+
     EvictionConfig()
         : cache_touch_window(std::chrono::milliseconds(0)),
-          eviction_interval(std::chrono::milliseconds(0)) {
+          eviction_interval(std::chrono::milliseconds(0)),
+          physical_memory_protection_ratio(0.9),
+          enable_physical_memory_protection(true) {
     }
 
     EvictionConfig(int64_t cache_touch_window_ms, int64_t eviction_interval_ms)
         : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
-          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)) {
+          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
+          physical_memory_protection_ratio(0.9),
+          enable_physical_memory_protection(true) {
+    }
+
+    EvictionConfig(int64_t cache_touch_window_ms,
+                   int64_t eviction_interval_ms,
+                   double physical_memory_protection_ratio,
+                   bool enable_physical_memory_protection)
+        : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
+          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
+          physical_memory_protection_ratio(physical_memory_protection_ratio),
+          enable_physical_memory_protection(enable_physical_memory_protection) {
     }
 };
 
@@ -377,6 +412,22 @@ cache_memory_overhead_bytes(StorageType storage_type) {
             PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
+
+struct SystemMemoryInfo {
+    int64_t total_memory_bytes{0};
+    int64_t available_memory_bytes{0};
+    int64_t used_memory_bytes{0};
+};
+
+int64_t
+getHostTotalMemory();
+int64_t
+getContainerMemLimit();
+
+SystemMemoryInfo
+getSystemMemoryInfo();
+int64_t
+getCurrentProcessMemoryUsage();
 
 }  // namespace internal
 
