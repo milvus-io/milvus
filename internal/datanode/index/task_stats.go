@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -620,7 +621,7 @@ func buildIndexParams(
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 {
-		params.SegmentInsertFiles = GetSegmentInsertFiles(
+		params.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			req.GetInsertLogs(),
 			req.GetStorageConfig(),
 			req.GetCollectionID(),

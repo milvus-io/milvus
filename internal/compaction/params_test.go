@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -33,8 +34,12 @@ func TestGetJSONParams(t *testing.T) {
 	var result Params
 	err = json.Unmarshal([]byte(jsonStr), &result)
 	assert.NoError(t, err)
+	storageVersion := storage.StorageV1
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	assert.Equal(t, Params{
-		EnableStorageV2:           paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		StorageVersion:            storageVersion,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
@@ -46,7 +51,7 @@ func TestGetJSONParams(t *testing.T) {
 
 func TestGetParamsFromJSON(t *testing.T) {
 	input := `{
-		"enable_storage_v2": false,
+		"storage_version": 0,
 		"binlog_max_size": 4096,
 		"use_merge_sort": false,
 		"max_segment_merge_sort": 2,
@@ -55,7 +60,7 @@ func TestGetParamsFromJSON(t *testing.T) {
 	}`
 
 	expected := Params{
-		EnableStorageV2:           false,
+		StorageVersion:            storage.StorageV1,
 		BinLogMaxSize:             4096,
 		UseMergeSort:              false,
 		MaxSegmentMergeSort:       2,
@@ -79,8 +84,12 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	emptyJSON := ``
 	result, err := ParseParamsFromJSON(emptyJSON)
 	assert.NoError(t, err)
+	storageVersion := storage.StorageV1
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	assert.Equal(t, Params{
-		EnableStorageV2:           paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		StorageVersion:            storageVersion,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),

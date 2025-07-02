@@ -333,6 +333,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 	}
 
+	log.Info("handleSignal receive")
 	groups, err := t.getCandidates(signal)
 	if err != nil {
 		log.Warn("handle signal failed, get candidates return error", zap.Error(err))
@@ -549,7 +550,8 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 				!segment.GetIsImporting() && // not importing now
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible()
+				!segment.GetIsInvisible() &&
+				segment.GetIsSorted()
 		}),
 	}
 
@@ -815,4 +817,12 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 
 func getExpandedSize(size int64) int64 {
 	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
+}
+
+func canTriggerSortCompaction(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed &&
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		!segment.GetIsSorted() &&
+		!segment.GetIsImporting() &&
+		!segment.isCompacting
 }

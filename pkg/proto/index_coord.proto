@@ -324,6 +324,7 @@ message StatsTask {
 
 enum StatsSubJob {
     None = 0;
+    // deprecated, after v2.6.0, move to compaction
     Sort = 1;
     TextIndexJob = 2;
     BM25Job=3;

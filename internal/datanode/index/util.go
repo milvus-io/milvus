@@ -28,18 +28,12 @@ package index
 import "C"
 
 import (
-	"path"
-
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -101,25 +95,4 @@ func CalculateNodeSlots() int64 {
 		totalSlot = max(int64(float64(totalSlot)*paramtable.Get().DataNodeCfg.StandaloneSlotRatio.GetAsFloat()), 1)
 	}
 	return totalSlot
-}
-
-func GetSegmentInsertFiles(fieldBinlogs []*datapb.FieldBinlog, storageConfig *indexpb.StorageConfig, collectionID int64, partitionID int64, segmentID int64) *indexcgopb.SegmentInsertFiles {
-	insertLogs := make([]*indexcgopb.FieldInsertFiles, 0)
-	for _, insertLog := range fieldBinlogs {
-		filePaths := make([]string, 0)
-		columnGroupID := insertLog.GetFieldID()
-		for _, binlog := range insertLog.GetBinlogs() {
-			filePath := metautil.BuildInsertLogPath(storageConfig.GetRootPath(), collectionID, partitionID, segmentID, columnGroupID, binlog.GetLogID())
-			if storageConfig.StorageType != "local" {
-				filePath = path.Join(storageConfig.GetBucketName(), filePath)
-			}
-			filePaths = append(filePaths, filePath)
-		}
-		insertLogs = append(insertLogs, &indexcgopb.FieldInsertFiles{
-			FilePaths: filePaths,
-		})
-	}
-	return &indexcgopb.SegmentInsertFiles{
-		FieldInsertFiles: insertLogs,
-	}
 }
