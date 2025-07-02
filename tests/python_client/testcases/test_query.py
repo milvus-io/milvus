@@ -7053,6 +7053,39 @@ class TestQueryTextMatch(TestcaseBase):
                 assert any([token in r[field] for token in multi_words])
 
 
+class TestQueryCompareTwoColumn(TestcaseBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_compare_two_column_with_last_expr_skip(self):
+        """
+        target: test query compare two column with last expr skip
+        method: 1. create collection and insert data
+                2. query with two column compare expr with last expr help to skip compare
+        expected: query successfully
+        """
+        fields = [
+            FieldSchema(name="f1", dtype=DataType.INT64, is_primary=True, nullable=False),
+            FieldSchema(name="f2", dtype=DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema(name="f3", dtype=DataType.INT64, is_primary=False, nullable=False),
+            FieldSchema(name="f4", dtype=DataType.INT64, is_primary=False, nullable=False),
+        ]
+        schema = CollectionSchema(fields=fields)
+        col_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(
+            name=col_name,
+            schema=schema,
+        )
+        collection_w.create_index("f3", {"index_type": "INVERTED"})
+        collection_w.create_index("f2", {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"})
+        for i in range(100):
+            collection_w.insert({"f1": i, "f2": {10: 0.07638, 3: 0.3925}, "f3": 4, "f4": 2})
+        collection_w.flush()
+        collection_w.load()
+        # f4 / 4 > 1 always false, so f3 < f4 will not be executed
+        res = collection_w.query(expr="f4 / 4 > 1 and f3 < f4", output_fields=["count(*)"])[0]
+        assert res[0]['count(*)'] == 0
+        collection_w.drop()
+
+
 class TestQueryTextMatchNegative(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_with_unsupported_tokenizer(self):
