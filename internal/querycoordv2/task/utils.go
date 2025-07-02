@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -189,14 +190,15 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCollectionResponse, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
 		LoadType:      loadType,
-		CollectionID:  collectionID,
+		CollectionID:  collectionInfo.GetCollectionID(),
 		PartitionIDs:  partitions,
-		DbName:        databaseName,
+		DbName:        collectionInfo.GetDbName(),
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
+		SchemaVersion: collectionInfo.GetUpdateTimestamp(),
 	}
 }
 

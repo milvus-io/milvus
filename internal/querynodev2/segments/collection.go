@@ -92,8 +92,12 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	defer m.mut.Unlock()
 
 	if collection, ok := m.collections[collectionID]; ok {
-		// the schema may be changed even the collection is loaded
-		collection.schema.Store(schema)
+		if loadMeta.GetSchemaVersion() > collection.schemaVersion {
+			// the schema may be changed even the collection is loaded
+			collection.schema.Store(schema)
+			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
+			collection.schemaVersion = loadMeta.GetSchemaVersion()
+		}
 		collection.Ref(1)
 		return nil
 	}
@@ -177,10 +181,11 @@ type Collection struct {
 	// but Collection in Manager will be released before assign new replica of new resource group on these node.
 	// so we don't need to update resource group in Collection.
 	// if resource group is not updated, the reference count of collection manager works failed.
-	metricType atomic.String // deprecated
-	schema     atomic.Pointer[schemapb.CollectionSchema]
-	isGpuIndex bool
-	loadFields typeutil.Set[int64]
+	metricType    atomic.String // deprecated
+	schema        atomic.Pointer[schemapb.CollectionSchema]
+	isGpuIndex    bool
+	loadFields    typeutil.Set[int64]
+	schemaVersion uint64
 
 	refCount *atomic.Uint32
 }
