@@ -580,9 +580,9 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
     ResourceUsage new_limit = ResourceUsage(700, 0);
     ResourceUsage new_high_watermark = ResourceUsage(650, 0);
     ResourceUsage new_low_watermark = ResourceUsage(600, 0);
-    ASSERT_TRUE(dlist_->UpdateLimit(new_limit));
-    dlist_->UpdateHighWatermark(new_high_watermark);
     dlist_->UpdateLowWatermark(new_low_watermark);
+    dlist_->UpdateHighWatermark(new_high_watermark);
+    ASSERT_TRUE(dlist_->UpdateLimit(new_limit));
     EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_).memory_bytes,
               new_limit.memory_bytes);
 

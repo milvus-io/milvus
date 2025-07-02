@@ -42,6 +42,21 @@ SemiInlineGet(folly::SemiFuture<T>&& future) {
     return std::move(future).via(&folly::InlineExecutor::instance()).get();
 }
 
+inline std::string
+FormatBytes(int64_t bytes) {
+    if (bytes < 1024) {
+        return fmt::format("{} B", bytes);
+    } else if (bytes < 1024 * 1024) {
+        return fmt::format("{:.2f} KB ({} B)", bytes / 1024.0, bytes);
+    } else if (bytes < 1024 * 1024 * 1024) {
+        return fmt::format(
+            "{:.2f} MB ({} B)", bytes / (1024.0 * 1024.0), bytes);
+    } else {
+        return fmt::format(
+            "{:.2f} GB ({} B)", bytes / (1024.0 * 1024.0 * 1024.0), bytes);
+    }
+}
+
 struct ResourceUsage {
     int64_t memory_bytes{0};
     int64_t file_bytes{0};
@@ -70,6 +85,18 @@ struct ResourceUsage {
                              file_bytes - rhs.file_bytes);
     }
 
+    ResourceUsage
+    operator*(double factor) const {
+        return ResourceUsage(
+            static_cast<int64_t>(std::round(memory_bytes * factor)),
+            static_cast<int64_t>(std::round(file_bytes * factor)));
+    }
+
+    friend ResourceUsage
+    operator*(double factor, const ResourceUsage& usage) {
+        return usage * factor;
+    }
+
     void
     operator-=(const ResourceUsage& rhs) {
         memory_bytes -= rhs.memory_bytes;
@@ -87,7 +114,12 @@ struct ResourceUsage {
     }
 
     bool
-    GEZero() const {
+    AnyGTZero() const {
+        return memory_bytes > 0 || file_bytes > 0;
+    }
+
+    bool
+    AllGEZero() const {
         return memory_bytes >= 0 && file_bytes >= 0;
     }
 
@@ -106,18 +138,27 @@ struct ResourceUsage {
 
     std::string
     ToString() const {
-        return fmt::format(
-            "memory {} bytes ({:.2} GB), disk {} bytes ({:.2} GB)",
-            memory_bytes,
-            memory_bytes / 1024.0 / 1024.0 / 1024.0,
-            file_bytes,
-            file_bytes / 1024.0 / 1024.0 / 1024.0);
+        if (memory_bytes == 0 && file_bytes == 0) {
+            return "EMPTY";
+        }
+
+        std::string result;
+        if (memory_bytes > 0) {
+            result += fmt::format("memory {}", FormatBytes(memory_bytes));
+        }
+        if (file_bytes > 0) {
+            if (!result.empty()) {
+                result += ", ";
+            }
+            result += fmt::format("disk {}", FormatBytes(file_bytes));
+        }
+        return result;
     }
 };
 
 inline std::ostream&
 operator<<(std::ostream& os, const ResourceUsage& usage) {
-    os << "memory=" << usage.memory_bytes << ", disk=" << usage.file_bytes;
+    os << usage.ToString();
     return os;
 }
 
@@ -206,14 +247,39 @@ struct EvictionConfig {
     // Use cache_touch_window_ms to reduce the frequency of touching and reduce contention.
     std::chrono::milliseconds cache_touch_window;
     std::chrono::milliseconds eviction_interval;
+    // Overloaded memory threshold percentage - limits cache memory usage to this percentage of total physical memory
+    float overloaded_memory_threshold_percentage;
+    // Max disk usage percentage - limits disk cache usage to this percentage of total disk space (not used yet)
+    float max_disk_usage_percentage;
+    // Loading memory factor for estimating memory during loading
+    float loading_memory_factor;
+
     EvictionConfig()
         : cache_touch_window(std::chrono::milliseconds(0)),
-          eviction_interval(std::chrono::milliseconds(0)) {
+          eviction_interval(std::chrono::milliseconds(0)),
+          overloaded_memory_threshold_percentage(0.9),
+          max_disk_usage_percentage(0.95),
+          loading_memory_factor(2.5f) {
     }
 
     EvictionConfig(int64_t cache_touch_window_ms, int64_t eviction_interval_ms)
         : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
-          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)) {
+          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
+          overloaded_memory_threshold_percentage(0.9),
+          max_disk_usage_percentage(0.95),
+          loading_memory_factor(2.5f) {
+    }
+
+    EvictionConfig(int64_t cache_touch_window_ms,
+                   int64_t eviction_interval_ms,
+                   float overloaded_memory_threshold_percentage,
+                   float max_disk_usage_percentage,
+                   float loading_memory_factor = 2.5f)
+        : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
+          eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
+          overloaded_memory_threshold_percentage(overloaded_memory_threshold_percentage),
+          max_disk_usage_percentage(max_disk_usage_percentage),
+          loading_memory_factor(loading_memory_factor) {
     }
 };
 
@@ -377,6 +443,22 @@ cache_memory_overhead_bytes(StorageType storage_type) {
             PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
+
+struct SystemMemoryInfo {
+    int64_t total_memory_bytes{0};
+    int64_t available_memory_bytes{0};
+    int64_t used_memory_bytes{0};
+};
+
+int64_t
+getHostTotalMemory();
+int64_t
+getContainerMemLimit();
+
+SystemMemoryInfo
+getSystemMemoryInfo();
+int64_t
+getCurrentProcessMemoryUsage();
 
 }  // namespace internal
 

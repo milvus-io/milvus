@@ -263,7 +263,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         }
         ~CacheCell() {
             if (state_ == State::LOADING) {
-                LOG_ERROR("CacheSlot Cell {} destroyed while loading", key());
+                LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading", key());
             }
         }
 
