@@ -553,4 +553,22 @@ DEFINE_PROMETHEUS_GAUGE(internal_cache_memory_overhead_bytes_mixed,
 
 // --- caching layer metrics end ---
 
+// --- file writer metrics ---
+
+std::map<std::string, std::string> diskWriteModeBufferedLabel = {
+    {"mode", "buffered"}};
+std::map<std::string, std::string> diskWriteModeDirectLabel = {
+    {"mode", "direct"}};
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(disk_write_total_bytes,
+                               "[cpp]disk write total bytes");
+DEFINE_PROMETHEUS_COUNTER(disk_write_total_bytes_buffered,
+                        disk_write_total_bytes,
+                        diskWriteModeBufferedLabel);
+DEFINE_PROMETHEUS_COUNTER(disk_write_total_bytes_direct,
+                        disk_write_total_bytes,
+                        diskWriteModeDirectLabel);
+
+// --- file writer metrics end ---
+
 }  // namespace milvus::monitor

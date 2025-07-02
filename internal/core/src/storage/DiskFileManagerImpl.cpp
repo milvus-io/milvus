@@ -45,6 +45,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/FileWriter.h"
 
 namespace milvus::storage {
 DiskFileManagerImpl::DiskFileManagerImpl(
@@ -120,7 +121,6 @@ DiskFileManagerImpl::AddFileInternal(
             AddBatchIndexFiles(file,
                                local_file_offsets,
                                batch_remote_files,
-
                                remote_file_sizes);
             batch_remote_files.clear();
             remote_file_sizes.clear();
@@ -222,7 +222,7 @@ DiskFileManagerImpl::AddBatchIndexFiles(
 void
 DiskFileManagerImpl::CacheIndexToDiskInternal(
     const std::vector<std::string>& remote_files,
-    const std::function<std::string()>& get_local_index_prefix,
+    const std::string& local_index_prefix,
     milvus::proto::common::LoadPriority priority) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -249,11 +249,9 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
         auto local_index_file_name =
-            get_local_index_prefix() +
+            local_index_prefix +
             prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager->CreateFile(local_index_file_name);
-        auto file =
-            File::Open(local_index_file_name, O_CREAT | O_RDWR | O_TRUNC);
 
         // Get the remote files
         std::vector<std::string> batch_remote_files;
@@ -262,30 +260,32 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         uint64_t max_parallel_degree =
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
 
-        auto appendIndexFiles = [&]() {
-            auto index_chunks_futures =
-                GetObjectData(rcm_.get(),
-                              batch_remote_files,
-                              milvus::PriorityForLoad(priority));
-            for (auto& chunk_future : index_chunks_futures) {
-                auto chunk_codec = chunk_future.get();
-                file.Write(chunk_codec->PayloadData(),
-                           chunk_codec->PayloadSize());
+        {
+            auto file_writer = storage::FileWriter(local_index_file_name);
+            auto appendIndexFiles = [&]() {
+                auto index_chunks_futures =
+                    GetObjectData(rcm_.get(), batch_remote_files, milvus::PriorityForLoad(priority));
+                for (auto& chunk_future : index_chunks_futures) {
+                    auto chunk_codec = chunk_future.get();
+                    file_writer.Write(chunk_codec->PayloadData(), chunk_codec->PayloadSize());
+                }
+                batch_remote_files.clear();
+            };
+
+            for (int& iter : slices.second) {
+                auto origin_file = prefix + "_" + std::to_string(iter);
+                batch_remote_files.push_back(origin_file);
+
+                if (batch_remote_files.size() == max_parallel_degree) {
+                    appendIndexFiles();
+                }
             }
-            batch_remote_files.clear();
-        };
-
-        for (int& iter : slices.second) {
-            auto origin_file = prefix + "_" + std::to_string(iter);
-            batch_remote_files.push_back(origin_file);
-
-            if (batch_remote_files.size() == max_parallel_degree) {
+            if (batch_remote_files.size() > 0) {
                 appendIndexFiles();
             }
+            file_writer.Finish();
         }
-        if (batch_remote_files.size() > 0) {
-            appendIndexFiles();
-        }
+
         local_paths_.emplace_back(local_index_file_name);
     }
 }
@@ -296,7 +296,7 @@ DiskFileManagerImpl::CacheIndexToDisk(
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files,
-        [this]() { return GetLocalIndexObjectPrefix(); },
+        GetLocalIndexObjectPrefix(),
         priority);
 }
 
@@ -305,7 +305,7 @@ DiskFileManagerImpl::CacheTextLogToDisk(
     const std::vector<std::string>& remote_files,
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
-        remote_files, [this]() { return GetLocalTextIndexPrefix(); }, priority);
+        remote_files, GetLocalTextIndexPrefix(), priority);
 }
 
 void
@@ -314,7 +314,7 @@ DiskFileManagerImpl::CacheJsonKeyIndexToDisk(
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files,
-        [this]() { return GetLocalJsonKeyIndexPrefix(); },
+        GetLocalJsonKeyIndexPrefix(),
         priority);
 }
 
@@ -324,7 +324,7 @@ DiskFileManagerImpl::CacheNgramIndexToDisk(
     milvus::proto::common::LoadPriority priority) {
     return CacheIndexToDiskInternal(
         remote_files,
-        [this]() { return GetLocalNgramIndexPrefix(); },
+        GetLocalNgramIndexPrefix(),
         priority);
 }
 

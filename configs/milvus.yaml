@@ -446,7 +446,7 @@ queryNode:
       subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
       refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
       refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
-      refineWithQuant: true # whether to use refineQuantType to refine for fatser but loss a little precision
+      refineWithQuant: true # whether to use refineQuantType to refine for faster but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
@@ -576,7 +576,7 @@ dataCoord:
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
-    diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
+    diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
     assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
@@ -615,7 +615,7 @@ dataCoord:
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
   # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
   targetVecIndexVersion: -1
-  segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
+  segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
@@ -634,13 +634,13 @@ dataCoord:
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
-    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms
+    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms
     mix:
       triggerInterval: 60 # The time interval in seconds to trigger mix compaction
     levelzero:
       triggerInterval: 10 # The time interval in seconds for trigger L0 compaction
       forceTrigger:
-        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
+        minSize: 8388608 # The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
@@ -897,6 +897,19 @@ common:
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
   simdType: auto
+  # This parameter controls the write mode of the local disk, which is used to write temporary data downloaded from remote storage.
+  # Currently, only QueryNode uses 'common.diskWrite*' parameters. Support for other components will be added in the future.
+  # The options include 'direct' and 'buffered'. The default value is 'buffered'.
+  diskWriteMode: buffered
+  # Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+  # Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.
+  diskWriteBufferSizeKb: 64
+  # This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
+  # It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
+  # For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
+  # The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
+  # In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.
+  diskWriteNumThreads: 0
   security:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
