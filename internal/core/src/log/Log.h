@@ -75,6 +75,12 @@
                 GetThreadName(),    \
                 milvus::tracer::GetTraceID())
 
+// avoid evaluating args if trace log is not enabled
+#define LOG_TRACE(args...)                                               \
+    if (VLOG_IS_ON(GLOG_TRACE)) {                                        \
+        VLOG(GLOG_TRACE) << SERVER_MODULE_FUNCTION << fmt::format(args); \
+    }
+
 #define LOG_DEBUG(args...) \
     VLOG(GLOG_DEBUG) << SERVER_MODULE_FUNCTION << fmt::format(args)
 #define LOG_INFO(args...) \

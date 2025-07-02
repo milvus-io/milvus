@@ -113,6 +113,7 @@ class ListNode {
                 state_ = State::LOADED;
                 load_promise_->setValue(folly::Unit());
                 load_promise_ = nullptr;
+                remove_self_from_loading_resource();
             } else {
                 // LOADED: cell has been loaded by another thread, do nothing.
                 return;
@@ -134,6 +135,7 @@ class ListNode {
                 load_promise_ = nullptr;
                 // the node that marked LOADING has already reserved memory, do not double count.
                 touch(false);
+                remove_self_from_loading_resource();
             } else {
                 // LOADED: cell has been loaded by another thread, do nothing.
                 return;
@@ -143,6 +145,9 @@ class ListNode {
 
     void
     set_error(folly::exception_wrapper error);
+
+    void
+    remove_self_from_loading_resource();
 
     State state_{State::NOT_LOADED};
 
