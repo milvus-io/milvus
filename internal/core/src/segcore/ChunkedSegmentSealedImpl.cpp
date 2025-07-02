@@ -1057,12 +1057,30 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               int64_t count,
                                               T* dst) {
     static_assert(IsScalar<T>);
-    field->BulkValueAt(
-        [dst](const char* value, size_t i) {
-            dst[i] = *static_cast<const S*>(static_cast<const void*>(value));
-        },
-        seg_offsets,
-        count);
+    if (std::is_same_v<S, T>) {
+        // use field->data_type_ to determine the type of dst
+        field->BulkPrimitiveValueAt(
+            static_cast<void*>(dst), seg_offsets, count);
+    } else {
+        // int8_t and int16_t will be converted to int32_t, so use self-defined function to copy the value
+        field->BulkValueAt(
+            [dst](const char* value, size_t dst_idx) {
+                dst[dst_idx] = *static_cast<const S*>(static_cast<const void*>(value));
+            },
+            seg_offsets,
+            count);
+    }
+}
+
+// for dense vector
+void
+ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
+                                              ChunkedColumnInterface* field,
+                                              const int64_t* seg_offsets,
+                                              int64_t count,
+                                              void* dst_raw) {
+    auto dst_vec = reinterpret_cast<char*>(dst_raw);
+    field->BulkVectorValueAt(dst_vec, seg_offsets, element_sizeof, count);
 }
 
 template <typename S>
@@ -1113,23 +1131,6 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
     column->BulkVectorArrayAt(
         [dst](VectorFieldProto&& array, size_t i) {
             dst->at(i) = std::move(array);
-        },
-        seg_offsets,
-        count);
-}
-
-// for dense vector
-void
-ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
-                                              ChunkedColumnInterface* field,
-                                              const int64_t* seg_offsets,
-                                              int64_t count,
-                                              void* dst_raw) {
-    auto dst_vec = reinterpret_cast<char*>(dst_raw);
-    field->BulkValueAt(
-        [&](const char* value, size_t i) {
-            auto dst = dst_vec + i * element_sizeof;
-            memcpy(dst, value, element_sizeof);
         },
         seg_offsets,
         count);
@@ -1403,6 +1404,15 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
             break;
         }
+        case DataType::VECTOR_INT8: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
         case DataType::VECTOR_SPARSE_FLOAT: {
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             int64_t max_dim = 0;
@@ -1426,15 +1436,6 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 count);
             dst->set_dim(max_dim);
             ret->mutable_vectors()->set_dim(dst->dim());
-            break;
-        }
-        case DataType::VECTOR_INT8: {
-            bulk_subscript_impl(
-                field_meta.get_sizeof(),
-                column.get(),
-                seg_offsets,
-                count,
-                ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
         case DataType::VECTOR_ARRAY: {

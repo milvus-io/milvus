@@ -359,6 +359,87 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
     }
 
+    template <typename T>
+    void
+    BulkPrimitiveValueAtImpl(void* dst, const int64_t* offsets, int64_t count) {
+        static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                          std::is_same_v<T, int32_t> ||
+                          std::is_same_v<T, int64_t> ||
+                          std::is_same_v<T, float> ||
+                          std::is_same_v<T, double> || std::is_same_v<T, bool>,
+                      "BulkPrimitiveValueAtImpl only supports int8_t, int16_t, "
+                      "int32_t, int64_t, float, double, bool types");
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        auto typed_dst = static_cast<T*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            typed_dst[i] =
+                *static_cast<const T*>(static_cast<const void*>(value));
+        }
+    }
+
+    void
+    BulkPrimitiveValueAt(void* dst,
+                         const int64_t* offsets,
+                         int64_t count) override {
+        switch (data_type_) {
+            case DataType::INT8: {
+                BulkPrimitiveValueAtImpl<int8_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT16: {
+                BulkPrimitiveValueAtImpl<int16_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT32: {
+                BulkPrimitiveValueAtImpl<int32_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT64: {
+                BulkPrimitiveValueAtImpl<int64_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::FLOAT: {
+                BulkPrimitiveValueAtImpl<float>(dst, offsets, count);
+                break;
+            }
+            case DataType::DOUBLE: {
+                BulkPrimitiveValueAtImpl<double>(dst, offsets, count);
+                break;
+            }
+            case DataType::BOOL: {
+                BulkPrimitiveValueAtImpl<bool>(dst, offsets, count);
+                break;
+            }
+            default: {
+                PanicInfo(
+                    ErrorCode::Unsupported,
+                    "BulkScalarValueAt is not supported for unknown scalar "
+                    "data type: {}",
+                    data_type_);
+            }
+        }
+    }
+
+    void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) override {
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        auto dst_vec = reinterpret_cast<char*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
+        }
+    }
+
     void
     BulkRawStringAt(std::function<void(std::string_view, size_t, bool)> fn,
                     const int64_t* offsets = nullptr,
