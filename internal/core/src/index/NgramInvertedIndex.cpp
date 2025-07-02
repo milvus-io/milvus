@@ -107,45 +107,212 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
 }
 
 std::optional<TargetBitmap>
-NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
-                                    exec::SegmentExpr* segment) {
+NgramInvertedIndex::ExecuteQuery(const std::string& literal,
+                                 proto::plan::OpType op_type,
+                                 exec::SegmentExpr* segment) {
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }
 
+    switch (op_type) {
+        case proto::plan::OpType::InnerMatch:
+            return InnerMatchQuery(literal, segment);
+        case proto::plan::OpType::Match:
+            return MatchQuery(literal, segment);
+        case proto::plan::OpType::PrefixMatch:
+            return PrefixMatchQuery(literal, segment);
+        case proto::plan::OpType::PostfixMatch:
+            return PostfixMatchQuery(literal, segment);
+        default:
+            LOG_WARN("unsupported op type for ngram index: {}", op_type);
+            return std::nullopt;
+    }
+}
+
+inline void
+handle_sub_batch(const std::string_view* data,
+                 const bool* valid_data,
+                 const int32_t* offsets,
+                 const int size,
+                 TargetBitmapView res,
+                 TargetBitmapView valid_res,
+                 std::function<bool(const std::string_view&)> predicate) {
+    auto next_off_option = res.find_first();
+    while (next_off_option.has_value()) {
+        auto next_off = next_off_option.value();
+        if (next_off >= size) {
+            return;
+        }
+        if (!predicate(data[next_off])) {
+            res[next_off] = false;
+        }
+        next_off_option = res.find_next(next_off);
+    }
+}
+
+std::optional<TargetBitmap>
+NgramInvertedIndex::PrefixMatchQuery(const std::string& literal,
+                                     exec::SegmentExpr* segment) {
     TargetBitmap bitset{static_cast<size_t>(Count())};
-    wrapper_->inner_match_ngram(literal, min_gram_, max_gram_, &bitset);
+    wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
+
+    // verify it's the prefix of the raw data
+    TargetBitmapView res(bitset);
+    TargetBitmap valid(res.size(), true);
+    TargetBitmapView valid_res(valid.data(), valid.size());
+
+    auto predicate = [&literal](const std::string_view& data) {
+        return data.length() >= literal.length() &&
+               std::equal(literal.begin(), literal.end(), data.begin());
+    };
+
+    auto execute_sub_batch = [&predicate](const std::string_view* data,
+                                          const bool* valid_data,
+                                          const int32_t* offsets,
+                                          const int size,
+                                          TargetBitmapView res,
+                                          TargetBitmapView valid_res) {
+        handle_sub_batch(
+            data, valid_data, offsets, size, res, valid_res, predicate);
+    };
+
+    segment->ProcessAllDataChunk<std::string_view>(
+        execute_sub_batch, std::nullptr_t{}, res, valid_res);
+
+    return std::optional<TargetBitmap>(std::move(bitset));
+}
+
+std::optional<TargetBitmap>
+NgramInvertedIndex::PostfixMatchQuery(const std::string& literal,
+                                      exec::SegmentExpr* segment) {
+    TargetBitmap bitset{static_cast<size_t>(Count())};
+    wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
+
+    // verify it's the prefix of the raw data
+    TargetBitmapView res(bitset);
+    TargetBitmap valid(res.size(), true);
+    TargetBitmapView valid_res(valid.data(), valid.size());
+
+    auto predicate = [&literal](const std::string_view& data) {
+        return data.length() >= literal.length() &&
+               std::equal(literal.rbegin(), literal.rend(), data.rbegin());
+    };
+
+    auto execute_sub_batch = [&predicate](const std::string_view* data,
+                                          const bool* valid_data,
+                                          const int32_t* offsets,
+                                          const int size,
+                                          TargetBitmapView res,
+                                          TargetBitmapView valid_res) {
+        handle_sub_batch(
+            data, valid_data, offsets, size, res, valid_res, predicate);
+    };
+
+    segment->ProcessAllDataChunk<std::string_view>(
+        execute_sub_batch, std::nullptr_t{}, res, valid_res);
+
+    return std::optional<TargetBitmap>(std::move(bitset));
+}
+
+std::optional<TargetBitmap>
+NgramInvertedIndex::InnerMatchQuery(const std::string& literal,
+                                    exec::SegmentExpr* segment) {
+    TargetBitmap bitset{static_cast<size_t>(Count())};
+    wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
 
     // Post filtering: if the literal length is larger than the max_gram
     // we need to filter out the bitset
     if (literal.length() > max_gram_) {
-        auto bitset_off = 0;
         TargetBitmapView res(bitset);
         TargetBitmap valid(res.size(), true);
         TargetBitmapView valid_res(valid.data(), valid.size());
 
-        auto execute_sub_batch = [&literal](const std::string_view* data,
-                                            const bool* valid_data,
-                                            const int32_t* offsets,
-                                            const int size,
-                                            TargetBitmapView res,
-                                            TargetBitmapView valid_res) {
-            auto next_off_option = res.find_first();
-            while (next_off_option.has_value()) {
-                auto next_off = next_off_option.value();
-                if (next_off >= size) {
-                    break;
-                }
-                if (data[next_off].find(literal) == std::string::npos) {
-                    res[next_off] = false;
-                }
-                next_off_option = res.find_next(next_off);
-            }
+        auto predicate = [&literal](const std::string_view& data) {
+            return data.find(literal) != std::string::npos;
+        };
+
+        auto execute_sub_batch = [&predicate](const std::string_view* data,
+                                              const bool* valid_data,
+                                              const int32_t* offsets,
+                                              const int size,
+                                              TargetBitmapView res,
+                                              TargetBitmapView valid_res) {
+            handle_sub_batch(
+                data, valid_data, offsets, size, res, valid_res, predicate);
         };
 
         segment->ProcessAllDataChunk<std::string_view>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res);
     }
+
+    return std::optional<TargetBitmap>(std::move(bitset));
+}
+
+std::vector<std::string>
+split_by_wildcard(const std::string& literal) {
+    std::vector<std::string> result;
+    std::string r;
+    r.reserve(literal.size());
+    bool escape_mode = false;
+    for (char c : literal) {
+        if (escape_mode) {
+            r += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                // consider case "\\%", we should reserve %
+                escape_mode = true;
+            } else if (c == '%' || c == '_') {
+                if (r.length() > 0) {
+                    result.push_back(r);
+                    r.clear();
+                }
+            } else {
+                r += c;
+            }
+        }
+    }
+    if (r.length() > 0) {
+        result.push_back(r);
+    }
+    return result;
+}
+
+std::optional<TargetBitmap>
+NgramInvertedIndex::MatchQuery(const std::string& literal,
+                               exec::SegmentExpr* segment) {
+    TargetBitmap bitset{static_cast<size_t>(Count())};
+    auto literals = split_by_wildcard(literal);
+    for (const auto& l : literals) {
+        if (l.length() < min_gram_) {
+            return std::nullopt;
+        }
+        wrapper_->ngram_match_query(l, min_gram_, max_gram_, &bitset);
+    }
+
+    TargetBitmapView res(bitset);
+    TargetBitmap valid(res.size(), true);
+    TargetBitmapView valid_res(valid.data(), valid.size());
+
+    PatternMatchTranslator translator;
+    auto regex_pattern = translator(literal);
+    RegexMatcher matcher(regex_pattern);
+
+    auto predicate = [&matcher](const std::string_view& data) {
+        return matcher(data);
+    };
+
+    auto execute_sub_batch = [&predicate](const std::string_view* data,
+                                          const bool* valid_data,
+                                          const int32_t* offsets,
+                                          const int size,
+                                          TargetBitmapView res,
+                                          TargetBitmapView valid_res) {
+        handle_sub_batch(
+            data, valid_data, offsets, size, res, valid_res, predicate);
+    };
+    segment->ProcessAllDataChunk<std::string_view>(
+        execute_sub_batch, std::nullptr_t{}, res, valid_res);
 
     return std::optional<TargetBitmap>(std::move(bitset));
 }
