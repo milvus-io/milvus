@@ -96,23 +96,8 @@ class Chunk {
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
 };
 
-template <typename ChunkT>
-class CRTPChunk : public Chunk {
- public:
-    CRTPChunk(int32_t row_nums,
-              char* data,
-              uint64_t size,
-              bool nullable)
-        : Chunk(row_nums, data, size, nullable) {}
-
-    const char*
-    ValueAt(int64_t idx) const final {
-        return static_cast<const ChunkT*>(this)->ValueAtImpl(idx);
-    }
-};
-
 // for fixed size data, includes fixed size array
-class FixedWidthChunk : public CRTPChunk<FixedWidthChunk> {
+class FixedWidthChunk : public Chunk {
  public:
     FixedWidthChunk(int32_t row_nums,
                     int32_t dim,
@@ -120,7 +105,7 @@ class FixedWidthChunk : public CRTPChunk<FixedWidthChunk> {
                     uint64_t size,
                     uint64_t element_size,
                     bool nullable)
-        : CRTPChunk<FixedWidthChunk>(row_nums, data, size, nullable),
+        : Chunk(row_nums, data, size, nullable),
           dim_(dim),
           element_size_(element_size) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
@@ -136,7 +121,7 @@ class FixedWidthChunk : public CRTPChunk<FixedWidthChunk> {
     }
 
     const char*
-    ValueAtImpl(int64_t idx) const {
+    ValueAt(int64_t idx) const override {
         return data_start_ + idx * element_size_ * dim_;
     }
 
@@ -172,11 +157,11 @@ class FixedWidthChunk : public CRTPChunk<FixedWidthChunk> {
 // In this example, 'exampleChunk' is a StringChunk with 3 rows, a pointer to the data stored in 'dataPointer',
 // a total data size of 'dataSize', and it does not support nullability.
 
-class StringChunk : public CRTPChunk<StringChunk> {
+class StringChunk : public Chunk {
  public:
     StringChunk() = default;
     StringChunk(int32_t row_nums, char* data, uint64_t size, bool nullable)
-        : CRTPChunk<StringChunk>(row_nums, data, size, nullable) {
+        : Chunk(row_nums, data, size, nullable) {
         auto null_bitmap_bytes_num = nullable_ ? (row_nums_ + 7) / 8 : 0;
         offsets_ = reinterpret_cast<uint32_t*>(data + null_bitmap_bytes_num);
     }
@@ -222,7 +207,7 @@ class StringChunk : public CRTPChunk<StringChunk> {
     ViewsByOffsets(const FixedVector<int32_t>& offsets);
 
     const char*
-    ValueAtImpl(int64_t idx) const {
+    ValueAt(int64_t idx) const override {
         return (*this)[idx].data();
     }
 
@@ -262,14 +247,14 @@ using JSONChunk = StringChunk;
 // In this example, 'exampleChunk' is an ArrayChunk with 3 rows, a pointer to the data stored in 'dataPointer',
 // a total data size of 'dataSize', element type INT32, and it does not support nullability.
 
-class ArrayChunk : public CRTPChunk<ArrayChunk> {
+class ArrayChunk : public Chunk {
  public:
     ArrayChunk(int32_t row_nums,
                char* data,
                uint64_t size,
                milvus::DataType element_type,
                bool nullable)
-        : CRTPChunk<ArrayChunk>(row_nums, data, size, nullable), element_type_(element_type) {
+        : Chunk(row_nums, data, size, nullable), element_type_(element_type) {
         auto null_bitmap_bytes_num = 0;
         if (nullable) {
             null_bitmap_bytes_num = (row_nums + 7) / 8;
@@ -338,7 +323,7 @@ class ArrayChunk : public CRTPChunk<ArrayChunk> {
     }
 
     const char*
-    ValueAtImpl(int64_t idx) const {
+    ValueAt(int64_t idx) const override {
         PanicInfo(ErrorCode::Unsupported,
                   "ArrayChunk::ValueAt is not supported");
     }
@@ -363,14 +348,14 @@ class ArrayChunk : public CRTPChunk<ArrayChunk> {
 //
 // [offsets_lens][all_vector_data_concatenated]
 // [28, 3, 36, 1, 76, 2, 100] [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-class VectorArrayChunk : public CRTPChunk<VectorArrayChunk> {
+class VectorArrayChunk : public Chunk {
  public:
     VectorArrayChunk(int64_t dim,
                      int32_t row_nums,
                      char* data,
                      uint64_t size,
                      milvus::DataType element_type)
-        : CRTPChunk<VectorArrayChunk>(row_nums, data, size, false),
+        : Chunk(row_nums, data, size, false),
           dim_(dim),
           element_type_(element_type) {
         offsets_lens_ = reinterpret_cast<uint32_t*>(data);
@@ -398,7 +383,7 @@ class VectorArrayChunk : public CRTPChunk<VectorArrayChunk> {
     }
 
     const char*
-    ValueAtImpl(int64_t idx) const {
+    ValueAt(int64_t idx) const override {
         PanicInfo(ErrorCode::Unsupported,
                   "VectorArrayChunk::ValueAt is not supported");
     }
@@ -409,13 +394,13 @@ class VectorArrayChunk : public CRTPChunk<VectorArrayChunk> {
     milvus::DataType element_type_;
 };
 
-class SparseFloatVectorChunk : public CRTPChunk<SparseFloatVectorChunk> {
+class SparseFloatVectorChunk : public Chunk {
  public:
     SparseFloatVectorChunk(int32_t row_nums,
                            char* data,
                            uint64_t size,
                            bool nullable)
-        : CRTPChunk<SparseFloatVectorChunk>(row_nums, data, size, nullable) {
+        : Chunk(row_nums, data, size, nullable) {
         vec_.resize(row_nums);
         auto null_bitmap_bytes_num = (row_nums + 7) / 8;
         auto offsets_ptr =
@@ -435,7 +420,7 @@ class SparseFloatVectorChunk : public CRTPChunk<SparseFloatVectorChunk> {
     }
 
     const char*
-    ValueAtImpl(int64_t i) const {
+    ValueAt(int64_t i) const override {
         return static_cast<const char*>(
             static_cast<const void*>(vec_.data() + i));
     }
