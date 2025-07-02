@@ -141,18 +141,8 @@ func packLoadSegmentRequest(
 	if task.Source() == utils.LeaderChecker {
 		loadScope = querypb.LoadScope_Delta
 	}
-	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
-	for _, field := range schema.GetFields() {
-		if exist {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.MmapEnabledKey,
-				Value: strconv.FormatBool(collectionMmapEnabled),
-			})
-		}
-	}
 
-	schema.Properties = mergeCollectonProps(schema.Properties, collectionProperties)
+	applyCollectionMmapSetting(schema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -204,10 +194,12 @@ func packSubChannelRequest(
 	task *ChannelTask,
 	action Action,
 	schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
 	loadMeta *querypb.LoadMetaInfo,
 	channel *meta.DmChannel,
 	indexInfo []*indexpb.IndexInfo,
 ) *querypb.WatchDmChannelsRequest {
+	applyCollectionMmapSetting(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
@@ -263,5 +255,23 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
 		ChannelName:  task.Channel(),
+	}
+}
+
+func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
+) {
+	schema.Properties = mergeCollectonProps(schema.Properties, collectionProperties)
+	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
+	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
+	for _, field := range schema.GetFields() {
+		if exist &&
+			// field-level mmap setting has higher priority than collection-level mmap setting, skip if field-level mmap enabled
+			!common.FieldHasMmapKey(schema, field.GetFieldID()) {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.MmapEnabledKey,
+				Value: strconv.FormatBool(collectionMmapEnabled),
+			})
+		}
 	}
 }
