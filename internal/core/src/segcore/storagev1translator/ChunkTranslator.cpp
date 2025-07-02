@@ -128,12 +128,7 @@ ChunkTranslator::get_cells(
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_,
-                                 IsVectorDataType(data_type) &&
-                                         !IsSparseFloatVectorDataType(data_type)
-                                     ? field_meta_.get_dim()
-                                     : 1,
-                                 array_vec);
+            chunk = create_chunk(field_meta_, array_vec);
         } else {
             // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
             auto filepath = folder / std::to_string(cid);
@@ -144,22 +139,12 @@ ChunkTranslator::get_cells(
                      cid,
                      filepath.string());
 
-            auto file =
-                File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             bool popped = channel->pop(r);
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_,
-                                 IsVectorDataType(data_type) &&
-                                         !IsSparseFloatVectorDataType(data_type)
-                                     ? field_meta_.get_dim()
-                                     : 1,
-                                 file,
-                                 /*file_offset*/ 0,
-                                 array_vec);
+            chunk = create_chunk(field_meta_, array_vec, filepath.string());
             auto ok = unlink(filepath.c_str());
             AssertInfo(
                 ok == 0,
