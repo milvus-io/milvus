@@ -1630,7 +1630,6 @@ func (node *QueryNode) getDistributionModifyTS() int64 {
 
 func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
 	defer node.updateDistributionModifyTS()
-	keys := node.delegators.Keys()
 	if req.GetNeedTransfer() {
 		shardDelegator, ok := node.delegators.Get(req.GetChannel())
 		if !ok {
