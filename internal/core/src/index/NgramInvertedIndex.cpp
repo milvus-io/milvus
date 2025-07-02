@@ -156,7 +156,6 @@ NgramInvertedIndex::PrefixMatchQuery(const std::string& literal,
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
 
-    // verify it's the prefix of the raw data
     TargetBitmapView res(bitset);
     TargetBitmap valid(res.size(), true);
     TargetBitmapView valid_res(valid.data(), valid.size());
@@ -188,7 +187,6 @@ NgramInvertedIndex::PostfixMatchQuery(const std::string& literal,
     TargetBitmap bitset{static_cast<size_t>(Count())};
     wrapper_->ngram_match_query(literal, min_gram_, max_gram_, &bitset);
 
-    // verify it's the prefix of the raw data
     TargetBitmapView res(bitset);
     TargetBitmap valid(res.size(), true);
     TargetBitmapView valid_res(valid.data(), valid.size());
