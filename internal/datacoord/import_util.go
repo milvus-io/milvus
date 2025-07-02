@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -125,7 +124,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			return nil, err
 		}
 		taskProto.SegmentIDs = segments
-		if paramtable.Get().DataCoordCfg.EnableStatsTask.GetAsBool() {
+		if paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 			statsSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
 			if err != nil {
 				return nil, err
@@ -507,25 +506,25 @@ func getImportingProgress(ctx context.Context, jobID int64, importMeta ImportMet
 	return float32(importedRows) / float32(totalRows), importedRows, totalRows
 }
 
-func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, sjm StatsInspector) float32 {
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
+	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() || !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		return 1
 	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
-	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSegmentIDs()
+	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetStatsSegmentIDs()
 	})
-	if len(originSegmentIDs) == 0 {
+	if len(targetSegmentIDs) == 0 {
 		return 1
 	}
 	doneCnt := 0
-	for _, originSegmentID := range originSegmentIDs {
-		t := sjm.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
-		if t.GetState() == indexpb.JobState_JobStateFinished {
+	for _, segID := range targetSegmentIDs {
+		seg := meta.GetHealthySegment(ctx, segID)
+		if seg != nil {
 			doneCnt++
 		}
 	}
-	return float32(doneCnt) / float32(len(originSegmentIDs))
+	return float32(doneCnt) / float32(len(targetSegmentIDs))
 }
 
 func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
@@ -543,7 +542,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if len(originSegmentIDs) == 0 {
 		return 1
 	}
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() || !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		targetSegmentIDs = originSegmentIDs
 	}
 	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
@@ -561,7 +560,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
 func GetJobProgress(ctx context.Context, jobID int64,
-	importMeta ImportMeta, meta *meta, sjm StatsInspector,
+	importMeta ImportMeta, meta *meta,
 ) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := importMeta.GetJob(ctx, jobID)
 	if job == nil {
@@ -581,7 +580,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		return 10 + 30 + int64(progress*30), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
 	case internalpb.ImportJobState_Stats:
-		progress := getStatsProgress(ctx, jobID, importMeta, sjm)
+		progress := getStatsProgress(ctx, jobID, importMeta, meta)
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
