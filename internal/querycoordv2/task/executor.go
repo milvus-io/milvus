@@ -395,8 +395,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	}
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(ctx, task.CollectionID()),
-		task.CollectionID(),
-		collectionInfo.GetDbName(),
+		collectionInfo,
 		task.ResourceGroup(),
 		loadFields,
 		partitions...,
@@ -719,8 +718,7 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(ctx, task.CollectionID()),
-		task.CollectionID(),
-		collectionInfo.GetDbName(),
+		collectionInfo,
 		task.ResourceGroup(),
 		loadFields,
 		partitions...,
