@@ -41,7 +41,8 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 		}
 		req, err := option.InsertRequest(collection)
 		if err != nil {
-			return collection.UpdateTimestamp, err
+			// return schema mismatch err to retry with newer schema
+			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
 
 		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
@@ -99,7 +100,8 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 		}
 		req, err := option.UpsertRequest(collection)
 		if err != nil {
-			return collection.UpdateTimestamp, err
+			// return schema mismatch err to retry with newer schema
+			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
 		}
 		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 			resp, err := milvusService.Upsert(ctx, req, callOptions...)

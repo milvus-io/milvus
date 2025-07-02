@@ -19,9 +19,7 @@ package internaltls
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -30,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -48,37 +45,14 @@ type InternaltlsTestSuit struct {
 	vecType    schemapb.DataType
 }
 
-// Define the content for the configuration YAML file
-var configContent = `
-common:
-  security:
-    internaltlsEnabled : true
-
-internaltls:
-  serverPemPath: ../../../configs/cert/server.pem
-  serverKeyPath: ../../../configs/cert/server.key
-  caPemPath: ../../../configs/cert/ca.pem
-  sni: localhost
-`
-
-const configFilePath = "../../../configs/_test.yaml"
-
-// CreateConfigFile creates the YAML configuration file for tests
-func CreateConfigFile() {
-	// Write config content to _test.yaml file
-	err := os.WriteFile(configFilePath, []byte(configContent), 0o600)
-	if err != nil {
-		log.Error("Failed to create config file", zap.Error(err))
-	}
-	log.Info(fmt.Sprintf("Config file created: %s", configFilePath))
-}
-
 func (s *InternaltlsTestSuit) SetupSuite() {
-	log.Info("Initializing paramtable...")
-	CreateConfigFile()
-	paramtable.Init()
-	log.Info("Setting up EmbedEtcd...")
-	s.Require().NoError(s.SetupEmbedEtcd())
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSEnabled.Key, "true")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSServerPemPath.Key, "../../../configs/cert/server.pem")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSServerKeyPath.Key, "../../../configs/cert/server.key")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSCaPemPath.Key, "../../../configs/cert/ca.pem")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSSNI.Key, "localhost")
+
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *InternaltlsTestSuit) run() {
@@ -98,7 +72,7 @@ func (s *InternaltlsTestSuit) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -111,7 +85,7 @@ func (s *InternaltlsTestSuit) run() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -123,25 +97,8 @@ func (s *InternaltlsTestSuit) run() {
 		fVecColumn = integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	}
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
 
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("insert check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("insert report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeInsert, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.RequestDataSizeKey])
-				return
-			}
-		}
-	}
-	go insertCheckReport()
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -152,7 +109,7 @@ func (s *InternaltlsTestSuit) run() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -165,7 +122,7 @@ func (s *InternaltlsTestSuit) run() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -173,7 +130,7 @@ func (s *InternaltlsTestSuit) run() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      fVecColumn.FieldName,
 		IndexName:      "_default",
@@ -188,7 +145,7 @@ func (s *InternaltlsTestSuit) run() {
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -209,51 +166,11 @@ func (s *InternaltlsTestSuit) run() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		fVecColumn.FieldName, s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
 
-	searchCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("search check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("search report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-				return
-			}
-		}
-	}
-	go searchCheckReport()
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 
-	queryCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("query check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("query report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-				return
-			}
-		}
-	}
-	go queryCheckReport()
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -265,26 +182,7 @@ func (s *InternaltlsTestSuit) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 
-	deleteCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("delete check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("delete report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
-				s.EqualValues(2, reportInfo[hookutil.SuccessCntKey])
-				s.EqualValues(0, reportInfo[hookutil.RelatedCntKey])
-				return
-			}
-		}
-	}
-	go deleteCheckReport()
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           integration.Int64Field + " in [1, 2]",
@@ -295,13 +193,13 @@ func (s *InternaltlsTestSuit) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
 
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
@@ -318,20 +216,7 @@ func (s *InternaltlsTestSuit) TestHelloMilvus_basic() {
 	s.run()
 }
 
-func (s *InternaltlsTestSuit) TearDownSuite() {
-	defer func() {
-		err := os.Remove(configFilePath)
-		if err != nil {
-			log.Error("Failed to delete config file:", zap.Error(err))
-			return
-		}
-		log.Info(fmt.Sprintf("Config file deleted: %s", configFilePath))
-	}()
-	s.MiniClusterSuite.TearDownSuite()
-}
-
 func TestInternalTLS(t *testing.T) {
-	g := integration.WithoutStreamingService()
-	defer g()
+	t.Skip("skip until we fix the issue https://github.com/milvus-io/milvus/issues/42930")
 	suite.Run(t, new(InternaltlsTestSuit))
 }

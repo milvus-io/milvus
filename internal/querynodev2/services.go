@@ -303,6 +303,16 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	})
 	delegator.AddExcludedSegments(growingInfo)
 
+	flushedInfo := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, uint64) {
+		return id, typeutil.MaxTimestamp
+	})
+	delegator.AddExcludedSegments(flushedInfo)
+
+	droppedInfo := lo.SliceToMap(channel.GetDroppedSegmentIds(), func(id int64) (int64, uint64) {
+		return id, typeutil.MaxTimestamp
+	})
+	delegator.AddExcludedSegments(droppedInfo)
+
 	defer func() {
 		if err != nil {
 			// remove legacy growing

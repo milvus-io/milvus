@@ -56,25 +56,27 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
 	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
 
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	s.NoError(merr.CheckRPCCall(showCollectionsResp, err))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	showPartitionsResp, err := c.Proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+	showPartitionsResp, err := c.MilvusClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(showPartitionsResp, err))
 	log.Info("ShowPartitions result", zap.Any("showPartitionsResp", showPartitionsResp))
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -84,7 +86,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(loadStatus, err))
@@ -111,7 +113,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, insRow, dim)
 		hashKeys := integration.GenerateHashKeys(insRow)
-		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
 			HashKeys:       hashKeys,
@@ -131,7 +133,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 			delCnt := delRow / delBatch
 			idBegin := insertedIDs.GetIntId().GetData()[beginIndex]
 			idEnd := insertedIDs.GetIntId().GetData()[beginIndex+delCnt-1]
-			deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+			deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
 				Expr:           fmt.Sprintf("%d <= %s <= %d", idBegin, integration.Int64Field, idEnd),
 			})
@@ -140,7 +142,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 		}
 
 		// flush
-		flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			CollectionNames: []string{collectionName},
 		})
 		s.NoError(merr.CheckRPCCall(flushResp, err))
@@ -151,7 +153,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 		s.True(has)
 		s.WaitForFlush(ctx, ids, flushTs, "", collectionName)
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 		for _, segment := range segments {
@@ -161,7 +163,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 
 	// check l0 segments
 	if totalDeleteRowNum > 0 {
-		segments, err := c.MetaWatcher.ShowSegments()
+		segments, err := c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
@@ -180,7 +182,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
@@ -192,7 +194,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 
 	// query
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName: collectionName,
 		Expr:           expr,
 		OutputFields:   []string{"count(*)"},
@@ -204,7 +206,7 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 
 	// query 2
 	expr = fmt.Sprintf("%s < %d", integration.Int64Field, totalInsertedIDs.GetIntId().GetData()[10])
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName: collectionName,
 		Expr:           expr,
 		OutputFields:   []string{},
@@ -246,21 +248,21 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
 	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(describeCollectionResp, err))
 	newCollectionID := describeCollectionResp.GetCollectionID()
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -282,10 +284,10 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	// binlog import
 	files := make([]*internalpb.ImportFile, 0)
 	for _, segmentID := range flushedSegments {
-		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("/tmp/%s/insert_log/%d/%d/%d",
-			paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, partitionID, segmentID)}})
+		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
+			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
 	}
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 		Files:          files,
@@ -300,7 +302,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	err = WaitForImportDone(ctx, c, jobID)
 	s.NoError(err)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
@@ -325,12 +327,12 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		files = []*internalpb.ImportFile{
 			{
 				Paths: []string{
-					fmt.Sprintf("/tmp/%s/delta_log/%d/%d/",
-						paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, common.AllPartitionsID),
+					fmt.Sprintf("%s/delta_log/%d/%d/",
+						s.Cluster.RootPath(), collectionID, common.AllPartitionsID),
 				},
 			},
 		}
-		importResp, err = c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+		importResp, err = c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: collectionName,
 			Files:          files,
 			Options: []*commonpb.KeyValuePair{
@@ -344,7 +346,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		err = WaitForImportDone(ctx, c, jobID)
 		s.NoError(err)
 
-		segments, err = c.MetaWatcher.ShowSegments()
+		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
 		segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
@@ -365,7 +367,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	}
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(loadStatus, err))
@@ -382,7 +384,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
@@ -403,7 +405,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 
 	// query
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName:   collectionName,
 		Expr:             expr,
 		OutputFields:     []string{"count(*)"},
@@ -416,7 +418,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 
 	// query 2
 	expr = fmt.Sprintf("%s < %d", integration.Int64Field, insertedIDs.GetIntId().GetData()[10])
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName:   collectionName,
 		Expr:             expr,
 		OutputFields:     []string{},
@@ -442,14 +444,14 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
 	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(merr.CheckRPCCall(describeCollectionResp, err))
@@ -460,7 +462,7 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 			Paths: []string{"invalid-path", "invalid-path", "invalid-path"},
 		},
 	}
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 		Files:          files,

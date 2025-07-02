@@ -78,7 +78,7 @@ type BaseTable struct {
 
 type baseTableConfig struct {
 	configDir       string
-	refreshInterval int
+	refreshInterval time.Duration
 	skipRemote      bool
 	skipEnv         bool
 	yamlFiles       []string
@@ -92,7 +92,7 @@ func Files(files []string) Option {
 	}
 }
 
-func Interval(interval int) Option {
+func Interval(interval time.Duration) Option {
 	return func(bt *baseTableConfig) {
 		bt.refreshInterval = interval
 	}
@@ -120,7 +120,7 @@ func NewBaseTable(opts ...Option) *BaseTable {
 	defaultConfig := &baseTableConfig{
 		configDir:       initConfPath(),
 		yamlFiles:       defaultYaml,
-		refreshInterval: 5,
+		refreshInterval: 5 * time.Second,
 		skipRemote:      false,
 		skipEnv:         false,
 	}
@@ -175,7 +175,7 @@ func (bt *BaseTable) initConfigsFromLocal() {
 
 	err := bt.mgr.AddSource(config.NewFileSource(&config.FileInfo{
 		Files:           files,
-		RefreshInterval: time.Duration(refreshInterval) * time.Second,
+		RefreshInterval: refreshInterval,
 	}))
 	if err != nil {
 		log.Warn("init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles), zap.Error(err))
@@ -207,7 +207,7 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
 		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
 		KeyPrefix:       etcdConfig.RootPath.GetValue(),
-		RefreshInterval: time.Duration(refreshInterval) * time.Second,
+		RefreshInterval: refreshInterval,
 	}
 
 	s, err := config.NewEtcdSource(info)

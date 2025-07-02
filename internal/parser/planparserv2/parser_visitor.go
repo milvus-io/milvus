@@ -184,9 +184,17 @@ func (v *ParserVisitor) VisitAddSub(ctx *parser.AddSubContext) interface{} {
 		leftValue, rightValue := leftValueExpr.GetValue(), rightValueExpr.GetValue()
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserADD:
-			return Add(leftValue, rightValue)
+			n, err := Add(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
 		case parser.PlanParserSUB:
-			return Subtract(leftValue, rightValue)
+			n, err := Subtract(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
 		default:
 			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
 		}
@@ -263,7 +271,11 @@ func (v *ParserVisitor) VisitMulDivMod(ctx *parser.MulDivModContext) interface{}
 		leftValue, rightValue := getGenericValue(left), getGenericValue(right)
 		switch ctx.GetOp().GetTokenType() {
 		case parser.PlanParserMUL:
-			return Multiply(leftValue, rightValue)
+			n, err := Multiply(leftValue, rightValue)
+			if err != nil {
+				return err
+			}
+			return n
 		case parser.PlanParserDIV:
 			n, err := Divide(leftValue, rightValue)
 			if err != nil {
@@ -897,7 +909,11 @@ func (v *ParserVisitor) VisitUnary(ctx *parser.UnaryContext) interface{} {
 		case parser.PlanParserSUB:
 			return Negative(childValue)
 		case parser.PlanParserNOT:
-			return Not(childValue)
+			n, err := Not(childValue)
+			if err != nil {
+				return err
+			}
+			return n
 		default:
 			return fmt.Errorf("unexpected op: %s", ctx.GetOp().GetText())
 		}

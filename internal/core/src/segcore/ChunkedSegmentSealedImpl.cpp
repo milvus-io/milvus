@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Utils.h"
@@ -35,6 +36,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
 #include "common/Schema.h"
 #include "common/SystemProperty.h"
@@ -46,6 +48,7 @@
 #include "index/IndexFactory.h"
 #include "index/JsonFlatIndex.h"
 #include "index/VectorMemIndex.h"
+#include "milvus-storage/common/metadata.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
 #include "monitor/prometheus_client.h"
@@ -171,14 +174,22 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         JsonIndex index;
         index.nested_path = path;
         index.field_id = field_id;
-        index.index = std::move(const_cast<LoadIndexInfo&>(info).index);
-        index.cast_type = index.index->GetCastType();
+        index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        index.cast_type =
+            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
         json_indices.push_back(std::move(index));
         return;
     }
 
-    scalar_indexings_[field_id] =
-        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+    if (auto it = info.index_params.find(index::INDEX_TYPE);
+        it != info.index_params.end() &&
+        it->second == index::NGRAM_INDEX_TYPE) {
+        ngram_indexings_[field_id] =
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+    } else {
+        scalar_indexings_[field_id] =
+            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+    }
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -256,12 +267,9 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         storage::SortByPath(insert_files);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-        auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs, insert_files[0], arrow_schema);
-        std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
-            file_reader->file_metadata();
 
-        auto field_id_mapping = metadata->GetFieldIDMapping();
+        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
+            column_group_id, insert_files[0], arrow_schema, fs);
 
         std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
         for (const auto& file : insert_files) {
@@ -269,32 +277,35 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
             row_group_meta_list.push_back(
                 reader->file_metadata()->GetRowGroupMetadataVector());
+            auto status = reader->Close();
+            AssertInfo(status.ok(),
+                       "failed to close file reader when get row group "
+                       "metadata from file: " +
+                           file + " with error: " + status.ToString());
         }
-
-        milvus_storage::FieldIDList field_id_list =
-            metadata->GetGroupFieldIDList().GetFieldIDList(
-                column_group_id.get());
-        std::vector<FieldId> milvus_field_ids;
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
         // warmup will be disabled only when all columns are not in load list
         bool merged_in_load_list = false;
+        std::vector<FieldId> milvus_field_ids;
         for (int i = 0; i < field_id_list.size(); ++i) {
-            milvus_field_ids.emplace_back(field_id_list.Get(i));
-            merged_in_load_list =
-                merged_in_load_list ||
-                schema_->ShallLoadField(FieldId(field_id_list.Get(i)));
+            milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
+            merged_in_load_list = merged_in_load_list ||
+                                  schema_->ShallLoadField(milvus_field_ids[i]);
         }
 
         auto column_group_info = FieldDataInfo(column_group_id.get(),
                                                num_rows,
                                                load_info.mmap_dir_path,
                                                merged_in_load_list);
-        LOG_INFO("segment {} loads column group {} with num_rows {}",
-                 this->get_segment_id(),
-                 column_group_id.get(),
-                 num_rows);
+        LOG_INFO(
+            "segment {} loads column group {} with field ids {} with num_rows "
+            "{}",
+            this->get_segment_id(),
+            column_group_id.get(),
+            field_id_list.ToString(),
+            num_rows);
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
@@ -306,7 +317,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 insert_files,
                 info.enable_mmap,
                 row_group_meta_list,
-                field_id_list);
+                milvus_field_ids.size(),
+                load_info.load_priority);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -358,7 +370,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                 ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
             pool.Submit(LoadArrowReaderFromRemote,
                         insert_files,
-                        field_data_info.arrow_reader_channel);
+                        field_data_info.arrow_reader_channel,
+                        load_info.load_priority);
 
             LOG_INFO("segment {} submits load field {} task to thread pool",
                      this->get_segment_id(),
@@ -383,7 +396,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     field_meta,
                     field_data_info,
                     std::move(insert_files_with_entries_nums),
-                    info.enable_mmap);
+                    info.enable_mmap,
+                    load_info.load_priority);
 
             auto data_type = field_meta.get_data_type();
             auto column = MakeChunkedColumnBase(
@@ -591,13 +605,34 @@ ChunkedSegmentSealedImpl::chunk_view_by_offsets(
 PinWrapper<const index::IndexBase*>
 ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
                                            int64_t chunk_id) const {
+    std::shared_lock lck(mutex_);
     AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
                "Cannot find scalar_indexing with field_id: " +
                    std::to_string(field_id.get()));
     auto slot = scalar_indexings_.at(field_id);
+    lck.unlock();
+
     auto ca = SemiInlineGet(slot->PinCells({0}));
     auto index = ca->get_cell_of(0);
     return PinWrapper<const index::IndexBase*>(ca, index);
+}
+
+PinWrapper<index::NgramInvertedIndex*>
+ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    auto iter = ngram_indexings_.find(field_id);
+    if (iter == ngram_indexings_.end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+    auto slot = iter->second.get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache is corrupted, field_id: {}",
+               field_id.get());
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
 int64_t
@@ -1180,7 +1215,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
     }
 
     // create index reader.
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetSealed);
     // release index writer.
     index->Finish();
 

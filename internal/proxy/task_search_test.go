@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -87,6 +88,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 	t.Run("Test empty result", func(t *testing.T) {
@@ -705,6 +707,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 
@@ -721,6 +724,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 
@@ -754,6 +758,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			tr:       timerecord.NewTimeRecorder("test-search"),
 		}
 		require.NoError(t, task.OnEnqueue())
+		task.SetTs(tsoutil.ComposeTSByTime(time.Now(), 0))
 		return task
 	}
 
@@ -894,7 +899,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.True(t, st.isIterator)
@@ -923,7 +928,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.Error(t, st.PreExecute(ctx))
 	})
@@ -954,7 +959,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
@@ -976,7 +981,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 		assert.NotNil(t, st.functionScore)
@@ -998,7 +1003,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		_, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		require.Equal(t, typeutil.ZeroTimestamp, st.TimeoutTimestamp)
-		enqueueTs := uint64(100000)
+		enqueueTs := tsoutil.ComposeTSByTime(time.Now(), 0)
 		st.SetTs(enqueueTs)
 		assert.NoError(t, st.PreExecute(ctx))
 	})
@@ -1152,7 +1157,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(info, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
+	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
 
@@ -3652,7 +3657,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
 	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
 	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
-	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
+	cache.EXPECT().GetShard(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
 

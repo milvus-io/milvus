@@ -27,7 +27,7 @@ import (
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
 	flushed := func() bool {
-		resp, err := s.Cluster.Proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+		resp, err := s.Cluster.MilvusClient.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
 			SegmentIDs:     segIDs,
 			FlushTs:        flushTs,
 			DbName:         dbName,

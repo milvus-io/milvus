@@ -709,19 +709,21 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("error"))
 		meta := &MetaTable{
 			catalog:     catalog,
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
 		ctx := context.Background()
-		err := meta.AlterCollection(ctx, nil, nil, 0)
+		err := meta.AlterCollection(ctx, nil, nil, 0, false)
 		assert.Error(t, err)
 	})
 
 	t.Run("alter collection ok", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
 		catalog.On("AlterCollection",
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -736,7 +738,7 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 
 		oldColl := &model.Collection{CollectionID: 1}
 		newColl := &model.Collection{CollectionID: 1}
-		err := meta.AlterCollection(ctx, oldColl, newColl, 0)
+		err := meta.AlterCollection(ctx, oldColl, newColl, 0, false)
 		assert.NoError(t, err)
 		assert.Equal(t, meta.collID2Meta[1], newColl)
 	})
@@ -1360,6 +1362,7 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 			mock.Anything, // *model.Collection
 			mock.Anything, // metastore.AlterType
 			mock.AnythingOfType("uint64"),
+			mock.Anything,
 		).Return(errors.New("error mock AlterCollection"))
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1379,6 +1382,7 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 			mock.Anything, // *model.Collection
 			mock.Anything, // metastore.AlterType
 			mock.AnythingOfType("uint64"),
+			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
 			catalog:     catalog,
@@ -1399,6 +1403,7 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 			mock.Anything, // *model.Collection
 			mock.Anything, // metastore.AlterType
 			mock.AnythingOfType("uint64"),
+			mock.Anything,
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
@@ -1556,8 +1561,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 	t.Run("alter collection fail", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything,
+		catalog.On("AlterCollectionDB",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -1651,8 +1655,7 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 
 	t.Run("alter collection ok", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("AlterCollection",
-			mock.Anything,
+		catalog.On("AlterCollectionDB",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,

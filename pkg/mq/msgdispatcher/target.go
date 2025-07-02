@@ -30,11 +30,13 @@ import (
 )
 
 type target struct {
-	vchannel string
-	ch       chan *MsgPack
-	subPos   SubPos
-	pos      *Pos
-	isLagged bool
+	vchannel           string
+	ch                 chan *MsgPack
+	subPos             SubPos
+	pos                *Pos
+	filterSameTimeTick bool
+	latestTimeTick     uint64
+	isLagged           bool
 
 	closeMu         sync.Mutex
 	closeOnce       sync.Once
@@ -46,18 +48,20 @@ type target struct {
 	cancelCh lifetime.SafeChan
 }
 
-func newTarget(streamConfig *StreamConfig) *target {
+func newTarget(streamConfig *StreamConfig, filterSameTimeTick bool) *target {
 	replicateConfig := streamConfig.ReplicateConfig
 	maxTolerantLag := paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second)
 	t := &target{
-		vchannel:        streamConfig.VChannel,
-		ch:              make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
-		subPos:          streamConfig.SubPos,
-		pos:             streamConfig.Pos,
-		cancelCh:        lifetime.NewSafeChan(),
-		maxLag:          maxTolerantLag,
-		timer:           time.NewTimer(maxTolerantLag),
-		replicateConfig: replicateConfig,
+		vchannel:           streamConfig.VChannel,
+		ch:                 make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
+		subPos:             streamConfig.SubPos,
+		pos:                streamConfig.Pos,
+		filterSameTimeTick: filterSameTimeTick,
+		latestTimeTick:     0,
+		cancelCh:           lifetime.NewSafeChan(),
+		maxLag:             maxTolerantLag,
+		timer:              time.NewTimer(maxTolerantLag),
+		replicateConfig:    replicateConfig,
 	}
 	t.closed = false
 	if replicateConfig != nil {
@@ -87,6 +91,23 @@ func (t *target) send(pack *MsgPack) error {
 		return nil
 	}
 
+	if t.filterSameTimeTick {
+		if pack.EndPositions[0].GetTimestamp() <= t.latestTimeTick {
+			if len(pack.Msgs) > 0 {
+				// only filter out the msg that is only timetick message,
+				// So it's a unexpected behavior if the msgs is not empty
+				log.Warn("some data lost when time tick filtering",
+					zap.String("vchannel", t.vchannel),
+					zap.Uint64("latestTimeTick", t.latestTimeTick),
+					zap.Uint64("packEndTs", pack.EndPositions[0].GetTimestamp()),
+					zap.Int("msgCount", len(pack.Msgs)),
+				)
+			}
+			// filter out the msg that is already sent with the same timetick.
+			return nil
+		}
+	}
+
 	if !t.timer.Stop() {
 		select {
 		case <-t.timer.C:
@@ -100,8 +121,11 @@ func (t *target) send(pack *MsgPack) error {
 		return nil
 	case <-t.timer.C:
 		t.isLagged = true
-		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s, beginTs=%d, endTs=%d", t.vchannel, t.maxLag, pack.BeginTs, pack.EndTs)
+		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s, beginTs=%d, endTs=%d, latestTimeTick=%d", t.vchannel, t.maxLag, pack.BeginTs, pack.EndTs, t.latestTimeTick)
 	case t.ch <- pack:
+		if len(pack.EndPositions) > 0 {
+			t.latestTimeTick = pack.EndPositions[0].GetTimestamp()
+		}
 		return nil
 	}
 }

@@ -24,6 +24,7 @@
 #include "segcore/Types.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 #include <gtest/gtest.h>
@@ -134,14 +135,16 @@ TEST(JsonIndexTest, TestJsonContains) {
     json_field->add_json_data(jsons);
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, json_path}};
+    load_index_info.index_params = {{JSON_PATH, json_path},
+                                    {JSON_CAST_TYPE, "ARRAY_DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     segment->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -227,14 +230,16 @@ TEST(JsonIndexTest, TestJsonCast) {
     json_field->add_json_data(jsons);
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     auto segment = segcore::CreateSealedSegment(schema);
     segcore::LoadIndexInfo load_index_info;
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, json_path}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("", std::move(json_index));
+    load_index_info.index_params = {{JSON_PATH, json_path},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
     segment->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()

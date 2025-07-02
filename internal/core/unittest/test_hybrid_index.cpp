@@ -130,7 +130,7 @@ class HybridIndexTestV1 : public testing::Test {
                     ptr[byteIndex] &= ~(1 << bitIndex);
                 }
             }
-            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            field_data->FillFieldData(data_.data(), ptr, data_.size(), 0);
             delete[] ptr;
         } else {
             field_data->FillFieldData(data_.data(), data_.size());
@@ -184,7 +184,8 @@ class HybridIndexTestV1 : public testing::Test {
         index_info.field_type = type_;
 
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);

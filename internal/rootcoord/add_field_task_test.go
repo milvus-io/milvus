@@ -170,6 +170,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(errors.New("mock"))
 		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
 		alloc := newMockIDAllocator()
@@ -206,6 +207,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(testCollection, nil)
 		meta.EXPECT().AlterCollection(
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
@@ -255,6 +257,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
+			mock.Anything,
 		).Return(nil)
 		meta.EXPECT().ListAliasesByID(mock.Anything, mock.Anything).Return([]string{})
 
@@ -297,6 +300,7 @@ func Test_AddCollectionFieldTask_Execute(t *testing.T) {
 			mock.Anything,
 		).Return(testCollection, nil)
 		meta.EXPECT().AlterCollection(
+			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,

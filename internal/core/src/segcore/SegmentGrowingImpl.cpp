@@ -46,6 +46,7 @@
 
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/common/constants.h"
 
 namespace milvus::segcore {
 
@@ -314,8 +315,10 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
-        auto load_future =
-            pool.Submit(LoadFieldDatasFromRemote, insert_files, channel);
+        auto load_future = pool.Submit(LoadFieldDatasFromRemote,
+                                       insert_files,
+                                       channel,
+                                       infos.load_priority);
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -423,16 +426,6 @@ SegmentGrowingImpl::load_column_group_data_internal(
         storage::SortByPath(insert_files);
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
-        auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs, insert_files[0], arrow_schema);
-        std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
-            file_reader->file_metadata();
-
-        auto field_id_mapping = metadata->GetFieldIDMapping();
-
-        milvus_storage::FieldIDList field_ids =
-            metadata->GetGroupFieldIDList().GetFieldIDList(
-                column_group_id.get());
 
         auto column_group_info =
             FieldDataInfo(column_group_id.get(), num_rows, infos.mmap_dir_path);
@@ -457,6 +450,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::vector<int64_t> all_row_groups(row_group_num);
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
+            auto status = reader->Close();
+            AssertInfo(status.ok(),
+                       "failed to close file reader when get row group "
+                       "metadata from file: " +
+                           file + " with error: " + status.ToString());
         }
 
         // create parallel degree split strategy
@@ -468,12 +466,14 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     column_group_info.arrow_reader_channel,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
-                                    row_group_lists);
+                                    row_group_lists,
+                                    nullptr,
+                                    infos.load_priority);
         });
 
-        LOG_INFO("segment {} submits load fields {} task to thread pool",
+        LOG_INFO("segment {} submits load column group {} task to thread pool",
                  this->get_segment_id(),
-                 field_ids.ToString());
+                 info.field_id);
 
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
@@ -481,10 +481,19 @@ SegmentGrowingImpl::load_column_group_data_internal(
         while (column_group_info.arrow_reader_channel->pop(r)) {
             for (const auto& table : r->arrow_tables) {
                 size_t batch_num_rows = table->num_rows();
-                for (int i = 0; i < field_ids.size(); ++i) {
-                    auto field_id = FieldId(field_ids.Get(i));
+                for (int i = 0; i < table->schema()->num_fields(); ++i) {
+                    AssertInfo(table->schema()->field(i)->metadata()->Contains(
+                                   milvus_storage::ARROW_FIELD_ID_KEY),
+                               "field id not found in metadata for field {}",
+                               table->schema()->field(i)->name());
+                    auto field_id =
+                        std::stoll(table->schema()
+                                       ->field(i)
+                                       ->metadata()
+                                       ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                                       ->data());
                     for (auto& field : schema_->get_fields()) {
-                        if (field.second.get_id().get() != field_id.get()) {
+                        if (field.second.get_id().get() != field_id) {
                             continue;
                         }
                         auto field_data = storage::CreateFieldData(
@@ -494,7 +503,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                                      : 0,
                             batch_num_rows);
                         field_data->FillFieldData(table->column(i));
-                        field_data_map[field_id].push_back(field_data);
+                        field_data_map[FieldId(field_id)].push_back(field_data);
                     }
                 }
             }
@@ -1129,7 +1138,7 @@ SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
         "milvus_tokenizer",
         field_meta.get_analyzer_params().c_str());
     index->Commit();
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
     index->RegisterTokenizer("milvus_tokenizer",
                              field_meta.get_analyzer_params().c_str());
     text_indexes_[field_id] = std::move(index);
@@ -1194,7 +1203,7 @@ SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
         JSON_KEY_STATS_COMMIT_INTERVAL, unique_id.c_str());
 
     index->Commit();
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetGrowing);
 
     json_indexes_[field_id] = std::move(index);
 }
@@ -1249,7 +1258,10 @@ SegmentGrowingImpl::FinishLoad() {
         if (field_id.get() < START_USER_FIELDID) {
             continue;
         }
-        if (!insert_record_.is_data_exist(field_id)) {
+        // append_data is called according to schema before
+        // so we must check data empty here
+        if (!IsVectorDataType(field_meta.get_data_type()) &&
+            insert_record_.get_data_base(field_id)->empty()) {
             fill_empty_field(field_meta);
         }
     }
@@ -1258,15 +1270,24 @@ SegmentGrowingImpl::FinishLoad() {
 void
 SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
-    insert_record_.append_field_meta(field_id, field_meta, size_per_chunk());
+    // append meta only needed when schema is old
+    // loading old segment with new schema will have meta appended
+    if (!insert_record_.is_data_exist(field_id)) {
+        insert_record_.append_field_meta(
+            field_id, field_meta, size_per_chunk(), mmap_descriptor_);
+    }
 
     auto total_row_num = insert_record_.size();
 
     auto data = bulk_subscript_not_exist_field(field_meta, total_row_num);
-    insert_record_.get_data_base(field_id)->set_data_raw(
-        0, total_row_num, data.get(), field_meta);
     insert_record_.get_valid_data(field_id)->set_data_raw(
         total_row_num, data.get(), field_meta);
+    insert_record_.get_data_base(field_id)->set_data_raw(
+        0, total_row_num, data.get(), field_meta);
+
+    LOG_INFO("Growing segment {} fill empty field {} done",
+             this->get_segment_id(),
+             field_meta.get_id().get());
 }
 
 }  // namespace milvus::segcore

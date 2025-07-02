@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -42,7 +43,8 @@ type ReplicaManagerInterface interface {
 	// Basic operations
 	Recover(ctx context.Context, collections []int64) error
 	Get(ctx context.Context, id typeutil.UniqueID) *Replica
-	Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int, channels []string) ([]*Replica, error)
+	Spawn(ctx context.Context, collection int64,
+		replicaNumInRG map[string]int, channels []string, loadPriority commonpb.LoadPriority) ([]*Replica, error)
 
 	// Replica manipulation
 	TransferReplica(ctx context.Context, collectionID typeutil.UniqueID, srcRGName string, dstRGName string, replicaNum int) error
@@ -126,7 +128,8 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 		}
 
 		if collectionSet.Contain(replica.GetCollectionID()) {
-			m.putReplicaInMemory(newReplica(replica))
+			rep := NewReplicaWithPriority(replica, commonpb.LoadPriority_HIGH)
+			m.putReplicaInMemory(rep)
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
@@ -157,7 +160,9 @@ func (m *ReplicaManager) Get(ctx context.Context, id typeutil.UniqueID) *Replica
 }
 
 // Spawn spawns N replicas at resource group for given collection in ReplicaManager.
-func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int, channels []string) ([]*Replica, error) {
+func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNumInRG map[string]int,
+	channels []string, loadPriority commonpb.LoadPriority,
+) ([]*Replica, error) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -172,18 +177,17 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 				return nil, err
 			}
 
-			channelExclusiveNodeInfo := make(map[string]*querypb.ChannelNodeInfo)
+			replica := NewReplicaWithPriority(&querypb.Replica{
+				ID:            id,
+				CollectionID:  collection,
+				ResourceGroup: rgName,
+			}, loadPriority)
 			if enableChannelExclusiveMode {
-				for _, channel := range channels {
-					channelExclusiveNodeInfo[channel] = &querypb.ChannelNodeInfo{}
-				}
+				mutableReplica := replica.CopyForWrite()
+				mutableReplica.TryEnableChannelExclusiveMode(channels...)
+				replica = mutableReplica.IntoReplica()
 			}
-			replicas = append(replicas, newReplica(&querypb.Replica{
-				ID:               id,
-				CollectionID:     collection,
-				ResourceGroup:    rgName,
-				ChannelNodeInfos: channelExclusiveNodeInfo,
-			}))
+			replicas = append(replicas, replica)
 		}
 	}
 	if err := m.put(ctx, replicas...); err != nil {
@@ -470,7 +474,10 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.Int64s("newRONodes", roNodes),
 				zap.Int64s("roToRWNodes", recoverableNodes),
-				zap.Int64s("newIncomingNodes", incomingNode))
+				zap.Int64s("newIncomingNodes", incomingNode),
+				zap.Bool("enableChannelExclusiveMode", mutableReplica.IsChannelExclusiveModeEnabled()),
+				zap.Any("channelNodeInfos", mutableReplica.replicaPB.GetChannelNodeInfos()),
+			)
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
 	})

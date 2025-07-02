@@ -221,20 +221,10 @@ func (s *deleteCollectionDataStep) Execute(ctx context.Context) ([]nestedStep, e
 	if s.isSkip {
 		return nil, nil
 	}
-	ddlTs, err := s.core.garbageCollector.GcCollectionData(ctx, s.coll)
-	if err != nil {
+	if _, err := s.core.garbageCollector.GcCollectionData(ctx, s.coll); err != nil {
 		return nil, err
 	}
-	// wait for ts synced.
-	children := make([]nestedStep, 0, len(s.coll.PhysicalChannelNames))
-	for _, channel := range s.coll.PhysicalChannelNames {
-		children = append(children, &waitForTsSyncedStep{
-			baseStep: baseStep{core: s.core},
-			ts:       ddlTs,
-			channel:  channel,
-		})
-	}
-	return children, nil
+	return nil, nil
 }
 
 func (s *deleteCollectionDataStep) Desc() string {
@@ -243,31 +233,6 @@ func (s *deleteCollectionDataStep) Desc() string {
 
 func (s *deleteCollectionDataStep) Weight() stepPriority {
 	return stepPriorityImportant
-}
-
-// waitForTsSyncedStep child step of deleteCollectionDataStep.
-type waitForTsSyncedStep struct {
-	baseStep
-	ts      Timestamp
-	channel string
-}
-
-func (s *waitForTsSyncedStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	syncedTs := s.core.chanTimeTick.getSyncedTimeTick(s.channel)
-	if syncedTs < s.ts {
-		// TODO: there may be frequent log here.
-		// time.Sleep(Params.ProxyCfg.TimeTickInterval)
-		return nil, fmt.Errorf("ts not synced yet, channel: %s, synced: %d, want: %d", s.channel, syncedTs, s.ts)
-	}
-	return nil, nil
-}
-
-func (s *waitForTsSyncedStep) Desc() string {
-	return fmt.Sprintf("wait for ts synced, channel: %s, want: %d", s.channel, s.ts)
-}
-
-func (s *waitForTsSyncedStep) Weight() stepPriority {
-	return stepPriorityNormal
 }
 
 type deletePartitionDataStep struct {
@@ -466,13 +431,14 @@ func (s *nullStep) Weight() stepPriority {
 
 type AlterCollectionStep struct {
 	baseStep
-	oldColl *model.Collection
-	newColl *model.Collection
-	ts      Timestamp
+	oldColl     *model.Collection
+	newColl     *model.Collection
+	ts          Timestamp
+	fieldModify bool
 }
 
 func (a *AlterCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts, a.fieldModify)
 	return nil, err
 }
 
@@ -508,7 +474,7 @@ type AddCollectionFieldStep struct {
 func (a *AddCollectionFieldStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	// newColl := a.oldColl.Clone()
 	// newColl.Fields = append(newColl.Fields, a.newField)
-	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.updatedCollection, a.updatedCollection.UpdateTimestamp)
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.updatedCollection, a.updatedCollection.UpdateTimestamp, true)
 	log.Ctx(ctx).Info("add field done", zap.Int64("collectionID", a.oldColl.CollectionID), zap.Any("new field", a.newField))
 	return nil, err
 }

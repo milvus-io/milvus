@@ -103,11 +103,14 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
     auto fr =
         std::make_shared<milvus_storage::FileRowGroupReader>(fs_, paths_[0]);
-    auto field_id_list =
-        fr->file_metadata()->GetGroupFieldIDList().GetFieldIDList(0);
 
     row_group_meta_list.push_back(
         fr->file_metadata()->GetRowGroupMetadataVector());
+    auto status = fr->Close();
+    AssertInfo(
+        status.ok(),
+        "failed to close file reader when get row group metadata from file: " +
+            paths_[0] + " with error: " + status.ToString());
 
     GroupChunkTranslator translator(segment_id_,
                                     field_metas,
@@ -115,7 +118,8 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
                                     paths_,
                                     use_mmap,
                                     row_group_meta_list,
-                                    field_id_list);
+                                    schema_->get_field_ids().size(),
+                                    milvus::proto::common::LoadPriority::LOW);
 
     // num cells
     EXPECT_EQ(translator.num_cells(), row_group_meta_list[0].size());

@@ -50,6 +50,7 @@ const char TEXT_LOG_ROOT_PATH[] = "text_log";
 const char ITERATIVE_FILTER[] = "iterative_filter";
 const char HINTS[] = "hints";
 const char JSON_KEY_INDEX_LOG_ROOT_PATH[] = "json_key_index_log";
+const char NGRAM_LOG_ROOT_PATH[] = "ngram_log";
 
 const char DEFAULT_PLANNODE_ID[] = "0";
 const char DEAFULT_QUERY_ID[] = "0";
@@ -103,3 +104,5 @@ const int64_t STORAGE_V1 = 1;
 const int64_t STORAGE_V2 = 2;
 
 const std::string UNKNOW_CAST_FUNCTION_NAME = "unknown";
+
+const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;

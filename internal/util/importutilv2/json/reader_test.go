@@ -37,6 +37,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+type mockReader struct {
+	io.Reader
+	io.Closer
+	io.ReaderAt
+	io.Seeker
+	size int64
+}
+
+func (mr *mockReader) Size() (int64, error) {
+	return mr.size, nil
+}
+
 type ReaderSuite struct {
 	suite.Suite
 
@@ -130,12 +142,6 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	jsonBytes, err := json.Marshal(rows)
 	suite.NoError(err)
 
-	type mockReader struct {
-		io.Reader
-		io.Closer
-		io.ReaderAt
-		io.Seeker
-	}
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
 		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
@@ -205,12 +211,6 @@ func (suite *ReaderSuite) runWithDefaultValue(dataType schemapb.DataType, elemTy
 	jsonBytes, err := json.Marshal(rows)
 	suite.NoError(err)
 
-	type mockReader struct {
-		io.Reader
-		io.Closer
-		io.ReaderAt
-		io.Seeker
-	}
 	cm := mocks.NewChunkManager(suite.T())
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
 		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}

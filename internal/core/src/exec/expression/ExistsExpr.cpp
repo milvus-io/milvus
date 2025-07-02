@@ -55,7 +55,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
     if (cached_index_chunk_id_ != 0) {
         cached_index_chunk_id_ = 0;
         auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-        auto* index = segment_->GetJsonIndex(expr_->column_.field_id_, pointer);
+        auto pw = segment_->GetJsonIndex(expr_->column_.field_id_, pointer);
+        auto* index = pw.get();
         AssertInfo(index != nullptr,
                    "Cannot find json index with path: " + pointer);
         switch (index->GetCastType().data_type()) {

@@ -26,7 +26,7 @@ type walImpl struct {
 }
 
 func (w *walImpl) WALName() string {
-	return walName
+	return WALName
 }
 
 // Append appends a message to the wal.

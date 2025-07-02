@@ -109,11 +109,13 @@ ReverseDataFromIndex(const index::IndexBase* index,
 
 void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
-                          std::shared_ptr<ArrowReaderChannel> channel);
+                          std::shared_ptr<ArrowReaderChannel> channel,
+                          milvus::proto::common::LoadPriority priority);
 
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel);
+                         FieldDataChannelPtr channel,
+                         milvus::proto::common::LoadPriority priority);
 /**
  * Returns an index pointing to the first element in the range [first, last) such that `value < element` is true
  * (i.e. that is strictly greater than value), or last if no such element is found.

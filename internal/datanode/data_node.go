@@ -251,13 +251,14 @@ func (node *DataNode) Init() error {
 		node.factory.Init(Params)
 		log.Info("DataNode server init succeeded")
 
-		chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
-		if err != nil {
-			initError = err
-			return
+		if !streamingutil.IsStreamingServiceEnabled() {
+			chunkManager, err := node.factory.NewPersistentStorageChunkManager(node.ctx)
+			if err != nil {
+				initError = err
+				return
+			}
+			node.chunkManager = chunkManager
 		}
-
-		node.chunkManager = chunkManager
 		syncMgr := syncmgr.NewSyncManager(node.chunkManager)
 		node.syncMgr = syncMgr
 

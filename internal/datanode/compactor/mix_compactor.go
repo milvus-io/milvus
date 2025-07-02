@@ -358,6 +358,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	var res []*datapb.CompactionSegment
 	var err error
 	if sortMergeAppicable {
+		// TODO: the implementation of mergeSortMultipleSegments is not correct, also see issue: https://github.com/milvus-io/milvus/issues/43034
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
 			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl())

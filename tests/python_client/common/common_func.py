@@ -261,7 +261,7 @@ def analyze_documents(texts, language="en"):
     # this is a trick to make the text match test case verification simple, because the long word can be still split
     if language in ["zh", "cn", "chinese"]:
         word_freq = Counter({word: count for word, count in word_freq.items() if 1< len(word) <= 3})
-    log.info(f"word freq {word_freq.most_common(10)}")
+    log.debug(f"word freq {word_freq.most_common(10)}")
     return word_freq
 
 
@@ -1126,33 +1126,6 @@ def gen_schema_multi_string_fields(string_fields):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
                                                                     primary_field=primary_field, auto_id=False)
     return schema
-
-
-def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
-    vectors = []
-    if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
-    elif vector_data_type == DataType.FLOAT16_VECTOR:
-        vectors = gen_fp16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.BFLOAT16_VECTOR:
-        vectors = gen_bf16_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.SPARSE_FLOAT_VECTOR:
-        vectors = gen_sparse_vectors(nb, dim)
-    elif vector_data_type == ct.text_sparse_vector:
-        vectors = gen_text_vectors(nb) # for Full Text Search
-    elif vector_data_type == DataType.INT8_VECTOR:
-        vectors = gen_int8_vectors(nb, dim)[1]
-    elif vector_data_type == DataType.BINARY_VECTOR:
-        vectors = gen_binary_vectors(nb, dim)[1]
-    else:
-        log.error(f"Invalid vector data type: {vector_data_type}")
-        raise Exception(f"Invalid vector data type: {vector_data_type}")
-    if dim > 1:
-        if vector_data_type == DataType.FLOAT_VECTOR:
-            vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
-            vectors = vectors.tolist()
-    return vectors
-
 
 def gen_string(nb):
     string_values = [str(random.random()) for _ in range(nb)]
@@ -3613,7 +3586,7 @@ def gen_sparse_vectors(nb, dim=1000, sparse_format="dok", empty_percentage=0):
 def gen_vectors(nb, dim, vector_data_type=DataType.FLOAT_VECTOR):
     vectors = []
     if vector_data_type == DataType.FLOAT_VECTOR:
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+        vectors = [[random.uniform(-1, 1) for _ in range(dim)] for _ in range(nb)]
     elif vector_data_type == DataType.FLOAT16_VECTOR:
         vectors = gen_fp16_vectors(nb, dim)[1]
     elif vector_data_type == DataType.BFLOAT16_VECTOR:

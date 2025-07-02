@@ -261,7 +261,15 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	t.sess2ChanTsMap = make(map[typeutil.UniqueID]*chanTsMsg)
 	// Init DDL source
 	t.sess2ChanTsMap[ddlSourceID] = nil
+	rangeChecker := semver.MustParseRange(">=2.6.0-dev")
 	for _, s := range sess {
+		if rangeChecker(s.Version) {
+			log.Info("new proxy with no timetick join, ignored",
+				zap.String("version", s.Version.String()),
+				zap.Int64("serverID", s.ServerID),
+				zap.String("address", s.Address))
+			continue
+		}
 		t.sess2ChanTsMap[s.ServerID] = nil
 		log.Info("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
 	}

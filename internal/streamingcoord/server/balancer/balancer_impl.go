@@ -458,7 +458,7 @@ func (f *backoffConfigFetcher) BackoffConfig() typeutil.BackoffConfig {
 	return typeutil.BackoffConfig{
 		InitialInterval: paramtable.Get().StreamingCfg.WALBalancerBackoffInitialInterval.GetAsDurationByParse(),
 		Multiplier:      paramtable.Get().StreamingCfg.WALBalancerBackoffMultiplier.GetAsFloat(),
-		MaxInterval:     paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.GetAsDurationByParse(),
+		MaxInterval:     paramtable.Get().StreamingCfg.WALBalancerBackoffMaxInterval.GetAsDurationByParse(),
 	}
 }
 

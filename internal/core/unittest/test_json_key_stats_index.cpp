@@ -85,7 +85,8 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
                     valid_data_[byteIndex] &= ~(1 << bitIndex);
                 }
             }
-            field_data->FillFieldData(data_.data(), valid_data_, data_.size());
+            field_data->FillFieldData(
+                data_.data(), valid_data_, data_.size(), 0);
             delete[] valid_data_;
         } else {
             field_data->FillFieldData(data_.data(), data_.size());
@@ -128,7 +129,8 @@ class JsonKeyStatsIndexTest : public ::testing::TestWithParam<bool> {
 
         index::CreateIndexInfo index_info{};
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         index_ = std::make_shared<JsonKeyStatsInvertedIndex>(ctx, true);
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
@@ -607,7 +609,7 @@ TEST(GrowingJsonKeyStatsIndexTest, GrowingIndex) {
     for (const auto& jsonData : jsonDatas) {
         jsons.push_back(milvus::Json(simdjson::padded_string(jsonData)));
     }
-    index->CreateReader();
+    index->CreateReader(milvus::index::SetBitsetSealed);
     index->AddJSONDatas(jsonDatas.size(), jsonDatas.data(), nullptr, 0);
     index->Commit();
     index->Reload();

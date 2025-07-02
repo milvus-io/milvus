@@ -17,13 +17,12 @@
 package crossclusterrouting
 
 import (
-	"fmt"
 	"math/rand"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -31,10 +30,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/milvus-io/milvus/tests/integration/cluster/process"
 )
 
 type CrossClusterRoutingSuite struct {
@@ -43,101 +43,62 @@ type CrossClusterRoutingSuite struct {
 
 func (s *CrossClusterRoutingSuite) SetupSuite() {
 	rand.Seed(time.Now().UnixNano())
-	s.Require().NoError(s.SetupEmbedEtcd())
 
-	paramtable.Init()
-	paramtable.Get().Save("grpc.client.maxMaxAttempts", "1")
-}
-
-func (s *CrossClusterRoutingSuite) TearDownSuite() {
-	s.TearDownEmbedEtcd()
-	paramtable.Get().Save("grpc.client.maxMaxAttempts", strconv.FormatInt(paramtable.DefaultMaxAttempts, 10))
+	s.WithMilvusConfig("grpc.client.maxMaxAttempts", "1")
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
-	const (
-		waitFor  = time.Second * 10
-		duration = time.Millisecond * 10
-	)
-
-	go func() {
-		for {
-			select {
-			case <-time.After(15 * time.Second):
-				return
-			default:
-				err := paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, fmt.Sprintf("%d", rand.Int()))
-				if err != nil {
-					panic(err)
-				}
-			}
-		}
-	}()
-
+	randomClusterKey := uuid.New().String()
 	// test rootCoord
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.ShowCollections(s.Cluster.GetContext(), &milvuspb.ShowCollectionsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
-			),
-			DbName: "fake_db_name",
-		})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
-
-	// test dataCoord
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.GetRecoveryInfoV2(s.Cluster.GetContext(), &datapb.GetRecoveryInfoRequestV2{})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
-
-	// test queryCoord
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.LoadCollection(s.Cluster.GetContext(), &querypb.LoadCollectionRequest{})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
+	address, _ := s.Cluster.DefaultMixCoord().GetAddress(s.Cluster.GetContext())
+	conn, err := process.DailGRPClient(s.Cluster.GetContext(), address, randomClusterKey, s.Cluster.DefaultMixCoord().GetNodeID())
+	s.NoError(err)
+	defer conn.Close()
+	mixcoordClient := rootcoordpb.NewRootCoordClient(conn)
+	_, err = mixcoordClient.ShowCollections(s.Cluster.GetContext(), &milvuspb.ShowCollectionsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+		),
+		DbName: "fake_db_name",
+	})
+	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 
 	// test proxy
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.ProxyClient.InvalidateCollectionMetaCache(s.Cluster.GetContext(), &proxypb.InvalidateCollMetaCacheRequest{})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
+	address, _ = s.Cluster.DefaultProxy().GetAddress(s.Cluster.GetContext())
+	conn, err = process.DailGRPClient(s.Cluster.GetContext(), address, randomClusterKey, s.Cluster.DefaultProxy().GetNodeID())
+	s.NoError(err)
+	defer conn.Close()
+	proxyClient := proxypb.NewProxyClient(conn)
+	_, err = proxyClient.InvalidateCollectionMetaCache(s.Cluster.GetContext(), &proxypb.InvalidateCollMetaCacheRequest{})
+	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 
 	// test dataNode
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.DataNodeClient.FlushSegments(s.Cluster.GetContext(), &datapb.FlushSegmentsRequest{})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
+	address, _ = s.Cluster.DefaultDataNode().GetAddress(s.Cluster.GetContext())
+	conn, err = process.DailGRPClient(s.Cluster.GetContext(), address, randomClusterKey, s.Cluster.DefaultProxy().GetNodeID())
+	s.NoError(err)
+	defer conn.Close()
+	dataClient := datapb.NewDataNodeClient(conn)
+	_, err = dataClient.FlushSegments(s.Cluster.GetContext(), &datapb.FlushSegmentsRequest{})
+	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 
 	// test queryNode
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.QueryNodeClient.Search(s.Cluster.GetContext(), &querypb.SearchRequest{})
-		s.Suite.T().Logf("resp: %s, err: %s", resp, err)
-		if err != nil {
-			return strings.Contains(err.Error(), merr.ErrServiceUnavailable.Error())
-		}
-		return false
-	}, waitFor, duration)
+	address, _ = s.Cluster.DefaultQueryNode().GetAddress(s.Cluster.GetContext())
+	conn, err = process.DailGRPClient(s.Cluster.GetContext(), address, randomClusterKey, s.Cluster.DefaultQueryNode().GetNodeID())
+	s.NoError(err)
+	defer conn.Close()
+	queryClient := querypb.NewQueryNodeClient(conn)
+	_, err = queryClient.Search(s.Cluster.GetContext(), &querypb.SearchRequest{})
+	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
+
+	// test streamingNode
+	address, _ = s.Cluster.DefaultStreamingNode().GetAddress(s.Cluster.GetContext())
+	conn, err = process.DailGRPClient(s.Cluster.GetContext(), address, randomClusterKey, s.Cluster.DefaultStreamingNode().GetNodeID())
+	s.NoError(err)
+	defer conn.Close()
+	queryClient = querypb.NewQueryNodeClient(conn)
+	_, err = queryClient.Search(s.Cluster.GetContext(), &querypb.SearchRequest{})
+	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
 }
 
 func TestCrossClusterRoutingSuite(t *testing.T) {

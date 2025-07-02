@@ -115,9 +115,13 @@ struct TantivyIndexWrapper {
     }
 
     // load index. create index reader.
-    explicit TantivyIndexWrapper(const char* path, SetBitsetFn set_bitset) {
+    explicit TantivyIndexWrapper(const char* path,
+                                 bool load_in_mmap,
+                                 SetBitsetFn set_bitset)
+        : load_in_mmap_(load_in_mmap) {
         assert(tantivy_index_exist(path));
-        auto res = RustResultWrapper(tantivy_load_index(path, set_bitset));
+        auto res = RustResultWrapper(
+            tantivy_load_index(path, load_in_mmap_, set_bitset));
         AssertInfo(res.result_->success,
                    "failed to load index: {}",
                    res.result_->error);
@@ -173,12 +177,35 @@ struct TantivyIndexWrapper {
         path_ = std::string(path);
     }
 
+    // create index writer for ngram
+    TantivyIndexWrapper(const char* field_name,
+                        const char* path,
+                        uintptr_t min_gram,
+                        uintptr_t max_gram,
+                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
+                        uintptr_t overall_memory_budget_in_bytes =
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+        auto res = RustResultWrapper(
+            tantivy_create_ngram_writer(field_name,
+                                        path,
+                                        min_gram,
+                                        max_gram,
+                                        num_threads,
+                                        overall_memory_budget_in_bytes));
+
+        AssertInfo(res.result_->success,
+                   "failed to create ngram writer: {}",
+                   res.result_->error);
+        writer_ = res.result_->value.ptr._0;
+        path_ = std::string(path);
+    }
+
     // create reader.
     void
-    create_reader() {
+    create_reader(SetBitsetFn set_bitset) {
         if (writer_ != nullptr) {
-            auto res = RustResultWrapper(tantivy_create_reader_from_writer(
-                writer_, milvus::index::SetBitset));
+            auto res = RustResultWrapper(
+                tantivy_create_reader_from_writer(writer_, set_bitset));
             AssertInfo(res.result_->success,
                        "failed to create reader from writer: {}",
                        res.result_->error);
@@ -186,7 +213,7 @@ struct TantivyIndexWrapper {
         } else if (!path_.empty()) {
             assert(tantivy_index_exist(path_.c_str()));
             auto res = RustResultWrapper(
-                tantivy_load_index(path_.c_str(), milvus::index::SetBitset));
+                tantivy_load_index(path_.c_str(), load_in_mmap_, set_bitset));
             AssertInfo(res.result_->success,
                        "failed to load index: {}",
                        res.result_->error);
@@ -908,6 +935,22 @@ struct TantivyIndexWrapper {
             "TantivyIndexWrapper.phrase_match_query: invalid result type");
     }
 
+    void
+    inner_match_ngram(const std::string& literal,
+                      uintptr_t min_gram,
+                      uintptr_t max_gram,
+                      void* bitset) {
+        auto array = tantivy_inner_match_ngram(
+            reader_, literal.c_str(), min_gram, max_gram, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.inner_match_ngram: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.inner_match_ngram: invalid result type");
+    }
+
     // json query
     template <typename T>
     void
@@ -1107,5 +1150,6 @@ struct TantivyIndexWrapper {
     IndexWriter writer_ = nullptr;
     IndexReader reader_ = nullptr;
     std::string path_;
+    bool load_in_mmap_ = true;
 };
 }  // namespace milvus::tantivy

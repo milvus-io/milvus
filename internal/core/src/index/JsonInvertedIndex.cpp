@@ -24,6 +24,20 @@
 
 namespace milvus::index {
 
+namespace json {
+
+bool
+IsDataTypeSupported(JsonCastType cast_type, DataType data_type, bool is_array) {
+    bool cast_type_is_array =
+        cast_type.data_type() == JsonCastType::DataType::ARRAY;
+    auto type = cast_type.ToMilvusDataType();
+    return is_array == cast_type_is_array &&
+           (type == data_type ||
+            (data_type == DataType::INT64 && type == DataType::DOUBLE));
+}
+
+}  // namespace json
+
 template <typename T>
 void
 JsonInvertedIndex<T>::build_index_for_json(
@@ -101,18 +115,6 @@ JsonInvertedIndex<T>::build_index_for_json(
     }
 
     error_recorder_.PrintErrStats();
-}
-
-template <typename T>
-bool
-JsonInvertedIndex<T>::IsDataTypeSupported(DataType data_type,
-                                          bool is_array) const {
-    bool cast_type_is_array =
-        cast_type_.data_type() == JsonCastType::DataType::ARRAY;
-    auto type = cast_type_.ToMilvusDataType();
-    return is_array == cast_type_is_array &&
-           (type == data_type ||
-            (data_type == DataType::INT64 && type == DataType::DOUBLE));
 }
 
 template class JsonInvertedIndex<bool>;

@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "common/JsonCastType.h"
+#include "cachinglayer/Utils.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "index/Index.h"
@@ -25,6 +26,7 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -55,10 +57,10 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual InsertRecord<true>&
     get_insert_record() = 0;
 
-    virtual index::IndexBase*
+    virtual PinWrapper<index::IndexBase*>
     GetJsonIndex(FieldId field_id, std::string path) const override {
         int path_len_diff = std::numeric_limits<int>::max();
-        index::IndexBase* best_match = nullptr;
+        index::CacheIndexBasePtr best_match = nullptr;
         std::string_view path_view = path;
         for (const auto& index : json_indices) {
             if (index.field_id != field_id) {
@@ -75,26 +77,38 @@ class SegmentSealed : public SegmentInternalInterface {
                             path_view.length() - index.nested_path.length();
                         if (current_len_diff < path_len_diff) {
                             path_len_diff = current_len_diff;
-                            best_match = index.index.get();
+                            best_match = index.index;
                         }
                         if (path_len_diff == 0) {
-                            return best_match;
+                            break;
                         }
                     }
                     break;
                 default:
                     if (index.nested_path == path) {
-                        return index.index.get();
+                        best_match = index.index;
+                        break;
                     }
             }
         }
-        return best_match;
+        if (best_match == nullptr) {
+            return nullptr;
+        }
+        auto ca = SemiInlineGet(best_match->PinCells({0}));
+        auto index = ca->get_cell_of(0);
+        return PinWrapper<index::IndexBase*>(ca, index);
     }
 
     virtual void
     LoadJsonKeyIndex(
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const = 0;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const override = 0;
 
     SegmentType
     type() const override {
@@ -127,8 +141,8 @@ class SegmentSealed : public SegmentInternalInterface {
                     return true;
                 }
                 return index.nested_path == path &&
-                       index.index->IsDataTypeSupported(data_type,
-                                                        is_json_contain);
+                       milvus::index::json::IsDataTypeSupported(
+                           index.cast_type, data_type, is_json_contain);
             });
         return it != json_indices.end();
     }
@@ -141,13 +155,15 @@ class SegmentSealed : public SegmentInternalInterface {
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
                      int64_t chunk_id) const override {
-        return GetJsonIndex(field_id, path);
+        return GetJsonIndex(field_id, path)
+            .template transform<const index::IndexBase*>(
+                [](auto&& index) { return index; });
     }
     struct JsonIndex {
         FieldId field_id;
         std::string nested_path;
         JsonCastType cast_type{JsonCastType::UNKNOWN};
-        index::IndexBasePtr index;
+        index::CacheIndexBasePtr index;
     };
 
     std::vector<JsonIndex> json_indices;

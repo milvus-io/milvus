@@ -1,4 +1,3 @@
-
 // Licensed to the LF AI & Data foundation under one
 // or more contributor license agreements. See the NOTICE file
 // distributed with this work for additional information
@@ -56,6 +55,8 @@
 
 namespace milvus::storage {
 
+constexpr const char* TEMP = "tmp";
+
 std::map<std::string, ChunkManagerType> ChunkManagerType_Map = {
     {"local", ChunkManagerType::Local},
     {"minio", ChunkManagerType::Minio},
@@ -99,18 +100,14 @@ genValidIter(const uint8_t* valid_data, int length) {
     return valid_data_;
 }
 
-StorageType
+void
 ReadMediumType(BinlogReaderPtr reader) {
     AssertInfo(reader->Tell() == 0,
                "medium type must be parsed from stream header");
     int32_t magic_num;
     auto ret = reader->Read(sizeof(magic_num), &magic_num);
     AssertInfo(ret.ok(), "read binlog failed: {}", ret.what());
-    if (magic_num == MAGIC_NUM) {
-        return StorageType::Remote;
-    }
-
-    return StorageType::LocalDisk;
+    AssertInfo(magic_num == MAGIC_NUM, "invalid magic num: {}", magic_num);
 }
 
 void
@@ -560,37 +557,32 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
 }
 
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
+GenIndexPathIdentifier(int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id) {
+    return std::to_string(build_id) + "_" + std::to_string(index_version) +
+           "_" + std::to_string(segment_id) + "_" + std::to_string(field_id) +
+           "/";
 }
 
 std::string
 GenIndexPathPrefix(ChunkManagerPtr cm,
                    int64_t build_id,
-                   int64_t index_version) {
+                   int64_t index_version,
+                   int64_t segment_id,
+                   int64_t field_id,
+                   bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
     boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
     boost::filesystem::path path1 =
-        GenIndexPathIdentifier(build_id, index_version);
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
-}
-
-std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
-    boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(INDEX_ROOT_PATH);
-    boost::filesystem::path path1 = std::to_string(build_id);
-    return (prefix / path / path1).string();
-}
-
-std::string
-GenTextIndexPathIdentifier(int64_t build_id,
-                           int64_t index_version,
-                           int64_t segment_id,
-                           int64_t field_id) {
-    return std::to_string(build_id) + "/" + std::to_string(index_version) +
-           "/" + std::to_string(segment_id) + "/" + std::to_string(field_id) +
-           "/";
 }
 
 std::string
@@ -598,19 +590,36 @@ GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
-                       int64_t field_id) {
+                       int64_t field_id,
+                       bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
     boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
-    boost::filesystem::path path1 = GenTextIndexPathIdentifier(
-        build_id, index_version, segment_id, field_id);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
 }
 
 std::string
-GetTextIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
+GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
+                          int64_t build_id,
+                          int64_t index_version,
+                          int64_t segment_id,
+                          int64_t field_id,
+                          bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(TEXT_LOG_ROOT_PATH);
-    boost::filesystem::path path1 = std::to_string(build_id);
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
+    boost::filesystem::path path = std::string(JSON_KEY_INDEX_LOG_ROOT_PATH);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
 }
 
@@ -628,13 +637,13 @@ GenJsonKeyIndexPathIdentifier(int64_t build_id,
 }
 
 std::string
-GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
-                          int64_t build_id,
-                          int64_t index_version,
-                          int64_t collection_id,
-                          int64_t partition_id,
-                          int64_t segment_id,
-                          int64_t field_id) {
+GenRemoteJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
+                                int64_t build_id,
+                                int64_t index_version,
+                                int64_t collection_id,
+                                int64_t partition_id,
+                                int64_t segment_id,
+                                int64_t field_id) {
     return cm->GetRootPath() + "/" + std::string(JSON_KEY_INDEX_LOG_ROOT_PATH) +
            "/" +
            GenJsonKeyIndexPathIdentifier(build_id,
@@ -646,10 +655,21 @@ GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
-GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id) {
+GenNgramIndexPrefix(ChunkManagerPtr cm,
+                    int64_t build_id,
+                    int64_t index_version,
+                    int64_t segment_id,
+                    int64_t field_id,
+                    bool is_temp) {
     boost::filesystem::path prefix = cm->GetRootPath();
-    boost::filesystem::path path = std::string(JSON_KEY_INDEX_LOG_ROOT_PATH);
-    boost::filesystem::path path1 = std::to_string(build_id);
+
+    if (is_temp) {
+        prefix = prefix / TEMP;
+    }
+
+    boost::filesystem::path path = std::string(NGRAM_LOG_ROOT_PATH);
+    boost::filesystem::path path1 =
+        GenIndexPathIdentifier(build_id, index_version, segment_id, field_id);
     return (prefix / path / path1).string();
 }
 
@@ -670,20 +690,6 @@ GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
     boost::filesystem::path path = std::string(RAWDATA_ROOT_PATH);
     boost::filesystem::path path1 = std::to_string(segment_id);
     return (prefix / path / path1).string();
-}
-
-std::unique_ptr<DataCodec>
-DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
-                            const std::string& file,
-                            bool is_field_data) {
-    // TODO remove this Size() cost
-    auto fileSize = chunk_manager->Size(file);
-    auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-    chunk_manager->Read(file, buf.get(), fileSize);
-    auto res = DeserializeFileData(buf, fileSize, is_field_data);
-    res->SetData(buf);
-    // DataCodec must keep the buf alive for zero-copy usage, otherwise segmentation violation will occur
-    return res;
 }
 
 std::pair<std::string, size_t>
@@ -716,13 +722,27 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
 GetObjectData(ChunkManager* remote_chunk_manager,
-              const std::vector<std::string>& remote_files) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+              const std::vector<std::string>& remote_files,
+              milvus::ThreadPoolPriority priority,
+              bool is_field_data) {
+    auto& pool = ThreadPools::GetThreadPool(priority);
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
+
+    auto DownloadAndDeserialize = [&](ChunkManager* chunk_manager,
+                                      const std::string& file,
+                                      bool is_field_data) {
+        // TODO remove this Size() cost
+        auto fileSize = chunk_manager->Size(file);
+        auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
+        chunk_manager->Read(file, buf.get(), fileSize);
+        auto res = DeserializeFileData(buf, fileSize, is_field_data);
+        return res;
+    };
+
     for (auto& file : remote_files) {
         futures.emplace_back(pool.Submit(
-            DownloadAndDecodeRemoteFile, remote_chunk_manager, file, true));
+            DownloadAndDeserialize, remote_chunk_manager, file, is_field_data));
     }
     return futures;
 }
@@ -1006,7 +1026,7 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     for (const auto& data : data_array) {
         if (merged_data->IsNullable()) {
             merged_data->FillFieldData(
-                data->Data(), data->ValidData(), data->Length());
+                data->Data(), data->ValidData(), data->Length(), 0);
         } else {
             merged_data->FillFieldData(data->Data(), data->Length());
         }
@@ -1055,99 +1075,83 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
     for (auto& remote_chunk_files : remote_files) {
         AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
-
-        // find second last of / to get group_id
-        std::string path = remote_chunk_files[0];
-        size_t last_slash = path.find_last_of("/");
-        size_t second_last_slash = path.find_last_of("/", last_slash - 1);
-        int64_t group_id = std::stol(path.substr(
-            second_last_slash + 1, last_slash - second_last_slash - 1));
-
+        int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
         column_group_files[group_id] = remote_chunk_files;
     }
 
-    for (auto& [column_group_id, remote_chunk_files] : column_group_files) {
-        auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                      .GetArrowFileSystem();
-        // read first file to get path and column offset of the field id
-        auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs, remote_chunk_files[0]);
-        std::shared_ptr<milvus_storage::PackedFileMetadata> metadata =
-            file_reader->file_metadata();
+    std::vector<std::string> remote_chunk_files;
+    if (column_group_files.find(field_id) == column_group_files.end()) {
+        remote_chunk_files = column_group_files[DEFAULT_SHORT_COLUMN_GROUP_ID];
+    } else {
+        remote_chunk_files = column_group_files[field_id];
+    }
 
-        auto field_id_mapping = metadata->GetFieldIDMapping();
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
 
+    // set up channel for arrow reader
+    auto field_data_info = FieldDataInfo();
+    auto parallel_degree =
+        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+    field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
+
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+
+    for (auto& column_group_file : remote_chunk_files) {
+        // get all row groups for each file
+        std::vector<std::vector<int64_t>> row_group_lists;
+        auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+            fs, column_group_file);
+        auto field_id_mapping = reader->file_metadata()->GetFieldIDMapping();
         auto it = field_id_mapping.find(field_id);
         AssertInfo(it != field_id_mapping.end(),
                    "field id {} not found in field id mapping",
                    field_id);
         auto column_offset = it->second;
-        AssertInfo(column_offset.path_index < remote_files.size(),
-                   "column offset path index {} is out of range",
-                   column_offset.path_index);
-        if (column_offset.path_index != column_group_id) {
-            LOG_INFO("Skip group id {} since target field shall be in group {}",
-                     column_group_id,
-                     column_offset.path_index);
-            continue;
-        }
 
-        // set up channel for arrow reader
-        auto field_data_info = FieldDataInfo();
-        auto parallel_degree = static_cast<uint64_t>(
-            DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-        field_data_info.arrow_reader_channel->set_capacity(parallel_degree);
+        auto row_group_num =
+            reader->file_metadata()->GetRowGroupMetadataVector().size();
+        std::vector<int64_t> all_row_groups(row_group_num);
+        std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
+        row_group_lists.push_back(all_row_groups);
 
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+        // create a schema with only the field id
+        auto field_schema =
+            reader->schema()->field(column_offset.col_index)->Copy();
+        auto arrow_schema = arrow::schema({field_schema});
+        auto status = reader->Close();
+        AssertInfo(
+            status.ok(),
+            "failed to close file reader when get arrow schema from file: " +
+                column_group_file + " with error: " + status.ToString());
 
-        for (auto& column_group_file : remote_chunk_files) {
-            // get all row groups for each file
-            std::vector<std::vector<int64_t>> row_group_lists;
-            auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-                fs, column_group_file);
-            auto row_group_num =
-                reader->file_metadata()->GetRowGroupMetadataVector().size();
-            std::vector<int64_t> all_row_groups(row_group_num);
-            std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
-            row_group_lists.push_back(all_row_groups);
-
-            // create a schema with only the field id
-            auto field_schema =
-                file_reader->schema()->field(column_offset.col_index)->Copy();
-            auto arrow_schema = arrow::schema({field_schema});
-
-            // split row groups for parallel reading
-            auto strategy =
-                std::make_unique<segcore::ParallelDegreeSplitStrategy>(
-                    parallel_degree);
-            auto load_future = pool.Submit([&]() {
-                return LoadWithStrategy(
-                    std::vector<std::string>{column_group_file},
-                    field_data_info.arrow_reader_channel,
-                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                    std::move(strategy),
-                    row_group_lists,
-                    nullptr);
-            });
-            // read field data from channel
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (field_data_info.arrow_reader_channel->pop(r)) {
-                size_t num_rows = 0;
-                std::vector<std::shared_ptr<arrow::ChunkedArray>>
-                    chunked_arrays;
-                for (const auto& table : r->arrow_tables) {
-                    num_rows += table->num_rows();
-                    chunked_arrays.push_back(
-                        table->column(column_offset.col_index));
-                }
-                auto field_data = storage::CreateFieldData(
-                    data_type, field_schema->nullable(), dim, num_rows);
-                for (const auto& chunked_array : chunked_arrays) {
-                    field_data->FillFieldData(chunked_array);
-                }
-                field_data_list.push_back(field_data);
+        // split row groups for parallel reading
+        auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+            parallel_degree);
+        auto load_future = pool.Submit([&]() {
+            return LoadWithStrategy(std::vector<std::string>{column_group_file},
+                                    field_data_info.arrow_reader_channel,
+                                    DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                                    std::move(strategy),
+                                    row_group_lists,
+                                    nullptr);
+        });
+        // read field data from channel
+        std::shared_ptr<milvus::ArrowDataWrapper> r;
+        while (field_data_info.arrow_reader_channel->pop(r)) {
+            size_t num_rows = 0;
+            std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
+            for (const auto& table : r->arrow_tables) {
+                num_rows += table->num_rows();
+                chunked_arrays.push_back(
+                    table->column(column_offset.col_index));
             }
+            auto field_data = storage::CreateFieldData(
+                data_type, field_schema->nullable(), dim, num_rows);
+            for (const auto& chunked_array : chunked_arrays) {
+                field_data->FillFieldData(chunked_array);
+            }
+            field_data_list.push_back(field_data);
         }
     }
     return field_data_list;
@@ -1191,6 +1195,39 @@ CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
     }
 
     return field_datas;
+}
+
+int64_t
+ExtractGroupIdFromPath(const std::string& path) {
+    // find second last of / to get group_id
+    size_t last_slash = path.find_last_of("/");
+    size_t second_last_slash = path.find_last_of("/", last_slash - 1);
+    return std::stol(
+        path.substr(second_last_slash + 1, last_slash - second_last_slash - 1));
+}
+
+// if it is multi-field column group, read field id list from file metadata
+// if it is single-field column group, return the column group id
+milvus_storage::FieldIDList
+GetFieldIDList(FieldId column_group_id,
+               const std::string& filepath,
+               const std::shared_ptr<arrow::Schema>& arrow_schema,
+               milvus_storage::ArrowFileSystemPtr fs) {
+    milvus_storage::FieldIDList field_id_list;
+    if (column_group_id >= FieldId(START_USER_FIELDID)) {
+        field_id_list.Add(column_group_id.get());
+        return field_id_list;
+    }
+    auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
+        fs, filepath, arrow_schema);
+    field_id_list =
+        file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
+            column_group_id.get());
+    auto status = file_reader->Close();
+    AssertInfo(status.ok(),
+               "failed to close file reader when get field id list from {}",
+               filepath);
+    return field_id_list;
 }
 
 }  // namespace milvus::storage

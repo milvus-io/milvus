@@ -303,6 +303,10 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
         auto config = milvus::index::ParseConfigFromIndexParams(
             load_index_info->index_params);
+        auto load_priority_str =
+            config[milvus::LOAD_PRIORITY].get<std::string>();
+        auto priority_for_load = milvus::PriorityForLoad(load_priority_str);
+        config[milvus::LOAD_PRIORITY] = priority_for_load;
 
         // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
         // Use value_or(1) for unit test without setting this value
@@ -322,12 +326,14 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         milvus::tracer::SetRootSpan(span);
 
         LOG_INFO(
-            "[collection={}][segment={}][field={}][enable_mmap={}] load index "
+            "[collection={}][segment={}][field={}][enable_mmap={}][load_"
+            "priority={}] load index "
             "{}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
+            load_priority_str,
             load_index_info->index_id);
 
         // get index type
@@ -340,6 +346,28 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             AssertInfo(index_params.find("metric_type") != index_params.end(),
                        "metric type is empty for vector index");
             index_info.metric_type = index_params.at("metric_type");
+        }
+
+        if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
+            AssertInfo(index_params.find(milvus::index::MIN_GRAM) !=
+                           index_params.end(),
+                       "min_gram is empty for ngram index");
+            AssertInfo(index_params.find(milvus::index::MAX_GRAM) !=
+                           index_params.end(),
+                       "max_gram is empty for ngram index");
+
+            // get min_gram and max_gram and convert to uintptr_t
+            milvus::index::NgramParams ngram_params{};
+            ngram_params.loading_index = true;
+            ngram_params.min_gram =
+                std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                               config, milvus::index::MIN_GRAM)
+                               .value());
+            ngram_params.max_gram =
+                std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                               config, milvus::index::MAX_GRAM)
+                               .value());
+            index_info.ngram_params = std::make_optional(ngram_params);
         }
 
         // init file manager
@@ -368,45 +396,16 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             field_meta, index_meta, remote_chunk_manager);
         fileManagerContext.set_for_loading_index(true);
 
-        // TODO: JSON should be handled with cache layer
-        if (load_index_info->field_type == milvus::DataType::JSON) {
-            load_index_info->index =
-                milvus::index::IndexFactory::GetInstance().CreateIndex(
-                    index_info, fileManagerContext);
-            load_index_info->index->SetCellSize(load_index_info->index_size);
-            if (load_index_info->enable_mmap &&
-                load_index_info->index->IsMmapSupported()) {
-                AssertInfo(!load_index_info->mmap_dir_path.empty(),
-                           "mmap directory path is empty");
-                auto filepath =
-                    std::filesystem::path(load_index_info->mmap_dir_path) /
-                    "index_files" / std::to_string(load_index_info->index_id) /
-                    std::to_string(load_index_info->segment_id) /
-                    std::to_string(load_index_info->field_id);
+        // use cache layer to load vector/scalar index
+        std::unique_ptr<
+            milvus::cachinglayer::Translator<milvus::index::IndexBase>>
+            translator = std::make_unique<
+                milvus::segcore::storagev1translator::SealedIndexTranslator>(
+                index_info, load_index_info, ctx, fileManagerContext, config);
 
-                config[milvus::index::ENABLE_MMAP] = "true";
-                config[milvus::index::MMAP_FILE_PATH] = filepath.string();
-            }
-
-            LOG_DEBUG("load index with configs: {}", config.dump());
-            load_index_info->index->Load(ctx, config);
-        } else {
-            // use cache layer to load vector/scalar index
-            std::unique_ptr<
-                milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-                translator =
-                    std::make_unique<milvus::segcore::storagev1translator::
-                                         SealedIndexTranslator>(
-                        index_info,
-                        load_index_info,
-                        ctx,
-                        fileManagerContext,
-                        config);
-
-            load_index_info->cache_index =
-                milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                    std::move(translator));
-        }
+        load_index_info->cache_index =
+            milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+                std::move(translator));
         span->End();
         milvus::tracer::CloseRootSpan();
 
@@ -506,7 +505,10 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         auto index_file_path_prefix =
             milvus::storage::GenIndexPathPrefix(local_chunk_manager,
                                                 load_index_info->index_build_id,
-                                                load_index_info->index_version);
+                                                load_index_info->index_version,
+                                                load_index_info->segment_id,
+                                                load_index_info->field_id,
+                                                false);
         local_chunk_manager->RemoveDir(index_file_path_prefix);
         auto status = CStatus();
         status.error_code = milvus::Success;

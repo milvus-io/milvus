@@ -67,13 +67,12 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 
 // Build builds a streaming node server.
 func (b *ServerBuilder) Build() *Server {
-	resource.Apply(
+	resource.Init(
 		resource.OptETCD(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
 		resource.OptMixCoordClient(b.mixc),
 		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(b.kv)),
 	)
-	resource.Done()
 	s := &Server{
 		session:    b.session,
 		grpcServer: b.grpcServer,

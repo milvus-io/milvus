@@ -17,33 +17,46 @@
 package storagecommon
 
 import (
-	"github.com/samber/lo"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+const (
+	// column group id for short columns
+	DefaultShortColumnGroupID = 0
 )
 
 type ColumnGroup struct {
+	GroupID typeutil.UniqueID
 	Columns []int // column indices
 }
 
-// split by row average size
-func SplitByFieldSize(fieldBinlogs []*datapb.FieldBinlog, splitThresHold int64) []ColumnGroup {
+// SplitBySchema is a generic function to split columns by schema based on data type
+func SplitBySchema(fields []*schemapb.FieldSchema) []ColumnGroup {
 	groups := make([]ColumnGroup, 0)
-	shortColumnGroup := ColumnGroup{Columns: make([]int, 0)}
-	for i, fieldBinlog := range fieldBinlogs {
-		if len(fieldBinlog.Binlogs) == 0 {
-			continue
-		}
-		totalSize := lo.SumBy(fieldBinlog.Binlogs, func(b *datapb.Binlog) int64 { return b.LogSize })
-		totalNumRows := lo.SumBy(fieldBinlog.Binlogs, func(b *datapb.Binlog) int64 { return b.EntriesNum })
-		if totalSize/totalNumRows >= splitThresHold {
-			groups = append(groups, ColumnGroup{Columns: []int{i}})
+	shortColumnGroup := ColumnGroup{Columns: make([]int, 0), GroupID: DefaultShortColumnGroupID}
+	for i, field := range fields {
+		if IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
+			groups = append(groups, ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
 		} else {
 			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
 		}
 	}
 	if len(shortColumnGroup.Columns) > 0 {
-		groups = append(groups, shortColumnGroup)
+		groups = append([]ColumnGroup{shortColumnGroup}, groups...)
 	}
 	return groups
+}
+
+func IsVectorDataType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector,
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_SparseFloatVector:
+		return true
+	}
+	return false
 }
