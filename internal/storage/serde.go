@@ -547,6 +547,11 @@ type DeserializeReaderImpl[T any] struct {
 // Iterate to next value, return error or EOF if no more value.
 func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 	if deser.pos == 0 || deser.pos >= len(deser.values) {
+		// Release the previous record.
+		if deser.rec != nil {
+			deser.rec.Release()
+		}
+
 		r, err := deser.rr.Next()
 		if err != nil {
 			return nil, err
@@ -566,6 +571,9 @@ func (deser *DeserializeReaderImpl[T]) NextValue() (*T, error) {
 }
 
 func (deser *DeserializeReaderImpl[T]) Close() error {
+	if deser.rec != nil {
+		deser.rec.Release()
+	}
 	return deser.rr.Close()
 }
 
