@@ -17,6 +17,7 @@
 package metricsinfo
 
 import (
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -63,6 +64,19 @@ type QueryNodeQuotaMetrics struct {
 	GrowingSegmentsSize int64
 	Effect              NodeEffect
 	DeleteBufferInfo    DeleteBufferInfo
+	StreamingQuota      *StreamingQuotaMetrics
+}
+
+// StreamingQuotaMetrics contains the metrics of streaming node.
+// Only used in queryNode embedded in streaming node.
+type StreamingQuotaMetrics struct {
+	WALs []WALMetrics
+}
+
+// WALMetrics contains the metrics of wal.
+type WALMetrics struct {
+	Channel          types.ChannelID    // ChannelID is the unique identifier of a pchannel.
+	RecoveryTimeTick typeutil.Timestamp // current recovery
 }
 
 type DeleteBufferInfo struct {
