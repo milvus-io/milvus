@@ -20,6 +20,7 @@
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "log/Log.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
@@ -93,6 +94,14 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                                           : 1;
             search_info.strict_group_size_ =
                 query_info_proto.strict_group_size();
+            if (!query_info_proto.json_path().empty()) {
+                search_info.json_path_ = query_info_proto.json_path();
+            }
+            if (query_info_proto.json_cast_type() !=
+                milvus::proto::schema::DataType::None) {
+                search_info.json_cast_type_ = static_cast<milvus::DataType>(
+                    query_info_proto.json_cast_type());
+            }
         }
 
         if (query_info_proto.has_search_iterator_v2_info()) {
