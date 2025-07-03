@@ -321,7 +321,7 @@ func (jm *statsJobManager) SubmitStatsTask(originSegmentID, targetSegmentID int6
 	}
 	if err = jm.mt.statsTaskMeta.AddStatsTask(t); err != nil {
 		if errors.Is(err, merr.ErrTaskDuplicate) {
-			log.RatedInfo(10, "stats task already exists", zap.Int64("taskID", taskID),
+			log.Ctx(jm.ctx).WithRateGroup("job_manager", 1, 60).RatedInfo(10, "stats task already exists", zap.Int64("taskID", taskID),
 				zap.Int64("collectionID", originSegment.GetCollectionID()),
 				zap.Int64("segmentID", originSegment.GetID()))
 			return nil
