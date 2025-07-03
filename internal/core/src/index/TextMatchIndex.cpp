@@ -182,15 +182,9 @@ TextMatchIndex::AddTextSealed(const std::string& text,
                               int64_t offset) {
     if (!valid) {
         AddNullSealed(offset);
-        if (shouldTriggerCommit()) {
-            Commit();
-        }
         return;
     }
     wrapper_->add_data(&text, 1, offset);
-    if (shouldTriggerCommit()) {
-        Commit();
-    }
 }
 
 // Add null for sealed segment
