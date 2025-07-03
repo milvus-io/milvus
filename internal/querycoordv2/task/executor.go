@@ -420,6 +420,7 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		task,
 		action,
 		collectionInfo.GetSchema(),
+		collectionInfo.GetProperties(),
 		loadMeta,
 		dmChannel,
 		indexInfo,
