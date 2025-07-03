@@ -841,6 +841,7 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/pull/43064 change drop alias restraint")
     def test_milvus_client_drop_collection_invalid_collection_name(self, name):
         """
         target: test fast create collection normal case
