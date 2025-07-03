@@ -39,6 +39,11 @@
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
 
+#define SIMDJSON_CHECK_ERROR(result)               \
+    do {                                           \
+        if ((result).error() != simdjson::SUCCESS) \
+            return (result).error();               \
+    } while (0)
 namespace milvus {
 
 bool
@@ -269,6 +274,24 @@ class Json {
         }
 
         return doc().at_pointer(pointer).get<T>();
+    }
+
+    value_result<std::string>
+    at_string_any(std::string_view pointer) const {
+        if (data_.empty()) {
+            return std::string{};
+        }
+
+        auto doc_res = doc();
+        SIMDJSON_CHECK_ERROR(doc_res);
+
+        auto el_res = doc_res.value().at_pointer(pointer);
+        SIMDJSON_CHECK_ERROR(el_res);
+
+        auto json_str = simdjson::to_json_string(el_res.value());
+        SIMDJSON_CHECK_ERROR(json_str);
+
+        return std::string{json_str.value()};
     }
 
     template <typename T>
