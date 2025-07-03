@@ -115,15 +115,15 @@ func (s *InsertDataSuite) TestInsertData() {
 	s.Run("init by New", func() {
 		s.True(s.iDataEmpty.IsEmpty())
 		s.Equal(0, s.iDataEmpty.GetRowNum())
-		s.Equal(32, s.iDataEmpty.GetMemorySize())
+		s.Equal(33, s.iDataEmpty.GetMemorySize())
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(199, s.iDataOneRow.GetMemorySize())
+		s.Equal(240, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(364, s.iDataTwoRows.GetMemorySize())
+		s.Equal(433, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -153,6 +153,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 4)
 	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0)
 	s.Equal(s.iDataEmpty.Data[Int8VectorField].GetMemorySize(), 4)
+	s.Equal(s.iDataEmpty.Data[StructSubInt32Field].GetMemorySize(), 1)
+	s.Equal(s.iDataEmpty.Data[StructSubFloatVectorField].GetMemorySize(), 0)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 9)
 	s.Equal(s.iDataOneRow.Data[TimestampField].GetMemorySize(), 9)
@@ -172,6 +174,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetMemorySize(), 12)
 	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28)
 	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetMemorySize(), 8)
+	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetMemorySize(), 3*4+1)
+	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4)
 
 	s.Equal(s.iDataTwoRows.Data[RowIDField].GetMemorySize(), 17)
 	s.Equal(s.iDataTwoRows.Data[TimestampField].GetMemorySize(), 17)
@@ -190,6 +194,8 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[BFloat16VectorField].GetMemorySize(), 20)
 	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54)
 	s.Equal(s.iDataTwoRows.Data[Int8VectorField].GetMemorySize(), 12)
+	s.Equal(s.iDataTwoRows.Data[StructSubInt32Field].GetMemorySize(), 3*4+2*4+1)
+	s.Equal(s.iDataTwoRows.Data[StructSubFloatVectorField].GetMemorySize(), 3*4*2+4+2*4*2+4)
 }
 
 func (s *InsertDataSuite) TestGetRowSize() {
@@ -211,10 +217,21 @@ func (s *InsertDataSuite) TestGetRowSize() {
 	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetRowSize(0), 8)
 	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetRowSize(0), 24)
 	s.Equal(s.iDataOneRow.Data[Int8VectorField].GetRowSize(0), 4)
+	s.Equal(s.iDataOneRow.Data[StructSubInt32Field].GetRowSize(0), 3*4)
+	s.Equal(s.iDataOneRow.Data[StructSubFloatVectorField].GetRowSize(0), 3*4*2+4)
+}
+
+func GetFields(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
+	ret := make([]*schemapb.FieldSchema, 0, 100)
+	ret = append(ret, schema.GetFields()...)
+	for _, structField := range schema.GetStructArrayFields() {
+		ret = append(ret, structField.GetFields()...)
+	}
+	return ret
 }
 
 func (s *InsertDataSuite) TestGetDataType() {
-	for _, field := range s.schema.GetFields() {
+	for _, field := range GetFields(s.schema) {
 		fieldData, ok := s.iDataOneRow.Data[field.GetFieldID()]
 		s.True(ok)
 		s.Equal(field.GetDataType(), fieldData.GetDataType())
@@ -222,7 +239,7 @@ func (s *InsertDataSuite) TestGetDataType() {
 }
 
 func (s *InsertDataSuite) TestGetNullable() {
-	for _, field := range s.schema.GetFields() {
+	for _, field := range GetFields(s.schema) {
 		fieldData, ok := s.iDataOneRow.Data[field.GetFieldID()]
 		s.True(ok)
 		s.Equal(field.GetNullable(), fieldData.GetNullable())
@@ -235,7 +252,7 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.True(s.iDataEmpty.IsEmpty())
 	s.Equal(0, s.iDataEmpty.GetRowNum())
-	s.Equal(32, s.iDataEmpty.GetMemorySize())
+	s.Equal(33, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
 		RowIDField:             int64(3),
@@ -260,6 +277,17 @@ func (s *InsertDataSuite) SetupTest() {
 			},
 		},
 		JSONField: []byte(`{"batch":3}`),
+		StructSubInt32Field: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+			},
+		},
+		StructSubFloatVectorField: &schemapb.VectorField{
+			Dim: 2,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}},
+			},
+		},
 	}
 
 	s.iDataOneRow, err = NewInsertData(s.schema)
@@ -294,6 +322,17 @@ func (s *InsertDataSuite) SetupTest() {
 			},
 		},
 		JSONField: []byte(`{"batch":1}`),
+		StructSubInt32Field: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 2}},
+			},
+		},
+		StructSubFloatVectorField: &schemapb.VectorField{
+			Dim: 2,
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+			},
+		},
 	}
 
 	s.iDataTwoRows, err = NewInsertData(s.schema)

@@ -250,11 +250,12 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 	dcReq := &datapb.AlterCollectionRequest{
 		CollectionID: req.GetCollectionID(),
 		Schema: &schemapb.CollectionSchema{
-			Name:        colMeta.Name,
-			Description: colMeta.Description,
-			AutoID:      colMeta.AutoID,
-			Fields:      model.MarshalFieldModels(colMeta.Fields),
-			Functions:   model.MarshalFunctionModels(colMeta.Functions),
+			Name:              colMeta.Name,
+			Description:       colMeta.Description,
+			AutoID:            colMeta.AutoID,
+			Fields:            model.MarshalFieldModels(colMeta.Fields),
+			StructArrayFields: model.MarshalStructArrayFieldModels(colMeta.StructArrayFields),
+			Functions:         model.MarshalFunctionModels(colMeta.Functions),
 		},
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
