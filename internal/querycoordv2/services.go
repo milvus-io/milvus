@@ -224,6 +224,19 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return merr.Status(err), nil
 	}
 
+	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
+	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
+	defer func() {
+		if userSpecifiedReplicaMode {
+			log.Info("user specified the replica number in load request, load config changes won't be apply to the collection automatically")
+			collection := s.meta.GetCollection(ctx, req.GetCollectionID())
+			if collection != nil {
+				collection.IsUserSpecifiedReplicaMode = true
+			}
+			s.meta.CollectionManager.PutCollection(ctx, collection)
+		}
+	}()
+
 	// to be compatible with old sdk, which set replica=1 if replica is not specified
 	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
 	if req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 {
@@ -376,6 +389,19 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		}
 		return merr.Status(err), nil
 	}
+
+	// if user specified the replica number in load request, load config changes won't be apply to the collection automatically
+	userSpecifiedReplicaMode := req.GetReplicaNumber() > 0
+	defer func() {
+		if userSpecifiedReplicaMode {
+			log.Info("user specified the replica number in load request, load config changes won't be apply to the collection automatically")
+			collection := s.meta.GetCollection(ctx, req.GetCollectionID())
+			if collection != nil {
+				collection.IsUserSpecifiedReplicaMode = true
+			}
+			s.meta.CollectionManager.PutCollection(ctx, collection)
+		}
+	}()
 
 	// to be compatible with old sdk, which set replica=1 if replica is not specified
 	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info

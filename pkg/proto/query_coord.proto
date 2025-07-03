@@ -681,6 +681,7 @@ message CollectionLoadInfo {
     int32 recover_times = 7;
     repeated int64 load_fields = 8;
     int64 dbID= 9;
+    bool is_user_specified_replica_mode = 10;
 }
 
 message PartitionLoadInfo {
