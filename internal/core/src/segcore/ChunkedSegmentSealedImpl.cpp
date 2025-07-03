@@ -1184,7 +1184,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         if (iter != fields_.end()) {
             iter->second->BulkRawStringAt(
                 [&](std::string_view value, size_t offset, bool is_valid) {
-                    index->AddText(std::string(value), is_valid, offset);
+                    index->AddTextSealed(std::string(value), is_valid, offset);
                 });
         } else {  // fetch raw data from index.
             auto field_index_iter = scalar_indexings_.find(field_id);
@@ -1205,9 +1205,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             for (size_t i = 0; i < n; i++) {
                 auto raw = impl->Reverse_Lookup(i);
                 if (!raw.has_value()) {
-                    index->AddNull(i);
+                    index->AddNullSealed(i);
                 }
-                index->AddText(raw.value(), true, i);
+                index->AddTextSealed(raw.value(), true, i);
             }
         }
     }

@@ -34,6 +34,7 @@ TextMatchIndex::TextMatchIndex(int64_t commit_interval_in_ms,
         ,
         tokenizer_name,
         analyzer_params);
+    set_is_growing(true);
 }
 
 TextMatchIndex::TextMatchIndex(const std::string& path,
@@ -152,7 +153,6 @@ TextMatchIndex::Load(const Config& config) {
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         auto index_valid_data = binary_set.GetByName("index_null_offset");
-        folly::SharedMutex::WriteHolder lock(mutex_);
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
         memcpy(null_offset_.data(),
                index_valid_data->data.get(),
@@ -175,12 +175,13 @@ TextMatchIndex::Load(const Config& config) {
     }
 }
 
+// Add text for sealed segment
 void
-TextMatchIndex::AddText(const std::string& text,
-                        const bool valid,
-                        int64_t offset) {
+TextMatchIndex::AddTextSealed(const std::string& text,
+                              const bool valid,
+                              int64_t offset) {
     if (!valid) {
-        AddNull(offset);
+        AddNullSealed(offset);
         if (shouldTriggerCommit()) {
             Commit();
         }
@@ -192,22 +193,21 @@ TextMatchIndex::AddText(const std::string& text,
     }
 }
 
+// Add null for sealed segment
 void
-TextMatchIndex::AddNull(int64_t offset) {
-    {
-        folly::SharedMutex::WriteHolder lock(mutex_);
-        null_offset_.push_back(offset);
-    }
+TextMatchIndex::AddNullSealed(int64_t offset) {
+    null_offset_.push_back(offset);
     // still need to add null to make offset is correct
     std::string empty = "";
     wrapper_->add_array_data(&empty, 0, offset);
 }
 
+// Add texts for growing segment
 void
-TextMatchIndex::AddTexts(size_t n,
-                         const std::string* texts,
-                         const bool* valids,
-                         int64_t offset_begin) {
+TextMatchIndex::AddTextsGrowing(size_t n,
+                                const std::string* texts,
+                                const bool* valids,
+                                int64_t offset_begin) {
     if (valids != nullptr) {
         for (int i = 0; i < n; i++) {
             auto offset = i + offset_begin;

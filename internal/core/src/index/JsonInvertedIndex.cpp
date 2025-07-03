@@ -56,10 +56,7 @@ JsonInvertedIndex<T>::build_index_for_json(
         for (int64_t i = 0; i < n; i++) {
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (this->schema_.nullable() && !data->is_valid(i)) {
-                {
-                    folly::SharedMutex::WriteHolder lock(this->mutex_);
-                    this->null_offset_.push_back(offset);
-                }
+                this->null_offset_.push_back(offset);
                 this->wrapper_->template add_array_data<T>(
                     nullptr, 0, offset++);
                 continue;
