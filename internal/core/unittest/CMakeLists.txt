@@ -108,6 +108,7 @@ set(MILVUS_TEST_FILES
         test_json_flat_index.cpp
         test_vector_array.cpp
         test_ngram_query.cpp
+        test_group_by_json.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )
