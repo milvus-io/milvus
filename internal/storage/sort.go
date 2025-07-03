@@ -261,6 +261,14 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	}
 
 	rb := NewRecordBuilder(schema)
+	writeRecord := func() error {
+		rec := rb.Build()
+		defer rec.Release()
+		if rec.Len() > 0 {
+			return rw.Write(rec)
+		}
+		return nil
+	}
 
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
@@ -269,7 +277,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		//	small batch size will cause write performance degradation. To work around this issue, we accumulate
 		//	records and write them in batches. This requires additional memory copy.
 		if rb.GetSize() >= batchSize {
-			if err := rw.Write(rb.Build()); err != nil {
+			if err := writeRecord(); err != nil {
 				return 0, err
 			}
 		}
