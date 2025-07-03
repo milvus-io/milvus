@@ -42,11 +42,22 @@ func GetLocalAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
 	// so make a copy before appending for local wal to keep the consistency.
 }
 
+// GetLocalWALMetrics returns all the metrics of current wal manager.
+func GetLocalWALMetrics() (*types.StreamingNodeMetrics, error) {
+	if !paramtable.IsLocalComponentEnabled(typeutil.StreamingNodeRole) {
+		return nil, ErrNoStreamingNodeDeployed
+	}
+	return registry.Get().Metrics()
+}
+
 // WALManager is a hint type for wal manager at streaming node.
 type WALManager interface {
 	// GetAvailableWAL returns a available wal instance for the channel.
 	// Return nil if the wal instance is not found.
 	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
+
+	// Metrics return all the metrics of current wal manager.
+	Metrics() (*types.StreamingNodeMetrics, error)
 }
 
 // localWAL is a hint type for local wal.

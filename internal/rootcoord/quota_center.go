@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -568,6 +569,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	}
 	for oldQN := range oldQueryNodes {
 		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(oldQN, 10))
+		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.StreamingNodeRole, strconv.FormatInt(oldQN, 10))
 	}
 	return nil
 }
@@ -968,6 +970,24 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 			delay := t1.Sub(t2)
 			updateCollectionDelay(delay, metric.Effect.CollectionIDs)
 			metrics.RootCoordTtDelay.WithLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(delay.Milliseconds()))
+		}
+		if metric.StreamingQuota != nil {
+			// If the query node is embedded in streaming node,
+			// we also need to use the wal's metrics to calculate the delay.
+			var maxDelay time.Duration
+			for _, wal := range metric.StreamingQuota.WALs {
+				t2, _ := tsoutil.ParseTS(wal.RecoveryTimeTick)
+				delay := t1.Sub(t2)
+				if maxDelay < delay {
+					maxDelay = delay
+				}
+				// Update all collections work on this pchannel.
+				pchannelInfo := channel.StaticPChannelStatsManager.MustGet().GetPChannelStats(wal.Channel)
+				updateCollectionDelay(delay, pchannelInfo.CollectionIDs())
+			}
+			if maxDelay > 0 {
+				metrics.RootCoordTtDelay.WithLabelValues(typeutil.StreamingNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(maxDelay.Milliseconds()))
+			}
 		}
 	}
 	for nodeID, metric := range q.dataNodeMetrics {

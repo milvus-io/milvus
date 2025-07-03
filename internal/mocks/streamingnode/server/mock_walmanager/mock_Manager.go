@@ -56,63 +56,6 @@ func (_c *MockManager_Close_Call) RunAndReturn(run func()) *MockManager_Close_Ca
 	return _c
 }
 
-// GetAllAvailableChannels provides a mock function with no fields
-func (_m *MockManager) GetAllAvailableChannels() ([]types.PChannelInfo, error) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetAllAvailableChannels")
-	}
-
-	var r0 []types.PChannelInfo
-	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]types.PChannelInfo, error)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() []types.PChannelInfo); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]types.PChannelInfo)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockManager_GetAllAvailableChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllAvailableChannels'
-type MockManager_GetAllAvailableChannels_Call struct {
-	*mock.Call
-}
-
-// GetAllAvailableChannels is a helper method to define mock.On call
-func (_e *MockManager_Expecter) GetAllAvailableChannels() *MockManager_GetAllAvailableChannels_Call {
-	return &MockManager_GetAllAvailableChannels_Call{Call: _e.mock.On("GetAllAvailableChannels")}
-}
-
-func (_c *MockManager_GetAllAvailableChannels_Call) Run(run func()) *MockManager_GetAllAvailableChannels_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockManager_GetAllAvailableChannels_Call) Return(_a0 []types.PChannelInfo, _a1 error) *MockManager_GetAllAvailableChannels_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockManager_GetAllAvailableChannels_Call) RunAndReturn(run func() ([]types.PChannelInfo, error)) *MockManager_GetAllAvailableChannels_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetAvailableWAL provides a mock function with given fields: channel
 func (_m *MockManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
 	ret := _m.Called(channel)
@@ -167,6 +110,63 @@ func (_c *MockManager_GetAvailableWAL_Call) Return(_a0 wal.WAL, _a1 error) *Mock
 }
 
 func (_c *MockManager_GetAvailableWAL_Call) RunAndReturn(run func(types.PChannelInfo) (wal.WAL, error)) *MockManager_GetAvailableWAL_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Metrics provides a mock function with no fields
+func (_m *MockManager) Metrics() (*types.StreamingNodeMetrics, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Metrics")
+	}
+
+	var r0 *types.StreamingNodeMetrics
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (*types.StreamingNodeMetrics, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() *types.StreamingNodeMetrics); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*types.StreamingNodeMetrics)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockManager_Metrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Metrics'
+type MockManager_Metrics_Call struct {
+	*mock.Call
+}
+
+// Metrics is a helper method to define mock.On call
+func (_e *MockManager_Expecter) Metrics() *MockManager_Metrics_Call {
+	return &MockManager_Metrics_Call{Call: _e.mock.On("Metrics")}
+}
+
+func (_c *MockManager_Metrics_Call) Run(run func()) *MockManager_Metrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockManager_Metrics_Call) Return(_a0 *types.StreamingNodeMetrics, _a1 error) *MockManager_Metrics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockManager_Metrics_Call) RunAndReturn(run func() (*types.StreamingNodeMetrics, error)) *MockManager_Metrics_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -38,12 +38,6 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}
 	indices := make([]*index, 0)
 
-	defer func() {
-		for _, r := range records {
-			r.Release()
-		}
-	}()
-
 	for _, r := range rr {
 		for {
 			rec, err := r.Next()
