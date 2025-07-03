@@ -17,6 +17,7 @@
 #pragma once
 
 #include <optional>
+#include <type_traits>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/QueryInfo.h"
@@ -37,39 +38,97 @@ class DataGetter {
  public:
     virtual std::optional<T>
     Get(int64_t idx) const = 0;
+
+ protected:
+    std::optional<std::string> json_path_;
 };
 
-template <typename T>
-class GrowingDataGetter : public DataGetter<T> {
+template <typename OutputType, typename InnerRawType>
+class GrowingDataGetter : public DataGetter<OutputType> {
  public:
     GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
-                      FieldId fieldId) {
-        growing_raw_data_ = segment.get_insert_record().get_data<T>(fieldId);
+                      FieldId fieldId,
+                      std::optional<std::string> json_path){
+        growing_raw_data_ = segment.get_insert_record().get_data<InnerRawType>(fieldId);
         valid_data_ = segment.get_insert_record().is_valid_data_exist(fieldId)
                           ? segment.get_insert_record().get_valid_data(fieldId)
                           : nullptr;
+        this->json_path_ = json_path;
     }
 
-    GrowingDataGetter(const GrowingDataGetter<T>& other)
+    GrowingDataGetter(const GrowingDataGetter<OutputType, InnerRawType>& other)
         : growing_raw_data_(other.growing_raw_data_) {
     }
 
-    std::optional<T>
+    std::optional<OutputType>
     Get(int64_t idx) const {
         if (valid_data_ && !valid_data_->is_valid(idx)) {
             return std::nullopt;
         }
-        if constexpr (std::is_same_v<std::string, T>) {
+        if constexpr (std::is_same_v<InnerRawType, std::string>) {
             if (growing_raw_data_->is_mmap()) {
                 // when scalar data is mapped, it's needed to get the scalar data view and reconstruct string from the view
-                return T(growing_raw_data_->view_element(idx));
+                return std::optional<std::string>(
+                    growing_raw_data_->view_element(idx));
             }
+        } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
+            auto parse_json_doc =
+                [&](auto& json_val) -> std::optional<OutputType> {
+                auto doc = json_val.doc();
+                if (doc.error() != simdjson::SUCCESS)
+                    return std::nullopt;
+                auto doc_val = doc.at_path(this->json_path_.value());
+                if (doc_val.error() != simdjson::SUCCESS)
+                    return std::nullopt;
+                if constexpr (std::is_same_v<OutputType, bool>) {
+                    return doc_val.get_bool();
+                } else if constexpr (std::is_same_v<OutputType, int8_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return static_cast<int8_t>(result.value());
+                } else if constexpr (std::is_same_v<OutputType, int16_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return static_cast<int16_t>(result.value());
+                } else if constexpr (std::is_same_v<OutputType, int32_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return static_cast<int32_t>(result.value());
+                } else if constexpr (std::is_same_v<OutputType, int64_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return result.value();
+                } else if constexpr (std::is_same_v<OutputType, std::string>) {
+                    auto str_result = doc_val.get_string();
+                    if (str_result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return std::string(str_result.value());
+                }
+                return std::nullopt;
+            };
+            if (growing_raw_data_->is_mmap()) {
+                auto json_val_view = growing_raw_data_->view_element(idx);
+                milvus::Json json_val(json_val_view);
+                return parse_json_doc(json_val);
+            } else {
+                auto json_val = growing_raw_data_->operator[](idx);
+                return parse_json_doc(json_val);
+            }
+        } else {
+            static_assert(std::is_same_v<OutputType, InnerRawType>,
+                          "OutputType and InnerRawType must be the same for "
+                          "non-json field group by");
+            return std::optional<OutputType>(
+                static_cast<OutputType>(growing_raw_data_->operator[](idx)));
         }
-        return growing_raw_data_->operator[](idx);
     }
 
  protected:
-    const segcore::ConcurrentVector<T>* growing_raw_data_;
+    const segcore::ConcurrentVector<InnerRawType>* growing_raw_data_;
     segcore::ThreadSafeValidDataPtr valid_data_;
 };
 
@@ -86,7 +145,9 @@ class SealedDataGetter : public DataGetter<T> {
         pw_map_;
     // Getting str_view from segment is cpu-costly, this map is to cache this view for performance
  public:
-    SealedDataGetter(const segcore::SegmentSealed& segment, FieldId& field_id)
+    SealedDataGetter(const segcore::SegmentSealed& segment,
+                     FieldId& field_id,
+                     std::optional<std::string> json_path)
         : segment_(segment), field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
         if (!from_data_ && !segment_.HasIndex(field_id_)) {
@@ -97,6 +158,7 @@ class SealedDataGetter : public DataGetter<T> {
                 "index or data",
                 segment_.get_segment_id());
         }
+        this->json_path_ = json_path;
     }
 
     std::optional<T>
@@ -119,6 +181,52 @@ class SealedDataGetter : public DataGetter<T> {
                 }
                 std::string_view str_val_view = str_chunk_view[inner_offset];
                 return std::string(str_val_view.data(), str_val_view.length());
+            } else if constexpr (std::is_same_v<T, milvus::Json>) {
+                auto pw =
+                    segment_.chunk_view<milvus::Json>(field_id_, chunk_id);
+                auto& [json_chunk_view, valid_data] = pw.get();
+                if (!valid_data.empty() && !valid_data[inner_offset]) {
+                    return std::nullopt;
+                }
+                auto& json_val = json_chunk_view[inner_offset];
+                auto doc = json_val.doc();
+                if (doc.error() != simdjson::SUCCESS) {
+                    return std::nullopt;
+                }
+                auto doc_val = doc.at_path(this->json_path_.value());
+                if (doc_val.error() != simdjson::SUCCESS) {
+                    return std::nullopt;
+                }
+                if constexpr (std::is_same_v<T, bool>) {
+                    return doc_val.get_bool();
+                } else if constexpr (std::is_same_v<T, int8_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return static_cast<int8_t>(result.value());
+                } else if constexpr (std::is_same_v<T, int16_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return static_cast<int16_t>(result.value());
+                } else if constexpr (std::is_same_v<T, int32_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return static_cast<int32_t>(result.value());
+                } else if constexpr (std::is_same_v<T, int64_t>) {
+                    auto result = doc_val.get_int64();
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return result.value();
+                } else if constexpr (std::is_same_v<T, std::string>) {
+                    auto str_result = doc_val.get_string();
+                    if (str_result.error() != simdjson::SUCCESS) {
+                        return std::nullopt;
+                    }
+                    return std::string(str_result.value());
+                }
+                return std::nullopt;
             } else {
                 auto pw = segment_.chunk_data<T>(field_id_, chunk_id);
                 auto& span = pw.get();
@@ -139,17 +247,19 @@ class SealedDataGetter : public DataGetter<T> {
     }
 };
 
-template <typename T>
-static const std::shared_ptr<DataGetter<T>>
+template <typename OutputType, typename InnerRawType>
+static const std::shared_ptr<DataGetter<OutputType>>
 GetDataGetter(const segcore::SegmentInternalInterface& segment,
-              FieldId fieldId) {
+              FieldId fieldId,
+              std::optional<std::string> json_path = std::nullopt) {
     if (const auto* growing_segment =
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
-        return std::make_shared<GrowingDataGetter<T>>(*growing_segment,
-                                                      fieldId);
+        return std::make_shared<GrowingDataGetter<OutputType, InnerRawType>>(
+            *growing_segment, fieldId, json_path);
     } else if (const auto* sealed_segment =
                    dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
-        return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
+        return std::make_shared<SealedDataGetter<OutputType>>(
+            *sealed_segment, fieldId, json_path);
     } else {
         PanicInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "

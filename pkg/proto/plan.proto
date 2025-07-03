@@ -77,6 +77,8 @@ message QueryInfo {
   int64 query_field_id =11;
   string hints = 12;
   optional SearchIteratorV2Info search_iterator_v2_info = 13;
+  string json_path = 14;
+  schema.DataType json_cast_type = 15;
 }
 
 message ColumnInfo {

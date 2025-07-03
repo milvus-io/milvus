@@ -39,7 +39,8 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
     topk_per_nq_prefix_sum.reserve(iterators.size() + 1);
     switch (data_type) {
         case DataType::INT8: {
-            auto dataGetter = GetDataGetter<int8_t>(segment, group_by_field_id);
+            auto dataGetter =
+                GetDataGetter<int8_t, int8_t>(segment, group_by_field_id);
             GroupIteratorsByType<int8_t>(iterators,
                                          search_info.topk_,
                                          search_info.group_size_,
@@ -54,7 +55,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::INT16: {
             auto dataGetter =
-                GetDataGetter<int16_t>(segment, group_by_field_id);
+                GetDataGetter<int16_t, int16_t>(segment, group_by_field_id);
             GroupIteratorsByType<int16_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -69,7 +70,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::INT32: {
             auto dataGetter =
-                GetDataGetter<int32_t>(segment, group_by_field_id);
+                GetDataGetter<int32_t, int32_t>(segment, group_by_field_id);
             GroupIteratorsByType<int32_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -84,7 +85,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
         }
         case DataType::INT64: {
             auto dataGetter =
-                GetDataGetter<int64_t>(segment, group_by_field_id);
+                GetDataGetter<int64_t, int64_t>(segment, group_by_field_id);
             GroupIteratorsByType<int64_t>(iterators,
                                           search_info.topk_,
                                           search_info.group_size_,
@@ -98,7 +99,8 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             break;
         }
         case DataType::BOOL: {
-            auto dataGetter = GetDataGetter<bool>(segment, group_by_field_id);
+            auto dataGetter =
+                GetDataGetter<bool, bool>(segment, group_by_field_id);
             GroupIteratorsByType<bool>(iterators,
                                        search_info.topk_,
                                        search_info.group_size_,
@@ -112,8 +114,8 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             break;
         }
         case DataType::VARCHAR: {
-            auto dataGetter =
-                GetDataGetter<std::string>(segment, group_by_field_id);
+            auto dataGetter = GetDataGetter<std::string, std::string>(
+                segment, group_by_field_id);
             GroupIteratorsByType<std::string>(iterators,
                                               search_info.topk_,
                                               search_info.group_size_,
@@ -124,6 +126,115 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
                                               distances,
                                               search_info.metric_type_,
                                               topk_per_nq_prefix_sum);
+            break;
+        }
+        case DataType::JSON: {
+            AssertInfo(search_info.json_path_.has_value(),
+                       "json_path is required for json field when doing "
+                       "search_group_by");
+            AssertInfo(search_info.json_cast_type_.has_value(),
+                       "json_cast_type is required for json field when doing "
+                       "search_group_by");
+            switch (search_info.json_cast_type_.value()) {
+                case DataType::BOOL: {
+                    auto data_getter = GetDataGetter<bool, milvus::Json>(
+                        segment, group_by_field_id, search_info.json_path_);
+                    GroupIteratorsByType<bool>(iterators,
+                                               search_info.topk_,
+                                               search_info.group_size_,
+                                               search_info.strict_group_size_,
+                                               *data_getter,
+                                               group_by_values,
+                                               seg_offsets,
+                                               distances,
+                                               search_info.metric_type_,
+                                               topk_per_nq_prefix_sum);
+                    break;
+                }
+                case DataType::INT8: {
+                    auto data_getter = GetDataGetter<int8_t, milvus::Json>(
+                        segment, group_by_field_id, search_info.json_path_);
+                    GroupIteratorsByType<int8_t>(iterators,
+                                                 search_info.topk_,
+                                                 search_info.group_size_,
+                                                 search_info.strict_group_size_,
+                                                 *data_getter,
+                                                 group_by_values,
+                                                 seg_offsets,
+                                                 distances,
+                                                 search_info.metric_type_,
+                                                 topk_per_nq_prefix_sum);
+                    break;
+                }
+                case DataType::INT16: {
+                    auto data_getter = GetDataGetter<int16_t, milvus::Json>(
+                        segment, group_by_field_id, search_info.json_path_);
+                    GroupIteratorsByType<int16_t>(
+                        iterators,
+                        search_info.topk_,
+                        search_info.group_size_,
+                        search_info.strict_group_size_,
+                        *data_getter,
+                        group_by_values,
+                        seg_offsets,
+                        distances,
+                        search_info.metric_type_,
+                        topk_per_nq_prefix_sum);
+                    break;
+                }
+                case DataType::INT32: {
+                    auto data_getter = GetDataGetter<int32_t, milvus::Json>(
+                        segment, group_by_field_id, search_info.json_path_);
+                    GroupIteratorsByType<int32_t>(
+                        iterators,
+                        search_info.topk_,
+                        search_info.group_size_,
+                        search_info.strict_group_size_,
+                        *data_getter,
+                        group_by_values,
+                        seg_offsets,
+                        distances,
+                        search_info.metric_type_,
+                        topk_per_nq_prefix_sum);
+                    break;
+                }
+                case DataType::INT64: {
+                    auto data_getter = GetDataGetter<int64_t, milvus::Json>(
+                        segment, group_by_field_id, search_info.json_path_);
+                    GroupIteratorsByType<int64_t>(
+                        iterators,
+                        search_info.topk_,
+                        search_info.group_size_,
+                        search_info.strict_group_size_,
+                        *data_getter,
+                        group_by_values,
+                        seg_offsets,
+                        distances,
+                        search_info.metric_type_,
+                        topk_per_nq_prefix_sum);
+                    break;
+                }
+                case DataType::VARCHAR: {
+                    auto data_getter = GetDataGetter<std::string, milvus::Json>(
+                        segment, group_by_field_id, search_info.json_path_);
+                    GroupIteratorsByType<std::string>(
+                        iterators,
+                        search_info.topk_,
+                        search_info.group_size_,
+                        search_info.strict_group_size_,
+                        *data_getter,
+                        group_by_values,
+                        seg_offsets,
+                        distances,
+                        search_info.metric_type_,
+                        topk_per_nq_prefix_sum);
+                    break;
+                }
+                default: {
+                    PanicInfo(Unsupported,
+                              "unsupported json cast type for search group by");
+                }
+            }
             break;
         }
         default: {
