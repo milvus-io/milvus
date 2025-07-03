@@ -359,8 +359,12 @@ func (mr *MilvusRoles) Run() {
 	tracer.Init()
 
 	// Initialize streaming service if enabled.
-	streaming.Init()
-	defer streaming.Release()
+
+	if mr.ServerType == typeutil.StandaloneRole || !mr.EnableDataNode {
+		// only datanode does not init streaming service
+		streaming.Init()
+		defer streaming.Release()
+	}
 
 	enableComponents := []bool{
 		mr.EnableProxy,
