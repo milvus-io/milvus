@@ -909,7 +909,8 @@ class TestInsertOperation(TestcaseBase):
             cf.gen_string_field(default_value="abc", enable_partition_key=enable_partition_key, nullable=True),
             cf.gen_array_field(name=ct.default_int32_array_field_name, element_type=DataType.INT32, nullable=True),
             cf.gen_array_field(name=ct.default_float_array_field_name, element_type=DataType.FLOAT, nullable=True),
-            cf.gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR, max_length=100, nullable=True),
+            cf.gen_array_field(name=ct.default_string_array_field_name, element_type=DataType.VARCHAR, max_length=100,
+                               nullable=True),
             cf.gen_json_field(name=json_embedded_object, nullable=True),
             cf.gen_float_vec_field()
         ]
@@ -945,7 +946,8 @@ class TestInsertOperation(TestcaseBase):
         # 1. initialize with data
         if enable_partition_key is True and nullable is True:
             pytest.skip("partition key field not support nullable")
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
+        fields = [cf.gen_int64_field(is_primary=True),
+                  cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
                   cf.gen_string_field(default_value="abc", is_partition_key=enable_partition_key, nullable=nullable),
                   cf.gen_json_field(), cf.gen_float_vec_field()]
         schema = cf.gen_collection_schema(fields)
@@ -962,7 +964,7 @@ class TestInsertOperation(TestcaseBase):
 
         exp = f"{ct.default_string_field_name} == 'abc'"
         res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
-        assert len(res) == ct.default_nb/2
+        assert len(res) == ct.default_nb / 2
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_multi_fields_by_rows_using_none(self):
@@ -974,7 +976,8 @@ class TestInsertOperation(TestcaseBase):
         """
         # 1. initialize with data
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(nullable=True),
-                  cf.gen_string_field(default_value="abc", nullable=True), cf.gen_json_field(), cf.gen_float_vec_field()]
+                  cf.gen_string_field(default_value="abc", nullable=True), cf.gen_json_field(),
+                  cf.gen_float_vec_field()]
         schema = cf.gen_collection_schema(fields)
         collection_w = self.init_collection_wrap(schema=schema)
 
@@ -990,7 +993,7 @@ class TestInsertOperation(TestcaseBase):
 
         exp = f"{ct.default_string_field_name} == 'abc'"
         res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
-        assert len(res) == ct.default_nb/2
+        assert len(res) == ct.default_nb / 2
         assert res[0][ct.default_float_field_name] is None
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1041,7 +1044,6 @@ class TestInsertOperation(TestcaseBase):
         })
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-
 
 
 class TestInsertAsync(TestcaseBase):
@@ -1234,6 +1236,7 @@ class TestInsertInvalid(TestcaseBase):
       The following cases are used to test insert invalid params
       ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_insert_with_invalid_field_value(self, primary_field):
@@ -1247,7 +1250,7 @@ class TestInsertInvalid(TestcaseBase):
                                                     is_all_data_type=True, with_json=True)[0]
         nb = 100
         data = cf.gen_data_by_collection_schema(collection_w.schema, nb=nb)
-        for dirty_i in [0, nb // 2, nb - 1]:      # check the dirty data at first, middle and last
+        for dirty_i in [0, nb // 2, nb - 1]:  # check the dirty data at first, middle and last
             log.debug(f"dirty_i: {dirty_i}")
             for i in range(len(data)):
                 if data[i][dirty_i].__class__ is int:
@@ -1716,7 +1719,7 @@ class TestUpsertValid(TestcaseBase):
                 [str(i) for i in range(nb)], binary_vectors]
         collection_w.upsert(data)
         res = collection_w.query("int64 >= 0", [ct.default_binary_vec_field_name])[0]
-        assert binary_vectors[0] == res[0][ct. default_binary_vec_field_name][0]
+        assert binary_vectors[0] == res[0][ct.default_binary_vec_field_name][0]
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_same_with_inserted_data(self):
@@ -1875,7 +1878,7 @@ class TestUpsertValid(TestcaseBase):
         # upsert
         step = 500
         for i in range(10):
-            data = cf.gen_default_data_for_upsert(upsert_nb, start=i*step)[0]
+            data = cf.gen_default_data_for_upsert(upsert_nb, start=i * step)[0]
             collection_w.upsert(data)
         # check the result
         res = collection_w.query(expr="", output_fields=["count(*)"])[0]
@@ -2035,7 +2038,8 @@ class TestUpsertValid(TestcaseBase):
         # 1. initialize with data
         if enable_partition_key is True and nullable is True:
             pytest.skip("partition key field not support nullable")
-        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
+        fields = [cf.gen_int64_field(is_primary=True),
+                  cf.gen_float_field(default_value=np.float32(3.14), nullable=nullable),
                   cf.gen_string_field(default_value="abc", is_partition_key=enable_partition_key, nullable=nullable),
                   cf.gen_json_field(), cf.gen_float_vec_field()]
         schema = cf.gen_collection_schema(fields)
@@ -2053,11 +2057,11 @@ class TestUpsertValid(TestcaseBase):
 
         exp = f"{ct.default_float_field_name} == {np.float32(3.14)} and {ct.default_string_field_name} == 'abc'"
         res = collection_w.query(exp, output_fields=[ct.default_float_field_name, ct.default_string_field_name])[0]
-        assert len(res) == ct.default_nb/2
+        assert len(res) == ct.default_nb / 2
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("enable_partition_key", [True, False])
-    def test_upsert_multi_fields_by_rows_using_none(self,enable_partition_key):
+    def test_upsert_multi_fields_by_rows_using_none(self, enable_partition_key):
         """
         target: test insert/upsert multi fields by rows with none value
         method: 1. create a collection with one field using none value
@@ -2173,9 +2177,9 @@ class TestUpsertValid(TestcaseBase):
         collection_w.load()
         for i in range(5):
             collection_w.upsert(data=data)
-            collection_w.query(expr=f'{ct.default_int64_field_name} >= 0', output_fields=[ct.default_count_output]
-                                        , check_task=CheckTasks.check_query_results,
-                                         check_items={"exp_res": [{"count(*)": ct.default_nb}]})
+            collection_w.query(expr=f'{ct.default_int64_field_name} >= 0', output_fields=[ct.default_count_output],
+                               check_task=CheckTasks.check_query_results,
+                               check_items={"exp_res": [{"count(*)": ct.default_nb}]})
 
 
 class TestUpsertInvalid(TestcaseBase):
@@ -2242,7 +2246,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [128-8, 128+8])
+    @pytest.mark.parametrize("dim", [128 - 8, 128 + 8])
     def test_upsert_binary_dim_unmatch(self, dim):
         """
         target: test upsert with unmatched vector dim
@@ -2419,9 +2423,9 @@ class TestInsertArray(TestcaseBase):
         arr_len = ct.default_max_capacity
         pk_values = [i for i in range(nb)]
         float_vec = cf.gen_vectors(nb, ct.default_dim)
-        int32_values = [[np.int32(j) for j in range(i, i+arr_len)] for i in range(nb)]
-        float_values = [[np.float32(j) for j in range(i, i+arr_len)] for i in range(nb)]
-        string_values = [[str(j) for j in range(i, i+arr_len)] for i in range(nb)]
+        int32_values = [[np.int32(j) for j in range(i, i + arr_len)] for i in range(nb)]
+        float_values = [[np.float32(j) for j in range(i, i + arr_len)] for i in range(nb)]
+        string_values = [[str(j) for j in range(i, i + arr_len)] for i in range(nb)]
 
         data = [pk_values, float_vec, int32_values, float_values, string_values]
         if auto_id:
