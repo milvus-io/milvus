@@ -43,6 +43,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
+#include "monitor/scope_metric.h"
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
@@ -339,6 +340,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 void
 ChunkedSegmentSealedImpl::load_field_data_internal(
     const LoadFieldDataInfo& load_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     AssertInfo(
         !num_rows_.has_value() || num_rows_ == num_rows,
@@ -412,6 +415,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 void
 ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
                                                      FieldDataInfo& data) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto num_rows = data.row_count;
     AssertInfo(SystemProperty::Instance().IsSystem(field_id),
                "system field is not system field");
@@ -452,6 +457,8 @@ ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
 
 void
 ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
+    SCOPE_CGO_CALL_METRIC();
+
     AssertInfo(info.row_count > 0, "The row count of deleted record is 0");
     AssertInfo(info.primary_keys, "Deleted primary keys is null");
     AssertInfo(info.timestamps, "Deleted timestamps is null");
