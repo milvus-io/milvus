@@ -25,6 +25,7 @@
 #include "google/protobuf/text_format.h"
 #include "log/Log.h"
 #include "mmap/Types.h"
+#include "monitor/scope_metric.h"
 #include "segcore/Collection.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -45,6 +46,8 @@ NewSegment(CCollection collection,
            int64_t segment_id,
            CSegmentInterface* newSegment,
            bool is_sorted_by_pk) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto col = static_cast<milvus::segcore::Collection*>(collection);
 
@@ -81,18 +84,24 @@ NewSegment(CCollection collection,
 
 void
 DeleteSegment(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto s = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     delete s;
 }
 
 void
 ClearSegmentData(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto s = static_cast<milvus::segcore::SegmentSealed*>(c_segment);
     s->ClearData();
 }
 
 void
 DeleteSearchResult(CSearchResult search_result) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto res = static_cast<milvus::SearchResult*>(search_result);
     delete res;
 }
@@ -248,6 +257,8 @@ AsyncRetrieveByOffsets(CTraceContext c_trace,
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto mem_size = segment->GetMemoryUsageInBytes();
     return mem_size;
@@ -255,6 +266,8 @@ GetMemoryUsageInBytes(CSegmentInterface c_segment) {
 
 int64_t
 GetRowCount(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto row_count = segment->get_row_count();
     return row_count;
@@ -263,6 +276,8 @@ GetRowCount(CSegmentInterface c_segment) {
 // TODO: segmentInterface implement get_deleted_count()
 int64_t
 GetDeletedCount(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto segment =
         reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto deleted_count = segment->get_deleted_count();
@@ -271,6 +286,8 @@ GetDeletedCount(CSegmentInterface c_segment) {
 
 int64_t
 GetRealCount(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     // not accurate, pk may exist in deleted record and not in insert record.
     // return GetRowCount(c_segment) - GetDeletedCount(c_segment);
     auto segment =
@@ -280,6 +297,8 @@ GetRealCount(CSegmentInterface c_segment) {
 
 bool
 HasRawData(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto segment =
         reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
     return segment->HasRawData(field_id);
@@ -294,6 +313,8 @@ Insert(CSegmentInterface c_segment,
        const uint64_t* timestamps,
        const uint8_t* data_info,
        const uint64_t data_info_len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         AssertInfo(data_info_len < std::numeric_limits<int>::max(),
                    "insert data length ({}) exceeds max int",
@@ -318,6 +339,8 @@ Insert(CSegmentInterface c_segment,
 
 CStatus
 PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         *offset = segment->PreInsert(size);
@@ -333,6 +356,8 @@ Delete(CSegmentInterface c_segment,
        const uint8_t* ids,
        const uint64_t ids_size,
        const uint64_t* timestamps) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto pks = std::make_unique<milvus::proto::schema::IDs>();
     auto suc = pks->ParseFromArray(ids, ids_size);
@@ -349,6 +374,8 @@ Delete(CSegmentInterface c_segment,
 CStatus
 LoadFieldData(CSegmentInterface c_segment,
               CLoadFieldDataInfo c_load_field_data_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -364,6 +391,8 @@ LoadFieldData(CSegmentInterface c_segment,
 CStatus
 LoadDeletedRecord(CSegmentInterface c_segment,
                   CLoadDeletedRecordInfo deleted_record_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -385,6 +414,8 @@ LoadDeletedRecord(CSegmentInterface c_segment,
 CStatus
 UpdateSealedSegmentIndex(CSegmentInterface c_segment,
                          CLoadIndexInfo c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -404,6 +435,8 @@ CStatus
 LoadTextIndex(CSegmentInterface c_segment,
               const uint8_t* serialized_load_text_index_info,
               const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -456,6 +489,8 @@ LoadJsonKeyIndex(CTraceContext c_trace,
                  CSegmentInterface c_segment,
                  const uint8_t* serialized_load_json_key_index_info,
                  const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
@@ -511,6 +546,8 @@ UpdateFieldRawDataSize(CSegmentInterface c_segment,
                        int64_t field_id,
                        int64_t num_rows,
                        int64_t field_data_size) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -525,6 +562,8 @@ UpdateFieldRawDataSize(CSegmentInterface c_segment,
 
 CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -540,6 +579,8 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id) {
 
 CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -556,6 +597,8 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
 CStatus
 AddFieldDataInfoForSealed(CSegmentInterface c_segment,
                           CLoadFieldDataInfo c_load_field_data_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -573,12 +616,16 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
 
 void
 RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto segment = reinterpret_cast<milvus::segcore::SegmentSealed*>(c_segment);
     segment->RemoveFieldFile(milvus::FieldId(field_id));
 }
 
 CStatus
 CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -591,6 +638,8 @@ CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
 
 CStatus
 FinishLoad(CSegmentInterface c_segment) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto segment_interface =
             reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
