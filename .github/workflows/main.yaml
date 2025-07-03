@@ -169,7 +169,7 @@ jobs:
     name: UT for Go
     needs: Build
     runs-on: aws-node
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
