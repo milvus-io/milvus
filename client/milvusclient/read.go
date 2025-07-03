@@ -64,35 +64,43 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 	fieldDataList := results.GetFieldsData()
 	gb := results.GetGroupByFieldValue()
 	for i := 0; i < int(results.GetNumQueries()); i++ {
-		rc := int(results.GetTopks()[i]) // result entry count for current query
-		entry := ResultSet{
-			ResultCount: rc,
-			Scores:      results.GetScores()[offset : offset+rc],
-			sch:         schema,
-		}
-
-		// set recall if returned
-		if i < len(results.Recalls) {
-			entry.Recall = results.Recalls[i]
-		}
-
-		entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)
-		if entry.Err != nil {
-			offset += rc
-			continue
-		}
-		// parse group-by values
-		if gb != nil {
-			entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
-			if entry.Err != nil {
-				offset += rc
-				continue
+		func() {
+			var rc int
+			entry := ResultSet{
+				ResultCount: rc,
+				Scores:      results.GetScores()[offset : offset+rc],
+				sch:         schema,
 			}
-		}
-		entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
-		sr = append(sr, entry)
+			defer func() {
+				offset += rc
+				sr = append(sr, entry)
+			}()
 
-		offset += rc
+			if i >= len(results.Topks) {
+				entry.Err = errors.Newf("topk not returned for nq %d", i)
+				return
+			}
+			rc = int(results.GetTopks()[i]) // result entry count for current query
+
+			// set recall if returned
+			if i < len(results.Recalls) {
+				entry.Recall = results.Recalls[i]
+			}
+
+			entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)
+			if entry.Err != nil {
+				return
+			}
+			// parse group-by values
+			if gb != nil {
+				entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
+				if entry.Err != nil {
+					return
+				}
+			}
+			entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
+			sr = append(sr, entry)
+		}()
 	}
 	return sr, nil
 }
