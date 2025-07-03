@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 #include "cachinglayer/lrucache/DList.h"
 
+#include <algorithm>
 #include <mutex>
 #include <vector>
 
@@ -73,13 +74,13 @@ DList::reserveMemory(const ResourceUsage& size) {
 
         if (physical_eviction_needed == 0) {
             // we only need to evict for logical limit and we have succeeded.
-            return true;
+            break;
         }
 
         if (physical_eviction_needed = checkPhysicalMemoryLimit(size);
             physical_eviction_needed == 0) {
-            // if after eviction we no longer need to evict, we can return.
-            return true;
+            // if after eviction we no longer need to evict, we can break.
+            break;
         }
         // else perform another round of eviction.
         LOG_TRACE(
@@ -216,6 +217,15 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             actively_pinned += it->size();
         }
     }
+    if (!size_to_evict.AnyGTZero()) {
+        LOG_DEBUG(
+            "[MCL] No items can be evicted, expected_eviction {}, min_eviction "
+            "{}, giving up eviction. Current usage: {}",
+            expected_eviction.ToString(),
+            min_eviction.ToString(),
+            usageInfo(actively_pinned));
+        return ResourceUsage{0, 0};
+    }
     if (!size_to_evict.CanHold(expected_eviction)) {
         if (!size_to_evict.CanHold(min_eviction)) {
             LOG_INFO(
@@ -229,9 +239,11 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             return ResourceUsage{0, 0};
         }
         LOG_DEBUG(
-            "[MCL] cannot evict expected_eviction {}, "
-            "evicting as much({}) as possible. Current usage: {}",
+            "[MCL] cannot evict expected_eviction {} but can evict "
+            "min_eviction {}, evicting as much({}) as possible. Current usage: "
+            "{}",
             expected_eviction.ToString(),
+            min_eviction.ToString(),
             size_to_evict.ToString(),
             usageInfo(actively_pinned));
     }
@@ -271,7 +283,10 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
 bool
 DList::UpdateLimit(const ResourceUsage& new_limit) {
     AssertInfo((new_limit - high_watermark_).AllGEZero(),
-               "[MCL] limit must be greater than high watermark");
+               "[MCL] limit must be greater than high watermark. new_limit: "
+               "{}, high_watermark: {}",
+               new_limit.ToString(),
+               high_watermark_.ToString());
     std::unique_lock<std::mutex> list_lock(list_mtx_);
     auto used = used_memory_.load();
     if (!new_limit.CanHold(used)) {
@@ -296,16 +311,30 @@ DList::UpdateLowWatermark(const ResourceUsage& new_low_watermark) {
     std::unique_lock<std::mutex> list_lock(list_mtx_);
     AssertInfo(new_low_watermark.AllGEZero(),
                "[MCL] low watermark must be greater than or "
-               "equal to 0");
+               "equal to 0. new_low_watermark: {}",
+               new_low_watermark.ToString());
+    AssertInfo((high_watermark_ - new_low_watermark).AllGEZero(),
+               "[MCL] low watermark must be less than or equal to high "
+               "watermark. new_low_watermark: {}, high_watermark: {}",
+               new_low_watermark.ToString(),
+               high_watermark_.ToString());
     low_watermark_ = new_low_watermark;
 }
 
 void
 DList::UpdateHighWatermark(const ResourceUsage& new_high_watermark) {
     std::unique_lock<std::mutex> list_lock(list_mtx_);
-    AssertInfo((new_high_watermark - low_watermark_).AllGEZero(),
-               "[MCL] high watermark must be greater than or "
-               "equal to low watermark");
+    AssertInfo(
+        (new_high_watermark - low_watermark_).AllGEZero(),
+        "[MCL] high watermark must be greater than or "
+        "equal to low watermark. new_high_watermark: {}, low_watermark: {}",
+        new_high_watermark.ToString(),
+        low_watermark_.ToString());
+    AssertInfo((max_memory_ - new_high_watermark).AllGEZero(),
+               "[MCL] high watermark must be less than or equal to max "
+               "memory. new_high_watermark: {}, max_memory: {}",
+               new_high_watermark.ToString(),
+               max_memory_.ToString());
     high_watermark_ = new_high_watermark;
 }
 
@@ -398,7 +427,8 @@ DList::checkPhysicalMemoryLimit(const ResourceUsage& size) const {
         static_cast<int64_t>(sys_mem.total_memory_bytes *
                              eviction_config_.physical_memory_protection_ratio);
 
-    int64_t eviction_needed = std::max(0L, projected_usage - limit);
+    int64_t eviction_needed =
+        std::max(static_cast<int64_t>(0), projected_usage - limit);
 
     LOG_TRACE(
         "[MCL] Physical memory check: "
