@@ -5228,7 +5228,7 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	MaxConcurrentImportTaskNum  ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
 	ImportBaseBufferSize        ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
@@ -5519,15 +5519,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
-	p.MaxConcurrentImportTaskNum = ParamItem{
-		Key:          "dataNode.import.maxConcurrentTaskNum",
+	p.ImportConcurrencyPerCPUCore = ParamItem{
+		Key:          "dataNode.import.concurrencyPerCPUCore",
 		Version:      "2.4.0",
-		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
-		DefaultValue: "16",
+		Doc:          "The execution concurrency unit for import/pre-import tasks per CPU core.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+	p.ImportConcurrencyPerCPUCore.Init(base.mgr)
 
 	p.MaxImportFileSizeInGB = ParamItem{
 		Key:          "dataNode.import.maxImportFileSizeInGB",
@@ -5542,7 +5542,7 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportBaseBufferSize = ParamItem{
 		Key:          "dataNode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
-		Doc:          "The insert buffer size (in MB) during import.",
+		Doc:          "The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.",
 		DefaultValue: "16",
 		Formatter: func(v string) string {
 			bufferSize := getAsFloat(v)
