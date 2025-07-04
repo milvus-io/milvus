@@ -172,27 +172,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             }
         }
         // nullable:
-        if (offsets == nullptr) {
-            int64_t current_offset = 0;
-            for (cid_t cid = 0; cid < num_chunks(); ++cid) {
-                auto group_chunk = group_->GetGroupChunk(cid);
-                auto chunk = group_chunk.get()->GetChunk(field_id_);
-                auto chunk_rows = chunk->RowNums();
-                for (int64_t i = 0; i < chunk_rows; ++i) {
-                    auto valid = chunk->isValid(i);
-                    fn(valid, current_offset + i);
-                }
-                current_offset += chunk_rows;
-            }
-        } else {
-            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-            auto ca = group_->GetGroupChunks(cids);
-            for (int64_t i = 0; i < count; i++) {
-                auto* group_chunk = ca->get_cell_of(cids[i]);
-                auto chunk = group_chunk->GetChunk(field_id_);
-                auto valid = chunk->isValid(offsets_in_chunk[i]);
-                fn(valid, i);
-            }
+        if (count == 0) {
+            return;
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto valid = chunk->isValid(offsets_in_chunk[i]);
+            fn(valid, i);
         }
     }
 
