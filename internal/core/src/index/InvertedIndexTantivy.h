@@ -245,6 +245,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    set_is_growing(bool is_growing) {
+        is_growing_ = is_growing;
+    }
+
  protected:
     void
     finish();
@@ -300,5 +305,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // built from a higher version of tantivy which is not supported.
     // Therefore, we should provide a way to allow higher version of milvus to build tantivy index with low version.
     uint32_t tantivy_index_version_{0};
+
+    // for now, only TextMatchIndex and JsonKeyStatsInvertedIndex can be built for growing segment,
+    // and can read and insert concurrently.
+    bool is_growing_{false};
 };
 }  // namespace milvus::index

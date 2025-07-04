@@ -82,7 +82,7 @@ class TestIvfRabitqBuildParams(TestMilvusClientV2Base):
                 for key, value in build_params.items():
                     if value is not None:
                         assert key in idx_info.keys()
-                        # assert value in idx_info.values()     # TODO: uncommented after #41783 fixed
+                        assert str(value) in idx_info.values()     # TODO: uncommented after #41783 fixed
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("vector_data_type", ct.all_vector_types)

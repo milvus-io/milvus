@@ -46,10 +46,11 @@ type InternaltlsTestSuit struct {
 }
 
 func (s *InternaltlsTestSuit) SetupSuite() {
+	workDir := s.WorkDir()
 	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSEnabled.Key, "true")
-	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSServerPemPath.Key, "../../../configs/cert/server.pem")
-	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSServerKeyPath.Key, "../../../configs/cert/server.key")
-	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSCaPemPath.Key, "../../../configs/cert/ca.pem")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSServerPemPath.Key, workDir+"/configs/cert/server.pem")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSServerKeyPath.Key, workDir+"/configs/cert/server.key")
+	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSCaPemPath.Key, workDir+"/configs/cert/ca.pem")
 	s.WithMilvusConfig(paramtable.Get().InternalTLSCfg.InternalTLSSNI.Key, "localhost")
 
 	s.MiniClusterSuite.SetupSuite()
@@ -217,6 +218,5 @@ func (s *InternaltlsTestSuit) TestHelloMilvus_basic() {
 }
 
 func TestInternalTLS(t *testing.T) {
-	t.Skip("skip until we fix the issue https://github.com/milvus-io/milvus/issues/42930")
 	suite.Run(t, new(InternaltlsTestSuit))
 }

@@ -3536,6 +3536,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
     @pytest.mark.parametrize("empty_percent", [0])
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("enable_inverted_index", [True])
+    @pytest.mark.parametrize("enable_group_by_field", [True, False])
     @pytest.mark.parametrize("index_type", ["SPARSE_INVERTED_INDEX"])
     @pytest.mark.parametrize("tokenizer", ["standard"])
     @pytest.mark.parametrize("inverted_index_algo", ct.inverted_index_algo)
@@ -3547,6 +3548,7 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         empty_percent,
         index_type,
         inverted_index_algo,
+        enable_group_by_field,
     ):
         """
         target: test full text search
@@ -3561,6 +3563,11 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         dim = 128
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="language",
+                dtype=DataType.VARCHAR,
+                max_length=16,
+            ),
             FieldSchema(
                 name="word",
                 dtype=DataType.VARCHAR,
@@ -3608,10 +3615,12 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
         collection_w = self.init_collection_wrap(
             name=cf.gen_unique_str(prefix), schema=schema
         )
+        language_list = ["en", "zh", "de", "jp", "unknown"]
         fake = fake_en
         data = [
             {
                 "id": i,
+                "language": random.choice(language_list),
                 "word": fake.word().lower() if random.random() >= empty_percent else "",
                 "sentence": fake.sentence().lower()
                 if random.random() >= empty_percent
@@ -3690,13 +3699,17 @@ class TestHybridSearchWithFullTextSearch(TestcaseBase):
             reqs=[bm25_search, dense_search, sparse_search],
             rerank=WeightedRanker(0.5, 0.5, 0.5),
             limit=limit,
-            output_fields=["id", "text"],
+            output_fields=["id", "text", "language"],
+            group_by_field="language" if enable_group_by_field else None,
         )
         assert len(res_list) == nq
         # check the result correctness
         for i in range(nq):
             log.info(f"res length: {len(res_list[i])}")
-            assert len(res_list[i]) == limit
+            if enable_group_by_field:
+                assert len(res_list[i]) == len(language_list)
+            else:
+                assert len(res_list[i]) == limit
 
 
 class TestFullTextSearchMultiAnalyzer(TestcaseBase):

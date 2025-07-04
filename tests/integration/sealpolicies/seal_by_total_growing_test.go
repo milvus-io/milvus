@@ -98,7 +98,7 @@ func (s *SealSuite) TestSealByTotalGrowingSegmentsSize() {
 		var segments []*datapb.SegmentInfo
 		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
-		s.NotEmpty(segments)
+		// segment may be in growing state or can not be seen at meta right after insert.
 		flushedSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 			return segment.GetState() == commonpb.SegmentState_Flushed
 		})

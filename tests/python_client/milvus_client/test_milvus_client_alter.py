@@ -76,10 +76,14 @@ class TestMilvusClientAlterIndex(TestMilvusClientV2Base):
         index_params.add_index(field_name=vector_field_name, metric_type="COSINE",
                                index_type="HNSW", params={"M": 16, "efConstruction": 100, "mmap.enabled": True})
         index_params.add_index(field_name=str_field_name)
-        self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params,
+                               properties={"mmap.enabled": True})
         self.describe_collection(client, collection_name, check_task=CheckTasks.check_collection_fields_properties,
                                  check_items={str_field_name: {"max_length": max_length, "mmap_enabled": True},
-                                              vector_field_name: {"mmap_enabled": True}})
+                                              vector_field_name: {"mmap_enabled": True},
+                                              'properties': {'mmap.enabled': 'False'}})
+        res = self.describe_index(client, collection_name, index_name=vector_field_name)[0]
+        assert res.get('mmap.enabled', None) == 'True'
         self.release_collection(client, collection_name)
         properties = self.describe_index(client, collection_name, index_name=vector_field_name)[0]
         for p in properties.items():

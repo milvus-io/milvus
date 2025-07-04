@@ -6,6 +6,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
+from pymilvus import DataType
 
 prefix = "client_index"
 epsilon = ct.epsilon
@@ -733,15 +734,15 @@ class TestMilvusClientJsonPathIndexInvalid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32,
-                                              DataType.INT64, DataType.FLOAT, DataType.DOUBLE, DataType.VARCHAR,
-                                              DataType.JSON, DataType.ARRAY, DataType.FLOAT_VECTOR,
-                                              DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR,
-                                              DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR])
+    @pytest.fixture(scope="function", params=[DataType.INT8.name, DataType.INT16.name, DataType.INT32.name,
+                                              DataType.INT64.name, DataType.FLOAT.name,
+                                              DataType.ARRAY.name, DataType.FLOAT_VECTOR.name,
+                                              DataType.FLOAT16_VECTOR.name, DataType.BFLOAT16_VECTOR.name, DataType.BINARY_VECTOR.name,
+                                              DataType.SPARSE_FLOAT_VECTOR.name, DataType.INT8_VECTOR.name])
     def not_supported_json_cast_type(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    @pytest.fixture(scope="function", params=["Json", "BOOL", "double", "varchar"])
     def supported_json_cast_type(self, request):
         yield request.param
 

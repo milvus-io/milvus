@@ -36,7 +36,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+const (
+	insertPrefix = "mock-insert-binlog-prefix"
+	deltaPrefix  = "mock-delta-binlog-prefix"
 )
 
 type ReaderSuite struct {
@@ -66,6 +72,18 @@ func (suite *ReaderSuite) SetupTest() {
 	suite.tsEnd = math.MaxUint64
 	suite.pkDataType = schemapb.DataType_Int64
 	suite.vecDataType = schemapb.DataType_FloatVector
+}
+
+func genBinlogPath(fieldID int64) string {
+	return fmt.Sprintf("backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/%d/6666", fieldID)
+}
+
+func genBinlogPaths(fieldIDs []int64) map[int64][]string {
+	binlogPaths := make(map[int64][]string)
+	for _, fieldID := range fieldIDs {
+		binlogPaths[fieldID] = []string{genBinlogPath(fieldID)}
+	}
+	return binlogPaths
 }
 
 func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.FieldData) []byte {
@@ -195,34 +213,80 @@ func createDeltaBuf(t *testing.T, deletePKs []storage.PrimaryKey, deleteTss []in
 	return blob.Value
 }
 
-func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool) {
-	const (
-		insertPrefix = "mock-insert-binlog-prefix"
-		deltaPrefix  = "mock-delta-binlog-prefix"
-	)
-	insertBinlogs := map[int64][]string{
-		0: {
-			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735801",
-		},
-		1: {
-			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/1/435978159903735811",
-		},
-		100: {
-			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/100/435978159903735821",
-		},
-		101: {
-			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/101/435978159903735831",
-		},
-		102: {
-			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/102/435978159903735841",
-		},
-	}
+func (suite *ReaderSuite) createMockChunk(schema *schemapb.CollectionSchema, insertBinlogs map[int64][]string, expectRead bool) (*mocks.ChunkManager, *storage.InsertData) {
 	var deltaLogs []string
 	if len(suite.deletePKs) != 0 {
 		deltaLogs = []string{
 			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105",
 		}
 	}
+
+	cm := mocks.NewChunkManager(suite.T())
+
+	originalInsertData, err := testutil.CreateInsertData(schema, suite.numRows)
+	suite.NoError(err)
+
+	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
+
+	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			for _, filePath := range insertLogs {
+				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+					return nil
+				}
+			}
+			return nil
+		})
+
+	if expectRead {
+		cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				for _, filePath := range deltaLogs {
+					if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+						return nil
+					}
+				}
+				return nil
+			})
+
+		var (
+			paths = make([]string, 0)
+			bytes = make([][]byte, 0)
+		)
+		for _, field := range schema.Fields {
+			fieldID := field.GetFieldID()
+			logs, ok := insertBinlogs[fieldID]
+			if ok && len(logs) > 0 {
+				paths = append(paths, insertBinlogs[fieldID][0])
+
+				// the testutil.CreateInsertData() doesn't create data for function output field
+				// add data here to avoid crash
+				if field.IsFunctionOutput {
+					data, dim := testutils.GenerateSparseFloatVectorsData(suite.numRows)
+					originalInsertData.Data[fieldID] = &storage.SparseFloatVectorFieldData{
+						SparseFloatArray: schemapb.SparseFloatArray{
+							Contents: data,
+							Dim:      dim,
+						},
+					}
+				}
+				bytes = append(bytes, createBinlogBuf(suite.T(), field, originalInsertData.Data[fieldID]))
+			}
+		}
+		cm.EXPECT().MultiRead(mock.Anything, paths).Return(bytes, nil)
+
+		if len(suite.deletePKs) != 0 {
+			for _, path := range deltaLogs {
+				buf := createDeltaBuf(suite.T(), suite.deletePKs, suite.deleteTss)
+				cm.EXPECT().Read(mock.Anything, path).Return(buf, nil)
+			}
+		}
+	}
+
+	return cm, originalInsertData
+}
+
+func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType, nullable bool) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -263,51 +327,22 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 			},
 		},
 	}
-	cm := mocks.NewChunkManager(suite.T())
-
-	originalInsertData, err := testutil.CreateInsertData(schema, suite.numRows)
-	suite.NoError(err)
-	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
-
-	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
-			for _, filePath := range insertLogs {
-				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
-					return nil
-				}
-			}
-			return nil
-		})
-	cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
-			for _, filePath := range deltaLogs {
-				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
-					return nil
-				}
-			}
-			return nil
-		})
-	var (
-		paths = make([]string, 0)
-		bytes = make([][]byte, 0)
-	)
-	for _, field := range schema.Fields {
-		paths = append(paths, insertBinlogs[field.GetFieldID()][0])
-		bytes = append(bytes, createBinlogBuf(suite.T(), field, originalInsertData.Data[field.GetFieldID()]))
-	}
-	cm.EXPECT().MultiRead(mock.Anything, paths).Return(bytes, nil)
-
-	if len(suite.deletePKs) != 0 {
-		for _, path := range deltaLogs {
-			buf := createDeltaBuf(suite.T(), suite.deletePKs, suite.deleteTss)
-			cm.EXPECT().Read(mock.Anything, path).Return(buf, nil)
-		}
-	}
+	insertBinlogs := genBinlogPaths(lo.Map(schema.Fields, func(fieldSchema *schemapb.FieldSchema, _ int) int64 {
+		return fieldSchema.GetFieldID()
+	}))
+	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
+	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
 	reader, err := NewReader(context.Background(), cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
+	size, err := reader.Size()
+	suite.NoError(err)
+	suite.Equal(int64(128*len(lo.Flatten(lo.Values(insertBinlogs)))), size)
+	size2, err := reader.Size() // size is cached
+	suite.NoError(err)
+	suite.Equal(size, size2)
 
 	pks, err := storage.GetPkFromInsertData(schema, originalInsertData)
 	suite.NoError(err)
@@ -442,6 +477,290 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 
-func TestUtil(t *testing.T) {
+func (suite *ReaderSuite) TestVerify() {
+	suite.deletePKs = []storage.PrimaryKey{}
+
+	pkFieldID := int64(100)
+	vecFieldID := int64(101)
+	nullableFieldID := int64(102)
+	functionFieldID := int64(103)
+	dynamicFieldID := int64(104)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      pkFieldID,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  vecFieldID,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "8",
+					},
+				},
+			},
+			{
+				FieldID:  nullableFieldID,
+				Name:     "nullable",
+				DataType: schemapb.DataType_Double,
+				Nullable: true,
+			},
+			{
+				FieldID:          functionFieldID,
+				Name:             "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+			{
+				FieldID:   dynamicFieldID,
+				Name:      "dynamic",
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: true,
+			},
+		},
+	}
+	insertBinlogs := genBinlogPaths(lo.Map(schema.Fields, func(fieldSchema *schemapb.FieldSchema, _ int) int64 {
+		return fieldSchema.GetFieldID()
+	}))
+
+	checkFunc := func() {
+		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
+		reader, err := NewReader(context.Background(), cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
+		suite.Error(err)
+		suite.Nil(reader)
+	}
+
+	// no insert binlogs to import
+	reader, err := NewReader(context.Background(), nil, schema, []string{}, suite.tsStart, suite.tsEnd)
+	suite.Error(err)
+	suite.Nil(reader)
+
+	// too many input paths
+	reader, err = NewReader(context.Background(), nil, schema, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd)
+	suite.Error(err)
+	suite.Nil(reader)
+
+	// no binlog for RowID
+	insertBinlogs[common.RowIDField] = []string{}
+	checkFunc()
+
+	// no binlog for RowID
+	insertBinlogs[common.RowIDField] = []string{genBinlogPath(common.RowIDField)}
+	insertBinlogs[common.TimeStampField] = []string{}
+	checkFunc()
+
+	// binlog count not equal
+	insertBinlogs[common.TimeStampField] = []string{genBinlogPath(common.TimeStampField)}
+	insertBinlogs[vecFieldID] = []string{genBinlogPath(vecFieldID), genBinlogPath(vecFieldID)}
+	checkFunc()
+
+	// vector field is required
+	insertBinlogs[vecFieldID] = []string{}
+	checkFunc()
+
+	// primary key is required
+	insertBinlogs[vecFieldID] = []string{genBinlogPath(vecFieldID)}
+	insertBinlogs[pkFieldID] = []string{}
+	checkFunc()
+
+	// function output field is required
+	insertBinlogs[pkFieldID] = []string{genBinlogPath(pkFieldID)}
+	insertBinlogs[functionFieldID] = []string{}
+	checkFunc()
+}
+
+func (suite *ReaderSuite) TestZeroDeltaRead() {
+	suite.deletePKs = []storage.PrimaryKey{}
+
+	mockChunkFunc := func(sourceSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) *mocks.ChunkManager {
+		sourceBinlogs := genBinlogPaths(lo.Map(sourceSchema.Fields, func(fieldSchema *schemapb.FieldSchema, _ int) int64 {
+			return fieldSchema.GetFieldID()
+		}))
+
+		cm := mocks.NewChunkManager(suite.T())
+
+		sourceInsertData, err := testutil.CreateInsertData(sourceSchema, suite.numRows)
+		suite.NoError(err)
+
+		sourceInsertLogs := lo.Flatten(lo.Values(sourceBinlogs))
+
+		cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				for _, filePath := range sourceInsertLogs {
+					if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+						return nil
+					}
+				}
+				return nil
+			})
+
+		var (
+			paths = make([]string, 0)
+			bytes = make([][]byte, 0)
+		)
+		for _, field := range sourceSchema.Fields {
+			fieldID := field.GetFieldID()
+			logs, ok := expectReadBinlogs[fieldID]
+			if ok && len(logs) > 0 {
+				paths = append(paths, expectReadBinlogs[fieldID][0])
+
+				// the testutil.CreateInsertData() doesn't create data for function output field
+				// add data here to avoid crash
+				if field.IsFunctionOutput {
+					data, dim := testutils.GenerateSparseFloatVectorsData(suite.numRows)
+					sourceInsertData.Data[fieldID] = &storage.SparseFloatVectorFieldData{
+						SparseFloatArray: schemapb.SparseFloatArray{
+							Contents: data,
+							Dim:      dim,
+						},
+					}
+				}
+				bytes = append(bytes, createBinlogBuf(suite.T(), field, sourceInsertData.Data[fieldID]))
+			}
+		}
+		cm.EXPECT().MultiRead(mock.Anything, paths).Return(bytes, nil)
+
+		cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				return nil
+			})
+
+		return cm
+	}
+
+	rowID := int64(common.RowIDField)
+	tsID := int64(common.TimeStampField)
+	pkFieldID := int64(100)
+	vecFieldID := int64(101)
+	functionFieldID := int64(102)
+	nullableFieldID := int64(103)
+	dynamicFieldID := int64(104)
+	sourceSchema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      rowID,
+				Name:         common.RowIDFieldName,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      tsID,
+				Name:         common.TimeStampFieldName,
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      pkFieldID,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  vecFieldID,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "8",
+					},
+				},
+			},
+			{
+				FieldID:          functionFieldID,
+				Name:             "sparse",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+			{
+				FieldID:      nullableFieldID,
+				Name:         "nullable",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:   dynamicFieldID,
+				Name:      "dynamic",
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: true,
+			},
+		},
+	}
+
+	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
+		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
+		reader, err := NewReader(context.Background(), cm, targetSchema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
+		suite.NoError(err)
+		suite.NotNil(reader)
+
+		readData, err := reader.Read()
+		suite.NoError(err)
+		suite.Equal(suite.numRows, readData.GetRowNum())
+
+		for _, field := range targetSchema.Fields {
+			fieldID := field.GetFieldID()
+			fieldData, ok := readData.Data[fieldID]
+			if !ok {
+				// if this field has no data, it must be nullable/default or dynamic
+				suite.True(field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil)
+			} else {
+				suite.Equal(suite.numRows, fieldData.RowNum())
+			}
+		}
+	}
+
+	targetSchemaFunc := func(from int, to int, newFields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+		fields := make([]*schemapb.FieldSchema, 0)
+		fields = append(fields, sourceSchema.Fields[from:to]...)
+		fields = append(fields, newFields...)
+		return &schemapb.CollectionSchema{Fields: fields}
+	}
+
+	// the target schema lacks some fields(not required field), can import
+	checkFunc(targetSchemaFunc(0, 3), map[int64][]string{
+		rowID:     {genBinlogPath(rowID)},
+		tsID:      {genBinlogPath(tsID)},
+		pkFieldID: {genBinlogPath(pkFieldID)},
+	})
+
+	// the target schema has a new nullable field, can import
+	checkFunc(targetSchemaFunc(0, len(sourceSchema.Fields), &schemapb.FieldSchema{
+		FieldID:  200,
+		Name:     "new",
+		DataType: schemapb.DataType_Double,
+		Nullable: true,
+	}), map[int64][]string{
+		rowID:           {genBinlogPath(rowID)},
+		tsID:            {genBinlogPath(tsID)},
+		pkFieldID:       {genBinlogPath(pkFieldID)},
+		vecFieldID:      {genBinlogPath(vecFieldID)},
+		functionFieldID: {genBinlogPath(functionFieldID)},
+		nullableFieldID: {genBinlogPath(nullableFieldID)},
+		dynamicFieldID:  {genBinlogPath(dynamicFieldID)},
+	})
+
+	// the target schema has a new dynamic field, can import
+	checkFunc(targetSchemaFunc(0, len(sourceSchema.Fields), &schemapb.FieldSchema{
+		FieldID:   200,
+		Name:      "new",
+		DataType:  schemapb.DataType_JSON,
+		IsDynamic: true,
+	}), map[int64][]string{
+		rowID:           {genBinlogPath(rowID)},
+		tsID:            {genBinlogPath(tsID)},
+		pkFieldID:       {genBinlogPath(pkFieldID)},
+		vecFieldID:      {genBinlogPath(vecFieldID)},
+		functionFieldID: {genBinlogPath(functionFieldID)},
+		nullableFieldID: {genBinlogPath(nullableFieldID)},
+		dynamicFieldID:  {genBinlogPath(dynamicFieldID)},
+	})
+}
+
+func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }

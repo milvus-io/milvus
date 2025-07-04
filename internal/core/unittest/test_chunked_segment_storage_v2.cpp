@@ -68,7 +68,6 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             nullptr,
             -1,
             segcore::SegcoreConfig::default_config(),
-            false,
             true);
 
         // Initialize file system

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/column_groups_c.h"
 #include <vector>
 #include <string>
 #include <memory>
+
+#include "segcore/column_groups_c.h"
+#include "monitor/scope_metric.h"
 
 using VecVecInt = std::vector<std::vector<int>>;
 
@@ -23,12 +25,16 @@ extern "C" {
 
 CColumnGroups
 NewCColumnGroups() {
+    SCOPE_CGO_CALL_METRIC();
+
     auto vv = std::make_unique<VecVecInt>();
     return vv.release();
 }
 
 void
 AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
+    SCOPE_CGO_CALL_METRIC();
+
     if (!cgs || !group)
         return;
 
@@ -39,6 +45,8 @@ AddCColumnGroup(CColumnGroups cgs, int* group, int group_size) {
 
 int
 CColumnGroupsSize(CColumnGroups cgs) {
+    SCOPE_CGO_CALL_METRIC();
+
     if (!cgs)
         return 0;
 
@@ -48,6 +56,8 @@ CColumnGroupsSize(CColumnGroups cgs) {
 
 void
 FreeCColumnGroups(CColumnGroups cgs) {
+    SCOPE_CGO_CALL_METRIC();
+
     delete static_cast<VecVecInt*>(cgs);
 }
 }

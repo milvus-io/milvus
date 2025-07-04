@@ -56,11 +56,11 @@ func (m *sealWorker) loop() {
 	timer := time.NewTicker(m.timePolicyCheckInterval)
 	listener := &hardware.SystemMetricsListener{
 		Cooldown: 30 * time.Second,
-		Condition: func(sm hardware.SystemMetrics) bool {
+		Condition: func(sm hardware.SystemMetrics, _ *hardware.SystemMetricsListener) bool {
 			memoryThreshold := m.statsManager.getConfig().memoryThreshold
 			return sm.UsedRatio() > memoryThreshold
 		},
-		Callback: func(sm hardware.SystemMetrics) {
+		Callback: func(sm hardware.SystemMetrics, _ *hardware.SystemMetricsListener) {
 			select {
 			case memoryNotifier <- policy.PolicyNodeMemory(sm.UsedRatio()):
 				// the repeated notify can be ignored.

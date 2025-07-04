@@ -8,13 +8,17 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // recoverRecoveryInfoFromMeta retrieves the recovery info for the given channel.
@@ -95,6 +99,23 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	// save the vchannel recovery info into the catalog
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(resp.GetCollections()))
 	for _, collection := range resp.GetCollections() {
+		if collection.State == etcdpb.CollectionState_CollectionDropping {
+			// Drop the already dropping collection before streaming arch enabled.
+			// Otherwise, the dropping collection message will be lost,
+			// and the data of collection can not be dropped.
+			coordClient, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+			resp, err := coordClient.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
+				Base:        commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+				ChannelName: collection.Vchannel,
+			})
+			if err = merr.CheckRPCCall(resp, err); err != nil {
+				return nil, errors.Wrap(err, "failed to drop virtual channel")
+			}
+			continue
+		}
 		partitions := make([]*streamingpb.PartitionInfoOfVChannel, 0, len(collection.Partitions))
 		for _, partition := range collection.Partitions {
 			partitions = append(partitions, &streamingpb.PartitionInfoOfVChannel{PartitionId: partition.PartitionId})

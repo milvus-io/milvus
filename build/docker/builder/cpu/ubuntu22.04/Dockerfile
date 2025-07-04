@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
 RUN pip3 install conan==1.64.1
 
 RUN echo "target arch $TARGETARCH"
-RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
+RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 
 RUN mkdir /opt/vcpkg &&  \
     wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \

@@ -23,6 +23,7 @@
 #include "index/Meta.h"
 #include "storage/Util.h"
 #include "pb/clustering.pb.h"
+#include "monitor/scope_metric.h"
 #include "clustering/KmeansClustering.h"
 
 using namespace milvus;
@@ -54,6 +55,8 @@ CStatus
 Analyze(CAnalyze* res_analyze,
         const uint8_t* serialized_analyze_info,
         const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto analyze_info =
             std::make_unique<milvus::proto::clustering::AnalyzeInfo>();
@@ -110,6 +113,8 @@ Analyze(CAnalyze* res_analyze,
 
 CStatus
 DeleteAnalyze(CAnalyze analyze) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(analyze, "failed to delete analyze, passed index was null");
@@ -131,6 +136,8 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(analyze,

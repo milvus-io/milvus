@@ -81,7 +81,6 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         auto index_valid_data = binary_set.GetByName("index_null_offset");
-        folly::SharedMutex::WriteHolder lock(mutex_);
         null_offset_.resize((size_t)index_valid_data->size / sizeof(size_t));
         memcpy(null_offset_.data(),
                index_valid_data->data.get(),

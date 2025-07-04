@@ -69,6 +69,3 @@ func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, req types.BroadcastA
 	})
 	return err
 }
-
-func (c *GRPCBroadcastServiceImpl) Close() {
-}

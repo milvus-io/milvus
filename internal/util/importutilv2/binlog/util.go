@@ -23,10 +23,14 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func readData(reader *storage.BinlogReader, et storage.EventTypeCode) ([]any, [][]bool, error) {
@@ -83,6 +87,7 @@ func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix s
 	}); err != nil {
 		return nil, err
 	}
+
 	if walkErr != nil {
 		return nil, walkErr
 	}
@@ -93,27 +98,92 @@ func listInsertLogs(ctx context.Context, cm storage.ChunkManager, insertPrefix s
 	return insertLogs, nil
 }
 
-func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) error {
-	// 1. check schema fields
-	for _, field := range schema.GetFields() {
-		if _, ok := insertLogs[field.GetFieldID()]; !ok {
-			return merr.WrapErrImportFailed(fmt.Sprintf("no binlog for field:%s", field.GetName()))
+func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog {
+	binlogFields := make([]*datapb.FieldBinlog, 0)
+	for fieldID, logs := range insertLogs {
+		binlog := &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: lo.Map(logs, func(path string, _ int) *datapb.Binlog {
+				return &datapb.Binlog{
+					LogPath: path,
+				}
+			}),
 		}
+		binlogFields = append(binlogFields, binlog)
 	}
-	// 2. check system fields (ts and rowID)
+	return binlogFields
+}
+
+func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
+	// check system fields (ts and rowID)
 	if _, ok := insertLogs[common.RowIDField]; !ok {
-		return merr.WrapErrImportFailed("no binlog for RowID field")
+		return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
 	}
 	if _, ok := insertLogs[common.TimeStampField]; !ok {
-		return merr.WrapErrImportFailed("no binlog for TimestampField")
+		return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
 	}
-	// 3. check file count
+
+	// check binlog file count, must be equal for all fields
 	for fieldID, logs := range insertLogs {
 		if len(logs) != len(insertLogs[common.RowIDField]) {
-			return merr.WrapErrImportFailed(fmt.Sprintf("misaligned binlog count, field%d:%d, field%d:%d",
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("misaligned binlog count, field%d:%d, field%d:%d",
 				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField])))
 		}
 	}
-	// for Function output field, we do not re-run the Function when restoring from a backup.
-	return nil
+
+	// Goal: support import binlog files to a different schema collection.
+	//
+	// What we know:
+	// - The milvus-backup tool knows the original collection's schema, it has the ability to create
+	//   a new collection from the old schema, it also supports restore data into an existing collection
+	//   which could be different schema.
+	// - The binlog field ids are parsed from the storage path, here we don't know the original field name.
+	//   The binlogs are mapped by fieldID, which could lead to type error later.
+	//
+	// How to do:
+	// - Always import pk field into the target collection no matter it is auto-id or not.
+	// - Returns an error if the target collection has a Function output field, but the source collection has no this field.
+	// - If both collections have the function output field, we do not re-run the Function when restoring from a backup.
+	// - For nullable/defaultValue fields, the binlog is optional.
+	// - For dynamic field, the binlog is optional.
+	// - For other fields, if a field is not in the target collection's schema, just skip the binlog of this field.
+	// - If the target collection's schema contains a field(not nullable/defaultValue) that the source collection
+	// doesn't have, reports an error
+
+	// Here we copy the schema for reading part of collection's data. The storage.NewBinlogRecordReader() requires
+	// a schema and the schema must be consistent with the binglog files([]*datapb.FieldBinlog)
+	cloneSchema := typeutil.Clone(schema)
+	cloneSchema.Fields = []*schemapb.FieldSchema{} // the Fields will be reset according to the validInsertLogs
+	cloneSchema.EnableDynamicField = false         // this flag will be reset
+
+	// this loop will reset the cloneSchema.Fields and return validInsertLogs
+	validInsertLogs := make(map[int64][]string)
+
+	for _, field := range schema.GetFields() {
+		id := field.GetFieldID()
+		logs, ok := insertLogs[id]
+		if !ok {
+			// dynamic field, nullable field, default value field, optional, no need to check
+			// they will be filled by AppendNullableDefaultFieldsData
+			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
+				continue
+			}
+
+			// primary key is required
+			// function output field is also required
+			// the other field must be provided
+			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for field:%s", field.GetName()))
+		} else {
+			// these binlogs are intend to be imported
+			validInsertLogs[id] = logs
+
+			// reset the cloneSchema.Fields
+			cloneSchema.Fields = append(cloneSchema.Fields, field)
+			if field.IsDynamic {
+				cloneSchema.EnableDynamicField = true
+			}
+		}
+	}
+
+	return validInsertLogs, cloneSchema, nil
 }

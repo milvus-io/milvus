@@ -17,10 +17,13 @@
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "segcore/load_field_data_c.h"
+#include "monitor/scope_metric.h"
 
 CStatus
 NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info,
                      int64_t storage_version) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_field_data_info = std::make_unique<LoadFieldDataInfo>();
         load_field_data_info->storage_version = storage_version;
@@ -33,6 +36,8 @@ NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info,
 
 void
 DeleteLoadFieldDataInfo(CLoadFieldDataInfo c_load_field_data_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     delete info;
 }
@@ -41,6 +46,8 @@ CStatus
 AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
                     int64_t field_id,
                     int64_t row_count) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_field_data_info =
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
@@ -64,6 +71,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
                         int64_t entries_num,
                         const char* c_file_path) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_field_data_info =
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
@@ -86,6 +95,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
 void
 AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
                   const char* c_dir_path) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto load_field_data_info =
         static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     load_field_data_info->mmap_dir_path = std::string(c_dir_path);
@@ -94,6 +105,8 @@ AppendMMapDirPath(CLoadFieldDataInfo c_load_field_data_info,
 void
 SetStorageVersion(CLoadFieldDataInfo c_load_field_data_info,
                   int64_t storage_version) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto load_field_data_info = (LoadFieldDataInfo*)c_load_field_data_info;
     load_field_data_info->storage_version = storage_version;
 }
@@ -102,12 +115,16 @@ void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
            bool enabled) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->field_infos[field_id].enable_mmap = enabled;
 }
 
 void
 SetLoadPriority(CLoadFieldDataInfo c_load_field_data_info, int32_t priority) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->load_priority = milvus::proto::common::LoadPriority(priority);
 }

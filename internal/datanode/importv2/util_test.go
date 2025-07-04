@@ -178,36 +178,119 @@ func Test_PickSegment(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func Test_AppendNullableDefaultFieldsData(t *testing.T) {
-	buildSchemaFn := func() *schemapb.CollectionSchema {
-		fields := make([]*schemapb.FieldSchema, 0)
-		fields = append(fields, &schemapb.FieldSchema{
-			FieldID:      100,
-			Name:         "pk",
-			DataType:     schemapb.DataType_Int64,
-			IsPrimaryKey: true,
-			AutoID:       false,
-		})
-		fields = append(fields, &schemapb.FieldSchema{
-			FieldID:  101,
-			Name:     "vec",
-			DataType: schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: "4",
+func Test_CheckRowsEqual(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "4",
+					},
 				},
 			},
-		})
-		fields = append(fields, &schemapb.FieldSchema{
-			FieldID:  102,
-			Name:     "dummy",
-			DataType: schemapb.DataType_Int32,
-			Nullable: true,
-		})
+			{
+				FieldID:  102,
+				Name:     "flag",
+				DataType: schemapb.DataType_Double,
+				Nullable: true,
+			},
+			{
+				FieldID:   103,
+				Name:      "dynamic",
+				DataType:  schemapb.DataType_JSON,
+				IsDynamic: true,
+			},
+			{
+				FieldID:          104,
+				Name:             "functionOutput",
+				DataType:         schemapb.DataType_SparseFloatVector,
+				IsFunctionOutput: true,
+			},
+		},
+	}
 
+	// empty insertData
+	insertData := &storage.InsertData{
+		Data: make(map[int64]storage.FieldData),
+	}
+	err := CheckRowsEqual(schema, insertData)
+	assert.NoError(t, err)
+
+	insertData, err = storage.NewInsertData(schema)
+	assert.NoError(t, err)
+	err = CheckRowsEqual(schema, insertData)
+	assert.NoError(t, err)
+
+	// row not equal
+	insertData, err = testutil.CreateInsertData(schema, 10)
+	assert.NoError(t, err)
+
+	newField := &schemapb.FieldSchema{
+		FieldID:  200,
+		Name:     "new",
+		DataType: schemapb.DataType_Bool,
+	}
+	schema.Fields = append(schema.Fields, newField)
+	insertData.Data[newField.GetFieldID()], err = storage.NewFieldData(newField.GetDataType(), newField, 1)
+	err = CheckRowsEqual(schema, insertData)
+	assert.Error(t, err)
+
+	// row equal
+	insertData, err = testutil.CreateInsertData(schema, 10)
+	assert.NoError(t, err)
+	err = CheckRowsEqual(schema, insertData)
+	assert.NoError(t, err)
+}
+
+func Test_AppendNullableDefaultFieldsData(t *testing.T) {
+	autoIDField := int64(100)
+	dynamicFieldID := int64(102)
+	functionFieldID := int64(103)
+	buildSchemaFn := func() *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
-			Fields: fields,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      autoIDField,
+					Name:         "pk",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       true,
+				},
+				{
+					FieldID:  101,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "4",
+						},
+					},
+				},
+				{
+					FieldID:   dynamicFieldID,
+					Name:      "dynamic",
+					DataType:  schemapb.DataType_JSON,
+					IsDynamic: true,
+				},
+				{
+					FieldID:          functionFieldID,
+					Name:             "functionOutput",
+					DataType:         schemapb.DataType_SparseFloatVector,
+					IsFunctionOutput: true,
+				},
+			},
 		}
 	}
 
@@ -382,23 +465,42 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "100"})
 			}
 
+			// create data without the new field
 			insertData, err := testutil.CreateInsertData(schema, count)
 			assert.NoError(t, err)
 
+			// add new nullalbe/default field to the schema
 			schema.Fields = append(schema.Fields, fieldSchema)
 
-			fieldData, err := storage.NewFieldData(fieldSchema.GetDataType(), fieldSchema, 0)
+			// prepare a one-row data
+			tempSchema := &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{fieldSchema},
+			}
+			tempData, err := testutil.CreateInsertData(tempSchema, 1)
 			assert.NoError(t, err)
-			insertData.Data[fieldSchema.GetFieldID()] = fieldData
+			insertData.Data[fieldSchema.GetFieldID()] = tempData.Data[fieldSchema.GetFieldID()]
 
+			// the new field row count is 1, not equal to others
+			err = AppendNullableDefaultFieldsData(schema, insertData, count)
+			assert.Error(t, err)
+
+			// the new field data is empty, it will be filled by AppendNullableDefaultFieldsData
+			insertData.Data[fieldSchema.GetFieldID()], err = storage.NewFieldData(fieldSchema.GetDataType(), fieldSchema, 0)
+			assert.NoError(t, err)
 			err = AppendNullableDefaultFieldsData(schema, insertData, count)
 			assert.NoError(t, err)
 
 			for fieldID, fieldData := range insertData.Data {
-				if fieldID < int64(200) {
+				// testutil.CreateInsertData dont create data for autoid, function output fields
+				// AppendNullableDefaultFieldsData doesn't fill autoid, dynamic and function output fields
+				if fieldID == autoIDField || fieldID == functionFieldID {
+					assert.Equal(t, 0, fieldData.RowNum())
+				} else {
+					assert.Equal(t, count, fieldData.RowNum())
+				}
+				if fieldID != tt.fieldID {
 					continue
 				}
-				assert.Equal(t, count, fieldData.RowNum())
 
 				if tt.nullable {
 					assert.True(t, fieldData.GetNullable())
@@ -456,4 +558,72 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUtil_FillDynamicData(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		EnableDynamicField: false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "pk",
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  1010,
+				Name:     "vec",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "16",
+					},
+				},
+			},
+		},
+	}
+
+	// prepare 10 rows data
+	count := 10
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	// EnableDynamicField is false, do nothing
+	err = FillDynamicData(schema, insertData, count)
+	assert.NoError(t, err)
+
+	// enable_dynamic_field is true but the dynamic field doesn't exist
+	schema.EnableDynamicField = true
+	err = FillDynamicData(schema, insertData, count)
+	assert.Error(t, err)
+
+	// add a dynamic field
+	dynamicFieldID := int64(200)
+	dynamicField := &schemapb.FieldSchema{
+		FieldID:   dynamicFieldID,
+		Name:      "dynamic",
+		DataType:  schemapb.DataType_JSON,
+		IsDynamic: true,
+	}
+	schema.Fields = append(schema.Fields, dynamicField)
+
+	// the dynamic field has one row, which is illegal
+	insertData.Data[dynamicFieldID], err = storage.NewFieldData(dynamicField.DataType, dynamicField, count)
+	assert.NoError(t, err)
+	err = insertData.Data[dynamicFieldID].AppendRow([]byte("{}"))
+	assert.NoError(t, err)
+	err = FillDynamicData(schema, insertData, count)
+	assert.Error(t, err)
+
+	// the dynamic field is empty, dynamic data is filled
+	insertData.Data[dynamicFieldID], err = storage.NewFieldData(dynamicField.DataType, dynamicField, count)
+	assert.NoError(t, err)
+	err = FillDynamicData(schema, insertData, count)
+	assert.NoError(t, err)
+	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
+
+	// the dynamic field is allready filled, do nothing
+	err = FillDynamicData(schema, insertData, count)
+	assert.NoError(t, err)
+	assert.Equal(t, count, insertData.Data[dynamicFieldID].RowNum())
 }

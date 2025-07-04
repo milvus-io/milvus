@@ -106,3 +106,78 @@ func TestUtil_EstimateReadCountPerBatch_LargeSchema(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), count)
 }
+
+func TestUtil_CheckVarcharLength(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "5",
+			},
+		},
+	}
+	err := CheckVarcharLength("aaaaaaaa", 5, fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckVarcharLength("aaaaa", 5, fieldSchema)
+	assert.NoError(t, err)
+}
+
+func TestUtil_CheckArrayCapacity(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_Array,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxCapacityKey,
+				Value: "5",
+			},
+		},
+	}
+	err := CheckArrayCapacity(6, 5, fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckArrayCapacity(5, 5, fieldSchema)
+	assert.NoError(t, err)
+}
+
+func TestUtil_CheckValidUTF8(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "1000",
+			},
+		},
+	}
+	err := CheckValidUTF8(string([]byte{0xC0, 0xAF}), fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckValidUTF8("abc", fieldSchema)
+	assert.NoError(t, err)
+}
+
+func TestUtil_CheckValidString(t *testing.T) {
+	fieldSchema := &schemapb.FieldSchema{
+		FieldID:  1,
+		DataType: schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.MaxLengthKey,
+				Value: "5",
+			},
+		},
+	}
+	err := CheckValidString("aaaaaaaa", 5, fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckValidString(string([]byte{0xC0, 0xAF}), 5, fieldSchema)
+	assert.Error(t, err)
+
+	err = CheckValidString("aaaaa", 5, fieldSchema)
+	assert.NoError(t, err)
+}

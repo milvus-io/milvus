@@ -20,20 +20,37 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+type mockReader struct {
+	io.Reader
+	io.Closer
+	io.ReaderAt
+	io.Seeker
+	size int64
+}
+
+func (mr *mockReader) Size() (int64, error) {
+	return mr.size, nil
+}
 
 type ReaderSuite struct {
 	suite.Suite
@@ -48,7 +65,7 @@ func (suite *ReaderSuite) SetupSuite() {
 }
 
 func (suite *ReaderSuite) SetupTest() {
-	suite.numRows = 10
+	suite.numRows = 100
 	suite.pkDataType = schemapb.DataType_Int64
 	suite.vecDataType = schemapb.DataType_FloatVector
 }
@@ -131,7 +148,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 
 	// write to csv file
 	filePath := fmt.Sprintf("/tmp/test_%d_reader.csv", rand.Int())
-	// defer os.Remove(filePath)
+	defer os.Remove(filePath)
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	suite.NoError(err)
 	writer := csv.NewWriter(wf)
@@ -149,7 +166,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	wrongSep := '\t'
 	_, err = NewReader(ctx, cm, schema, filePath, 64*1024*1024, wrongSep, nullkey)
 	suite.Error(err)
-	suite.Contains(err.Error(), "value of field is missed: ")
+	suite.Contains(err.Error(), "value of field is missed:")
 
 	// check data
 	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024, sep, nullkey)
@@ -234,6 +251,121 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32, schemapb.DataType_None, false)
 }
 
-func TestUtil(t *testing.T) {
+func (suite *ReaderSuite) TestError() {
+	testNewReaderErr := func(ioErr error, schema *schemapb.CollectionSchema, content string, bufferSize int) {
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			if ioErr != nil {
+				return nil, ioErr
+			} else {
+				r := &mockReader{Reader: strings.NewReader(content)}
+				return r, nil
+			}
+		})
+
+		reader, err := NewReader(context.Background(), cm, schema, "dummy path", bufferSize, ',', "")
+		suite.Error(err)
+		suite.Nil(reader)
+	}
+
+	testNewReaderErr(merr.WrapErrImportFailed("error"), nil, "", 1)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "int32",
+				DataType: schemapb.DataType_Int32,
+			},
+		},
+	}
+	testNewReaderErr(nil, schema, "", -1)
+	testNewReaderErr(nil, schema, "", 1)
+
+	testReadErr := func(schema *schemapb.CollectionSchema, content string) {
+		cm := mocks.NewChunkManager(suite.T())
+		cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+			r := &mockReader{Reader: strings.NewReader(content)}
+			return r, nil
+		})
+		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
+
+		reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1024, ',', "")
+		suite.NoError(err)
+		suite.NotNil(reader)
+
+		size, err := reader.Size()
+		suite.NoError(err)
+		suite.Equal(int64(128), size)
+
+		_, err = reader.Read()
+		suite.Error(err)
+	}
+	content := "pk,int32\n1,A"
+	testReadErr(schema, content)
+}
+
+func (suite *ReaderSuite) TestReadLoop() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "pk",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  101,
+				Name:     "float",
+				DataType: schemapb.DataType_Float,
+			},
+		},
+	}
+	content := "pk,float\n1,0.1\n2,0.2"
+
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+		reader := strings.NewReader(content)
+		r := &mockReader{
+			Reader: reader,
+			Closer: io.NopCloser(reader),
+		}
+		return r, nil
+	})
+	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
+
+	reader, err := NewReader(context.Background(), cm, schema, "dummy path", 1, ',', "")
+	suite.NoError(err)
+	suite.NotNil(reader)
+	defer reader.Close()
+
+	size, err := reader.Size()
+	suite.NoError(err)
+	suite.Equal(int64(128), size)
+	size2, err := reader.Size() // size is cached
+	suite.NoError(err)
+	suite.Equal(size, size2)
+
+	reader.count = 1
+	data, err := reader.Read()
+	suite.NoError(err)
+	suite.Equal(1, data.GetRowNum())
+
+	data, err = reader.Read()
+	suite.NoError(err)
+	suite.Equal(1, data.GetRowNum())
+
+	data, err = reader.Read()
+	suite.EqualError(io.EOF, err.Error())
+	suite.Nil(data)
+}
+
+func TestCsvReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }

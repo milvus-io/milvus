@@ -495,9 +495,18 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
+	return sd.addDistributionIfVersionOK(req.GetLoadMeta().GetSchemaVersion(), entries...)
+}
+
+func (sd *shardDelegator) addDistributionIfVersionOK(version uint64, entries ...SegmentEntry) error {
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+	if version < sd.schemaVersion {
+		return merr.WrapErrServiceInternal("schema version changed")
+	}
+
 	// alter distribution
 	sd.distribution.AddDistributions(entries...)
-
 	return nil
 }
 

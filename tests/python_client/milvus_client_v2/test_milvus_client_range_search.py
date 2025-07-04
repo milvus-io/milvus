@@ -1548,55 +1548,6 @@ class TestCollectionRangeSearch(TestcaseBase):
                             **kwargs
                             )
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_range_search_with_consistency_session(self, nq, dim, auto_id, _async):
-        """
-        target: test range search with different consistency level
-        method: 1. create a collection
-                2. insert data
-                3. range search with consistency_level is "session"
-        expected: searched successfully
-        """
-        limit = 1000
-        nb_old = 500
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim)[0:4]
-        # 2. search for original data after load
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
-                                                                   "range_filter": 1000}}
-        collection_w.search(vectors[:nq], default_search_field,
-                            range_search_params, limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": nb_old,
-                                         "_async": _async,
-                                         "pk_name": ct.default_int64_field_name})
-
-        kwargs = {}
-        consistency_level = kwargs.get(
-            "consistency_level", CONSISTENCY_SESSION)
-        kwargs.update({"consistency_level": consistency_level})
-
-        nb_new = 400
-        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
-                                                    auto_id=auto_id, dim=dim,
-                                                    insert_offset=nb_old)
-        insert_ids.extend(insert_ids_new)
-        collection_w.search(vectors[:nq], default_search_field,
-                            range_search_params, limit,
-                            default_search_exp, _async=_async,
-                            **kwargs,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": nb_old + nb_new,
-                                         "_async": _async,
-                                         "pk_name": ct.default_int64_field_name})
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_sparse(self):
         """

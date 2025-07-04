@@ -87,6 +87,12 @@ func mergeSortMultipleSegments(ctx context.Context,
 		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTtl, currentTime)
 	}
 
+	defer func() {
+		for _, r := range segmentReaders {
+			r.Close()
+		}
+	}()
+
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {
 	case schemapb.DataType_Int64:

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type DelegatorSuite struct {
@@ -148,7 +149,8 @@ func (s *DelegatorSuite) SetupTest() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		PartitionIDs: s.partitionIDs,
+		PartitionIDs:  s.partitionIDs,
+		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
@@ -197,7 +199,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101, 103}, // invalid output field
 			}},
-		}, nil, nil)
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
@@ -240,7 +242,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 				InputFieldIds:  []int64{102},
 				OutputFieldIds: []int64{101},
 			}},
-		}, nil, nil)
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
 			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
@@ -1416,6 +1418,7 @@ func (s *DelegatorSuite) ResetDelegator() {
 
 func (s *DelegatorSuite) TestRunAnalyzer() {
 	ctx := context.Background()
+	s.TestCreateDelegatorWithFunction()
 	s.Run("field analyzer not exist", func() {
 		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
 			FieldId: 100,
@@ -1445,7 +1448,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nil)
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1488,7 +1491,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nil)
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 		s.ResetDelegator()
 
 		result, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{
@@ -1533,7 +1536,7 @@ func (s *DelegatorSuite) TestRunAnalyzer() {
 				OutputFieldNames: []string{"sparse"},
 				OutputFieldIds:   []int64{101},
 			}},
-		}, nil, nil)
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 		s.ResetDelegator()
 
 		_, err := s.delegator.RunAnalyzer(ctx, &querypb.RunAnalyzerRequest{

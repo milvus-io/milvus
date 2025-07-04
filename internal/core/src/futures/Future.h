@@ -75,7 +75,6 @@ class Metrics {
             milvus::monitor::internal_cgo_cancel_before_execute_total_all
                 .Increment();
         } else {
-            milvus::monitor::internal_cgo_executing_task_total_all.Decrement();
             milvus::monitor::internal_cgo_execute_duration_seconds_all.Observe(
                 std::chrono::duration<double>(execute_duration_).count());
         }
@@ -102,6 +101,7 @@ class Metrics {
         auto now = std::chrono::steady_clock::now();
         execute_duration_ =
             std::chrono::duration_cast<Duration>(now - time_point_);
+        milvus::monitor::internal_cgo_executing_task_total_all.Decrement();
     }
 
  private:

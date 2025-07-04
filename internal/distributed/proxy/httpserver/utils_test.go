@@ -2548,6 +2548,23 @@ func TestGenFunctionSchem(t *testing.T) {
 		_, err := genFunctionSchema(context.Background(), funcSchema)
 		assert.NoError(t, err)
 	}
+	{
+		funcSchema := &FunctionSchema{
+			FunctionName:    "test",
+			Description:     "",
+			FunctionType:    "Rerank",
+			InputFieldNames: []string{"test"},
+			Params: map[string]interface{}{
+				"test": []string{"test", "test2"},
+				"test2": map[string]interface{}{
+					"test3": "test4",
+				},
+				"test3": []int{1, 2, 3},
+			},
+		}
+		_, err := genFunctionSchema(context.Background(), funcSchema)
+		assert.NoError(t, err)
+	}
 }
 
 func TestGenFunctionScore(t *testing.T) {

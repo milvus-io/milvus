@@ -177,10 +177,9 @@ func (t *DropAliasTask) OnEnqueue() error {
 }
 
 func (t *DropAliasTask) PreExecute(ctx context.Context) error {
-	collAlias := t.Alias
-	if err := ValidateCollectionAlias(collAlias); err != nil {
-		return err
-	}
+	// No need to check collection name
+	// Validation shall be preformed in `CreateCollection`
+	// also permit drop collection one with bad collection name
 	return nil
 }
 

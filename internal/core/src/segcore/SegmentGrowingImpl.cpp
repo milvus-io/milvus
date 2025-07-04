@@ -1167,7 +1167,7 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
             ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));
     }
-    iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
+    iter->second->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
 }
 
 void

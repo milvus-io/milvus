@@ -68,12 +68,12 @@ class IVF_RABITQ:
         # refine params test
         {
             "description": "Enable Refine Test",
-            "params": {"refine": 'true'},     # to be fixed: #41760
+            "params": {"refine": 'true'},
             "expected": success
         },
         {
             "description": "Disable Refine Test",
-            "params": {"refine": 'false'},  # to be fixed: #41760
+            "params": {"refine": 'false'},
             "expected": success
         },
 
@@ -194,7 +194,13 @@ class IVF_RABITQ:
         {
             "description": "Exceed nlist Test",
             "params": {"nprobe": 129},  # Assuming nlist=128
-            "expected": success      # to be fixed: #41765
+            "expected": success
+        },
+        {
+            "description": "Exceed nprobe Test",
+            "params": {"nprobe": 65537},
+            "expected": {"err_code": 999,
+                         "err_msg": "should be in range [1, 65536]"}
         },
         {
             "description": "Negative Value Test",

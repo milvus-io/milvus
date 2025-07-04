@@ -76,12 +76,12 @@ class TestMilvusClientDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.parametrize("is_release", [True])
     @pytest.mark.parametrize("single_data_num", [50])
     @pytest.mark.parametrize("expr_field", [ct.default_int64_field_name,
-                                            # ct.default_string_field_name,   # TODO: uncommented after #42604 fixed
+                                            ct.default_string_field_name,
                                             ct.default_float_array_field_name])
     def test_milvus_client_query_all_field_type_all_data_distribution_all_expressions_array(self,
                                                                                             enable_dynamic_field,
                                                                                             supported_numeric_scalar_index,
-                                                                                            # supported_varchar_scalar_index,
+                                                                                            supported_varchar_scalar_index,
                                                                                             supported_json_path_index,
                                                                                             supported_array_double_float_scalar_index,
                                                                                             is_flush,

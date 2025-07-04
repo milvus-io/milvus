@@ -488,7 +488,7 @@ class TestQueryParams(TestcaseBase):
 
         expr_3 = f'{ct.default_int64_field_name} in not [1, 2]'
         error_3 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
-                                                   "error: value 'not[1,2]' in list cannot be a non-const expression"}
+                                                   "error: not can only apply on boolean: invalid parameter"}
         collection_w.query(expr_3, check_task=CheckTasks.err_res, check_items=error_3)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2237,7 +2237,9 @@ class TestQueryOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
 
         # list connection to check
-        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: []})
+        self.connection_wrap.list_connections()
+        # delete the check because we have added "self.client = MilvusClient(uri=uri, token=cf.param_info.param_token)"
+        # at line156 in client_base.py.  So the result of list connections will not be empty
 
         # query after remove default connection
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,

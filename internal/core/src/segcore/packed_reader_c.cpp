@@ -24,6 +24,7 @@
 #include <memory>
 #include "common/EasyAssert.h"
 #include "common/type_c.h"
+#include "monitor/scope_metric.h"
 
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,
@@ -32,6 +33,8 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  const int64_t buffer_size,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
 
@@ -77,6 +80,8 @@ NewPackedReader(char** paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
                 CPackedReader* c_packed_reader) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto truePaths = std::vector<std::string>(paths, paths + num_paths);
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
@@ -99,6 +104,8 @@ CStatus
 ReadNext(CPackedReader c_packed_reader,
          CArrowArray* out_array,
          CArrowSchema* out_schema) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto packed_reader =
             static_cast<milvus_storage::PackedRecordBatchReader*>(
@@ -134,6 +141,8 @@ ReadNext(CPackedReader c_packed_reader,
 
 CStatus
 CloseReader(CPackedReader c_packed_reader) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto packed_reader =
             static_cast<milvus_storage::PackedRecordBatchReader*>(

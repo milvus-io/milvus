@@ -83,7 +83,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	}
 
 	s.serverID.Store(paramtable.GetNodeID())
-	s.datanode = dn.NewDataNode(s.ctx, s.factory)
+	s.datanode = dn.NewDataNode(s.ctx)
 	return s, nil
 }
 

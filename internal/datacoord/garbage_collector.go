@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -73,11 +74,40 @@ type garbageCollector struct {
 	wg         sync.WaitGroup
 	cmdCh      chan gcCmd
 	pauseUntil atomic.Time
+
+	systemMetricsListener *hardware.SystemMetricsListener
 }
+
 type gcCmd struct {
 	cmdType  datapb.GcCommand
 	duration time.Duration
 	done     chan struct{}
+}
+
+// newSystemMetricsListener creates a system metrics listener for garbage collector.
+// used to slow down the garbage collector when cpu usage is high.
+func newSystemMetricsListener(opt *GcOption) *hardware.SystemMetricsListener {
+	return &hardware.SystemMetricsListener{
+		Cooldown:  15 * time.Second,
+		Context:   false,
+		Condition: func(metrics hardware.SystemMetrics, listener *hardware.SystemMetricsListener) bool { return true },
+		Callback: func(metrics hardware.SystemMetrics, listener *hardware.SystemMetricsListener) {
+			isSlowDown := listener.Context.(bool)
+			if metrics.UsedRatio() > paramtable.Get().DataCoordCfg.GCSlowDownCPUUsageThreshold.GetAsFloat() {
+				if !isSlowDown {
+					log.Info("garbage collector slow down...", zap.Float64("cpuUsage", metrics.UsedRatio()))
+					opt.removeObjectPool.Resize(1)
+					listener.Context = true
+				}
+				return
+			}
+			if isSlowDown {
+				log.Info("garbage collector slow down finished", zap.Float64("cpuUsage", metrics.UsedRatio()))
+				opt.removeObjectPool.Resize(paramtable.Get().DataCoordCfg.GCRemoveConcurrent.GetAsInt())
+				listener.Context = false
+			}
+		},
+	}
 }
 
 // newGarbageCollector create garbage collector with meta and option
@@ -91,12 +121,13 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	ctx, cancel := context.WithCancel(context.Background())
 	return &garbageCollector{
-		ctx:     ctx,
-		cancel:  cancel,
-		meta:    meta,
-		handler: handler,
-		option:  opt,
-		cmdCh:   make(chan gcCmd),
+		ctx:                   ctx,
+		cancel:                cancel,
+		meta:                  meta,
+		handler:               handler,
+		option:                opt,
+		cmdCh:                 make(chan gcCmd),
+		systemMetricsListener: newSystemMetricsListener(&opt),
 	}
 }
 
@@ -182,6 +213,9 @@ func (gc *garbageCollector) work(ctx context.Context) {
 
 // startControlLoop start a control loop for garbageCollector.
 func (gc *garbageCollector) startControlLoop(_ context.Context) {
+	hardware.RegisterSystemMetricsListener(gc.systemMetricsListener)
+	defer hardware.UnregisterSystemMetricsListener(gc.systemMetricsListener)
+
 	for {
 		select {
 		case cmd := <-gc.cmdCh:
@@ -337,6 +371,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		// ignore error since it could be cleaned up next time
 		file := chunkInfo.FilePath
+
 		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
 			logger := logger.With(zap.String("file", file))
 			logger.Info("garbageCollector recycleUnusedBinlogFiles remove file...")

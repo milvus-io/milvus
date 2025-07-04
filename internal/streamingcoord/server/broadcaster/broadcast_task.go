@@ -2,7 +2,6 @@ package broadcaster
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -84,7 +83,8 @@ func (b *broadcastTask) State() streamingpb.BroadcastTaskState {
 	return b.task.State
 }
 
-// PendingBroadcastMessages returns the pending broadcast message of current broad cast.
+// PendingBroadcastMessages returns the pending broadcast message of current broadcast.
+// If the vchannel is already acked, it will be filtered out.
 func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -117,21 +117,26 @@ func (b *broadcastTask) InitializeRecovery(ctx context.Context) error {
 	return nil
 }
 
-// mustGetImmutableMessageFromVChannel gets the immutable message from the vchannel.
-func (b *broadcastTask) mustGetImmutableMessageFromVChannel(vchannel string) message.MutableMessage {
+// getImmutableMessageFromVChannel gets the immutable message from the vchannel.
+// If the vchannel is already acked, it returns nil.
+func (b *broadcastTask) getImmutableMessageFromVChannel(vchannel string) message.MutableMessage {
 	msgs := b.PendingBroadcastMessages()
 	for _, msg := range msgs {
 		if msg.VChannel() == vchannel {
 			return msg
 		}
 	}
-	panic(fmt.Sprintf("vchannel %s not found", vchannel))
+	return nil
 }
 
 // Ack acknowledges the message at the specified vchannel.
 func (b *broadcastTask) Ack(ctx context.Context, vchannel string) error {
 	// TODO: after all status is recovered from wal, we need make a async framework to handle the callback asynchronously.
-	msg := b.mustGetImmutableMessageFromVChannel(vchannel)
+	msg := b.getImmutableMessageFromVChannel(vchannel)
+	if msg == nil {
+		b.Logger().Warn("vchannel is already acked, ignore the ack request", zap.String("vchannel", vchannel))
+		return nil
+	}
 	if err := registry.CallMessageAckCallback(ctx, msg); err != nil {
 		b.Logger().Warn("message ack callback failed", log.FieldMessage(msg), zap.Error(err))
 		return err

@@ -123,10 +123,11 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				// the msgv1 will be read after all msgv0 is consumed as soon as possible.
 				// so the last confirm is set to the first msgv0 message for all old version message is ok.
 				var err error
+				messageID := msg.MessageID()
 				msg, err = newOldVersionImmutableMessage(ctx, s.innerWAL.Channel().Name, s.lastConfirmedMessageIDForOldVersion, msg)
 				if errors.Is(err, vchantempstore.ErrNotFound) {
 					// Skip the message's vchannel is not found in the vchannel temp store.
-					s.logger.Info("skip the old version message because vchannel not found", zap.Stringer("messageID", msg.MessageID()))
+					s.logger.Info("skip the old version message because vchannel not found", zap.Stringer("messageID", messageID))
 					continue
 				}
 				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {

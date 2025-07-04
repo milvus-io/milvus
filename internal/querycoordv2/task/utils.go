@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -101,7 +102,7 @@ func GetTaskType(task Task) Type {
 	return 0
 }
 
-func mergeCollectonProps(schemaProps []*commonpb.KeyValuePair, collectionProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+func mergeCollectionProps(schemaProps []*commonpb.KeyValuePair, collectionProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	// Merge the collectionProps and schemaProps maps, giving priority to the values in schemaProps if there are duplicate keys.
 	props := make(map[string]string)
 	for _, p := range collectionProps {
@@ -141,18 +142,8 @@ func packLoadSegmentRequest(
 	if task.Source() == utils.LeaderChecker {
 		loadScope = querypb.LoadScope_Delta
 	}
-	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
-	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
-	for _, field := range schema.GetFields() {
-		if exist {
-			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-				Key:   common.MmapEnabledKey,
-				Value: strconv.FormatBool(collectionMmapEnabled),
-			})
-		}
-	}
 
-	schema.Properties = mergeCollectonProps(schema.Properties, collectionProperties)
+	schema = applyCollectionMmapSetting(schema, collectionProperties)
 
 	return &querypb.LoadSegmentsRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -189,14 +180,15 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, collectionInfo *milvuspb.DescribeCollectionResponse, resourceGroup string, loadFields []int64, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
 		LoadType:      loadType,
-		CollectionID:  collectionID,
+		CollectionID:  collectionInfo.GetCollectionID(),
 		PartitionIDs:  partitions,
-		DbName:        databaseName,
+		DbName:        collectionInfo.GetDbName(),
 		ResourceGroup: resourceGroup,
 		LoadFields:    loadFields,
+		SchemaVersion: collectionInfo.GetUpdateTimestamp(),
 	}
 }
 
@@ -204,12 +196,14 @@ func packSubChannelRequest(
 	task *ChannelTask,
 	action Action,
 	schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
 	loadMeta *querypb.LoadMetaInfo,
 	channel *meta.DmChannel,
 	indexInfo []*indexpb.IndexInfo,
 	partitions []int64,
 	targetVersion int64,
 ) *querypb.WatchDmChannelsRequest {
+	schema = applyCollectionMmapSetting(schema, collectionProperties)
 	return &querypb.WatchDmChannelsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
@@ -269,4 +263,24 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 		CollectionID: task.CollectionID(),
 		ChannelName:  task.Channel(),
 	}
+}
+
+func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
+	collectionProperties []*commonpb.KeyValuePair,
+) *schemapb.CollectionSchema {
+	schema = typeutil.Clone(schema)
+	schema.Properties = mergeCollectionProps(schema.Properties, collectionProperties)
+	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
+	collectionMmapEnabled, exist := common.IsMmapDataEnabled(collectionProperties...)
+	for _, field := range schema.GetFields() {
+		if exist &&
+			// field-level mmap setting has higher priority than collection-level mmap setting, skip if field-level mmap enabled
+			!common.FieldHasMmapKey(schema, field.GetFieldID()) {
+			field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+				Key:   common.MmapEnabledKey,
+				Value: strconv.FormatBool(collectionMmapEnabled),
+			})
+		}
+	}
+	return schema
 }

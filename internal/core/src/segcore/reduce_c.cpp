@@ -18,6 +18,7 @@
 #include "segcore/reduce_c.h"
 #include "segcore/reduce/StreamReduce.h"
 #include "segcore/Utils.h"
+#include "monitor/scope_metric.h"
 
 using SearchResult = milvus::SearchResult;
 
@@ -27,6 +28,8 @@ NewStreamReducer(CSearchPlan c_plan,
                  int64_t* slice_topKs,
                  int64_t num_slices,
                  CSearchStreamReducer* stream_reducer) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         //convert search results and search plan
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
@@ -44,6 +47,8 @@ CStatus
 StreamReduce(CSearchStreamReducer c_stream_reducer,
              CSearchResult* c_search_results,
              int64_t num_segments) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto stream_reducer =
             static_cast<milvus::segcore::StreamReducerHelper*>(
@@ -63,6 +68,8 @@ StreamReduce(CSearchStreamReducer c_stream_reducer,
 CStatus
 GetStreamReduceResult(CSearchStreamReducer c_stream_reducer,
                       CSearchResultDataBlobs* c_search_result_data_blobs) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto stream_reducer =
             static_cast<milvus::segcore::StreamReducerHelper*>(
@@ -83,6 +90,8 @@ ReduceSearchResultsAndFillData(CTraceContext c_trace,
                                int64_t* slice_nqs,
                                int64_t* slice_topKs,
                                int64_t num_slices) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         // get SearchResult and SearchPlan
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
@@ -130,6 +139,8 @@ CStatus
 GetSearchResultDataBlob(CProto* searchResultDataBlob,
                         CSearchResultDataBlobs cSearchResultDataBlobs,
                         int32_t blob_index) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto search_result_data_blobs =
             reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
@@ -150,6 +161,8 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
 
 void
 DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs) {
+    SCOPE_CGO_CALL_METRIC();
+
     if (cSearchResultDataBlobs == nullptr) {
         return;
     }
@@ -161,6 +174,8 @@ DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs) {
 
 void
 DeleteStreamSearchReducer(CSearchStreamReducer c_stream_reducer) {
+    SCOPE_CGO_CALL_METRIC();
+
     if (c_stream_reducer == nullptr) {
         return;
     }
