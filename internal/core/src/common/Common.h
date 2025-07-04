@@ -67,7 +67,7 @@ SetDefaultConfigParamTypeCheck(bool val);
 struct BufferView {
     struct Element {
         const char* data_;
-        uint64_t* offsets_;
+        uint32_t* offsets_;
         int start_;
         int end_;
     };

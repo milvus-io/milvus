@@ -705,7 +705,8 @@ class SegmentExpr : public Expr {
             if (!skip_func || !skip_func(skip_index, field_id_, i)) {
                 bool is_seal = false;
                 if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>) {
+                              std::is_same_v<T, Json> ||
+                              std::is_same_v<T, ArrayView>) {
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
@@ -1034,7 +1035,8 @@ class SegmentExpr : public Expr {
 
             bool access_sealed_variable_column = false;
             if constexpr (std::is_same_v<T, std::string_view> ||
-                          std::is_same_v<T, Json>) {
+                          std::is_same_v<T, Json> ||
+                          std::is_same_v<T, ArrayView>) {
                 if (segment_->type() == SegmentType::Sealed) {
                     auto [data_vec, valid_data] = segment_->get_batch_views<T>(
                         field_id_, i, data_pos, size);
