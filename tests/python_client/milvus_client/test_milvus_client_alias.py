@@ -205,6 +205,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("alias_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/pull/43064 change drop alias restraint")
     def test_milvus_client_drop_alias_invalid_alias_name(self, alias_name):
         """
         target: test create same alias to different collections
@@ -219,6 +220,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/pull/43064 change drop alias restraint")
     def test_milvus_client_drop_alias_over_max_length(self):
         """
         target: test create same alias to different collections
