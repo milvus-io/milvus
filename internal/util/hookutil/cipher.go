@@ -91,24 +91,24 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 	return nil
 }
 
-func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) error {
+func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
 	if IsDBEncyptionEnabled(dbProperties) {
 		if !IsClusterEncyptionEnabled() {
-			return ErrCipherPluginMissing
+			return nil, ErrCipherPluginMissing
 		}
 		for _, property := range dbProperties {
 			if property.Key == EncryptionRootKeyKey {
-				return nil
+				return dbProperties, nil
 			}
 		}
 
-		// set default root key if not set
+		// set default root key from config if EncryuptionRootKeyKey left empty
 		dbProperties = append(dbProperties, &commonpb.KeyValuePair{
 			Key:   EncryptionRootKeyKey,
 			Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
 		})
 	}
-	return nil
+	return dbProperties, nil
 }
 
 func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
