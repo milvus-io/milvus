@@ -301,6 +301,8 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				return 0, 0, err
 			}
 		}
+		// Release the record after writing.
+		r.Release()
 	}
 
 	deltalogDeleteEntriesCount := len(delta)
