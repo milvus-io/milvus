@@ -471,9 +471,9 @@ func (t *dropCollectionTask) OnEnqueue() error {
 }
 
 func (t *dropCollectionTask) PreExecute(ctx context.Context) error {
-	if err := validateCollectionName(t.CollectionName); err != nil {
-		return err
-	}
+	// No need to check collection name
+	// Validation shall be preformed in `CreateCollection`
+	// also permit drop collection one with bad collection name
 	return nil
 }
 
