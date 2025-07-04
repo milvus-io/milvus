@@ -286,10 +286,20 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				rb.Append(r, sliceStart, r.Len())
 			}
 			if rb.GetRowNum() > 0 {
-				mWriter.Write(rb.Build())
+				err := func() error {
+					rec := rb.Build()
+					defer rec.Release()
+					return mWriter.Write(rec)
+				}()
+				if err != nil {
+					return 0, 0, err
+				}
 			}
 		} else {
-			mWriter.Write(r)
+			err := mWriter.Write(r)
+			if err != nil {
+				return 0, 0, err
+			}
 		}
 	}
 
