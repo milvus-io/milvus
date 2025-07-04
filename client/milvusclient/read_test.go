@@ -62,8 +62,9 @@ func (s *ReadSuite) TestSearch() {
 							},
 						},
 					},
-					Scores: make([]float32, 10),
-					Topks:  []int64{10},
+					Scores:  make([]float32, 10),
+					Topks:   []int64{10},
+					Recalls: []float32{0.9},
 				},
 			}, nil
 		}).Once()
@@ -120,6 +121,54 @@ func (s *ReadSuite) TestSearch() {
 			})),
 		}).WithPartitions(partitionName))
 		s.NoError(err)
+	})
+
+	s.Run("bad_result", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		partitionName := fmt.Sprintf("part_%s", s.randString(6))
+		s.setupCache(collectionName, s.schema)
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			s.Equal(collectionName, sr.GetCollectionName())
+			s.ElementsMatch([]string{partitionName}, sr.GetPartitionNames())
+
+			return &milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       10,
+					FieldsData: []*schemapb.FieldData{
+						s.getInt64FieldData("ID", []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}),
+					},
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+							},
+						},
+					},
+					Scores: make([]float32, 10),
+					Topks:  []int64{},
+				},
+			}, nil
+		}).Once()
+
+		ap := index.NewCustomAnnParam()
+		ap.WithExtraParam("custom_level", 1)
+		rss, err := s.client.Search(ctx, NewSearchOption(collectionName, 10, []entity.Vector{
+			entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+				return rand.Float32()
+			})),
+		}).WithPartitions(partitionName).
+			WithFilter("id > {tmpl_id}").
+			WithTemplateParam("tmpl_id", 100).
+			WithGroupByField("group_by").
+			WithSearchParam("ignore_growing", "true").
+			WithAnnParam(ap),
+		)
+		s.NoError(err)
+		s.Len(rss, 1)
+		rs := rss[0]
+		s.Error(rs.Err)
 	})
 
 	s.Run("failure", func() {
