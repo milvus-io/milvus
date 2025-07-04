@@ -67,9 +67,7 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 		func() {
 			var rc int
 			entry := ResultSet{
-				ResultCount: rc,
-				Scores:      results.GetScores()[offset : offset+rc],
-				sch:         schema,
+				sch: schema,
 			}
 			defer func() {
 				offset += rc
@@ -81,6 +79,8 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 				return
 			}
 			rc = int(results.GetTopks()[i]) // result entry count for current query
+			entry.ResultCount = rc
+			entry.Scores = results.GetScores()[offset : offset+rc]
 
 			// set recall if returned
 			if i < len(results.Recalls) {
