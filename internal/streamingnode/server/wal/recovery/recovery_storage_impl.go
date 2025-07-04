@@ -367,6 +367,11 @@ func (r *recoveryStorageImpl) handleCreatePartition(msg message.ImmutableCreateP
 
 // handleDropPartition handles the drop partition message.
 func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropPartitionMessageV1) {
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		// TODO: drop partition should never happen after the drop collection message.
+		// But now we don't have strong promise on it.
+		return
+	}
 	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
 	// flush all existing segments.
 	r.flushAllSegmentOfPartition(msg, msg.Header().CollectionId, msg.Header().PartitionId)
