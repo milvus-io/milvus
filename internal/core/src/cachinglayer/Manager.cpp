@@ -37,7 +37,8 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
 
         if (!evictionEnabled) {
             LOG_INFO(
-                "Tiered Storage manager is configured with disabled eviction");
+                "[MCL] Tiered Storage manager is configured "
+                "with disabled eviction");
             return;
         }
 
@@ -48,21 +49,12 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
         ResourceUsage high_watermark{cache_limit.memory_high_watermark_bytes,
                                      cache_limit.disk_high_watermark_bytes};
 
-        AssertInfo(
-            low_watermark.GEZero(),
-            "Milvus Caching Layer: low watermark must be greater than 0");
-        AssertInfo((high_watermark - low_watermark).GEZero(),
-                   "Milvus Caching Layer: high watermark must be greater than "
-                   "low watermark");
-        AssertInfo(
-            (max - high_watermark).GEZero(),
-            "Milvus Caching Layer: max must be greater than high watermark");
-
         manager.dlist_ = std::make_unique<internal::DList>(
             max, low_watermark, high_watermark, eviction_config);
 
         LOG_INFO(
-            "Configured Tiered Storage manager with memory watermark: low {} "
+            "[MCL] Configured Tiered Storage manager with "
+            "memory watermark: low {} "
             "bytes ({:.2} GB), high {} bytes ({:.2} GB), max {} bytes "
             "({:.2} GB), disk watermark: low "
             "{} bytes ({:.2} GB), high {} bytes ({:.2} GB), max {} bytes "

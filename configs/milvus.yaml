@@ -464,15 +464,13 @@ queryNode:
         vectorIndex: sync
       # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
       # eviction is necessary and the amount of data to evict from memory/disk.
-      # - The max ratio is the max amount of memory/disk that can be used for cache.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
+      # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
       memoryLowWatermarkRatio: 0.6
       memoryHighWatermarkRatio: 0.8
-      memoryMaxRatio: 0.9
       diskLowWatermarkRatio: 0.6
       diskHighWatermarkRatio: 0.8
-      diskMaxRatio: 0.9
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
