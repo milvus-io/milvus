@@ -44,7 +44,7 @@ concurrency:
 jobs:
   Build:
     name: Build and test AMD64 Ubuntu 22.04
-    runs-on: ubuntu-latest
+    runs-on: dedicated-node
     steps:
       - name: 'Setup $HOME'
         # hot fix
@@ -168,7 +168,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: dedicated-node
     timeout-minutes: 150
     steps:
       - name: Maximize build space
@@ -220,7 +220,7 @@ jobs:
   integration-test:
     name: Integration Test
     needs: Build
-    runs-on: ubuntu-latest
+    runs-on: dedicated-node
     timeout-minutes: 150
     steps:
       - name: Maximize build space
@@ -271,7 +271,7 @@ jobs:
   codecov:
     name: Upload Code Coverage
     needs: [UT-Go, integration-test]
-    runs-on: ubuntu-latest
+    runs-on: dedicated-node
     timeout-minutes: 5
     steps:
       - name: Checkout
