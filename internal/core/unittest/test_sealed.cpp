@@ -2262,7 +2262,7 @@ TEST(Sealed, SearchSortedPk) {
     auto varchar_pk_field = schema->AddDebugField("pk", DataType::VARCHAR);
     schema->set_primary_field_id(varchar_pk_field);
     auto segment_sealed = CreateSealedSegment(
-        schema, nullptr, 999, SegcoreConfig::default_config(), false, true);
+        schema, nullptr, 999, SegcoreConfig::default_config(), true);
     auto segment =
         dynamic_cast<ChunkedSegmentSealedImpl*>(segment_sealed.get());
 
