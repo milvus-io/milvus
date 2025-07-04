@@ -206,6 +206,10 @@ func (t *ImportTask) importFile(reader importutilv2.Reader) error {
 		if err != nil {
 			return err
 		}
+		err = FillDynamicData(t.GetSchema(), data, rowNum)
+		if err != nil {
+			return err
+		}
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)
 			if err != nil {

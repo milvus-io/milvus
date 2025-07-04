@@ -309,6 +309,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
       last_commit_time_(stdclock::now()) {
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, "", TANTIVY_INDEX_LATEST_VERSION, true /* in_ram */);
+    set_is_growing(true);
 }
 
 JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
@@ -323,6 +324,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     boost::filesystem::create_directories(path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, path_.c_str(), TANTIVY_INDEX_LATEST_VERSION);
+    set_is_growing(true);
 }
 
 IndexStatsPtr

@@ -213,11 +213,31 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	switch recs[0].Column(pkFieldId).(type) {
 	case *array.Int64:
 		pq = NewPriorityQueue(func(x, y *index) bool {
-			return recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
+			xVal := recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i)
+			yVal := recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
+
+			if xVal != yVal {
+				return xVal < yVal
+			}
+
+			if x.ri != y.ri {
+				return x.ri < y.ri
+			}
+			return x.i < y.i
 		})
 	case *array.String:
 		pq = NewPriorityQueue(func(x, y *index) bool {
-			return recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
+			xVal := recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i)
+			yVal := recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
+
+			if xVal != yVal {
+				return xVal < yVal
+			}
+
+			if x.ri != y.ri {
+				return x.ri < y.ri
+			}
+			return x.i < y.i
 		})
 	}
 
