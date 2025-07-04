@@ -69,6 +69,7 @@ func TestValidateCollectionName(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		"abc ",
 	}
 
 	for _, name := range invalidNames {

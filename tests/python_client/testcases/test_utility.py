@@ -197,7 +197,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {invalid_name}"}
-        if invalid_name in [None, "", " "]:
+        if invalid_name in [None, ""]:
             error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty"}
         self.utility_wrap.index_building_progress(collection_name=invalid_name,
                                                   check_task=CheckTasks.err_res, check_items=error)
