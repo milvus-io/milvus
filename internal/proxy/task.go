@@ -58,6 +58,8 @@ const (
 	GroupByFieldKey      = "group_by_field"
 	GroupSizeKey         = "group_size"
 	StrictGroupSize      = "strict_group_size"
+	JSONPath             = "json_path"
+	JSONCastType         = "json_cast_type"
 	RankGroupScorer      = "rank_group_scorer"
 	AnnsFieldKey         = "anns_field"
 	TopKKey              = "topk"
