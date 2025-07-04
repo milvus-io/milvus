@@ -83,6 +83,8 @@ github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAE
 github.com/Shopify/goreferrer v0.0.0-20181106222321-ec9c9a553398/go.mod h1:a1uqRtAwp2Xwc6WNPJEufxJ7fx3npB4UV/JOLmbu5I0=
 github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9 h1:eXnmJhsHt8m6NU3IJ19UthXJ8JK6e3tmfN07nym3BXs=
 github.com/SimFG/expr v0.0.0-20250513112851-9b981e8400b9/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=
+github.com/XTxxxx/milvus-proto/go-api/v2 v2.0.0-20250702144202-008daf6ef235 h1:N0bZWBXHAIIWrtbmYUn2Nmdrm6XzUdPu0IXK6BK1Nn0=
+github.com/XTxxxx/milvus-proto/go-api/v2 v2.0.0-20250702144202-008daf6ef235/go.mod h1:/6UT4zZl6awVeXLeE7UGDWZvXj3IWkRsh3mqsn0DiAs=
 github.com/actgardner/gogen-avro/v10 v10.1.0/go.mod h1:o+ybmVjEa27AAr35FRqU98DJu1fXES56uXniYFv4yDA=
 github.com/actgardner/gogen-avro/v10 v10.2.1/go.mod h1:QUhjeHPchheYmMDni/Nx7VB0RsT/ee8YIgGY/xpEQgQ=
 github.com/actgardner/gogen-avro/v9 v9.1.0/go.mod h1:nyTj6wPqDJoxM3qdnjcLv+EnMDSDFqE0qDpva2QRmKc=
