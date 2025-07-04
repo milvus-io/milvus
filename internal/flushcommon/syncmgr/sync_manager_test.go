@@ -172,7 +172,8 @@ func (s *SyncManagerSuite) TestResizePool() {
 	s.NotZero(cap)
 
 	params := paramtable.Get()
-	configKey := params.DataNodeCfg.MaxParallelSyncMgrTasks.Key
+	configKey := params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key
+	oldValue := params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt()
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
@@ -191,7 +192,7 @@ func (s *SyncManagerSuite) TestResizePool() {
 
 	syncMgr.resizeHandler(&config.Event{
 		Key:        configKey,
-		Value:      strconv.FormatInt(int64(cap*2), 10),
+		Value:      strconv.FormatInt(int64(oldValue*2), 10),
 		HasUpdated: true,
 	})
 	s.Equal(cap*2, syncMgr.keyLockDispatcher.workerPool.Cap())

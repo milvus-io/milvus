@@ -140,7 +140,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
-	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil)
+	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
 	for _, task := range tasks {
@@ -212,7 +212,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	meta, err := newMeta(context.TODO(), catalog, nil, broker)
 	assert.NoError(t, err)
 
-	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil)
+	tasks, err := NewImportTasks(fileGroups, job, alloc, meta, nil, 1*1024*1024*1024)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(tasks))
 	for _, task := range tasks {
@@ -225,6 +225,8 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
 	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
 
 	preImportTaskProto := &datapb.PreImportTask{
 		JobID:        0,
@@ -233,7 +235,9 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 		State:        datapb.ImportTaskStateV2_Pending,
 	}
 
-	var pt ImportTask = &preImportTask{}
+	var pt ImportTask = &preImportTask{
+		importMeta: importMeta,
+	}
 	pt.(*preImportTask).task.Store(preImportTaskProto)
 	preimportReq := AssemblePreImportRequest(pt, job)
 	assert.Equal(t, pt.GetJobID(), preimportReq.GetJobID())
@@ -248,7 +252,9 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 		CollectionID: 1,
 		SegmentIDs:   []int64{5, 6},
 	}
-	var task ImportTask = &importTask{}
+	var task ImportTask = &importTask{
+		importMeta: importMeta,
+	}
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
@@ -294,6 +300,8 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}, DataTs: 100},
 	}
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
 
 	preImportTaskProto := &datapb.PreImportTask{
 		JobID:        0,
@@ -302,7 +310,9 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 		State:        datapb.ImportTaskStateV2_Pending,
 	}
 
-	var pt ImportTask = &preImportTask{}
+	var pt ImportTask = &preImportTask{
+		importMeta: importMeta,
+	}
 	pt.(*preImportTask).task.Store(preImportTaskProto)
 	preimportReq := AssemblePreImportRequest(pt, job)
 	assert.Equal(t, pt.GetJobID(), preimportReq.GetJobID())
@@ -317,7 +327,9 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 		CollectionID: 1,
 		SegmentIDs:   []int64{5, 6},
 	}
-	var task ImportTask = &importTask{}
+	var task ImportTask = &importTask{
+		importMeta: importMeta,
+	}
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
@@ -382,7 +394,7 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 		},
 	}
 
-	groups := RegroupImportFiles(job, files, false)
+	groups := RegroupImportFiles(job, files, 1*1024*1024*1024)
 	total := 0
 	for i, fs := range groups {
 		sum := lo.SumBy(fs, func(f *datapb.ImportFileStats) int64 {

@@ -828,6 +828,7 @@ message PreImportRequest {
   repeated internal.ImportFile import_files = 8;
   repeated common.KeyValuePair options = 9;
   index.StorageConfig storage_config = 10;
+  int64 task_slot = 11;
 }
 
 message IDRange {
@@ -855,6 +856,7 @@ message ImportRequest {
   IDRange ID_range = 11;
   repeated ImportRequestSegment request_segments = 12;
   index.StorageConfig storage_config = 13;
+  int64 task_slot = 14;
 }
 
 message QueryPreImportRequest {

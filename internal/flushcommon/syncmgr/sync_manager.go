@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -67,9 +68,10 @@ type syncManager struct {
 
 func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 	params := paramtable.Get()
-	initPoolSize := params.DataNodeCfg.MaxParallelSyncMgrTasks.GetAsInt()
+	cpuNum := hardware.GetCPUNum()
+	initPoolSize := cpuNum * params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt()
 	dispatcher := newKeyLockDispatcher[int64](initPoolSize)
-	log.Info("sync manager initialized", zap.Int("initPoolSize", initPoolSize))
+	log.Info("sync manager initialized", zap.Int("initPoolSize", initPoolSize), zap.Int("cpuNum", cpuNum))
 
 	syncMgr := &syncManager{
 		keyLockDispatcher: dispatcher,
@@ -80,7 +82,7 @@ func NewSyncManager(chunkManager storage.ChunkManager) SyncManager {
 	// setup config update watcher
 	handler := config.NewHandler("datanode.syncmgr.poolsize", syncMgr.resizeHandler)
 	syncMgr.handler = handler
-	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasks.Key, handler)
+	params.Watch(params.DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, handler)
 	return syncMgr
 }
 
@@ -90,12 +92,13 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 			zap.String("key", evt.Key),
 			zap.String("value", evt.Value),
 		)
+		cpuNum := hardware.GetCPUNum()
 		size, err := strconv.ParseInt(evt.Value, 10, 64)
 		if err != nil {
 			log.Warn("failed to parse new datanode syncmgr pool size", zap.Error(err))
 			return
 		}
-		err = mgr.keyLockDispatcher.workerPool.Resize(int(size))
+		err = mgr.keyLockDispatcher.workerPool.Resize(cpuNum * int(size))
 		if err != nil {
 			log.Warn("failed to resize datanode syncmgr pool size", zap.String("key", evt.Key), zap.String("value", evt.Value), zap.Error(err))
 			return
@@ -173,7 +176,7 @@ func (mgr *syncManager) TaskStatsJSON() string {
 }
 
 func (mgr *syncManager) Close() error {
-	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasks.Key, mgr.handler)
+	paramtable.Get().Unwatch(paramtable.Get().DataNodeCfg.MaxParallelSyncMgrTasksPerCPUCore.Key, mgr.handler)
 	timeout := paramtable.Get().CommonCfg.SyncTaskPoolReleaseTimeoutSeconds.GetAsDuration(time.Second)
 	return mgr.workerPool.ReleaseTimeout(timeout)
 }

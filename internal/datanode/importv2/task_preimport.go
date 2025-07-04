@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -47,6 +46,7 @@ type PreImportTask struct {
 	vchannels    []string
 	schema       *schemapb.CollectionSchema
 	options      []*commonpb.KeyValuePair
+	req          *datapb.PreImportRequest
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -81,6 +81,7 @@ func NewPreImportTask(req *datapb.PreImportRequest,
 		vchannels:    req.GetVchannels(),
 		schema:       req.GetSchema(),
 		options:      req.GetOptions(),
+		req:          req,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -103,7 +104,11 @@ func (t *PreImportTask) GetSchema() *schemapb.CollectionSchema {
 }
 
 func (t *PreImportTask) GetSlots() int64 {
-	return int64(funcutil.Min(len(t.GetFileStats()), paramtable.Get().DataNodeCfg.MaxTaskSlotNum.GetAsInt()))
+	return t.req.GetTaskSlot()
+}
+
+func (t *PreImportTask) GetBufferSize() int64 {
+	return GetTaskBufferSize(t)
 }
 
 func (t *PreImportTask) Cancel() {
@@ -124,9 +129,10 @@ func (t *PreImportTask) Clone() Task {
 }
 
 func (t *PreImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportInsertBufferSize.GetAsInt()
+	bufferSize := int(t.GetBufferSize())
 	log.Info("start to preimport", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
+		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("schema", t.GetSchema()))...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
