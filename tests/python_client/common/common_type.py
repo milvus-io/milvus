@@ -55,6 +55,7 @@ another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 text_sparse_vector = "TEXT_SPARSE_VECTOR"
 default_reranker_field_name = "reranker_field"
+default_new_field_name = "field_new"
 
 all_vector_types = [
         DataType.FLOAT_VECTOR,
