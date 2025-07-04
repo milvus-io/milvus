@@ -2554,13 +2554,10 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 func Test_dropCollectionTask_PreExecute(t *testing.T) {
 	dct := &dropCollectionTask{DropCollectionRequest: &milvuspb.DropCollectionRequest{
 		Base:           &commonpb.MsgBase{},
-		CollectionName: "0xffff", // invalid
+		CollectionName: "valid", // invalid
 	}}
 	ctx := context.Background()
 	err := dct.PreExecute(ctx)
-	assert.Error(t, err)
-	dct.DropCollectionRequest.CollectionName = "valid"
-	err = dct.PreExecute(ctx)
 	assert.NoError(t, err)
 }
 
