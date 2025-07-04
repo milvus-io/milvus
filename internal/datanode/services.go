@@ -207,6 +207,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			binlogIO,
 			cm,
 			req,
+			compactionParams,
 		)
 	case datapb.CompactionType_MixCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
@@ -216,6 +217,7 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			taskCtx,
 			binlogIO,
 			req,
+			compactionParams,
 		)
 	case datapb.CompactionType_ClusteringCompaction:
 		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
@@ -225,6 +227,17 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			taskCtx,
 			binlogIO,
 			req,
+			compactionParams,
+		)
+	case datapb.CompactionType_SortCompaction:
+		if req.GetPreAllocatedSegmentIDs() == nil || req.GetPreAllocatedSegmentIDs().GetBegin() == 0 {
+			return merr.Status(merr.WrapErrParameterInvalidMsg("invalid pre-allocated segmentID range")), nil
+		}
+		task = compactor.NewSortCompactionTask(
+			taskCtx,
+			binlogIO,
+			req,
+			compactionParams,
 		)
 	default:
 		log.Warn("Unknown compaction type", zap.String("type", req.GetType().String()))

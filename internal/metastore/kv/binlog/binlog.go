@@ -108,18 +108,18 @@ func DecompressMultiBinLogs(infos []*datapb.SegmentInfo) error {
 	return nil
 }
 
-func DecompressCompactionBinlogs(binlogs []*datapb.CompactionSegmentBinlogs) error {
+func DecompressCompactionBinlogsWithRootPath(rootPath string, binlogs []*datapb.CompactionSegmentBinlogs) error {
 	for _, binlog := range binlogs {
 		collectionID, partitionID, segmentID := binlog.GetCollectionID(), binlog.GetPartitionID(), binlog.GetSegmentID()
-		err := DecompressBinLog(storage.InsertBinlog, collectionID, partitionID, segmentID, binlog.GetFieldBinlogs())
+		err := DecompressBinLogWithRootPath(rootPath, storage.InsertBinlog, collectionID, partitionID, segmentID, binlog.GetFieldBinlogs())
 		if err != nil {
 			return err
 		}
-		err = DecompressBinLog(storage.DeleteBinlog, collectionID, partitionID, segmentID, binlog.GetDeltalogs())
+		err = DecompressBinLogWithRootPath(rootPath, storage.DeleteBinlog, collectionID, partitionID, segmentID, binlog.GetDeltalogs())
 		if err != nil {
 			return err
 		}
-		err = DecompressBinLog(storage.StatsBinlog, collectionID, partitionID, segmentID, binlog.GetField2StatslogPaths())
+		err = DecompressBinLogWithRootPath(rootPath, storage.StatsBinlog, collectionID, partitionID, segmentID, binlog.GetField2StatslogPaths())
 		if err != nil {
 			return err
 		}

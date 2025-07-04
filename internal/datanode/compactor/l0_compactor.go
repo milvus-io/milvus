@@ -69,6 +69,7 @@ func NewLevelZeroCompactionTask(
 	binlogIO io.BinlogIO,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
+	compactionParams compaction.Params,
 ) *LevelZeroCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	alloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
@@ -76,12 +77,13 @@ func NewLevelZeroCompactionTask(
 		ctx:    ctx,
 		cancel: cancel,
 
-		BinlogIO:  binlogIO,
-		allocator: alloc,
-		cm:        cm,
-		plan:      plan,
-		tr:        timerecord.NewTimeRecorder("levelzero compaction"),
-		done:      make(chan struct{}, 1),
+		BinlogIO:         binlogIO,
+		allocator:        alloc,
+		cm:               cm,
+		plan:             plan,
+		tr:               timerecord.NewTimeRecorder("levelzero compaction"),
+		done:             make(chan struct{}, 1),
+		compactionParams: compactionParams,
 	}
 }
 
@@ -123,11 +125,6 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	}
 
 	var err error
-	t.compactionParams, err = compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
-	if err != nil {
-		return nil, err
-	}
-
 	l0Segments := lo.Filter(t.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L0
 	})
@@ -139,7 +136,7 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		log.Warn("compact wrong, not target sealed segments")
 		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
-	err = binlog.DecompressCompactionBinlogs(l0Segments)
+	err = binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), l0Segments)
 	if err != nil {
 		log.Warn("DecompressCompactionBinlogs failed", zap.Error(err))
 		return nil, err
