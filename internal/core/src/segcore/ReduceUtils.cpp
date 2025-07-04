@@ -119,6 +119,97 @@ AssembleGroupByValues(
                 }
                 break;
             }
+            case DataType::JSON: {
+                auto json_path = plan->plan_node_->search_info_.json_path_;
+                auto json_cast_type = plan->plan_node_->search_info_.json_cast_type_;
+                LOG_INFO("hc===AssembleGroupByValues=json_path: {}, json_cast_type: {}", json_path, json_cast_type);
+                switch (json_cast_type.value()) {
+                    case DataType::BOOL: {
+                        auto field_data = group_by_values_field->mutable_bool_data();
+                        field_data->mutable_data()->Resize(group_by_val_size, 0);
+                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                            if (group_by_vals[idx].has_value()) {
+                                bool val = std::get<bool>(group_by_vals[idx].value());
+                                field_data->mutable_data()->Set(idx, val);
+                            } else {
+                                valid_data->Set(idx, false);
+                            }
+                        }
+                        break;
+                    }
+                    case DataType::INT8: {
+                        auto field_data = group_by_values_field->mutable_int_data();
+                        field_data->mutable_data()->Resize(group_by_val_size, 0);
+                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                            if (group_by_vals[idx].has_value()) {
+                                int8_t val = std::get<int8_t>(group_by_vals[idx].value());
+                                field_data->mutable_data()->Set(idx, val);  
+                            } else {
+                                valid_data->Set(idx, false);
+                            }
+                        }
+                        break;
+                    }
+                    case DataType::INT16: {
+                        auto field_data = group_by_values_field->mutable_int_data();
+                        field_data->mutable_data()->Resize(group_by_val_size, 0);
+                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                            if (group_by_vals[idx].has_value()) {
+                                int16_t val = std::get<int16_t>(group_by_vals[idx].value());
+                                field_data->mutable_data()->Set(idx, val);
+                            } else {
+                                valid_data->Set(idx, false);
+                            }
+                        }
+                        break;
+                    }
+                    case DataType::INT32: {
+                        auto field_data = group_by_values_field->mutable_int_data();
+                        field_data->mutable_data()->Resize(group_by_val_size, 0);
+                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                            if (group_by_vals[idx].has_value()) {
+                                int32_t val = std::get<int32_t>(group_by_vals[idx].value());
+                                field_data->mutable_data()->Set(idx, val);
+                            } else {
+                                valid_data->Set(idx, false);
+                            }
+                        }
+                        break;
+                    }
+                    case DataType::INT64: {
+                        auto field_data = group_by_values_field->mutable_long_data();
+                        field_data->mutable_data()->Resize(group_by_val_size, 0);
+                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                            if (group_by_vals[idx].has_value()) {
+                                int64_t val = std::get<int64_t>(group_by_vals[idx].value());
+                                field_data->mutable_data()->Set(idx, val);
+                            } else {
+                                valid_data->Set(idx, false);
+                            }
+                        }
+                        break;
+                    }
+                    case DataType::VARCHAR: {
+                        auto field_data = group_by_values_field->mutable_string_data();
+                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                            if (group_by_vals[idx].has_value()) {
+                                std::string val = std::get<std::string>(group_by_vals[idx].value());
+                                *(field_data->mutable_data()->Add()) = val;
+                            } else {
+                                valid_data->Set(idx, false);
+                            }
+                        }
+                        break;
+                    }
+                    default: {
+                        PanicInfo(
+                            DataTypeInvalid,
+                            fmt::format("unsupported json cast type for json field group_by operations ",
+                                        json_cast_type.value()));
+                    }
+                }
+                break;
+            }
             default: {
                 PanicInfo(
                     DataTypeInvalid,
