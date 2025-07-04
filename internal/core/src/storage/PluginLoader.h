@@ -25,8 +25,7 @@ public:
     void
     load(const std::string& path) {
         std::lock_guard<std::mutex> lock(mutex_);
-        //GOOSE TODO: void *handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
-        void *handle = dlopen(path.c_str(), RTLD_NOW);
+        void *handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
         if (!handle) {
             const char* error = dlerror();
             PanicInfo(PluginLoadFailed,
@@ -119,9 +118,7 @@ public:
     }
 
 private:
-    PluginLoader() {
-        std::cout << "PluginLoader init" << std::endl;
-    }
+    PluginLoader() {}
 
     mutable std::mutex mutex_;
     std::map<std::string, void*> handles_;

@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -29,14 +28,9 @@ class BinlogReader {
     explicit BinlogReader(const std::shared_ptr<uint8_t[]> binlog_data,
                           int64_t length)
         : data_(binlog_data), size_(length), tell_(0) {
-        std::clog << "[YXReader ct] this=" << this
-                  << " use_count=" << data_.use_count() << "\n";
     }
 
-    ~BinlogReader(){
-        std::clog << "[YXReader dt] this=" << this
-                  << " use_count=" << data_.use_count() << "\n";
-    };
+    ~BinlogReader(){};
 
     template <typename T>
     SegcoreError
