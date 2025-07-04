@@ -286,7 +286,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				rb.Append(r, sliceStart, r.Len())
 			}
 			if rb.GetRowNum() > 0 {
-				mWriter.Write(rb.Build())
+				rec := rb.Build()
+				mWriter.Write(rec)
+				rec.Release()
 			}
 		} else {
 			mWriter.Write(r)

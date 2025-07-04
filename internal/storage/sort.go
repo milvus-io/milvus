@@ -38,9 +38,10 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}
 	indices := make([]*index, 0)
 
+	// release cgo records
 	defer func() {
-		for _, r := range records {
-			r.Release()
+		for _, rec := range records {
+			rec.Release()
 		}
 	}()
 
@@ -67,13 +68,6 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	if len(records) == 0 {
 		return 0, nil
 	}
-
-	// release cgo records
-	defer func() {
-		for _, rec := range records {
-			rec.Release()
-		}
-	}()
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -297,7 +291,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 
 	// write the last batch
 	if rb.GetRowNum() > 0 {
-		if err := rw.Write(rb.Build()); err != nil {
+		if err := writeRecord(); err != nil {
 			return 0, err
 		}
 	}
