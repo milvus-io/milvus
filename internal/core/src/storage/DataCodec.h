@@ -143,7 +143,7 @@ class DataCodec {
 
 // Deserialize the data stream of the file obtained from remote or local
 std::unique_ptr<DataCodec>
-DeserializeFileData(const std::shared_ptr<uint8_t[]> input,
+DeserializeFileData(const std::shared_ptr<uint8_t[]>& input,
                     int64_t length,
                     bool is_field_data = true);
 

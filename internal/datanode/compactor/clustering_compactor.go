@@ -590,15 +590,17 @@ func (t *clusteringCompactionTask) mappingSegment(
 	// TODO bucketName shall be passed via StorageConfig like index/stats task
 	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 
-	rr, err := storage.NewBinlogRecordReader(ctx,
-		segment.GetFieldBinlogs(),
-		t.plan.Schema,
+	opts := []storage.RwOption{
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
-		storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithCollectionID(t.GetCollection()),
 		storage.WithBucketName(bucketName),
-	)
+	}
+
+	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, opts...)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
@@ -877,6 +879,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		storage.WithVersion(segment.StorageVersion),
 		storage.WithBufferSize(t.memoryBufferSize),
 		storage.WithBucketName(bucketName),
+		storage.WithCollectionID(t.GetCollection()),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))

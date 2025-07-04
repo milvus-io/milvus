@@ -729,20 +729,18 @@ GetObjectData(ChunkManager* remote_chunk_manager,
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     futures.reserve(remote_files.size());
 
-    auto DownloadAndDeserialize = [&](ChunkManager* chunk_manager,
-                                      const std::string& file,
-                                      bool is_field_data) {
+    auto DownloadAndDeserialize = [remote_chunk_manager,
+                                   is_field_data](const std::string& file) {
         // TODO remove this Size() cost
-        auto fileSize = chunk_manager->Size(file);
+        auto fileSize = remote_chunk_manager->Size(file);
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-        chunk_manager->Read(file, buf.get(), fileSize);
+        remote_chunk_manager->Read(file, buf.get(), fileSize);
         auto res = DeserializeFileData(buf, fileSize, is_field_data);
         return res;
     };
 
     for (auto& file : remote_files) {
-        futures.emplace_back(pool.Submit(
-            DownloadAndDeserialize, remote_chunk_manager, file, is_field_data));
+        futures.emplace_back(pool.Submit(DownloadAndDeserialize, file));
     }
     return futures;
 }

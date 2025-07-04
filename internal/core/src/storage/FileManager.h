@@ -53,10 +53,18 @@ struct FileManagerContext {
         for_loading_index = value;
     }
 
+    void
+    set_plugin_context(std::shared_ptr<CPluginContext> plugin_context) {
+        plugin_context_ = plugin_context;
+    }
+
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     bool for_loading_index{false};
+
+private:
+    std::shared_ptr<CPluginContext> plugin_context_;
 };
 
 #define FILEMANAGER_TRY try {
