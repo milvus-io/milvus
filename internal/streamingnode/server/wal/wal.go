@@ -31,6 +31,9 @@ type ROWAL interface {
 	// WALName returns the name of the wal.
 	WALName() string
 
+	// Metrics returns the metrics of the wal.
+	Metrics() types.WALMetrics
+
 	// Channel returns the channel assignment info of the wal.
 	Channel() types.PChannelInfo
 

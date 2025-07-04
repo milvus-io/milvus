@@ -23,6 +23,11 @@ type BuildRecoveryStreamParam struct {
 	EndTimeTick     uint64
 }
 
+// RecoveryMetrics is the metrics of the recovery info.
+type RecoveryMetrics struct {
+	RecoveryTimeTick uint64
+}
+
 // RecoveryStreamBuilder is an interface that is used to build a recovery stream from the WAL.
 type RecoveryStreamBuilder interface {
 	// WALName returns the name of the WAL.
@@ -60,6 +65,9 @@ type RecoveryStream interface {
 
 // RecoveryStorage is an interface that is used to observe the messages from the WAL.
 type RecoveryStorage interface {
+	// Metrics gets the metrics of the recovery storage.
+	Metrics() RecoveryMetrics
+
 	// ObserveMessage observes the message from the WAL.
 	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
 

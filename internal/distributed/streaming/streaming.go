@@ -89,9 +89,8 @@ type WALAccesser interface {
 	// WALName returns the name of the wal.
 	WALName() string
 
-	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
-	// If the wal is located at remote, it will return 0, error.
-	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+	// Local returns the local services.
+	Local() Local
 
 	// Txn returns a transaction for writing records to one vchannel.
 	// It promises the atomicity written of the messages.
@@ -121,6 +120,16 @@ type WALAccesser interface {
 	// AppendMessagesWithOption appends messages to the wal with the given option.
 	// Same with AppendMessages, but with the given option.
 	AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses
+}
+
+type Local interface {
+	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
+	// If the wal is located at remote, it will return 0, error.
+	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
+
+	// GetMetricsIfLocal gets the metrics of the local wal.
+	// It will only return the metrics of the local wal but not the remote wal.
+	GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error)
 }
 
 // Broadcast is the interface for writing broadcast message into the wal.

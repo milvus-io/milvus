@@ -95,6 +95,21 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *RecoverySnapshot
 }
 
+// Metrics gets the metrics of the wal.
+func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// TODO: flusher will be merged into recovery storage, so this is a temporary solution.
+	recoveryTimeTick := r.checkpoint.TimeTick
+	if r.flusherCheckpoint != nil {
+		recoveryTimeTick = r.flusherCheckpoint.TimeTick
+	}
+	return RecoveryMetrics{
+		RecoveryTimeTick: recoveryTimeTick,
+	}
+}
+
 // UpdateFlusherCheckpoint updates the checkpoint of flusher.
 // TODO: should be removed in future, after merge the flusher logic into recovery storage.
 func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint) {

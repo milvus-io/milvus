@@ -346,6 +346,53 @@ func (_c *MockWAL_IsAvailable_Call) RunAndReturn(run func() bool) *MockWAL_IsAva
 	return _c
 }
 
+// Metrics provides a mock function with no fields
+func (_m *MockWAL) Metrics() types.WALMetrics {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Metrics")
+	}
+
+	var r0 types.WALMetrics
+	if rf, ok := ret.Get(0).(func() types.WALMetrics); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(types.WALMetrics)
+		}
+	}
+
+	return r0
+}
+
+// MockWAL_Metrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Metrics'
+type MockWAL_Metrics_Call struct {
+	*mock.Call
+}
+
+// Metrics is a helper method to define mock.On call
+func (_e *MockWAL_Expecter) Metrics() *MockWAL_Metrics_Call {
+	return &MockWAL_Metrics_Call{Call: _e.mock.On("Metrics")}
+}
+
+func (_c *MockWAL_Metrics_Call) Run(run func()) *MockWAL_Metrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWAL_Metrics_Call) Return(_a0 types.WALMetrics) *MockWAL_Metrics_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWAL_Metrics_Call) RunAndReturn(run func() types.WALMetrics) *MockWAL_Metrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Read provides a mock function with given fields: ctx, deliverPolicy
 func (_m *MockWAL) Read(ctx context.Context, deliverPolicy wal.ReadOption) (wal.Scanner, error) {
 	ret := _m.Called(ctx, deliverPolicy)

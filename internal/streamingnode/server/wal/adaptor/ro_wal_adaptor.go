@@ -39,6 +39,13 @@ func (w *roWALAdaptorImpl) Channel() types.PChannelInfo {
 	return w.roWALImpls.Channel()
 }
 
+// Metrics returns the metrics of the wal.
+func (w *roWALAdaptorImpl) Metrics() types.WALMetrics {
+	return types.ROWALMetrics{
+		ChannelInfo: w.Channel(),
+	}
+}
+
 func (w *roWALAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
 	panic("we cannot acquire lastest mvcc timestamp from a read only wal")
 }
