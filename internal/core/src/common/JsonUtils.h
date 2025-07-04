@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include "simdjson/dom.h"
+#include "common/Json.h"
 
 namespace milvus {
 

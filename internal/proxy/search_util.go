@@ -9,12 +9,14 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -255,6 +257,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	// 5. parse group by field and group by size
 	var groupByFieldId, groupSize int64
 	var strictGroupSize bool
+	var jsonPath string
+	var jsonCastType schemapb.DataType
 	if isAdvanced {
 		groupByFieldId, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
 	} else {
@@ -263,6 +267,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			return nil, err
 		}
 		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
+		jsonPath, jsonCastType = groupByInfo.GetJsonPath(), groupByInfo.GetJsonCastType()
 	}
 
 	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
@@ -291,6 +296,8 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 			StrictGroupSize:      strictGroupSize,
 			Hints:                hints,
 			SearchIteratorV2Info: planSearchIteratorV2Info,
+			JsonPath:             jsonPath,
+			JsonCastType:         jsonCastType,
 		},
 		offset:       offset,
 		isIterator:   isIterator,
@@ -393,6 +400,8 @@ type groupByInfo struct {
 	groupByFieldId  int64
 	groupSize       int64
 	strictGroupSize bool
+	jsonPath        string
+	jsonCastType    schemapb.DataType
 }
 
 func (g *groupByInfo) GetGroupByFieldId() int64 {
@@ -414,6 +423,20 @@ func (g *groupByInfo) GetStrictGroupSize() bool {
 		return g.strictGroupSize
 	}
 	return false
+}
+
+func (g *groupByInfo) GetJsonPath() string {
+	if g != nil {
+		return g.jsonPath
+	}
+	return ""
+}
+
+func (g *groupByInfo) GetJsonCastType() schemapb.DataType {
+	if g != nil {
+		return g.jsonCastType
+	}
+	return schemapb.DataType_None
 }
 
 func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema) (*groupByInfo, error) {
@@ -473,6 +496,24 @@ func parseGroupByInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemap
 		}
 	}
 	ret.strictGroupSize = strictGroupSize
+
+	// 4. parse json path
+	jsonPath, err := funcutil.GetAttrByKeyFromRepeatedKV(JSONPath, searchParamsPair)
+	if err == nil {
+		ret.jsonPath = jsonPath
+	}
+
+	// 5. parse json cast type
+	jsonCastTypeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(JSONCastType, searchParamsPair)
+	if err == nil {
+		dataTypeVal, ok := schemapb.DataType_value[jsonCastTypeStr]
+		if ok {
+			ret.jsonCastType = schemapb.DataType(dataTypeVal)
+		}
+	}
+	log.Info("hc===jsonCastTypeStr", zap.String("jsonCastTypeStr", jsonCastTypeStr), zap.Any("jsonCastType", ret.jsonCastType),
+		zap.String("jsonPath", ret.jsonPath))
+
 	return ret, nil
 }
 
