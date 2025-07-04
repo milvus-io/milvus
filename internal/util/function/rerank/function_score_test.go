@@ -322,7 +322,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 		rankParams := []*commonpb.KeyValuePair{}
 		f, err := NewFunctionScoreWithlegacy(schema, rankParams)
 		s.NoError(err)
-		s.Equal(f.reranker.GetRankName(), rrfName)
+		s.Equal(f.RerankName(), rrfName)
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
