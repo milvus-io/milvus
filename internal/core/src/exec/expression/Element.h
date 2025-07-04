@@ -27,6 +27,7 @@
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
 #include "query/PlanProto.h"
+#include "ankerl/unordered_dense.h"
 
 namespace milvus {
 namespace exec {
@@ -256,7 +257,7 @@ class SetElement : public MultiElement {
     }
 
  public:
-    std::set<T> values_;
+    ankerl::unordered_dense::set<T> values_;
 };
 
 }  //namespace exec
