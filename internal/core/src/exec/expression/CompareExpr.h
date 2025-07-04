@@ -140,9 +140,14 @@ class PhyCompareFilterExpr : public Expr {
           segment_chunk_reader_(segment, active_count),
           batch_size_(batch_size),
           expr_(expr) {
-        is_left_indexed_ = segment->HasIndex(left_field_);
-        is_right_indexed_ = segment->HasIndex(right_field_);
         if (segment->is_chunked()) {
+            auto& schema = segment->get_schema();
+            auto& left_field_meta = schema[left_field_];
+            auto& right_field_meta = schema[right_field_];
+            pinned_index_left_ = PinIndex(segment, left_field_meta);
+            pinned_index_right_ = PinIndex(segment, right_field_meta);
+            is_left_indexed_ = pinned_index_left_.get() != nullptr;
+            is_right_indexed_ = pinned_index_right_.get() != nullptr;
             left_num_chunk_ =
                 is_left_indexed_
                     ? segment->num_chunk_index(expr_->left_field_id_)
@@ -159,6 +164,8 @@ class PhyCompareFilterExpr : public Expr {
                     : segment->num_chunk_data(right_field_);
             num_chunk_ = left_num_chunk_;
         } else {
+            is_left_indexed_ = segment->HasIndex(left_field_);
+            is_right_indexed_ = segment->HasIndex(right_field_);
             num_chunk_ = is_left_indexed_
                              ? segment->num_chunk_index(expr_->left_field_id_)
                              : upper_div(segment_chunk_reader_.active_count_,
@@ -536,6 +543,8 @@ class PhyCompareFilterExpr : public Expr {
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
+    PinWrapper<index::IndexBase*> pinned_index_left_;
+    PinWrapper<index::IndexBase*> pinned_index_right_;
 };
 }  //namespace exec
 }  // namespace milvus
