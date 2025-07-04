@@ -88,12 +88,18 @@ func (s *PackWriterV2Suite) SetupTest() {
 					{Key: common.DimKey, Value: "128"},
 				},
 			},
+			{
+				FieldID:  102,
+				Name:     "nullable_string",
+				DataType: schemapb.DataType_String,
+				Nullable: true,
+			},
 		},
 	}
 	s.cm = storage.NewLocalChunkManager(objectstorage.RootPath(s.rootPath))
 }
 
-func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
+func (s *PackWriterV2Suite) TestPackWriterV2_NullableAddField() {
 	collectionID := int64(123)
 	partitionID := int64(456)
 	segmentID := int64(789)
@@ -119,7 +125,7 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 		deletes.Append(pk, ts)
 	}
 
-	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows)).WithDeleteData(deletes)
 
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0)
 
@@ -185,7 +191,7 @@ func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Schema().Return(s.schema).Maybe()
 
-	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
+	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows))
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0)
 
 	_, _, _, _, _, err := bw.Write(context.Background(), pack)
@@ -213,7 +219,28 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	s.Error(err)
 }
 
-func genInsertData(size int, schema *schemapb.CollectionSchema) []*storage.InsertData {
+func genInsertData(size int) []*storage.InsertData {
+	schema := &schemapb.CollectionSchema{
+		Name: "sync_task_test_col",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+			},
+			{
+				FieldID:  101,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		},
+	}
 	buf, _ := storage.NewInsertData(schema)
 	for i := 0; i < size; i++ {
 		data := make(map[storage.FieldID]any)
@@ -224,6 +251,7 @@ func genInsertData(size int, schema *schemapb.CollectionSchema) []*storage.Inser
 			return rand.Float32()
 		})
 		data[101] = vector
+		// no data[102]
 		buf.Append(data)
 	}
 	return []*storage.InsertData{buf}
