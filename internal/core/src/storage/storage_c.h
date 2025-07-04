@@ -41,14 +41,8 @@ ResizeTheadPool(int64_t priority, float ratio);
 
 CStatus
 InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads);
-//
-// Plugin related APIs
-typedef struct CPluginContext {
-    int64_t ez_id;
-    int64_t collection_id;
-    char* key;
-} CPluginContext;
 
+// Plugin related APIs
 CStatus
 InitPluginLoader(const char* plugin_path);
 

@@ -251,6 +251,11 @@ CreateIndex(CIndex* res_index,
             cipherPlugin->Update(build_index_info->storage_plugin_context().encryption_zone_id(),
                 build_index_info->storage_plugin_context().collection_id(),
                 build_index_info->storage_plugin_context().encryption_key());
+            auto plugin_context = std::make_shared<CPluginContext>();
+            plugin_context->ez_id = build_index_info->storage_plugin_context().encryption_zone_id();
+            plugin_context->collection_id = build_index_info->storage_plugin_context().collection_id();
+            plugin_context->key = build_index_info->storage_plugin_context().encryption_key();
+            fileManagerContext.set_plugin_context(std::make_shared<CPluginContext>(plugin_context));
         }
 
         auto index =
