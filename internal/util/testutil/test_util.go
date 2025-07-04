@@ -743,7 +743,7 @@ func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *
 					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetFloatData().GetData()
 				case schemapb.DataType_Double:
 					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetDoubleData().GetData()
-				case schemapb.DataType_String:
+				case schemapb.DataType_String, schemapb.DataType_VarChar:
 					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetStringData().GetData()
 				}
 			case schemapb.DataType_JSON:
