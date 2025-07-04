@@ -30,18 +30,10 @@ type CompactionSuite struct {
 }
 
 func (s *CompactionSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
+
 	s.MiniClusterSuite.SetupSuite()
-
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key, "1")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
-}
-
-func (s *CompactionSuite) TearDownSuite() {
-	s.MiniClusterSuite.TearDownSuite()
-
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0CompactionTriggerInterval.Key)
-	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.MixCompactionTriggerInterval.Key)
 }
 
 func TestCompaction(t *testing.T) {

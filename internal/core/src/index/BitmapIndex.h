@@ -24,7 +24,6 @@
 #include "common/RegexQuery.h"
 #include "index/ScalarIndex.h"
 #include "storage/FileManager.h"
-#include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
 
 namespace milvus {

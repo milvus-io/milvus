@@ -50,6 +50,7 @@ set(MILVUS_TEST_FILES
         test_exec.cpp
         test_expr.cpp
         test_expr_materialized_view.cpp
+        test_file_writer.cpp
         test_float16.cpp
         test_function.cpp
         test_futures.cpp
@@ -106,6 +107,7 @@ set(MILVUS_TEST_FILES
         test_thread_pool.cpp
         test_json_flat_index.cpp
         test_vector_array.cpp
+        test_ngram_query.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

@@ -527,6 +527,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		assert.Equal(t, 0.6, Params.GCSlowDownCPUUsageThreshold.GetAsFloat())
+		params.Save("dataCoord.gc.slowDownCPUUsageThreshold", "0.5")
+		assert.Equal(t, 0.5, Params.GCSlowDownCPUUsageThreshold.GetAsFloat())
 		params.Save("dataCoord.compaction.gcInterval", "100")
 		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
 		params.Save("dataCoord.compaction.dropTolerance", "100")
@@ -654,7 +657,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
 		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse())
-		assert.Equal(t, 26*time.Hour, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
+		assert.Equal(t, 72*time.Hour, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
 
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")

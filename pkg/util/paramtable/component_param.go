@@ -242,6 +242,10 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
+	DiskWriteMode         ParamItem `refreshable:"true"`
+	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
+	DiskWriteNumThreads   ParamItem `refreshable:"true"`
+
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
@@ -648,6 +652,40 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.DiskWriteMode = ParamItem{
+		Key:          "common.diskWriteMode",
+		Version:      "2.6.0",
+		DefaultValue: "buffered",
+		Doc: `This parameter controls the write mode of the local disk, which is used to write temporary data downloaded from remote storage.
+Currently, only QueryNode uses 'common.diskWrite*' parameters. Support for other components will be added in the future.
+The options include 'direct' and 'buffered'. The default value is 'buffered'.`,
+		Export: true,
+	}
+	p.DiskWriteMode.Init(base.mgr)
+
+	p.DiskWriteBufferSizeKb = ParamItem{
+		Key:          "common.diskWriteBufferSizeKb",
+		Version:      "2.6.0",
+		DefaultValue: "64",
+		Doc: `Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.`,
+		Export: true,
+	}
+	p.DiskWriteBufferSizeKb.Init(base.mgr)
+
+	p.DiskWriteNumThreads = ParamItem{
+		Key:          "common.diskWriteNumThreads",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Doc: `This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
+It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
+For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
+The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
+In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
+		Export: true,
+	}
+	p.DiskWriteNumThreads.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",
@@ -3203,7 +3241,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.interimIndex.refineWithQuant",
 		Version:      "2.5.6",
 		DefaultValue: "true",
-		Doc:          `whether to use refineQuantType to refine for fatser but loss a little precision`,
+		Doc:          `whether to use refineQuantType to refine for faster but loss a little precision`,
 		Export:       true,
 	}
 	p.InterimIndexRefineWithQuant.Init(base.mgr)
@@ -3940,7 +3978,7 @@ type dataCoordConfig struct {
 
 	CompactionRPCTimeout             ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
 	MinSegmentToMerge                ParamItem `refreshable:"true"`
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
@@ -3990,13 +4028,14 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection ParamItem `refreshable:"false"`
-	GCInterval              ParamItem `refreshable:"false"`
-	GCMissingTolerance      ParamItem `refreshable:"false"`
-	GCDropTolerance         ParamItem `refreshable:"false"`
-	GCRemoveConcurrent      ParamItem `refreshable:"false"`
-	GCScanIntervalInHour    ParamItem `refreshable:"false"`
-	EnableActiveStandby     ParamItem `refreshable:"false"`
+	EnableGarbageCollection     ParamItem `refreshable:"false"`
+	GCInterval                  ParamItem `refreshable:"false"`
+	GCMissingTolerance          ParamItem `refreshable:"false"`
+	GCDropTolerance             ParamItem `refreshable:"false"`
+	GCRemoveConcurrent          ParamItem `refreshable:"false"`
+	GCScanIntervalInHour        ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold ParamItem `refreshable:"false"`
+	EnableActiveStandby         ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -4112,7 +4151,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.diskSegmentMaxSize",
 		Version:      "2.0.0",
 		DefaultValue: "2048",
-		Doc:          "Maximun size of a segment in MB for collection which has Disk index",
+		Doc:          "Maximum size of a segment in MB for collection which has Disk index",
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
@@ -4377,7 +4416,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 			}
 			return strconv.FormatInt(ms, 10)
 		},
-		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
+		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms",
 	}
 	p.CompactionScheduleInterval.Init(base.mgr)
 
@@ -4472,7 +4511,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",
 		Version:      "2.4.0",
-		Doc:          "The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
+		Doc:          "The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
 		DefaultValue: "8388608",
 		Export:       true,
 	}
@@ -4674,6 +4713,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.GCScanIntervalInHour.Init(base.mgr)
 
+	p.GCSlowDownCPUUsageThreshold = ParamItem{
+		Key:          "dataCoord.gc.slowDownCPUUsageThreshold",
+		Version:      "2.6.0",
+		DefaultValue: "0.6",
+		Doc:          "The CPU usage threshold at which the garbage collection will be slowed down",
+		Export:       true,
+	}
+	p.GCSlowDownCPUUsageThreshold.Init(base.mgr)
+
 	// Do not set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
@@ -4830,7 +4878,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.segmentFlushInterval",
 		Version:      "2.4.6",
 		DefaultValue: "2",
-		Doc:          "the minimal interval duration(unit: Seconds) between flusing operation on same segment",
+		Doc:          "the minimal interval duration(unit: Seconds) between flushing operation on same segment",
 		Export:       true,
 	}
 	p.SegmentFlushInterval.Init(base.mgr)
@@ -5919,14 +5967,14 @@ More samples, more frequent truncate, more memory usage.`,
 	p.WALTruncateRetentionInterval = ParamItem{
 		Key:     "streaming.walTruncate.retentionInterval",
 		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 26h by default.
+		Doc: `The retention interval of wal truncate, 72h by default.
 If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
 Greater the interval, more wal storage usage, more redundant data in wal.
 Because current query path doesn't promise the read operation not happen before the truncate point,
 retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
 If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
 because the wal truncate operation is implemented by pulsar consumer.`,
-		DefaultValue: "26h",
+		DefaultValue: "72h",
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)

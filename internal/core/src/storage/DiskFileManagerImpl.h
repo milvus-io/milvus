@@ -27,6 +27,7 @@
 #include "storage/LocalChunkManager.h"
 #include "common/Consts.h"
 #include "storage/Types.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -88,6 +89,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetRemoteJsonKeyLogPrefix();
 
+    // Used for upload index to remote storage, using this index prefix dir as remote storage directory
+    std::string
+    GetLocalNgramIndexPrefix();
+
+    // Used for loading index, using this index prefix dir to store index.
+    std::string
+    GetLocalTempNgramIndexPrefix();
+
     std::string
     GetLocalRawDataObjectPrefix();
 
@@ -114,6 +123,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
                             milvus::proto::common::LoadPriority priority);
 
     void
+    CacheNgramIndexToDisk(const std::vector<std::string>& remote_files,
+                          milvus::proto::common::LoadPriority priority);
+
+    void
     RemoveIndexFiles();
 
     void
@@ -121,6 +134,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     void
     RemoveJsonKeyIndexFiles();
+
+    void
+    RemoveNgramIndexFiles();
 
     void
     AddBatchIndexFiles(const std::string& local_file_name,
@@ -169,11 +185,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
                         get_remote_path) noexcept;
 
     void
-    CacheIndexToDiskInternal(
-        const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix,
-        milvus::proto::common::LoadPriority priority =
-            milvus::proto::common::LoadPriority::HIGH);
+    CacheIndexToDiskInternal(const std::vector<std::string>& remote_files,
+                             const std::string& local_index_prefix,
+                             milvus::proto::common::LoadPriority priority =
+                                 milvus::proto::common::LoadPriority::HIGH);
 
     template <typename DataType>
     std::string

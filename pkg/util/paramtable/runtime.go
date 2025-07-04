@@ -17,11 +17,19 @@
 package paramtable
 
 import (
+	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+)
+
+const (
+	MilvusConfigRefreshIntervalEnvKey = "MILVUS_CONFIG_REFRESH_INTERVAL"
 )
 
 var (
@@ -35,7 +43,14 @@ var (
 
 func Init() {
 	once.Do(func() {
-		baseTable := NewBaseTable()
+		opts := []Option{}
+		if refreshInterval := os.Getenv(MilvusConfigRefreshIntervalEnvKey); refreshInterval != "" {
+			if duration, err := time.ParseDuration(refreshInterval); err == nil {
+				log.Info("set config refresh interval", zap.Duration("duration", duration))
+				opts = append(opts, Interval(duration))
+			}
+		}
+		baseTable := NewBaseTable(opts...)
 		params.Init(baseTable)
 		hookBaseTable := NewBaseTableFromYamlOnly(hookYamlFile)
 		hookParams.init(hookBaseTable)
@@ -51,6 +66,7 @@ func InitWithBaseTable(baseTable *BaseTable) {
 }
 
 func Get() *ComponentParam {
+	Init()
 	return &params
 }
 

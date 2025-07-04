@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -151,8 +152,9 @@ func (s *DelegatorDataSuite) genNormalCollection() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		LoadType:     querypb.LoadType_LoadCollection,
-		PartitionIDs: []int64{1001, 1002},
+		LoadType:      querypb.LoadType_LoadCollection,
+		PartitionIDs:  []int64{1001, 1002},
+		SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0),
 	})
 }
 
@@ -188,7 +190,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 			InputFieldIds:  []int64{102},
 			OutputFieldIds: []int64{101},
 		}},
-	}, nil, nil)
+	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
