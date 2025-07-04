@@ -277,16 +277,22 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
+	storageVersion := storage.StorageV1
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
+
 	return &datapb.PreImportRequest{
-		JobID:         task.GetJobID(),
-		TaskID:        task.GetTaskID(),
-		CollectionID:  task.GetCollectionID(),
-		PartitionIDs:  job.GetPartitionIDs(),
-		Vchannels:     job.GetVchannels(),
-		Schema:        job.GetSchema(),
-		ImportFiles:   importFiles,
-		Options:       job.GetOptions(),
-		StorageConfig: createStorageConfig(),
+		JobID:          task.GetJobID(),
+		TaskID:         task.GetTaskID(),
+		CollectionID:   task.GetCollectionID(),
+		PartitionIDs:   job.GetPartitionIDs(),
+		Vchannels:      job.GetVchannels(),
+		Schema:         job.GetSchema(),
+		ImportFiles:    importFiles,
+		Options:        job.GetOptions(),
+		StorageConfig:  createStorageConfig(),
+		StorageVersion: storageVersion,
 	}
 }
 
@@ -340,6 +346,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
+
+	storageVersion := storage.StorageV1
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	return &datapb.ImportRequest{
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
@@ -353,6 +364,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
+		StorageVersion:  storageVersion,
 	}, nil
 }
 

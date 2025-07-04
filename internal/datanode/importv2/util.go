@@ -54,15 +54,17 @@ func NewSyncTask(ctx context.Context,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
+	storageVersion int64,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{
-			ID:            segmentID,
-			State:         commonpb.SegmentState_Importing,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: vchannel,
+			ID:             segmentID,
+			State:          commonpb.SegmentState_Importing,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  vchannel,
+			StorageVersion: storageVersion,
 		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
