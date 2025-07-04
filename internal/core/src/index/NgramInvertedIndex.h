@@ -36,7 +36,24 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
     std::optional<TargetBitmap>
+    ExecuteQuery(const std::string& literal,
+                 proto::plan::OpType op_type,
+                 exec::SegmentExpr* segment);
+
+ private:
+    std::optional<TargetBitmap>
+    PrefixMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
+
+    std::optional<TargetBitmap>
+    PostfixMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
+
+    // InnerMatch is something like %xxx%.
+    std::optional<TargetBitmap>
     InnerMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
+
+    // Match is something like xxx%xxx%xxx, xxx%xxx, %xxx%xxx, xxx_x etc.
+    std::optional<TargetBitmap>
+    MatchQuery(const std::string& literal, exec::SegmentExpr* segment);
 
  private:
     uintptr_t min_gram_{0};
