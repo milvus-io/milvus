@@ -1463,3 +1463,33 @@ func getDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
 	}
 }
+
+// CheckFieldExistence checks if a field exists in all insert data blocks
+// and handles nullable fields appropriately. Returns true if the field should be processed,
+// false if it should be skipped, and an error if there's an issue.
+func CheckFieldExistence(field *schemapb.FieldSchema, data []*InsertData) (bool, error) {
+	// check insert data contain this field
+	// must be all missing or all exists
+	allExists := true
+	allMissing := false
+	for _, block := range data {
+		_, ok := block.Data[field.FieldID]
+		allExists = allExists && ok
+		allMissing = allMissing || !ok
+	}
+
+	// found missing block
+	if !allExists {
+		if !field.GetNullable() {
+			return false, errors.Newf("field %d(%s) missing and field not nullable", field.GetFieldID(), field.GetName())
+		}
+		// segment must be in same schema
+		if !allMissing {
+			return false, errors.Newf("segment must not be heterogeneous, all blocks must contain all fields or none, abnormal field %d(%s)", field.GetFieldID(), field.GetName())
+		}
+		log.Info("Skip field nullable missing field, could be schema change", zap.Int64("fieldId", field.GetFieldID()), zap.String("fieldName", field.GetName()))
+		return true, nil
+	}
+
+	return false, nil
+}
