@@ -456,7 +456,8 @@ struct VectorizedElementWiseBitsetPolicy {
             const size_t nbits = (end_element - start_element) * data_bits;
 
             // check if vectorized implementation is available
-            if (!func_vectorized(start_element, ptr_offset, nbits)) {
+            if (!func_vectorized(
+                    start_element, ptr_offset, end_element - start_element)) {
                 // vectorized implementation is not available, invoke the default one
                 func_baseline(starting_bit_idx, ptr_offset, nbits);
             }
