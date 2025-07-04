@@ -5181,10 +5181,10 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 // /////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
-	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
-	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
-	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
-	MaxParallelSyncMgrTasks ParamItem `refreshable:"true"`
+	FlowGraphMaxQueueLength           ParamItem `refreshable:"false"`
+	FlowGraphMaxParallelism           ParamItem `refreshable:"false"`
+	MaxParallelSyncTaskNum            ParamItem `refreshable:"false"`
+	MaxParallelSyncMgrTasksPerCPUCore ParamItem `refreshable:"true"`
 
 	// skip mode
 	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`
@@ -5319,22 +5319,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
 
-	p.MaxParallelSyncMgrTasks = ParamItem{
-		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
+	p.MaxParallelSyncMgrTasksPerCPUCore = ParamItem{
+		Key:          "dataNode.dataSync.maxParallelSyncMgrTasksPerCPUCore",
 		Version:      "2.3.4",
-		DefaultValue: "64",
-		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
+		DefaultValue: "16",
+		Doc:          "The max concurrent sync task number of datanode sync mgr per CPU core",
 		Formatter: func(v string) string {
 			concurrency := getAsInt(v)
 			if concurrency < 1 {
-				log.Warn("positive parallel task number, reset to default 64", zap.String("value", v))
-				return "64" // MaxParallelSyncMgrTasks must >= 1
+				log.Warn("positive parallel task number, reset to default 16", zap.String("value", v))
+				return "16" // MaxParallelSyncMgrTasksPerCPUCore must >= 1
 			}
 			return strconv.FormatInt(int64(concurrency), 10)
 		},
 		Export: true,
 	}
-	p.MaxParallelSyncMgrTasks.Init(base.mgr)
+	p.MaxParallelSyncMgrTasksPerCPUCore.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",

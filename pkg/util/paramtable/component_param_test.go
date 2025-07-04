@@ -595,6 +595,10 @@ func TestComponentParam(t *testing.T) {
 		maxParallelSyncTaskNum := Params.MaxParallelSyncTaskNum.GetAsInt()
 		t.Logf("maxParallelSyncTaskNum: %d", maxParallelSyncTaskNum)
 
+		maxParallelSyncMgrTasksPerCPUCore := Params.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt()
+		t.Logf("maxParallelSyncMgrTasksPerCPUCore: %d", maxParallelSyncMgrTasksPerCPUCore)
+		assert.Equal(t, 16, maxParallelSyncMgrTasksPerCPUCore)
+
 		size := Params.FlushInsertBufferSize.GetAsInt()
 		t.Logf("FlushInsertBufferSize: %d", size)
 
