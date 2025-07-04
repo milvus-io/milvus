@@ -337,7 +337,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         }
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
-            stats_.mem_size = chunked_column_group->memory_size();
+            stats_.mem_size += chunked_column_group->memory_size();
         }
     }
 }
@@ -1917,7 +1917,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (!enable_mmap) {
-        if (is_proxy_column &&
+        if (!is_proxy_column || is_proxy_column &&
             field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
         }
