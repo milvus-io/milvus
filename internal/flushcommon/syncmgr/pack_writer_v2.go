@@ -102,9 +102,10 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
-	columnGroups := storagecommon.SplitBySchema(bw.schema.GetFields())
+	filteredNullableAddFieldsSchema := bw.filterNullableAddFields(pack)
+	columnGroups := storagecommon.SplitBySchema(filteredNullableAddFieldsSchema.GetFields())
 
-	rec, err := bw.serializeBinlog(ctx, pack)
+	rec, err := bw.serializeBinlog(ctx, pack, filteredNullableAddFieldsSchema.GetFields())
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +132,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, nil)
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, filteredNullableAddFieldsSchema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -160,11 +161,35 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	return logs, nil
 }
 
-func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack) (storage.Record, error) {
+func (bw *BulkPackWriterV2) filterNullableAddFields(pack *SyncPack) *schemapb.CollectionSchema {
+	// Get all fieldIDs that exist in insertData
+	existingFieldIDs := make(map[storage.FieldID]bool)
+	for _, chunk := range pack.insertData {
+		for fieldID := range chunk.Data {
+			existingFieldIDs[fieldID] = true
+		}
+	}
+
+	// Filter schema fields to only include those that exist in insertData
+	var filteredFields []*schemapb.FieldSchema
+	for _, field := range bw.schema.GetFields() {
+		if existingFieldIDs[field.FieldID] {
+			filteredFields = append(filteredFields, field)
+		}
+	}
+
+	return &schemapb.CollectionSchema{
+		Name:   bw.schema.Name,
+		Fields: filteredFields,
+	}
+}
+
+func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack, filteredFields []*schemapb.FieldSchema) (storage.Record, error) {
 	if len(pack.insertData) == 0 {
 		return nil, nil
 	}
-	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema.Fields)
+
+	arrowSchema, err := storage.ConvertToArrowSchema(filteredFields)
 	if err != nil {
 		return nil, err
 	}
@@ -172,15 +197,15 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	defer builder.Release()
 
 	for _, chunk := range pack.insertData {
-		if err := storage.BuildRecord(builder, chunk, bw.schema.GetFields()); err != nil {
+		if err := storage.BuildRecord(builder, chunk, filteredFields); err != nil {
 			return nil, err
 		}
 	}
 
 	rec := builder.NewRecord()
-	field2Col := make(map[storage.FieldID]int, len(bw.schema.GetFields()))
+	field2Col := make(map[storage.FieldID]int, len(filteredFields))
 
-	for c, field := range bw.schema.GetFields() {
+	for c, field := range filteredFields {
 		field2Col[field.FieldID] = c
 	}
 	return storage.NewSimpleArrowRecord(rec, field2Col), nil

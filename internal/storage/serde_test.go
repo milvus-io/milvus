@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type MockRecordWriter struct {
@@ -211,6 +212,62 @@ func TestCalculateArraySize(t *testing.T) {
 			size := arr.Data().SizeInBytes()
 			if size != tt.expectedSize {
 				t.Errorf("Expected size %d, got %d", tt.expectedSize, size)
+			}
+		})
+	}
+}
+
+func TestBuildRecord(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        *InsertData
+		fields      []*schemapb.FieldSchema
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "non-nullable field missing - should return error",
+			data: &InsertData{
+				Data: map[FieldID]FieldData{
+					1: &Int32FieldData{Data: []int32{1, 2, 3}},
+					// field 2 is missing and not nullable
+				},
+			},
+			fields: []*schemapb.FieldSchema{
+				{FieldID: 1, Name: "field1", DataType: schemapb.DataType_Int32},
+				{FieldID: 2, Name: "field2", DataType: schemapb.DataType_String, Nullable: false},
+			},
+			expectError: true,
+			errorMsg:    "field field2 not found when building record",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create arrow schema from fields
+			arrowFields := make([]arrow.Field, len(tt.fields))
+			for i, field := range tt.fields {
+				dim, _ := typeutil.GetDim(field)
+				arrowFields[i] = arrow.Field{
+					Name:     field.Name,
+					Type:     serdeMap[field.DataType].arrowType(int(dim)),
+					Nullable: field.Nullable,
+				}
+			}
+			schema := arrow.NewSchema(arrowFields, nil)
+			builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+			defer builder.Release()
+
+			// Test BuildRecord function
+			err := BuildRecord(builder, tt.data, tt.fields)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
