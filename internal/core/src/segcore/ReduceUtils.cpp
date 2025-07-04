@@ -34,10 +34,13 @@ AssembleGroupByValues(
         auto group_by_field =
             plan->schema_->operator[](group_by_field_id.value());
         auto group_by_data_type = group_by_field.get_data_type();
-
+        auto group_by_field_value =
+            search_result->mutable_group_by_field_value();
         int group_by_val_size = group_by_vals.size();
         switch (group_by_data_type) {
             case DataType::INT8: {
+                group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::Int8);
                 auto field_data = group_by_values_field->mutable_int_data();
                 field_data->mutable_data()->Resize(group_by_val_size, 0);
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
@@ -52,6 +55,8 @@ AssembleGroupByValues(
                 break;
             }
             case DataType::INT16: {
+                group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::Int16);
                 auto field_data = group_by_values_field->mutable_int_data();
                 field_data->mutable_data()->Resize(group_by_val_size, 0);
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
@@ -66,6 +71,8 @@ AssembleGroupByValues(
                 break;
             }
             case DataType::INT32: {
+                group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::Int32);
                 auto field_data = group_by_values_field->mutable_int_data();
                 field_data->mutable_data()->Resize(group_by_val_size, 0);
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
@@ -80,6 +87,8 @@ AssembleGroupByValues(
                 break;
             }
             case DataType::INT64: {
+                group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::Int64);
                 auto field_data = group_by_values_field->mutable_long_data();
                 field_data->mutable_data()->Resize(group_by_val_size, 0);
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
@@ -94,6 +103,8 @@ AssembleGroupByValues(
                 break;
             }
             case DataType::BOOL: {
+                group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::Bool);
                 auto field_data = group_by_values_field->mutable_bool_data();
                 field_data->mutable_data()->Resize(group_by_val_size, 0);
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
@@ -107,6 +118,8 @@ AssembleGroupByValues(
                 break;
             }
             case DataType::VARCHAR: {
+                group_by_field_value->set_type(
+                    milvus::proto::schema::DataType::VarChar);
                 auto field_data = group_by_values_field->mutable_string_data();
                 for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
                     if (group_by_vals[idx].has_value()) {
@@ -121,15 +134,26 @@ AssembleGroupByValues(
             }
             case DataType::JSON: {
                 auto json_path = plan->plan_node_->search_info_.json_path_;
-                auto json_cast_type = plan->plan_node_->search_info_.json_cast_type_;
-                LOG_INFO("hc===AssembleGroupByValues=json_path: {}, json_cast_type: {}", json_path, json_cast_type);
+                auto json_cast_type =
+                    plan->plan_node_->search_info_.json_cast_type_;
+                LOG_INFO(
+                    "hc===AssembleGroupByValues=json_path: {}, json_cast_type: "
+                    "{}",
+                    json_path.value(),
+                    static_cast<int>(json_cast_type.value()));
                 switch (json_cast_type.value()) {
                     case DataType::BOOL: {
-                        auto field_data = group_by_values_field->mutable_bool_data();
-                        field_data->mutable_data()->Resize(group_by_val_size, 0);
-                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                        group_by_field_value->set_type(
+                            milvus::proto::schema::DataType::Bool);
+                        auto field_data =
+                            group_by_values_field->mutable_bool_data();
+                        field_data->mutable_data()->Resize(group_by_val_size,
+                                                           0);
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                bool val = std::get<bool>(group_by_vals[idx].value());
+                                bool val =
+                                    std::get<bool>(group_by_vals[idx].value());
                                 field_data->mutable_data()->Set(idx, val);
                             } else {
                                 valid_data->Set(idx, false);
@@ -138,12 +162,18 @@ AssembleGroupByValues(
                         break;
                     }
                     case DataType::INT8: {
-                        auto field_data = group_by_values_field->mutable_int_data();
-                        field_data->mutable_data()->Resize(group_by_val_size, 0);
-                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                        group_by_field_value->set_type(
+                            milvus::proto::schema::DataType::Int8);
+                        auto field_data =
+                            group_by_values_field->mutable_int_data();
+                        field_data->mutable_data()->Resize(group_by_val_size,
+                                                           0);
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                int8_t val = std::get<int8_t>(group_by_vals[idx].value());
-                                field_data->mutable_data()->Set(idx, val);  
+                                int8_t val = std::get<int8_t>(
+                                    group_by_vals[idx].value());
+                                field_data->mutable_data()->Set(idx, val);
                             } else {
                                 valid_data->Set(idx, false);
                             }
@@ -151,11 +181,17 @@ AssembleGroupByValues(
                         break;
                     }
                     case DataType::INT16: {
-                        auto field_data = group_by_values_field->mutable_int_data();
-                        field_data->mutable_data()->Resize(group_by_val_size, 0);
-                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                        group_by_field_value->set_type(
+                            milvus::proto::schema::DataType::Int16);
+                        auto field_data =
+                            group_by_values_field->mutable_int_data();
+                        field_data->mutable_data()->Resize(group_by_val_size,
+                                                           0);
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                int16_t val = std::get<int16_t>(group_by_vals[idx].value());
+                                int16_t val = std::get<int16_t>(
+                                    group_by_vals[idx].value());
                                 field_data->mutable_data()->Set(idx, val);
                             } else {
                                 valid_data->Set(idx, false);
@@ -164,11 +200,17 @@ AssembleGroupByValues(
                         break;
                     }
                     case DataType::INT32: {
-                        auto field_data = group_by_values_field->mutable_int_data();
-                        field_data->mutable_data()->Resize(group_by_val_size, 0);
-                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                        group_by_field_value->set_type(
+                            milvus::proto::schema::DataType::Int32);
+                        auto field_data =
+                            group_by_values_field->mutable_int_data();
+                        field_data->mutable_data()->Resize(group_by_val_size,
+                                                           0);
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                int32_t val = std::get<int32_t>(group_by_vals[idx].value());
+                                int32_t val = std::get<int32_t>(
+                                    group_by_vals[idx].value());
                                 field_data->mutable_data()->Set(idx, val);
                             } else {
                                 valid_data->Set(idx, false);
@@ -177,11 +219,17 @@ AssembleGroupByValues(
                         break;
                     }
                     case DataType::INT64: {
-                        auto field_data = group_by_values_field->mutable_long_data();
-                        field_data->mutable_data()->Resize(group_by_val_size, 0);
-                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                        group_by_field_value->set_type(
+                            milvus::proto::schema::DataType::Int64);
+                        auto field_data =
+                            group_by_values_field->mutable_long_data();
+                        field_data->mutable_data()->Resize(group_by_val_size,
+                                                           0);
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                int64_t val = std::get<int64_t>(group_by_vals[idx].value());
+                                int64_t val = std::get<int64_t>(
+                                    group_by_vals[idx].value());
                                 field_data->mutable_data()->Set(idx, val);
                             } else {
                                 valid_data->Set(idx, false);
@@ -190,10 +238,15 @@ AssembleGroupByValues(
                         break;
                     }
                     case DataType::VARCHAR: {
-                        auto field_data = group_by_values_field->mutable_string_data();
-                        for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
+                        group_by_field_value->set_type(
+                            milvus::proto::schema::DataType::VarChar);
+                        auto field_data =
+                            group_by_values_field->mutable_string_data();
+                        for (std::size_t idx = 0; idx < group_by_val_size;
+                             idx++) {
                             if (group_by_vals[idx].has_value()) {
-                                std::string val = std::get<std::string>(group_by_vals[idx].value());
+                                std::string val = std::get<std::string>(
+                                    group_by_vals[idx].value());
                                 *(field_data->mutable_data()->Add()) = val;
                             } else {
                                 valid_data->Set(idx, false);
@@ -202,10 +255,10 @@ AssembleGroupByValues(
                         break;
                     }
                     default: {
-                        PanicInfo(
-                            DataTypeInvalid,
-                            fmt::format("unsupported json cast type for json field group_by operations ",
-                                        json_cast_type.value()));
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format("unsupported json cast type for "
+                                              "json field group_by operations ",
+                                              json_cast_type.value()));
                     }
                 }
                 break;
@@ -217,14 +270,12 @@ AssembleGroupByValues(
                                 group_by_data_type));
             }
         }
-
-        auto group_by_field_value =
-            search_result->mutable_group_by_field_value();
-        group_by_field_value->set_type(
-            milvus::proto::schema::DataType(group_by_data_type));
-        group_by_field_value->mutable_valid_data()->MergeFrom(*valid_data);
-        group_by_field_value->mutable_scalars()->MergeFrom(
-            *group_by_values_field.get());
+        search_result->mutable_group_by_field_value()
+            ->mutable_valid_data()
+            ->MergeFrom(*valid_data);
+        search_result->mutable_group_by_field_value()
+            ->mutable_scalars()
+            ->MergeFrom(*group_by_values_field.get());
         return;
     }
 }

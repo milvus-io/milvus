@@ -48,8 +48,9 @@ class GrowingDataGetter : public DataGetter<OutputType> {
  public:
     GrowingDataGetter(const segcore::SegmentGrowingImpl& segment,
                       FieldId fieldId,
-                      std::optional<std::string> json_path){
-        growing_raw_data_ = segment.get_insert_record().get_data<InnerRawType>(fieldId);
+                      std::optional<std::string> json_path) {
+        growing_raw_data_ =
+            segment.get_insert_record().get_data<InnerRawType>(fieldId);
         valid_data_ = segment.get_insert_record().is_valid_data_exist(fieldId)
                           ? segment.get_insert_record().get_valid_data(fieldId)
                           : nullptr;

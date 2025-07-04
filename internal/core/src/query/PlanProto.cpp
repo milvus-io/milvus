@@ -93,7 +93,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
             search_info.strict_group_size_ =
                 query_info_proto.strict_group_size();
             search_info.json_path_ = query_info_proto.json_path();
-            search_info.json_cast_type_ = static_cast<milvus::DataType>(query_info_proto.json_cast_type());
+            search_info.json_cast_type_ = static_cast<milvus::DataType>(
+                query_info_proto.json_cast_type());
             LOG_INFO("hc===json_path: {}, json_cast_type: {}",
                      search_info.json_path_.value(),
                      search_info.json_cast_type_.value());
