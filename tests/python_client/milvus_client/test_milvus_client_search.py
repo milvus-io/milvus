@@ -3719,7 +3719,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         if not enable_dynamic_field:
             schema.add_field(json_field_name, DataType.JSON)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(default_vector_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
         vectors = cf.gen_vectors(default_nb + 60, default_dim)
@@ -3756,7 +3756,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         # 2. prepare index params
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
+        index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_name=index_name,
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -3804,7 +3804,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
                                  "pk_name": default_primary_key_field_name,
-                                 "limit": 1})[0]
+                                 "limit": 1})
         expr = f"{json_field_name} == {default_nb + 5}"
         insert_ids = [default_nb + 5]
         self.search(client, collection_name, vectors_to_search,
