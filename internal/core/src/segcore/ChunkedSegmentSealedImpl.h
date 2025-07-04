@@ -168,9 +168,22 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_pk(const PkType& pk, Timestamp timestamp) const override;
 
+    void
+    pk_range(proto::plan::OpType op,
+             const PkType& pk,
+             Timestamp timestamp,
+             BitsetTypeView& bitset) const override;
+
     template <typename Condition>
     std::vector<SegOffset>
     search_sorted_pk(const PkType& pk, Condition condition) const;
+
+    template <typename Condition>
+    void
+    search_sorted_pk(proto::plan::OpType op,
+                     const PkType& pk,
+                     BitsetTypeView& bitset,
+                     Condition condition) const;
 
     std::unique_ptr<DataArray>
     get_vector(FieldId field_id,
@@ -479,10 +492,6 @@ CreateSealedSegment(
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
     bool is_sorted_by_pk = false) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
-        schema,
-        index_meta,
-        segcore_config,
-        segment_id,
-        is_sorted_by_pk);
+        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 }  // namespace milvus::segcore
