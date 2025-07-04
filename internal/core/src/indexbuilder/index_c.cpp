@@ -63,7 +63,7 @@ CreateIndexV0(enum CDataType dtype,
             const auto& param = index_params.params(i);
             config[param.key()] = param.value();
         }
-
+        LOG_INFO("hc===CreateIndexV0=config: {}", config.dump());
         config[milvus::index::INDEX_ENGINE_VERSION] = std::to_string(
             knowhere::Version::GetCurrentVersion().VersionNumber());
 

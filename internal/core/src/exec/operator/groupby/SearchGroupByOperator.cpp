@@ -16,6 +16,7 @@
 #include "SearchGroupByOperator.h"
 #include "common/Consts.h"
 #include "query/Utils.h"
+#include "common/JsonUtils.h"
 
 namespace milvus {
 namespace exec {

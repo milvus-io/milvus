@@ -20,6 +20,8 @@
 #include <type_traits>
 
 #include "cachinglayer/CacheSlot.h"
+#include "common/Json.h"
+#include "common/JsonUtils.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
 #include "knowhere/index/index_node.h"
@@ -74,39 +76,38 @@ class GrowingDataGetter : public DataGetter<OutputType> {
             }
         } else if constexpr (std::is_same_v<InnerRawType, milvus::Json>) {
             auto parse_json_doc =
-                [&](auto& json_val) -> std::optional<OutputType> {
-                auto doc = json_val.doc();
-                if (doc.error() != simdjson::SUCCESS)
-                    return std::nullopt;
-                auto doc_val = doc.at_path(this->json_path_.value());
-                if (doc_val.error() != simdjson::SUCCESS)
-                    return std::nullopt;
+                [&](milvus::Json& json_val) -> std::optional<OutputType> {
                 if constexpr (std::is_same_v<OutputType, bool>) {
-                    return doc_val.get_bool();
+                    auto result = json_val.at<bool>(this->json_path_.value());
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return result.value();
                 } else if constexpr (std::is_same_v<OutputType, int8_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
                     return static_cast<int8_t>(result.value());
                 } else if constexpr (std::is_same_v<OutputType, int16_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
                     return static_cast<int16_t>(result.value());
                 } else if constexpr (std::is_same_v<OutputType, int32_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
                     return static_cast<int32_t>(result.value());
                 } else if constexpr (std::is_same_v<OutputType, int64_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
+                    LOG_INFO("hc===GrowingDataGetter=result.value(): {}", result.value());
                     return result.value();
                 } else if constexpr (std::is_same_v<OutputType, std::string>) {
-                    auto str_result = doc_val.get_string();
+                    auto str_result = json_val.at<std::string_view>(this->json_path_.value());
                     if (str_result.error() != simdjson::SUCCESS)
                         return std::nullopt;
+                    LOG_INFO("hc===GrowingDataGetter=str_result.value(): {}", str_result.value());
                     return std::string(str_result.value());
                 }
                 return std::nullopt;
@@ -159,7 +160,6 @@ class SealedDataGetter : public DataGetter<T> {
                 "index or data",
                 segment_.get_segment_id());
         }
-        this->json_path_ = json_path;
     }
 
     std::optional<T>
@@ -190,41 +190,38 @@ class SealedDataGetter : public DataGetter<T> {
                     return std::nullopt;
                 }
                 auto& json_val = json_chunk_view[inner_offset];
-                auto doc = json_val.doc();
-                if (doc.error() != simdjson::SUCCESS) {
-                    return std::nullopt;
-                }
-                auto doc_val = doc.at_path(this->json_path_.value());
-                if (doc_val.error() != simdjson::SUCCESS) {
-                    return std::nullopt;
-                }
                 if constexpr (std::is_same_v<T, bool>) {
-                    return doc_val.get_bool();
+                    auto result = json_val.at<bool>(this->json_path_.value());
+                    if (result.error() != simdjson::SUCCESS)
+                        return std::nullopt;
+                    return result.value();
                 } else if constexpr (std::is_same_v<T, int8_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
                     return static_cast<int8_t>(result.value());
                 } else if constexpr (std::is_same_v<T, int16_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
                     return static_cast<int16_t>(result.value());
                 } else if constexpr (std::is_same_v<T, int32_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
                     return static_cast<int32_t>(result.value());
                 } else if constexpr (std::is_same_v<T, int64_t>) {
-                    auto result = doc_val.get_int64();
+                    auto result = json_val.at<int64_t>(this->json_path_.value());
                     if (result.error() != simdjson::SUCCESS)
                         return std::nullopt;
+                    LOG_INFO("hc===SealedDataGetter=result.value(): {}", result.value());
                     return result.value();
                 } else if constexpr (std::is_same_v<T, std::string>) {
-                    auto str_result = doc_val.get_string();
+                    auto str_result = json_val.at<std::string_view>(this->json_path_.value());
                     if (str_result.error() != simdjson::SUCCESS) {
                         return std::nullopt;
                     }
+                    LOG_INFO("hc===SealedDataGetter=str_result.value(): {}", str_result.value());
                     return std::string(str_result.value());
                 }
                 return std::nullopt;
@@ -253,6 +250,11 @@ static const std::shared_ptr<DataGetter<OutputType>>
 GetDataGetter(const segcore::SegmentInternalInterface& segment,
               FieldId fieldId,
               std::optional<std::string> json_path = std::nullopt) {
+    if(json_path.has_value()) {
+        auto json_path_tokens = milvus::parse_json_pointer(json_path.value());
+        json_path = milvus::Json::pointer(json_path_tokens);
+        LOG_INFO("hc===Converted DataGetter=json_path: {}", json_path.value());
+    }
     if (const auto* growing_segment =
             dynamic_cast<const segcore::SegmentGrowingImpl*>(&segment)) {
         return std::make_shared<GrowingDataGetter<OutputType, InnerRawType>>(
