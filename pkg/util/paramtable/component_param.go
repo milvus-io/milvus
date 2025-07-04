@@ -5572,8 +5572,9 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.compaction.useMergeSort",
 		Version:      "2.5.0",
 		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
-		DefaultValue: "false",
-		Export:       true,
+		DefaultValue: "true",
+		// Enable by default start from 2.6.0
+		Export: true,
 	}
 	p.UseMergeSort.Init(base.mgr)
 
