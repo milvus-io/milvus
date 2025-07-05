@@ -26,6 +26,7 @@
 #include "log/Log.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
 
@@ -37,10 +38,12 @@ struct FileManagerContext {
     }
     FileManagerContext(const FieldDataMeta& fieldDataMeta,
                        const IndexMeta& indexMeta,
-                       const ChunkManagerPtr& chunkManagerPtr)
+                       const ChunkManagerPtr& chunkManagerPtr,
+                       milvus_storage::ArrowFileSystemPtr fs = nullptr)
         : fieldDataMeta(fieldDataMeta),
           indexMeta(indexMeta),
-          chunkManagerPtr(chunkManagerPtr) {
+          chunkManagerPtr(chunkManagerPtr),
+          fs(fs) {
     }
 
     bool
@@ -56,6 +59,7 @@ struct FileManagerContext {
     FieldDataMeta fieldDataMeta;
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
+    milvus_storage::ArrowFileSystemPtr fs;
     bool for_loading_index{false};
 };
 
@@ -176,6 +180,7 @@ class FileManagerImpl : public knowhere::FileManager {
     // index meta
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
+    milvus_storage::ArrowFileSystemPtr fs_;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;
