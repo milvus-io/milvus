@@ -23,11 +23,11 @@ import (
 	"google.golang.org/grpc/encoding"
 )
 
-func TestGrpcEncoder(t *testing.T) {
+func TestZstdAlgorithm(t *testing.T) {
 	data := "hello zstd algorithm!"
 	var buf bytes.Buffer
-
-	compressor := encoding.GetCompressor(Zstd)
+	zstdCom := zstdCompressor{}
+	compressor := encoding.GetCompressor(zstdCom.Name())
 	writer, err := compressor.Compress(&buf)
 	assert.NoError(t, err)
 	written, err := writer.Write([]byte(data))

@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
@@ -484,67 +485,85 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 }
 
 func TestClientBase_Compression(t *testing.T) {
-	lis, err := net.Listen("tcp", "localhost:")
-	address := lis.Addr()
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	kaep := keepalive.EnforcementPolicy{
-		MinTime:             5 * time.Second,
-		PermitWithoutStream: true,
-	}
-	kasp := keepalive.ServerParameters{
-		Time:    60 * time.Second,
-		Timeout: 60 * time.Second,
-	}
+	// Setup test server
+	lis, err := net.Listen("tcp", "localhost:0")
+	require.NoError(t, err, "failed to create listener")
+	defer lis.Close()
 
-	maxAttempts := 1
-	s := grpc.NewServer(
-		grpc.KeepaliveEnforcementPolicy(kaep),
-		grpc.KeepaliveParams(kasp),
+	// Create a real gRPC server with compression enabled
+	srv := grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    60 * time.Second,
+			Timeout: 60 * time.Second,
+		}),
 	)
-	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(1)})
-	reflection.Register(s)
-	go func() {
-		if err := s.Serve(lis); err != nil {
-			log.Fatalf("failed to serve: %v", err)
-		}
-	}()
-	defer s.Stop()
 
+	// Register the actual service we want to test
+	testServer := &testService{}
+	rootcoordpb.RegisterRootCoordServer(srv, testServer)
+
+	// Start server
+	go func() {
+		err := srv.Serve(lis)
+		require.NoError(t, err, "failed to serve")
+	}()
+	defer srv.GracefulStop()
+
+	// Create client with compression enabled
 	clientBase := ClientBase[rootcoordpb.RootCoordClient]{
 		ClientMaxRecvSize:      1 * 1024 * 1024,
 		ClientMaxSendSize:      1 * 1024 * 1024,
-		DialTimeout:            60 * time.Second,
+		DialTimeout:            5 * time.Second,
 		KeepAliveTime:          60 * time.Second,
 		KeepAliveTimeout:       60 * time.Second,
-		RetryServiceNameConfig: "helloworld.Greeter",
-		MaxAttempts:            maxAttempts,
-		InitialBackoff:         10.0,
-		MaxBackoff:             60.0,
-		CompressionEnabled:     true,
+		RetryServiceNameConfig: "rootcoordpb.GetComponentStates",
+		MaxAttempts:            1,
+		CompressionEnabled:     true, // Enable compression
+		CompressionAlgo:        "zstd",
 	}
+
+	// Setup client
 	clientBase.SetRole(typeutil.DataCoordRole)
 	clientBase.SetGetAddrFunc(func() (string, error) {
-		return address.String(), nil
+		return lis.Addr().String(), nil
 	})
 	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
 		return rootcoordpb.NewRootCoordClient(cc)
 	})
 	defer clientBase.Close()
 
+	// Test compression with actual RPC call
 	ctx := context.Background()
-	randID := rand.Int63()
+
+	// Make the actual RPC call
 	res, err := clientBase.Call(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
-		return &milvuspb.ComponentStates{
-			State: &milvuspb.ComponentInfo{
-				NodeID: randID,
-			},
-			Status: merr.Success(),
-		}, nil
+		// Call a real RPC method
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
+
 	assert.NoError(t, err)
-	assert.Equal(t, res.(*milvuspb.ComponentStates).GetState().GetNodeID(), randID)
+	states, ok := res.(*milvuspb.ComponentStates)
+	assert.True(t, ok)
+	assert.NotNil(t, states)
+	assert.Equal(t, states.State.NodeID, int64(100))
+}
+
+// testService implements the RootCoordServer interface
+type testService struct {
+	rootcoordpb.UnimplementedRootCoordServer
+}
+
+func (s *testService) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			NodeID: 100,
+		},
+		Status: merr.Success(),
+	}, nil
 }
 
 func TestVerifySession(t *testing.T) {
