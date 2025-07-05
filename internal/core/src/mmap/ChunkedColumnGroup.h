@@ -47,7 +47,9 @@ class ChunkedColumnGroup {
  public:
     explicit ChunkedColumnGroup(
         std::unique_ptr<Translator<GroupChunk>> translator)
-        : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+        : slot_(Manager::GetInstance().CreateCacheSlot(
+              std::move(translator),
+              CellIdMappingMode::IDENTICAL)) {
         num_chunks_ = slot_->num_cells();
         num_rows_ = GetNumRowsUntilChunk().back();
     }
@@ -67,14 +69,14 @@ class ChunkedColumnGroup {
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(int64_t chunk_id) const {
-        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto ca = slot_->PinCells({chunk_id});
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
     }
 
     std::shared_ptr<CellAccessor<GroupChunk>>
     GetGroupChunks(std::vector<int64_t> chunk_ids) {
-        return SemiInlineGet(slot_->PinCells(chunk_ids));
+        return slot_->PinCells(std::move(chunk_ids));
     }
 
     int64_t
@@ -95,6 +97,60 @@ class ChunkedColumnGroup {
             static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
                 slot_->meta());
         return meta->num_rows_until_chunk_;
+    }
+
+    std::pair<size_t, size_t>
+    GetChunkIDByOffset(int64_t offset) const {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        auto& num_rows_until_chunk = meta->num_rows_until_chunk_;
+        // optimize for single chunk case
+        if (num_rows_until_chunk.size() == 2) {
+            return {0, offset};
+        }
+        auto& virt_chunk_order = meta->virt_chunk_order_;
+        auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
+        auto vcid = offset >> virt_chunk_order;
+        auto scid = vcid_to_cid_arr[vcid];
+        while (scid < num_rows_until_chunk.size() - 1 &&
+               offset >= num_rows_until_chunk[scid + 1]) {
+            scid++;
+        }
+        auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+        return {scid, offset_in_chunk};
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const {
+        std::vector<milvus::cachinglayer::cid_t> cids(count);
+        std::vector<int64_t> offsets_in_chunk(count);
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        auto& num_rows_until_chunk = meta->num_rows_until_chunk_;
+        // optimize for single chunk case
+        if (num_rows_until_chunk.size() == 2) {
+            for (int64_t i = 0; i < count; i++) {
+                offsets_in_chunk[i] = offsets[i];
+            }
+            return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+        }
+        auto& virt_chunk_order = meta->virt_chunk_order_;
+        auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
+        for (int64_t i = 0; i < count; i++) {
+            auto offset = offsets[i];
+            auto vcid = offset >> virt_chunk_order;
+            auto scid = vcid_to_cid_arr[vcid];
+            while (scid < num_rows_until_chunk.size() - 1 &&
+                   offset >= num_rows_until_chunk[scid + 1]) {
+                scid++;
+            }
+            auto offset_in_chunk = offset - num_rows_until_chunk[scid];
+            cids[i] = scid;
+            offsets_in_chunk[i] = offset_in_chunk;
+        }
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
     }
 
     size_t
@@ -173,7 +229,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 current_offset += chunk_rows;
             }
         } else {
-            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+            auto [cids, offsets_in_chunk] = GetChunkIDsByOffsets(offsets, count);
             auto ca = group_->GetGroupChunks(cids);
             for (int64_t i = 0; i < count; i++) {
                 auto* group_chunk = ca->get_cell_of(cids[i]);
@@ -291,15 +347,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const override {
-        int64_t current_offset = 0;
-        for (int64_t i = 0; i < num_chunks(); ++i) {
-            auto rows = chunk_row_nums(i);
-            if (current_offset + rows > offset) {
-                return {i, offset - current_offset};
-            }
-            current_offset += rows;
-        }
-        return {num_chunks() - 1, chunk_row_nums(num_chunks() - 1) - 1};
+        return group_->GetChunkIDByOffset(offset);
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
+        return group_->GetChunkIDsByOffsets(offsets, count);
     }
 
     PinWrapper<Chunk*>
@@ -329,6 +382,87 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             auto* group_chunk = ca->get_cell_of(cids[i]);
             auto chunk = group_chunk->GetChunk(field_id_);
             fn(chunk->ValueAt(offsets_in_chunk[i]), i);
+        }
+    }
+
+    template <typename T>
+    void
+    BulkPrimitiveValueAtImpl(void* dst, const int64_t* offsets, int64_t count) {
+        static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
+                          std::is_same_v<T, int32_t> ||
+                          std::is_same_v<T, int64_t> ||
+                          std::is_same_v<T, float> ||
+                          std::is_same_v<T, double> || std::is_same_v<T, bool>,
+                      "BulkPrimitiveValueAtImpl only supports int8_t, int16_t, "
+                      "int32_t, int64_t, float, double, bool types");
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        auto typed_dst = static_cast<T*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            typed_dst[i] =
+                *static_cast<const T*>(static_cast<const void*>(value));
+        }
+    }
+
+    void
+    BulkPrimitiveValueAt(void* dst,
+                         const int64_t* offsets,
+                         int64_t count) override {
+        switch (data_type_) {
+            case DataType::INT8: {
+                BulkPrimitiveValueAtImpl<int8_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT16: {
+                BulkPrimitiveValueAtImpl<int16_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT32: {
+                BulkPrimitiveValueAtImpl<int32_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT64: {
+                BulkPrimitiveValueAtImpl<int64_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::FLOAT: {
+                BulkPrimitiveValueAtImpl<float>(dst, offsets, count);
+                break;
+            }
+            case DataType::DOUBLE: {
+                BulkPrimitiveValueAtImpl<double>(dst, offsets, count);
+                break;
+            }
+            case DataType::BOOL: {
+                BulkPrimitiveValueAtImpl<bool>(dst, offsets, count);
+                break;
+            }
+            default: {
+                PanicInfo(
+                    ErrorCode::Unsupported,
+                    "BulkScalarValueAt is not supported for unknown scalar "
+                    "data type: {}",
+                    data_type_);
+            }
+        }
+    }
+
+    void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) override {
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        auto dst_vec = reinterpret_cast<char*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
         }
     }
 

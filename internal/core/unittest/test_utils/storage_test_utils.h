@@ -137,6 +137,108 @@ PrepareInsertBinlog(int64_t collection_id,
     return load_info;
 }
 
+// This function uploads generated data into cm, and returns a load info that
+// can be used by a segment to load the data.
+inline LoadFieldDataInfo
+PrepareInsertBinlogWithChunks(int64_t collection_id,
+                    int64_t partition_id,
+                    int64_t segment_id,
+                    const std::vector<GeneratedData>& datasets,
+                    const ChunkManagerPtr cm,
+                    std::string mmap_dir_path = "",
+                    std::vector<int64_t> excluded_field_ids = {}) {
+    bool enable_mmap = !mmap_dir_path.empty();
+    LoadFieldDataInfo load_info;
+    load_info.mmap_dir_path = mmap_dir_path;
+    auto total_row_count = 0;
+    const std::string prefix = TestRemotePath;
+    for (auto& dataset : datasets) {
+        total_row_count += dataset.row_ids_.size();
+    }
+
+    auto SaveFieldDataWithChunks = [&](const std::vector<FieldDataPtr>& field_datas,
+                             const std::string& filepath_wo_chunk_id,
+                             const int64_t field_id) {
+        std::vector<std::string> chunk_filepaths;
+        std::vector<int64_t> chunk_row_counts;
+        chunk_filepaths.reserve(field_datas.size());
+
+        for (size_t chunk_id = 0; chunk_id < field_datas.size(); ++chunk_id) {
+            auto& field_data = field_datas[chunk_id];
+            auto payload_reader =
+                std::make_shared<milvus::storage::PayloadReader>(field_data);
+            auto insert_data = std::make_shared<InsertData>(payload_reader);
+            FieldDataMeta field_data_meta{
+                collection_id, partition_id, segment_id, field_id};
+            insert_data->SetFieldDataMeta(field_data_meta);
+            auto serialized_insert_data = insert_data->serialize_to_remote_file();
+            auto serialized_insert_size = serialized_insert_data.size();
+            auto chunk_filepath = filepath_wo_chunk_id + "/" + std::to_string(chunk_id);
+            chunk_filepaths.push_back(chunk_filepath);
+            chunk_row_counts.push_back(field_data->Length());
+            cm->Write(chunk_filepath, serialized_insert_data.data(), serialized_insert_size);
+        }
+        load_info.field_infos.emplace(
+            field_id,
+            FieldBinlogInfo{field_id,
+                            static_cast<int64_t>(total_row_count),
+                            chunk_row_counts,
+                            enable_mmap,
+                            chunk_filepaths});
+    };
+
+    auto field_excluded = [&](int64_t field_id) {
+        return std::find(excluded_field_ids.begin(),
+                         excluded_field_ids.end(),
+                         field_id) != excluded_field_ids.end();
+    };
+
+    if (!field_excluded(RowFieldID.get())) {
+        std::vector<FieldDataPtr> field_datas;
+        field_datas.reserve(datasets.size());
+        for (auto& dataset : datasets) {
+            auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
+                milvus::DataType::INT64, false);
+            field_data->FillFieldData(dataset.row_ids_.data(), dataset.row_ids_.size());
+            field_datas.push_back(field_data);
+        }
+        auto path = prefix + std::to_string(RowFieldID.get());
+        SaveFieldDataWithChunks(field_datas, path, RowFieldID.get());
+    }
+    if (!field_excluded(TimestampFieldID.get())) {
+        std::vector<FieldDataPtr> field_datas;
+        field_datas.reserve(datasets.size());
+        for (auto& dataset : datasets) {
+            auto field_data = std::make_shared<milvus::FieldData<int64_t>>(
+                milvus::DataType::INT64, false);
+            field_data->FillFieldData(dataset.timestamps_.data(), dataset.timestamps_.size());
+            field_datas.push_back(field_data);
+        }
+        auto path = prefix + std::to_string(TimestampFieldID.get());
+        SaveFieldDataWithChunks(field_datas, path, TimestampFieldID.get());
+    }
+    std::unordered_map<int64_t, std::vector<FieldDataPtr>> fields_datas;
+    for (auto& dataset : datasets) {
+        auto fields = dataset.schema_->get_fields();
+        for (auto& data : dataset.raw_->fields_data()) {
+            int64_t field_id = data.field_id();
+            if (!field_excluded(field_id)) {
+                auto field_meta = fields.at(FieldId(field_id));
+                auto field_data = milvus::segcore::CreateFieldDataFromDataArray(
+                    dataset.row_ids_.size(), &data, field_meta);
+                fields_datas[field_id].push_back(field_data);
+            }
+        }
+    }
+
+    for (auto& [field_id, field_datas] : fields_datas) {
+        auto path = prefix + std::to_string(field_id);
+        SaveFieldDataWithChunks(field_datas, path, field_id);
+    }
+
+    return load_info;
+}
+
 inline LoadFieldDataInfo
 PrepareSingleFieldInsertBinlog(int64_t collection_id,
                                int64_t partition_id,
@@ -203,6 +305,27 @@ LoadGeneratedDataIntoSegment(const GeneratedData& dataset,
                status.error_msg);
 }
 
+inline void
+LoadGeneratedDataIntoSegmentWithChunks(const std::vector<GeneratedData>& datasets,
+                             milvus::segcore::SegmentInternalInterface* segment,
+                             bool with_mmap = false,
+                             std::vector<int64_t> excluded_field_ids = {}) {
+    std::string mmap_dir_path = with_mmap ? "./data/mmap-test" : "";
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlogWithChunks(kCollectionID,
+                                         kPartitionID,
+                                         kSegmentID,
+                                         datasets,
+                                         cm,
+                                         mmap_dir_path,
+                                         excluded_field_ids);
+    auto status = LoadFieldData(segment, &load_info);
+    AssertInfo(status.error_code == milvus::Success,
+               "Failed to load field data, error: {}",
+               status.error_msg);
+}
+
 inline std::unique_ptr<milvus::segcore::SegmentSealed>
 CreateSealedWithFieldDataLoaded(milvus::SchemaPtr schema,
                                 const GeneratedData& dataset,
@@ -212,6 +335,18 @@ CreateSealedWithFieldDataLoaded(milvus::SchemaPtr schema,
         milvus::segcore::CreateSealedSegment(schema, milvus::empty_index_meta);
     LoadGeneratedDataIntoSegment(
         dataset, segment.get(), with_mmap, excluded_field_ids);
+    return segment;
+}
+
+inline std::unique_ptr<milvus::segcore::SegmentSealed>
+CreateSealedWithFieldDataLoadedWithChunks(milvus::SchemaPtr schema,
+                                          const std::vector<GeneratedData>& datasets,
+                                          bool with_mmap = false,
+                                          std::vector<int64_t> excluded_field_ids = {}) {
+    auto segment =
+        milvus::segcore::CreateSealedSegment(schema, milvus::empty_index_meta);
+    LoadGeneratedDataIntoSegmentWithChunks(
+        datasets, segment.get(), with_mmap, excluded_field_ids);
     return segment;
 }
 

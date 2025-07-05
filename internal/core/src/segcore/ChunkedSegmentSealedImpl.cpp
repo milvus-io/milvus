@@ -619,7 +619,7 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
     auto slot = scalar_indexings_.at(field_id);
     lck.unlock();
 
-    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto ca = slot->PinCells({0});
     auto index = ca->get_cell_of(0);
     return PinWrapper<const index::IndexBase*>(ca, index);
 }
@@ -634,7 +634,7 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     auto slot = iter->second.get();
     lck.unlock();
 
-    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto ca = slot->PinCells({0});
     auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
@@ -756,10 +756,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
     auto vec_index = dynamic_cast<index::VectorIndex*>(
-        cache_index->PinCells({0})
-            .via(&folly::InlineExecutor::instance())
-            .get()
-            ->get_cell_of(0));
+        cache_index->PinCells({0})->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
     auto index_type = vec_index->GetIndexType();
@@ -1045,19 +1042,25 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(const void* src_raw,
         dst[i] = src[offset];
     }
 }
+
 template <typename S, typename T>
 void
 ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
                                               T* dst) {
-    static_assert(IsScalar<T>);
-    field->BulkValueAt(
-        [dst](const char* value, size_t i) {
-            dst[i] = *static_cast<const S*>(static_cast<const void*>(value));
-        },
-        seg_offsets,
-        count);
+    field->BulkPrimitiveValueAt(static_cast<void*>(dst), seg_offsets, count);
+}
+
+// for dense vector
+void
+ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
+                                              ChunkedColumnInterface* field,
+                                              const int64_t* seg_offsets,
+                                              int64_t count,
+                                              void* dst_raw) {
+    auto dst_vec = reinterpret_cast<char*>(dst_raw);
+    field->BulkVectorValueAt(dst_vec, seg_offsets, element_sizeof, count);
 }
 
 template <typename S>
@@ -1108,23 +1111,6 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
     column->BulkVectorArrayAt(
         [dst](VectorFieldProto&& array, size_t i) {
             dst->at(i) = std::move(array);
-        },
-        seg_offsets,
-        count);
-}
-
-// for dense vector
-void
-ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
-                                              ChunkedColumnInterface* field,
-                                              const int64_t* seg_offsets,
-                                              int64_t count,
-                                              void* dst_raw) {
-    auto dst_vec = reinterpret_cast<char*>(dst_raw);
-    field->BulkValueAt(
-        [&](const char* value, size_t i) {
-            auto dst = dst_vec + i * element_sizeof;
-            memcpy(dst, value, element_sizeof);
         },
         seg_offsets,
         count);
@@ -1198,8 +1184,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             AssertInfo(field_index_iter != scalar_indexings_.end(),
                        "failed to create text index, neither raw data nor "
                        "index are found");
-            auto accessor =
-                SemiInlineGet(field_index_iter->second->PinCells({0}));
+            auto accessor = field_index_iter->second->PinCells({0});
             auto ptr = accessor->get_cell_of(0);
             AssertInfo(ptr->HasRawData(),
                        "text raw data not found, trying to create text index "
@@ -1397,6 +1382,15 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
             break;
         }
+        case DataType::VECTOR_INT8: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
         case DataType::VECTOR_SPARSE_FLOAT: {
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             int64_t max_dim = 0;
@@ -1420,15 +1414,6 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 count);
             dst->set_dim(max_dim);
             ret->mutable_vectors()->set_dim(dst->dim());
-            break;
-        }
-        case DataType::VECTOR_INT8: {
-            bulk_subscript_impl(
-                field_meta.get_sizeof(),
-                column.get(),
-                seg_offsets,
-                count,
-                ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
         case DataType::VECTOR_ARRAY: {
@@ -1844,7 +1829,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
 
             auto interim_index_cache_slot =
                 milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-                    std::move(translator));
+                    std::move(translator),
+                    milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO);
             // TODO: how to handle the binlog index?
             vector_indexings_.append_field_indexing(
                 field_id, index_metric, std::move(interim_index_cache_slot));
@@ -2015,33 +2001,37 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(), field_meta, field_data_info, false);
-    std::shared_ptr<milvus::ChunkedColumnBase> column{};
+    std::shared_ptr<milvus::ChunkedColumnInterface> column{};
     switch (field_meta.get_data_type()) {
         case milvus::DataType::STRING:
         case milvus::DataType::VARCHAR:
         case milvus::DataType::TEXT: {
-            column = std::make_shared<ChunkedVariableColumn<std::string>>(
-                std::move(translator), field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedVariableColumn<std::string>>(
+                    std::move(translator), field_meta));
             break;
         }
         case milvus::DataType::JSON: {
-            column = std::make_shared<ChunkedVariableColumn<milvus::Json>>(
-                std::move(translator), field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedVariableColumn<milvus::Json>>(
+                    std::move(translator), field_meta));
             break;
         }
         case milvus::DataType::ARRAY: {
-            column = std::make_shared<ChunkedArrayColumn>(std::move(translator),
-                                                          field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedArrayColumn>(std::move(translator),
+                                                     field_meta));
             break;
         }
         case milvus::DataType::VECTOR_ARRAY: {
-            column = std::make_shared<ChunkedVectorArrayColumn>(
-                std::move(translator), field_meta);
+            column = std::static_pointer_cast<ChunkedColumnInterface>(
+                std::make_shared<ChunkedVectorArrayColumn>(
+                    std::move(translator), field_meta));
             break;
         }
         default: {
-            column = std::make_shared<ChunkedColumn>(std::move(translator),
-                                                     field_meta);
+            column = MakeChunkedColumnBase(
+                field_meta.get_data_type(), std::move(translator), field_meta);
             break;
         }
     }

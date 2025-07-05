@@ -95,10 +95,12 @@ ListNode::size() {
     return size_;
 }
 
-std::pair<bool, folly::SemiFuture<ListNode::NodePin>>
+using PinResult = std::variant<ListNode::NodePin, folly::SemiFuture<ListNode::NodePin>>;
+
+std::pair<bool, PinResult>
 ListNode::pin() {
     // must be called with lock acquired, and state must not be NOT_LOADED.
-    auto read_op = [this]() -> std::pair<bool, folly::SemiFuture<NodePin>> {
+    auto read_op = [this]() -> std::pair<bool, PinResult> {
         AssertInfo(state_ != State::NOT_LOADED,
                    "Programming error: read_op called on a {} cell",
                    state_to_string(state_));

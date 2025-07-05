@@ -68,7 +68,8 @@ class ListNode {
     // - Otherwise, the cell is not loaded and not being loaded, return true and a future that will be ready when the
     //   cell is loaded. The caller needs to load this cell and call mark_loaded() to set the cell as loaded.
     //   The node will not be pinned until the future is ready.
-    std::pair<bool, folly::SemiFuture<NodePin>>
+    using PinResult = std::variant<NodePin, folly::SemiFuture<NodePin>>;
+    std::pair<bool, PinResult>
     pin();
 
     ResourceUsage&

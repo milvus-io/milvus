@@ -248,8 +248,7 @@ TEST_F(CacheSlotTest, PinSingleCellSuccess) {
         translator_->estimated_byte_size_of_cell(expected_cid);
 
     translator_->ResetCounters();
-    auto future = cache_slot_->PinCells({target_uid});
-    auto accessor = SemiInlineGet(std::move(future));
+    auto accessor = cache_slot_->PinCells({target_uid});
 
     ASSERT_NE(accessor, nullptr);
     ASSERT_EQ(translator_->GetCellsCallCount(), 1);
@@ -277,8 +276,7 @@ TEST_F(CacheSlotTest, PinMultipleCellsSuccess) {
     }
 
     translator_->ResetCounters();
-    auto future = cache_slot_->PinCells(target_uids);
-    auto accessor = SemiInlineGet(std::move(future));
+    auto accessor = cache_slot_->PinCells(target_uids);
 
     ASSERT_NE(accessor, nullptr);
     ASSERT_EQ(translator_->GetCellsCallCount(), 1);
@@ -308,8 +306,7 @@ TEST_F(CacheSlotTest, PinMultipleUidsMappingToSameCid) {
     }
 
     translator_->ResetCounters();
-    auto future = cache_slot_->PinCells(target_uids);
-    auto accessor = SemiInlineGet(std::move(future));
+    auto accessor = cache_slot_->PinCells(target_uids);
 
     ASSERT_NE(accessor, nullptr);
     ASSERT_EQ(translator_->GetCellsCallCount(), 1);
@@ -338,12 +335,11 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
     std::vector<cl_uid_t> target_uids = {valid_uid, invalid_uid};
 
     translator_->ResetCounters();
-    auto future = cache_slot_->PinCells(target_uids);
 
     EXPECT_THROW(
         {
             try {
-                SemiInlineGet(std::move(future));
+                auto accessor = cache_slot_->PinCells(target_uids);
             } catch (const std::invalid_argument& e) {
                 std::string error_what = e.what();
                 EXPECT_TRUE(error_what.find("out of range") !=
@@ -364,12 +360,11 @@ TEST_F(CacheSlotTest, LoadFailure) {
     translator_->ResetCounters();
     translator_->SetShouldThrow(true);
 
-    auto future = cache_slot_->PinCells({target_uid});
 
     EXPECT_THROW(
         {
             try {
-                SemiInlineGet(std::move(future));
+                auto accessor = cache_slot_->PinCells({target_uid});
             } catch (const std::runtime_error& e) {
                 std::string error_what = e.what();
                 EXPECT_TRUE(error_what.find("Simulated load error") !=
@@ -398,8 +393,7 @@ TEST_F(CacheSlotTest, PinAlreadyLoadedCell) {
 
     translator_->ResetCounters();
 
-    auto future1 = cache_slot_->PinCells({target_uid});
-    auto accessor1 = SemiInlineGet(std::move(future1));
+    auto accessor1 = cache_slot_->PinCells({target_uid});
     ASSERT_NE(accessor1, nullptr);
     ASSERT_EQ(translator_->GetCellsCallCount(), 1);
     ASSERT_EQ(translator_->GetRequestedCids().size(), 1);
@@ -409,8 +403,7 @@ TEST_F(CacheSlotTest, PinAlreadyLoadedCell) {
     ASSERT_NE(cell1, nullptr);
 
     translator_->ResetCounters();
-    auto future2 = cache_slot_->PinCells({target_uid});
-    auto accessor2 = SemiInlineGet(std::move(future2));
+    auto accessor2 = cache_slot_->PinCells({target_uid});
     ASSERT_NE(accessor2, nullptr);
 
     EXPECT_EQ(translator_->GetCellsCallCount(), 0);
@@ -436,8 +429,7 @@ TEST_F(CacheSlotTest, PinAlreadyLoadedCellViaDifferentUid) {
 
     translator_->ResetCounters();
 
-    auto future1 = cache_slot_->PinCells({uid1});
-    auto accessor1 = SemiInlineGet(std::move(future1));
+    auto accessor1 = cache_slot_->PinCells({uid1});
     ASSERT_NE(accessor1, nullptr);
     ASSERT_EQ(translator_->GetCellsCallCount(), 1);
     ASSERT_EQ(translator_->GetRequestedCids().size(), 1);
@@ -448,8 +440,7 @@ TEST_F(CacheSlotTest, PinAlreadyLoadedCellViaDifferentUid) {
     EXPECT_EQ(cell1->cid, expected_cid);
 
     translator_->ResetCounters();
-    auto future2 = cache_slot_->PinCells({uid2});
-    auto accessor2 = SemiInlineGet(std::move(future2));
+    auto accessor2 = cache_slot_->PinCells({uid2});
     ASSERT_NE(accessor2, nullptr);
 
     EXPECT_EQ(translator_->GetCellsCallCount(), 0);
@@ -483,8 +474,7 @@ TEST_F(CacheSlotTest, TranslatorReturnsExtraCells) {
     translator_->ResetCounters();
     translator_->SetExtraReturnCids({{requested_cid, {extra_cid}}});
 
-    auto future = cache_slot_->PinCells({requested_uid});
-    auto accessor = SemiInlineGet(std::move(future));
+    auto accessor = cache_slot_->PinCells({requested_uid});
 
     ASSERT_NE(accessor, nullptr);
     ASSERT_EQ(translator_->GetCellsCallCount(), 1);
@@ -498,8 +488,7 @@ TEST_F(CacheSlotTest, TranslatorReturnsExtraCells) {
     EXPECT_EQ(requested_cell->cid, requested_cid);
 
     translator_->ResetCounters();
-    auto future_extra = cache_slot_->PinCells({extra_uid});
-    auto accessor_extra = SemiInlineGet(std::move(future_extra));
+    auto accessor_extra = cache_slot_->PinCells({extra_uid});
 
     ASSERT_NE(accessor_extra, nullptr);
     EXPECT_EQ(translator_->GetCellsCallCount(), 0);
@@ -529,8 +518,7 @@ TEST_F(CacheSlotTest, EvictionTest) {
 
     // 1. Load cells 0, 1, 2
     translator_->ResetCounters();
-    auto future1 = cache_slot_->PinCells(uids_012);
-    auto accessor1 = SemiInlineGet(std::move(future1));
+    auto accessor1 = cache_slot_->PinCells(uids_012);
     ASSERT_NE(accessor1, nullptr);
     EXPECT_EQ(translator_->GetCellsCallCount(), 1);
     auto requested1 = translator_->GetRequestedCids()[0];
@@ -550,8 +538,7 @@ TEST_F(CacheSlotTest, EvictionTest) {
     ASSERT_EQ(size_3, ResourceUsage(200, 0));
 
     translator_->ResetCounters();
-    auto future2 = cache_slot_->PinCells({uid_3});
-    auto accessor2 = SemiInlineGet(std::move(future2));
+    auto accessor2 = cache_slot_->PinCells({uid_3});
     ASSERT_NE(accessor2, nullptr);
 
     EXPECT_EQ(translator_->GetCellsCallCount(),
@@ -675,7 +662,7 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
                 int expected_data = static_cast<int>(expected_cid * 10);
 
                 try {
-                    auto accessor = current_slot->PinCells({target_uid}).get();
+                    auto accessor = current_slot->PinCells({target_uid});
 
                     if (!accessor) {
                         ADD_FAILURE()
@@ -765,7 +752,7 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
             cid_t expected_cid = uid_map_3.at(target_uid);
             int expected_data = static_cast<int>(expected_cid * 10);
             try {
-                auto accessor = slot3->PinCells({target_uid}).get();
+                auto accessor = slot3->PinCells({target_uid});
                 if (!accessor) {
                     ADD_FAILURE()
                         << "T" << tid << " Op" << j
