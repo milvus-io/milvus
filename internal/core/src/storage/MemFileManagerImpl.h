@@ -26,6 +26,8 @@
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
+#include "storage/Types.h"
+#include "milvus-storage/filesystem/fs.h"
 
 namespace milvus::storage {
 
