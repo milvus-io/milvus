@@ -122,6 +122,7 @@ typedef struct CTraceConfig {
     const char* jaegerURL;
     const char* otlpEndpoint;
     const char* otlpMethod;
+    const char* otlpHeaders;
     bool oltpSecure;
 
     int nodeID;

@@ -13,6 +13,7 @@
 
 #include <memory>
 #include <string>
+#include <map>
 
 #include "opentelemetry/trace/provider.h"
 
@@ -26,6 +27,7 @@ struct TraceConfig {
     std::string jaegerURL;
     std::string otlpEndpoint;
     std::string otlpMethod;
+    std::string otlpHeaders;
     bool oltpSecure;
 
     int nodeID;
@@ -82,6 +84,9 @@ GetSpanIDAsHexStr(const TraceContext* ctx);
 
 std::string
 GetTraceID();
+
+std::map<std::string, std::string>
+parseHeaders(const std::string& headers);
 
 struct AutoSpan {
     explicit AutoSpan(const std::string& name,

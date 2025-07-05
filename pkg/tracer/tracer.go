@@ -18,6 +18,8 @@ package tracer
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
@@ -77,6 +79,34 @@ func SetTracerProvider(exp sdk.SpanExporter, traceIDRatio float64) {
 	otel.SetTracerProvider(tp)
 }
 
+// parseHeaders parses base64-encoded JSON headers string into map[string]string
+func parseHeaders(headers string) map[string]string {
+	if headers == "" {
+		return nil
+	}
+
+	// Try to decode as base64 first
+	decodeheaders, err := base64.StdEncoding.DecodeString(headers)
+	if err != nil {
+		log.Warn("Failed to decode base64 headers, trying to parse as JSON directly", zap.Error(err))
+		// Try to parse headers as JSON directly
+		var headersMap map[string]string
+		if jsonErr := json.Unmarshal([]byte(headers), &headersMap); jsonErr == nil {
+			return headersMap
+		}
+		log.Warn("Failed to parse headers as JSON", zap.Error(err))
+		return nil
+	}
+
+	// Parse decoded JSON into map[string]string
+	var headersMap map[string]string
+	if jsonErr := json.Unmarshal(decodeheaders, &headersMap); jsonErr == nil {
+		return headersMap
+	}
+	log.Warn("Failed to parse decoded headers as JSON", zap.Error(err))
+	return nil
+}
+
 func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, error) {
 	var exp sdk.SpanExporter
 	var err error
@@ -87,6 +117,7 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 			jaeger.WithEndpoint(params.TraceCfg.JaegerURL.GetValue())))
 	case "otlp":
 		secure := params.TraceCfg.OtlpSecure.GetAsBool()
+		headers := params.TraceCfg.OtlpHeaders.GetValue()
 		switch params.TraceCfg.OtlpMethod.GetValue() {
 		case "", "grpc":
 			opts := []otlptracegrpc.Option{
@@ -95,6 +126,9 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 			if !secure {
 				opts = append(opts, otlptracegrpc.WithInsecure())
 			}
+			if headersMap := parseHeaders(headers); headersMap != nil {
+				opts = append(opts, otlptracegrpc.WithHeaders(headersMap))
+			}
 			exp, err = otlptracegrpc.New(context.Background(), opts...)
 		case "http":
 			opts := []otlptracehttp.Option{
@@ -102,6 +136,9 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 			}
 			if !secure {
 				opts = append(opts, otlptracehttp.WithInsecure())
+			}
+			if headersMap := parseHeaders(headers); headersMap != nil {
+				opts = append(opts, otlptracehttp.WithHeaders(headersMap))
 			}
 			exp, err = otlptracehttp.New(context.Background(), opts...)
 		default:
