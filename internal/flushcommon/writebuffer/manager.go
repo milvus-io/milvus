@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -116,10 +117,6 @@ func (m *bufferManager) memoryCheck() {
 		var candiSize int64
 		var candiChan string
 
-		toMB := func(mem float64) float64 {
-			return mem / 1024 / 1024
-		}
-
 		select {
 		case <-m.ch.CloseCh():
 			log.Info("stop memory check due to manager stop")
@@ -142,15 +139,15 @@ func (m *bufferManager) memoryCheck() {
 		memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryForceSyncWatermark.GetAsFloat()
 		if float64(total) < memoryWatermark {
 			log.RatedDebug(20, "skip force sync because memory level is not high enough",
-				zap.Float64("current_total_memory_usage", toMB(float64(total))),
-				zap.Float64("current_memory_watermark", toMB(memoryWatermark)))
+				zap.Float64("current_total_memory_usage", logutil.ToMB(float64(total))),
+				zap.Float64("current_memory_watermark", logutil.ToMB(memoryWatermark)))
 			return
 		}
 
 		if candidate != nil {
 			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
 			log.Info("notify writebuffer to sync",
-				zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", toMB(float64(candiSize))))
+				zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", logutil.ToMB(float64(candiSize))))
 		}
 	}
 }
