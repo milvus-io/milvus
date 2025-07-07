@@ -171,25 +171,36 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     if (field_meta.get_data_type() == DataType::JSON) {
         auto path = info.index_params.at(JSON_PATH);
-        JsonIndex index;
-        index.nested_path = path;
-        index.field_id = field_id;
-        index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-        index.cast_type =
-            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-        json_indices.push_back(std::move(index));
-        return;
+        if (auto it = info.index_params.find(index::INDEX_TYPE);
+            it != info.index_params.end() &&
+            it->second == index::NGRAM_INDEX_TYPE) {
+            if (ngram_indexings_.find(field_id) == ngram_indexings_.end()) {
+                ngram_indexings_[field_id] =
+                    std::unordered_map<std::string, index::CacheIndexBasePtr>();
+            }
+            ngram_indexings_[field_id][path] =
+                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            return;
+        } else {
+            JsonIndex index;
+            index.nested_path = path;
+            index.field_id = field_id;
+            index.index =
+                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            index.cast_type =
+                JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+            json_indices.push_back(std::move(index));
+            return;
+        }
     }
 
     if (auto it = info.index_params.find(index::INDEX_TYPE);
         it != info.index_params.end() &&
         it->second == index::NGRAM_INDEX_TYPE) {
-        ngram_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-    } else {
-        scalar_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        ngram_fields_.insert(field_id);
     }
+    scalar_indexings_[field_id] =
+        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -620,8 +631,8 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    auto iter = ngram_indexings_.find(field_id);
-    if (iter == ngram_indexings_.end()) {
+    auto iter = scalar_indexings_.find(field_id);
+    if (iter == scalar_indexings_.end()) {
         return PinWrapper<index::NgramInvertedIndex*>(nullptr);
     }
     auto slot = iter->second.get();
@@ -632,6 +643,29 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
                field_id.get());
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+}
+
+PinWrapper<index::NgramInvertedIndex*>
+ChunkedSegmentSealedImpl::GetNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    std::shared_lock lck(mutex_);
+    auto iter = ngram_indexings_.find(field_id);
+    if (iter == ngram_indexings_.end() ||
+        iter->second.find(nested_path) == iter->second.end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+
+    auto slot = iter->second.at(nested_path).get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache for json is corrupted, field_id: {}, "
+               "nested_path: {}",
+               field_id.get(),
+               nested_path);
     return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
@@ -975,6 +1009,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       binlog_index_bitset_(schema->size()),
+      ngram_fields_(schema->size()),
       scalar_indexings_(schema->size()),
       insert_record_(*schema, MAX_ROW_COUNT),
       schema_(schema),
@@ -1135,8 +1170,10 @@ ChunkedSegmentSealedImpl::ClearData() {
         index_has_raw_data_.clear();
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
+        ngram_fields_.clear();
         scalar_indexings_.clear();
         vector_indexings_.clear();
+        ngram_indexings_.clear();
         insert_record_.clear();
         fields_.clear();
         variable_fields_avg_size_.clear();
