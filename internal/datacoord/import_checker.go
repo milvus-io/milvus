@@ -338,8 +338,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 	}
 
 	// Skip stats stage if not enable stats or is l0 import.
-	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() ||
-		!Params.DataCoordCfg.EnableCompaction.GetAsBool() ||
+	if !enableSortCompaction() ||
 		importutilv2.IsL0Import(job.GetOptions()) {
 		updateJobState(internalpb.ImportJobState_IndexBuilding, "")
 		return
@@ -404,7 +403,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	})
 
 	targetSegmentIDs := statsSegmentIDs
-	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() || !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+	if !enableSortCompaction() {
 		targetSegmentIDs = originSegmentIDs
 	}
 

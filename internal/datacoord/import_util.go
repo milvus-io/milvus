@@ -124,12 +124,12 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			return nil, err
 		}
 		taskProto.SegmentIDs = segments
-		if paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
-			statsSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
+		if enableSortCompaction() {
+			sortedSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
 			if err != nil {
 				return nil, err
 			}
-			taskProto.SortedSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
+			taskProto.SortedSegmentIDs = lo.RangeFrom(sortedSegIDBegin, len(segments))
 			log.Info("preallocate sorted segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.SortedSegmentIDs))...)
 		}
 		tasks = append(tasks, task)
@@ -507,7 +507,7 @@ func getImportingProgress(ctx context.Context, jobID int64, importMeta ImportMet
 }
 
 func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
-	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() || !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+	if !enableSortCompaction() {
 		return 1
 	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
@@ -542,7 +542,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 	if len(originSegmentIDs) == 0 {
 		return 1
 	}
-	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() || !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+	if !enableSortCompaction() {
 		targetSegmentIDs = originSegmentIDs
 	}
 	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)

@@ -938,7 +938,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	// set segment to SegmentState_Flushed
 	var operators []UpdateOperator
-	if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+	if enableSortCompaction() {
 		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
 	}
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
@@ -948,7 +948,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 
-	if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
+	if enableSortCompaction() {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
