@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "query/Plan.h"
 
@@ -21,6 +20,8 @@
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
+
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -28,30 +29,6 @@ using namespace milvus::storage;
 using namespace milvus::tracer;
 
 const char* METRICS_TYPE = "metric_type";
-
-int
-GetSearchResultBound(const SearchResult& search_result) {
-    int i = 0;
-    for (; i < search_result.seg_offsets_.size(); i++) {
-        if (search_result.seg_offsets_[i] == INVALID_SEG_OFFSET)
-            break;
-    }
-    return i - 1;
-}
-
-void
-CheckGroupBySearchResult(const SearchResult& search_result,
-                         int topK,
-                         int nq,
-                         bool strict) {
-    int size = search_result.group_by_values_.value().size();
-    ASSERT_EQ(search_result.seg_offsets_.size(), size);
-    ASSERT_EQ(search_result.distances_.size(), size);
-    ASSERT_TRUE(search_result.seg_offsets_[0] != INVALID_SEG_OFFSET);
-    ASSERT_TRUE(search_result.seg_offsets_[size - 1] != INVALID_SEG_OFFSET);
-    ASSERT_EQ(search_result.topk_per_nq_prefix_sum_.size(), nq + 1);
-    ASSERT_EQ(size, search_result.topk_per_nq_prefix_sum_[nq]);
-}
 
 TEST(GroupBY, SealedIndex) {
     using namespace milvus;

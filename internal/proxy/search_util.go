@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
@@ -268,6 +269,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		}
 		groupByFieldId, groupSize, strictGroupSize = groupByInfo.GetGroupByFieldId(), groupByInfo.GetGroupSize(), groupByInfo.GetStrictGroupSize()
 		jsonPath, jsonCastType = groupByInfo.GetJsonPath(), groupByInfo.GetJsonCastType()
+		jsonPath, err = typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, groupByFieldId)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("hc===jsonPath", zap.String("jsonPath", jsonPath), zap.Int64("groupByFieldId", groupByFieldId), zap.Any("jsonCastType", jsonCastType))
 	}
 
 	// 6. parse iterator tag, prevent trying to groupBy when doing iteration or doing range-search
