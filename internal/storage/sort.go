@@ -172,20 +172,39 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (numRows int, err error) {
+	// Fast path: no readers provided
+	if len(rr) == 0 {
+		return 0, nil
+	}
+
 	type index struct {
 		ri int
 		i  int
 	}
 
 	recs := make([]Record, len(rr))
+	// advanceRecord reads next record for reader i while releasing the previous one to
+	// avoid memory leaks introduced by cgo Arrow arrays.
 	advanceRecord := func(i int) error {
-		rec, err := rr[i].Next()
-		recs[i] = rec // assign nil if err
-		if err != nil {
-			return err
+		// Release previous record if any.
+		if recs[i] != nil {
+			recs[i].Release()
+			recs[i] = nil
 		}
-		return nil
+
+		rec, err := rr[i].Next()
+		recs[i] = rec
+		return err
 	}
+
+	// Ensure all remaining records are released on return.
+	defer func() {
+		for _, r := range recs {
+			if r != nil {
+				r.Release()
+			}
+		}
+	}()
 
 	for i := range rr {
 		err := advanceRecord(i)
@@ -235,8 +254,10 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		})
 	}
 
-	enqueueAll := func(ri int) {
+	var enqueueAll func(ri int) error
+	enqueueAll = func(ri int) error {
 		r := recs[ri]
+		hasValid := false
 		for j := 0; j < r.Len(); j++ {
 			if predicate(r, ri, j) {
 				pq.Enqueue(&index{
@@ -244,13 +265,27 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 					i:  j,
 				})
 				numRows++
+				hasValid = true
 			}
 		}
+		if !hasValid {
+			err := advanceRecord(ri)
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return enqueueAll(ri)
+		}
+		return nil
 	}
 
 	for i, v := range recs {
 		if v != nil {
-			enqueueAll(i)
+			if err := enqueueAll(i); err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -285,7 +320,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			if err != nil {
 				return 0, err
 			}
-			enqueueAll(idx.ri)
+			if err := enqueueAll(idx.ri); err != nil {
+				return 0, err
+			}
 		}
 	}
 
