@@ -939,9 +939,10 @@ func (mt *MetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *root
 		Collections: make([]*rootcoordpb.CollectionInfoOnPChannel, 0),
 	}
 	for _, collInfo := range mt.collID2Meta {
-		if collInfo.State != pb.CollectionState_CollectionCreated {
-			// streamingnode, skip non-created collections when recovering
+		if collInfo.State != pb.CollectionState_CollectionCreated && collInfo.State != pb.CollectionState_CollectionDropping {
 			// streamingnode will receive the createCollectionMessage to recover if the collection is creating.
+			// streamingnode use it to recover the collection state at first time streaming arch enabled.
+			// streamingnode will get the dropping collection and drop it before streaming arch enabled.
 			continue
 		}
 		if idx := lo.IndexOf(collInfo.PhysicalChannelNames, pchannel); idx >= 0 {
@@ -955,6 +956,7 @@ func (mt *MetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *root
 				CollectionId: collInfo.CollectionID,
 				Partitions:   partitions,
 				Vchannel:     collInfo.VirtualChannelNames[idx],
+				State:        collInfo.State,
 			})
 		}
 	}

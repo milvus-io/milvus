@@ -38,9 +38,10 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}
 	indices := make([]*index, 0)
 
+	// release cgo records
 	defer func() {
-		for _, r := range records {
-			r.Release()
+		for _, rec := range records {
+			rec.Release()
 		}
 	}()
 
@@ -67,13 +68,6 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	if len(records) == 0 {
 		return 0, nil
 	}
-
-	// release cgo records
-	defer func() {
-		for _, rec := range records {
-			rec.Release()
-		}
-	}()
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -213,11 +207,31 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	switch recs[0].Column(pkFieldId).(type) {
 	case *array.Int64:
 		pq = NewPriorityQueue(func(x, y *index) bool {
-			return recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
+			xVal := recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i)
+			yVal := recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
+
+			if xVal != yVal {
+				return xVal < yVal
+			}
+
+			if x.ri != y.ri {
+				return x.ri < y.ri
+			}
+			return x.i < y.i
 		})
 	case *array.String:
 		pq = NewPriorityQueue(func(x, y *index) bool {
-			return recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
+			xVal := recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i)
+			yVal := recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
+
+			if xVal != yVal {
+				return xVal < yVal
+			}
+
+			if x.ri != y.ri {
+				return x.ri < y.ri
+			}
+			return x.i < y.i
 		})
 	}
 
@@ -241,6 +255,14 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	}
 
 	rb := NewRecordBuilder(schema)
+	writeRecord := func() error {
+		rec := rb.Build()
+		defer rec.Release()
+		if rec.Len() > 0 {
+			return rw.Write(rec)
+		}
+		return nil
+	}
 
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
@@ -249,7 +271,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		//	small batch size will cause write performance degradation. To work around this issue, we accumulate
 		//	records and write them in batches. This requires additional memory copy.
 		if rb.GetSize() >= batchSize {
-			if err := rw.Write(rb.Build()); err != nil {
+			if err := writeRecord(); err != nil {
 				return 0, err
 			}
 		}
@@ -269,7 +291,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 
 	// write the last batch
 	if rb.GetRowNum() > 0 {
-		if err := rw.Write(rb.Build()); err != nil {
+		if err := writeRecord(); err != nil {
 			return 0, err
 		}
 	}
