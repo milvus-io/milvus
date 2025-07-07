@@ -239,6 +239,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	for _, opt := range option {
 		opt(rwOptions)
 	}
+	if rwOptions.storageConfig != nil {
+		bucketName = rwOptions.storageConfig.BucketName
+	}
 	blobsWriter := func(blobs []*Blob) error {
 		kvs := make(map[string][]byte, len(blobs))
 		for _, blob := range blobs {
