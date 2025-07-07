@@ -183,28 +183,11 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	}
 
 	recs := make([]Record, len(rr))
-	// advanceRecord reads next record for reader i while releasing the previous one to
-	// avoid memory leaks introduced by cgo Arrow arrays.
 	advanceRecord := func(i int) error {
-		// Release previous record if any.
-		if recs[i] != nil {
-			recs[i].Release()
-			recs[i] = nil
-		}
-
 		rec, err := rr[i].Next()
-		recs[i] = rec
+		recs[i] = rec // assign nil if err
 		return err
 	}
-
-	// Ensure all remaining records are released on return.
-	defer func() {
-		for _, r := range recs {
-			if r != nil {
-				r.Release()
-			}
-		}
-	}()
 
 	for i := range rr {
 		err := advanceRecord(i)
