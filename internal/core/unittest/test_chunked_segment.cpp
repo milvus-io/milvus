@@ -185,7 +185,6 @@ class TestChunkSegment : public testing::TestWithParam<bool> {
             nullptr,
             -1,
             segcore::SegcoreConfig::default_config(),
-            false,
             true);
         test_data_count = 10000;
 

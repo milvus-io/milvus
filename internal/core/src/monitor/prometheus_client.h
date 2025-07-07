@@ -229,4 +229,12 @@ DECLARE_PROMETHEUS_GAUGE(internal_cache_memory_overhead_bytes_mixed);
 
 // --- caching layer metrics end ---
 
+// --- file writer metrics ---
+
+DECLARE_PROMETHEUS_COUNTER_FAMILY(disk_write_total_bytes);
+DECLARE_PROMETHEUS_COUNTER(disk_write_total_bytes_buffered);
+DECLARE_PROMETHEUS_COUNTER(disk_write_total_bytes_direct);
+
+// --- file writer metrics end ---
+
 }  // namespace milvus::monitor

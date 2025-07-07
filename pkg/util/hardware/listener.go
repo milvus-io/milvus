@@ -41,9 +41,10 @@ func (s SystemMetrics) String() string {
 // SystemMetricsListener is a listener that listens for system metrics.
 type SystemMetricsListener struct {
 	nextTriggerInstant time.Time
+	Context            any
 	Cooldown           time.Duration
-	Condition          func(SystemMetrics) bool // condition to trigger the callback
-	Callback           func(SystemMetrics)      // callback function if the condition met, should be non-blocking.
+	Condition          func(SystemMetrics, *SystemMetricsListener) bool // condition to trigger the callback
+	Callback           func(SystemMetrics, *SystemMetricsListener)      // callback function if the condition met, should be non-blocking.
 }
 
 // RegisterSystemMetricsListener registers a listener into global default systemMetricsWatcher.
@@ -63,10 +64,10 @@ func getSystemMetricsWatcher() *SystemMericsWatcher {
 		logger := log.With(log.FieldComponent("system-metrics"))
 		warningLoggerListener := &SystemMetricsListener{
 			Cooldown: 1 * time.Minute,
-			Condition: func(stats SystemMetrics) bool {
+			Condition: func(stats SystemMetrics, listener *SystemMetricsListener) bool {
 				return stats.UsedRatio() > 0.9
 			},
-			Callback: func(sm SystemMetrics) {
+			Callback: func(sm SystemMetrics, listener *SystemMetricsListener) {
 				logger.Warn("memory used ratio is extremely high", zap.String("memory", sm.String()), zap.Float64("usedRatio", sm.UsedRatio()))
 			},
 		}
@@ -150,8 +151,8 @@ func (w *SystemMericsWatcher) updateMetrics() {
 			// cool down.
 			continue
 		}
-		if l.Condition(stats) {
-			l.Callback(stats)
+		if l.Condition(stats, l) {
+			l.Callback(stats, l)
 			l.nextTriggerInstant = now.Add(l.Cooldown)
 		}
 	}
