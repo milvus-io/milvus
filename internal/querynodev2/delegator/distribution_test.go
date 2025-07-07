@@ -1137,3 +1137,270 @@ func TestDistribution_ServiceableWithSyncedByCoord(t *testing.T) {
 		})
 	})
 }
+
+func (s *DistributionSuite) TestPinReadableSegments_RequiredLoadRatio() {
+	type testCase struct {
+		tag                   string
+		requiredLoadRatio     float64
+		sealedSegments        []SegmentEntry
+		growingSegments       []SegmentEntry
+		sealedSegmentRowCount map[int64]int64
+		growingInTarget       []int64
+		expectedSealedCount   int
+		expectedGrowingCount  int
+		shouldError           bool
+	}
+
+	cases := []testCase{
+		{
+			tag:               "full_result_with_target_version_filter",
+			requiredLoadRatio: 1.0,
+			sealedSegments: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1, PartitionID: 1, TargetVersion: 1000},
+				{NodeID: 1, SegmentID: 2, PartitionID: 1, TargetVersion: 1000},
+				{NodeID: 2, SegmentID: 3, PartitionID: 1, TargetVersion: -2}, // unreadable
+			},
+			growingSegments: []SegmentEntry{
+				{NodeID: 1, SegmentID: 4, PartitionID: 1, TargetVersion: 1000},
+				{NodeID: 1, SegmentID: 5, PartitionID: 1, TargetVersion: -2}, // unreadable
+			},
+			sealedSegmentRowCount: map[int64]int64{1: 100, 2: 100, 3: 100},
+			growingInTarget:       []int64{4, 5},
+			expectedSealedCount:   2, // segments 1,2 are readable (target version matches)
+			expectedGrowingCount:  1, // segment 4 is readable (target version matches)
+		},
+		{
+			tag:               "partial_result_with_query_view_filter",
+			requiredLoadRatio: 0.8,
+			sealedSegments: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1, PartitionID: 1, TargetVersion: 1000},
+				{NodeID: 1, SegmentID: 2, PartitionID: 1, TargetVersion: -2}, // not in query view
+				{NodeID: 2, SegmentID: 3, PartitionID: 1, TargetVersion: 1000},
+			},
+			growingSegments: []SegmentEntry{
+				{NodeID: 1, SegmentID: 4, PartitionID: 1, TargetVersion: 1000},
+				{NodeID: 1, SegmentID: 5, PartitionID: 1, TargetVersion: -2}, // not in query view
+			},
+			sealedSegmentRowCount: map[int64]int64{1: 100, 3: 100}, // segment 2 not in query view
+			growingInTarget:       []int64{4},                      // segment 5 not in query view
+			expectedSealedCount:   2,                               // segments 1,3 are in query view
+			expectedGrowingCount:  1,                               // segment 4 is in query view
+		},
+		{
+			tag:               "insufficient_load_ratio",
+			requiredLoadRatio: 1.0,
+			sealedSegments: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1, PartitionID: 1, TargetVersion: 1000},
+			},
+			growingSegments:       []SegmentEntry{},
+			sealedSegmentRowCount: map[int64]int64{1: 100, 2: 100}, // segment 2 not loaded
+			growingInTarget:       []int64{},
+			shouldError:           true, // load ratio = 0.5 < required 1.0
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.SetupTest()
+			defer s.TearDownTest()
+
+			// Add segments to distribution
+			s.dist.AddDistributions(tc.sealedSegments...)
+			s.dist.AddGrowing(tc.growingSegments...)
+
+			// Setup query view
+			s.dist.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:         1000,
+				SealedSegmentRowCount: tc.sealedSegmentRowCount,
+				GrowingInTarget:       tc.growingInTarget,
+			}, []int64{1})
+
+			// Test PinReadableSegments with different requiredLoadRatio
+			sealed, growing, _, err := s.dist.PinReadableSegments(tc.requiredLoadRatio, 1)
+
+			if tc.shouldError {
+				s.Error(err)
+				return
+			}
+
+			s.NoError(err)
+
+			// Count actual segments returned
+			actualSealedCount := 0
+			for _, item := range sealed {
+				actualSealedCount += len(item.Segments)
+			}
+
+			s.Equal(tc.expectedSealedCount, actualSealedCount)
+			s.Equal(tc.expectedGrowingCount, len(growing))
+		})
+	}
+}
+
+func (s *DistributionSuite) TestAddDistributions_TargetVersionSetting() {
+	type testCase struct {
+		tag                   string
+		existingSegment       *SegmentEntry
+		newSegment            SegmentEntry
+		expectedTargetVersion int64
+	}
+
+	cases := []testCase{
+		{
+			tag: "new_segment_gets_unreadable_target_version",
+			newSegment: SegmentEntry{
+				NodeID:    1,
+				SegmentID: 1,
+				Version:   1,
+			},
+			expectedTargetVersion: unreadableTargetVersion,
+		},
+		{
+			tag: "existing_segment_retains_target_version",
+			existingSegment: &SegmentEntry{
+				NodeID:        1,
+				SegmentID:     1,
+				Version:       1,
+				TargetVersion: 500, // existing target version
+			},
+			newSegment: SegmentEntry{
+				NodeID:    1,
+				SegmentID: 1,
+				Version:   2, // higher version
+			},
+			expectedTargetVersion: 500, // should retain existing target version
+		},
+		{
+			tag: "lower_version_segment_ignored",
+			existingSegment: &SegmentEntry{
+				NodeID:        1,
+				SegmentID:     1,
+				Version:       2,
+				TargetVersion: 500,
+			},
+			newSegment: SegmentEntry{
+				NodeID:    1,
+				SegmentID: 1,
+				Version:   1, // lower version
+			},
+			expectedTargetVersion: 500, // should keep existing segment unchanged
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.SetupTest()
+			defer s.TearDownTest()
+
+			// Add existing segment if provided
+			if tc.existingSegment != nil {
+				s.dist.AddDistributions(*tc.existingSegment)
+			}
+
+			// Add new segment
+			s.dist.AddDistributions(tc.newSegment)
+
+			// Verify target version
+			sealed, _ := s.dist.PeekSegments(false)
+			found := false
+			for _, item := range sealed {
+				for _, segment := range item.Segments {
+					if segment.SegmentID == tc.newSegment.SegmentID {
+						s.Equal(tc.expectedTargetVersion, segment.TargetVersion,
+							"Target version should match expected value")
+						found = true
+						break
+					}
+				}
+			}
+			s.True(found, "Segment should be found in distribution")
+		})
+	}
+}
+
+func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
+	type testCase struct {
+		tag                       string
+		growingSegments           []SegmentEntry
+		sealedInTarget            []int64
+		droppedInTarget           []int64
+		expectedRedundantSegments []int64
+	}
+
+	cases := []testCase{
+		{
+			tag: "growing_segment_becomes_redundant_due_to_sealed",
+			growingSegments: []SegmentEntry{
+				{SegmentID: 1, PartitionID: 1},
+				{SegmentID: 2, PartitionID: 1},
+			},
+			sealedInTarget:            []int64{1}, // segment 1 becomes sealed
+			droppedInTarget:           []int64{},
+			expectedRedundantSegments: []int64{1},
+		},
+		{
+			tag: "growing_segment_becomes_redundant_due_to_dropped",
+			growingSegments: []SegmentEntry{
+				{SegmentID: 1, PartitionID: 1},
+				{SegmentID: 2, PartitionID: 1},
+			},
+			sealedInTarget:            []int64{},
+			droppedInTarget:           []int64{2}, // segment 2 is dropped
+			expectedRedundantSegments: []int64{2},
+		},
+		{
+			tag: "multiple_growing_segments_become_redundant",
+			growingSegments: []SegmentEntry{
+				{SegmentID: 1, PartitionID: 1},
+				{SegmentID: 2, PartitionID: 1},
+				{SegmentID: 3, PartitionID: 1},
+			},
+			sealedInTarget:            []int64{1, 2},
+			droppedInTarget:           []int64{3},
+			expectedRedundantSegments: []int64{1, 2, 3},
+		},
+		{
+			tag: "no_redundant_growing_segments",
+			growingSegments: []SegmentEntry{
+				{SegmentID: 1, PartitionID: 1},
+				{SegmentID: 2, PartitionID: 1},
+			},
+			sealedInTarget:            []int64{},
+			droppedInTarget:           []int64{},
+			expectedRedundantSegments: []int64{},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.SetupTest()
+			defer s.TearDownTest()
+
+			// Add growing segments
+			s.dist.AddGrowing(tc.growingSegments...)
+
+			// Call SyncTargetVersion to trigger redundant growing segment logic
+			s.dist.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:   1000,
+				SealedInTarget:  tc.sealedInTarget,
+				DroppedInTarget: tc.droppedInTarget,
+			}, []int64{1})
+
+			// Verify redundant segments have correct target version
+			growing := make([]SegmentEntry, 0)
+			for _, entry := range s.dist.growingSegments {
+				growing = append(growing, entry)
+			}
+
+			redundantSegments := make([]int64, 0)
+			for _, entry := range growing {
+				if entry.TargetVersion == redundantTargetVersion {
+					redundantSegments = append(redundantSegments, entry.SegmentID)
+				}
+			}
+
+			s.ElementsMatch(tc.expectedRedundantSegments, redundantSegments,
+				"Expected redundant growing segments should have redundant target version")
+		})
+	}
+}
