@@ -108,8 +108,8 @@ func (c *importChecker) Start() {
 					c.checkPreImportingJob(job)
 				case internalpb.ImportJobState_Importing:
 					c.checkImportingJob(job)
-				case internalpb.ImportJobState_Sorted:
-					c.checkSegmentsSorted(job)
+				case internalpb.ImportJobState_Sorting:
+					c.checkSortingJob(job)
 				case internalpb.ImportJobState_IndexBuilding:
 					c.checkIndexBuildingJob(job)
 				case internalpb.ImportJobState_Failed:
@@ -314,7 +314,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 			return
 		}
 	}
-	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorted))
+	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	if err != nil {
 		log.Warn("failed to update job state to Stats", zap.Error(err))
 		return
@@ -324,7 +324,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 	log.Info("import job import done", zap.Duration("jobTimeCost/import", importDuration))
 }
 
-func (c *importChecker) checkSegmentsSorted(job ImportJob) {
+func (c *importChecker) checkSortingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	updateJobState := func(state internalpb.ImportJobState, reason string) {
 		err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(state), UpdateJobReason(reason))

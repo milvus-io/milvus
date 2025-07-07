@@ -248,15 +248,15 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
-	s.Equal(internalpb.ImportJobState_Sorted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check stats job
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
 	cim := s.checker.ci.(*MockCompactionInspector)
 	cim.EXPECT().enqueueCompaction(mock.Anything).Return(nil)
 
-	s.checker.checkSegmentsSorted(job)
-	s.Equal(internalpb.ImportJobState_Sorted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.checker.checkSortingJob(job)
+	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	for _, segmentID := range targetSegmentIDs {
 		segment := &SegmentInfo{
@@ -272,7 +272,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		s.NoError(err)
 	}
 
-	s.checker.checkSegmentsSorted(job)
+	s.checker.checkSortingJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check IndexBuilding job
@@ -753,7 +753,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	}
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Sorted
+		return job.GetState() == internalpb.ImportJobState_Sorting
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job stats")
 

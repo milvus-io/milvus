@@ -798,7 +798,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 0.5
-	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorted))
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	assert.NoError(t, err)
 
 	err = meta.AddSegment(ctx, &SegmentInfo{
