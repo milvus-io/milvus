@@ -152,8 +152,6 @@ func validateNQLimit(limit int64) error {
 }
 
 func validateCollectionNameOrAlias(entity, entityType string) error {
-	entity = strings.TrimSpace(entity)
-
 	if entity == "" {
 		return merr.WrapErrParameterInvalidMsg("collection %s should not be empty", entityType)
 	}
