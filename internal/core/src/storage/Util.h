@@ -167,7 +167,8 @@ std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
-                           int64_t dim);
+                           int64_t dim,
+                           milvus_storage::ArrowFileSystemPtr fs);
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
