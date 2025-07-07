@@ -70,6 +70,7 @@ func (hc *handlerClientImpl) GetWALMetricsIfLocal(ctx context.Context) (*types.S
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
+	defer hc.lifetime.Done()
 
 	return registry.GetLocalWALMetrics()
 }

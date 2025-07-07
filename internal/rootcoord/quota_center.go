@@ -1306,8 +1306,8 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 			}
 		}
 	}
-	initLimiters(q.readableCollections)
-	initLimiters(q.writableCollections)
+	partitions := q.meta.ListAllAvailPartitions(q.ctx)
+	initLimiters(partitions)
 	return nil
 }
 
