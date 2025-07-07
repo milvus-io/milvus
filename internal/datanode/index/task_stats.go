@@ -185,8 +185,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetSchema(),
 		alloc,
 		st.req.GetBinlogMaxSize(),
-		st.req.GetStorageConfig().GetBucketName(),
-		st.req.GetStorageConfig().GetRootPath(),
 		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return st.binlogIO.Upload(ctx, kvs)
@@ -237,7 +235,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,
 		storage.WithVersion(st.req.StorageVersion),
 		storage.WithDownloader(st.binlogIO.Download),
-		storage.WithBucketName(st.req.StorageConfig.BucketName),
 		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
