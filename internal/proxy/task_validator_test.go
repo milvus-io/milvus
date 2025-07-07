@@ -12,6 +12,8 @@ import (
 func TestValidateTask(t *testing.T) {
 	// Initialize paramtable for testing
 	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxResultEntries.Key, "1000000")
+	defer paramtable.Get().Save(paramtable.Get().ProxyCfg.MaxResultEntries.Key, "-1")
 
 	tests := []struct {
 		name        string
