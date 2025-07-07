@@ -46,7 +46,8 @@ func mergeSortMultipleSegments(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096)
+	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
+		storage.WithStorageConfig(compactionParams.StorageConfig))
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +70,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithVersion(s.StorageVersion),
 			storage.WithBucketName(bucketName),
+			storage.WithStorageConfig(compactionParams.StorageConfig),
 		)
 		if err != nil {
 			return nil, err
