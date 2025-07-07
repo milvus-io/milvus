@@ -1348,6 +1348,7 @@ template <CompareOpType CmpOp>
 struct ArithHelperF32<ArithOpType::Div, CmpOp> {
     static inline __m256
     op(const __m256 left, const __m256 right, const __m256 value) {
+        // right must be positive
         // left == right * value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
         return _mm256_cmp_ps(left, _mm256_mul_ps(right, value), pred);
@@ -1588,6 +1589,12 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod) {
         return false;
+    } else if constexpr (AOp == ArithOpType::Div) {
+        if (right_operand < 0) {
+            return OpArithCompareImpl<float, AOp, CompareOpFlip<CmpOp>::op>::
+                op_arith_compare(
+                    res_u8, src, -1 * right_operand, -1 * value, size);
+        }
     } else {
         // the restriction of the API
         assert((size % 8) == 0);
@@ -1622,6 +1629,12 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod) {
         return false;
+    } else if constexpr (AOp == ArithOpType::Div) {
+        if (right_operand < 0) {
+            return OpArithCompareImpl<double, AOp, CompareOpFlip<CmpOp>::op>::
+                op_arith_compare(
+                    res_u8, src, -1 * right_operand, -1 * value, size);
+        }
     } else {
         // the restriction of the API
         assert((size % 8) == 0);

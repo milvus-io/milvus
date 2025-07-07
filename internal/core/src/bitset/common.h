@@ -157,5 +157,13 @@ struct ArithCompareOperator {
     }
 };
 
+template <CompareOpType CmpOp>
+struct CompareOpFlip {
+    static constexpr CompareOpType op =
+        (CmpOp == CompareOpType::LE)   ? CompareOpType::GE
+        : (CmpOp == CompareOpType::LT) ? CompareOpType::GT
+                                       : CmpOp;
+};
+
 }  // namespace bitset
 }  // namespace milvus
