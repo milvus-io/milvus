@@ -1761,6 +1761,12 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod) {
         return false;
+    } else if constexpr (AOp == ArithOpType::Div) {
+        if (right_operand < 0) {
+            return OpArithCompareImpl<float, AOp, CompareOpFlip<CmpOp>::op>::
+                op_arith_compare(
+                    res_u8, src, -1 * right_operand, -1 * value, size);
+        }
     } else {
         // the restriction of the API
         assert((size % 8) == 0);
@@ -1827,6 +1833,12 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     const size_t size) {
     if constexpr (AOp == ArithOpType::Mod) {
         return false;
+    } else if constexpr (AOp == ArithOpType::Div) {
+        if (right_operand < 0) {
+            return OpArithCompareImpl<double, AOp, CompareOpFlip<CmpOp>::op>::
+                op_arith_compare(
+                    res_u8, src, -1 * right_operand, -1 * value, size);
+        }
     } else {
         // the restriction of the API
         assert((size % 8) == 0);
