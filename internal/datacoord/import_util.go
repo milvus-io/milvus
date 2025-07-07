@@ -785,3 +785,65 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	}
 	return memoryBasedSlots
 }
+
+func createSortCompactionTask(ctx context.Context,
+	originSegment *SegmentInfo,
+	targetSegmentID int64,
+	meta *meta,
+	handler Handler,
+	alloc allocator.Allocator) (*datapb.CompactionTask, error) {
+	if originSegment.GetNumOfRows() == 0 {
+		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
+		err := meta.UpdateSegmentsInfo(ctx, operator)
+		if err != nil {
+			log.Ctx(ctx).Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}
+	collection, err := handler.GetCollection(ctx, originSegment.GetCollectionID())
+	if err != nil {
+		log.Warn("Failed to create sort compaction task because get collection fail", zap.Error(err))
+		return nil, err
+	}
+
+	collectionTTL, err := getCollectionTTL(collection.Properties)
+	if err != nil {
+		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
+		return nil, err
+	}
+
+	startID, _, err := alloc.AllocN(2)
+	if err != nil {
+		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return nil, err
+	}
+
+	expectedSize := getExpectedSegmentSize(meta, collection)
+	task := &datapb.CompactionTask{
+		PlanID:             startID + 1,
+		TriggerID:          startID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		CollectionTtl:      collectionTTL.Nanoseconds(),
+		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
+		Type:               datapb.CompactionType_SortCompaction,
+		CollectionID:       originSegment.GetCollectionID(),
+		PartitionID:        originSegment.GetPartitionID(),
+		Channel:            originSegment.GetInsertChannel(),
+		Schema:             collection.Schema,
+		InputSegments:      []int64{originSegment.GetID()},
+		ResultSegments:     []int64{},
+		TotalRows:          originSegment.GetNumOfRows(),
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            getExpandedSize(expectedSize),
+		PreAllocatedSegmentIDs: &datapb.IDRange{
+			Begin: targetSegmentID,
+			End:   targetSegmentID + 1,
+		},
+	}
+
+	log.Ctx(ctx).Info("create sort compaction task success", zap.Int64("segmentID", originSegment.GetID()),
+		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("num rows", originSegment.GetNumOfRows()))
+	return task, nil
+}

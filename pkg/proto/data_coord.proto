@@ -977,7 +977,7 @@ message ImportTaskV2 {
   string reason = 7;
   string complete_time = 8;
   repeated ImportFileStats file_stats = 9;
-  repeated int64 stats_segmentIDs = 10;
+  repeated int64 sorted_segmentIDs = 10;
   string created_time = 11;
   ImportTaskSourceV2 source = 12;
 }

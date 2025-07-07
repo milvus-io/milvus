@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -109,7 +108,7 @@ func (c *importChecker) Start() {
 					c.checkPreImportingJob(job)
 				case internalpb.ImportJobState_Importing:
 					c.checkImportingJob(job)
-				case internalpb.ImportJobState_Stats:
+				case internalpb.ImportJobState_Sorted:
 					c.checkSegmentsSorted(job)
 				case internalpb.ImportJobState_IndexBuilding:
 					c.checkIndexBuildingJob(job)
@@ -315,7 +314,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 			return
 		}
 	}
-	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
+	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorted))
 	if err != nil {
 		log.Warn("failed to update job state to Stats", zap.Error(err))
 		return
@@ -354,7 +353,7 @@ func (c *importChecker) checkSegmentsSorted(job ImportJob) {
 	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, task := range tasks {
 		originSegmentIDs := task.(*importTask).GetSegmentIDs()
-		sortSegmentIDs := task.(*importTask).GetStatsSegmentIDs()
+		sortSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
 			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("target", sortSegmentIDs[i]))
@@ -366,13 +365,14 @@ func (c *importChecker) checkSegmentsSorted(job ImportJob) {
 				continue
 			}
 			if targetSegment == nil {
-				compactionTask, err := c.createSortCompactionTask(originSegment, sortSegmentIDs[i])
+				compactionTask, err := createSortCompactionTask(c.ctx, originSegment, sortSegmentIDs[i], c.meta, c.handler, c.alloc)
 				if err != nil {
 					log.Warn("create sort compaction task failed", zap.Int64("segmentID", originSegmentID), zap.Error(err))
 					continue
 				}
 				if compactionTask == nil {
 					log.Info("maybe it no need to create sort compaction task", zap.Int64("segmentID", originSegmentID))
+					doneCnt++
 					continue
 				}
 				log.Info("create sort compaction task success", taskLogFields...)
@@ -400,7 +400,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		return t.(*importTask).GetSegmentIDs()
 	})
 	statsSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetStatsSegmentIDs()
+		return t.(*importTask).GetSortedSegmentIDs()
 	})
 
 	targetSegmentIDs := statsSegmentIDs
@@ -578,7 +578,7 @@ func (c *importChecker) checkGC(job ImportJob) {
 		shouldRemoveJob := true
 		for _, task := range tasks {
 			if job.GetState() == internalpb.ImportJobState_Failed && task.GetType() == ImportTaskType {
-				if len(task.(*importTask).GetSegmentIDs()) != 0 || len(task.(*importTask).GetStatsSegmentIDs()) != 0 {
+				if len(task.(*importTask).GetSegmentIDs()) != 0 || len(task.(*importTask).GetSortedSegmentIDs()) != 0 {
 					shouldRemoveJob = false
 					continue
 				}
@@ -605,61 +605,4 @@ func (c *importChecker) checkGC(job ImportJob) {
 		}
 		log.Info("import job removed")
 	}
-}
-
-func (c *importChecker) createSortCompactionTask(originSegment *SegmentInfo, targetSegmentID int64) (*datapb.CompactionTask, error) {
-	if originSegment.GetNumOfRows() == 0 {
-		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
-		err := c.meta.UpdateSegmentsInfo(c.ctx, operator)
-		if err != nil {
-			log.Ctx(c.ctx).Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
-			return nil, err
-		}
-		return nil, nil
-	}
-	collection, err := c.handler.GetCollection(c.ctx, originSegment.GetCollectionID())
-	if err != nil {
-		log.Warn("Failed to create sort compaction task because get collection fail", zap.Error(err))
-		return nil, err
-	}
-
-	collectionTTL, err := getCollectionTTL(collection.Properties)
-	if err != nil {
-		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
-		return nil, err
-	}
-
-	startID, _, err := c.alloc.AllocN(2)
-	if err != nil {
-		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
-		return nil, err
-	}
-
-	expectedSize := getExpectedSegmentSize(c.meta, collection)
-	task := &datapb.CompactionTask{
-		PlanID:             startID + 1,
-		TriggerID:          startID,
-		State:              datapb.CompactionTaskState_pipelining,
-		StartTime:          time.Now().Unix(),
-		CollectionTtl:      collectionTTL.Nanoseconds(),
-		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
-		Type:               datapb.CompactionType_SortCompaction,
-		CollectionID:       originSegment.GetCollectionID(),
-		PartitionID:        originSegment.GetPartitionID(),
-		Channel:            originSegment.GetInsertChannel(),
-		Schema:             collection.Schema,
-		InputSegments:      []int64{originSegment.GetID()},
-		ResultSegments:     []int64{},
-		TotalRows:          originSegment.GetNumOfRows(),
-		LastStateStartTime: time.Now().Unix(),
-		MaxSize:            getExpandedSize(expectedSize),
-		PreAllocatedSegmentIDs: &datapb.IDRange{
-			Begin: targetSegmentID,
-			End:   targetSegmentID + 1,
-		},
-	}
-
-	log.Ctx(c.ctx).Info("create sort compaction task success", zap.Int64("segmentID", originSegment.GetID()),
-		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("num rows", originSegment.GetNumOfRows()))
-	return task, nil
 }

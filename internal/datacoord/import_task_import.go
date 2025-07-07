@@ -96,8 +96,8 @@ func (t *importTask) GetSegmentIDs() []int64 {
 	return t.task.Load().GetSegmentIDs()
 }
 
-func (t *importTask) GetStatsSegmentIDs() []int64 {
-	return t.task.Load().GetStatsSegmentIDs()
+func (t *importTask) GetSortedSegmentIDs() []int64 {
+	return t.task.Load().GetSortedSegmentIDs()
 }
 
 func (t *importTask) GetSource() datapb.ImportTaskSourceV2 {
