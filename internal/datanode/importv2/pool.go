@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -36,7 +37,8 @@ var (
 
 func initExecPool() {
 	pt := paramtable.Get()
-	initPoolSize := paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt()
+	cpuNum := hardware.GetCPUNum()
+	initPoolSize := cpuNum * pt.DataNodeCfg.ImportConcurrencyPerCPUCore.GetAsInt()
 	execPool = conc.NewPool[any](
 		initPoolSize,
 		conc.WithPreAlloc(false), // pre alloc must be false to resize pool dynamically, use warmup to alloc worker here
@@ -44,14 +46,15 @@ func initExecPool() {
 	)
 	conc.WarmupPool(execPool, runtime.LockOSThread)
 
-	watchKey := pt.DataNodeCfg.MaxConcurrentImportTaskNum.Key
+	watchKey := pt.DataNodeCfg.ImportConcurrencyPerCPUCore.Key
 	pt.Watch(watchKey, config.NewHandler(watchKey, resizeExecPool))
 	log.Info("init import execution pool done", zap.Int("size", initPoolSize))
 }
 
 func resizeExecPool(evt *config.Event) {
 	if evt.HasUpdated {
-		newSize := paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt()
+		cpuNum := hardware.GetCPUNum()
+		newSize := cpuNum * paramtable.Get().DataNodeCfg.ImportConcurrencyPerCPUCore.GetAsInt()
 		log := log.Ctx(context.Background()).With(zap.Int("newSize", newSize))
 
 		err := GetExecPool().Resize(newSize)
