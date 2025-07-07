@@ -88,7 +88,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # 1. create collection
         collection_name = "  "
-        error = {ct.err_code: 0, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        error = {ct.err_code: 1100, ct.err_msg: "Invalid collection name"}
         self.create_collection(client, collection_name, default_dim,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -621,6 +621,7 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/pull/43064 change drop alias restraint")
     def test_milvus_client_drop_collection_invalid_collection_name(self, name):
         """
         target: test fast create collection normal case
