@@ -248,7 +248,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Sorted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check stats job
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
@@ -256,7 +256,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	cim.EXPECT().enqueueCompaction(mock.Anything).Return(nil)
 
 	s.checker.checkSegmentsSorted(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Sorted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	for _, segmentID := range targetSegmentIDs {
 		segment := &SegmentInfo{
@@ -385,11 +385,11 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
-		JobID:           s.jobID,
-		TaskID:          1,
-		State:           datapb.ImportTaskStateV2_Pending,
-		SegmentIDs:      []int64{2},
-		StatsSegmentIDs: []int64{3},
+		JobID:            s.jobID,
+		TaskID:           1,
+		State:            datapb.ImportTaskStateV2_Pending,
+		SegmentIDs:       []int64{2},
+		SortedSegmentIDs: []int64{3},
 	}
 	it := &importTask{
 		tr: timerecord.NewTimeRecorder("import task"),
@@ -422,11 +422,11 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
-		JobID:           s.jobID,
-		TaskID:          1,
-		State:           datapb.ImportTaskStateV2_Failed,
-		SegmentIDs:      []int64{2},
-		StatsSegmentIDs: []int64{3},
+		JobID:            s.jobID,
+		TaskID:           1,
+		State:            datapb.ImportTaskStateV2_Failed,
+		SegmentIDs:       []int64{2},
+		SortedSegmentIDs: []int64{3},
 	}
 
 	task := &importTask{
@@ -753,7 +753,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	}
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Stats
+		return job.GetState() == internalpb.ImportJobState_Sorted
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job stats")
 

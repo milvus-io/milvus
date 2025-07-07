@@ -691,7 +691,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 				TotalRows:  200,
 			},
 		},
-		StatsSegmentIDs: []int64{100, 110, 120},
+		SortedSegmentIDs: []int64{100, 110, 120},
 	}
 	it1 := &importTask{}
 	it1.task.Store(taskProto1)
@@ -721,7 +721,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 				TotalRows:  300,
 			},
 		},
-		StatsSegmentIDs: []int64{200, 210, 220},
+		SortedSegmentIDs: []int64{200, 210, 220},
 	}
 	it2 := &importTask{}
 	it2.task.Store(taskProto2)
@@ -798,7 +798,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, "", reason)
 
 	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 0.5
-	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorted))
 	assert.NoError(t, err)
 
 	err = meta.AddSegment(ctx, &SegmentInfo{

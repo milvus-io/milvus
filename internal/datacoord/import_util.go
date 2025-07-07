@@ -129,8 +129,8 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			if err != nil {
 				return nil, err
 			}
-			taskProto.StatsSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
-			log.Info("preallocate stats segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.StatsSegmentIDs))...)
+			taskProto.SortedSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
+			log.Info("preallocate sorted segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.SortedSegmentIDs))...)
 		}
 		tasks = append(tasks, task)
 	}
@@ -512,7 +512,7 @@ func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, m
 	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
 	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetStatsSegmentIDs()
+		return t.(*importTask).GetSortedSegmentIDs()
 	})
 	if len(targetSegmentIDs) == 0 {
 		return 1
@@ -537,7 +537,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 		return t.(*importTask).GetSegmentIDs()
 	})
 	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetStatsSegmentIDs()
+		return t.(*importTask).GetSortedSegmentIDs()
 	})
 	if len(originSegmentIDs) == 0 {
 		return 1
@@ -579,7 +579,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		progress, importedRows, totalRows := getImportingProgress(ctx, jobID, importMeta, meta)
 		return 10 + 30 + int64(progress*30), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
-	case internalpb.ImportJobState_Stats:
+	case internalpb.ImportJobState_Sorted:
 		progress := getStatsProgress(ctx, jobID, importMeta, meta)
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
