@@ -682,6 +682,10 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     auto vec_ptr = insert_record_.get_data_base(field_id);
     if (field_meta.is_vector()) {
         auto result = CreateEmptyVectorDataArray(count, field_meta);
+        if (count == 0) {
+            return result;
+        }
+
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
             bulk_subscript_impl<FloatVector>(field_id,
                                              field_meta.get_sizeof(),

@@ -12,7 +12,9 @@
 #include <gtest/gtest.h>
 
 #include "common/Types.h"
+#include "expr/ITypeExpr.h"
 #include "knowhere/comp/index_param.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
@@ -275,6 +277,52 @@ TEST_P(RetrieveTest, Empty) {
     } else {
         ASSERT_EQ(field1.vectors().sparse_float_vector().contents_size(), 0);
     }
+}
+
+TEST_P(RetrieveTest, GrowingEmpty) {
+    ;
+    auto schema = std::make_shared<Schema>();
+    auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
+    auto DIM = 128;
+    auto fid_vec =
+        schema->AddDebugField("vector_64", data_type, DIM, metric_type);
+    schema->set_primary_field_id(fid_64);
+
+    int64_t N = 100;
+    int64_t req_size = 10;
+    auto choose = [=](int i) { return i * 3 % N; };
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", "IVF_FLAT"}, {"metric_type", "L2"}, {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        fid_vec, std::move(index_params), std::move(type_params));
+    auto& config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(true);
+    std::map<FieldId, FieldIndexMeta> filedMap = {{fid_vec, fieldIndexMeta}};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(226985, std::move(filedMap));
+
+    auto segment = CreateGrowingSegment(schema, metaPtr);
+
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    auto term_expr = std::make_shared<milvus::expr::AlwaysTrueExpr>();
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
+    std::vector<FieldId> outputs{fid_64, fid_vec};
+    plan->field_ids_ = outputs;
+
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE, false, 0);
+
+    Assert(retrieve_results->fields_data_size() == outputs.size());
+    auto field0 = retrieve_results->fields_data(0);
+    auto field1 = retrieve_results->fields_data(1);
+    Assert(field0.has_scalars());
+    auto field0_data = field0.scalars().long_data();
+    Assert(field0_data.data_size() == 0);
 }
 
 TEST_P(RetrieveTest, Limit) {
