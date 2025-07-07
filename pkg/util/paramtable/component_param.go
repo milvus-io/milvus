@@ -1997,10 +1997,11 @@ please adjust in embedded Milvus: false`,
 	p.MaxResultEntries = ParamItem{
 		Key:          "proxy.maxResultEntries",
 		Version:      "2.6.0",
-		DefaultValue: strconv.Itoa(1000000),
+		DefaultValue: "-1",
 		Doc: `maximum number of result entries, typically Nq * TopK * GroupSize. 
 It costs additional memory and time to process a large number of result entries. 
-If the number of result entries exceeds this limit, the search will be rejected.`,
+If the number of result entries exceeds this limit, the search will be rejected.
+Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxResultEntries.Init(base.mgr)

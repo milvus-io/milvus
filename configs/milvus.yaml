@@ -316,7 +316,8 @@ proxy:
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
-  maxResultEntries: 1000000
+  # Disabled if the value is less or equal to 0.
+  maxResultEntries: -1
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
