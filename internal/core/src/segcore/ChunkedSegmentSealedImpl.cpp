@@ -301,7 +301,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                load_info.mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
-            "segment {} loads column group {} with field ids {} with num_rows "
+            "segment {} loads column group {} with field ids {} with "
+            "num_rows "
             "{}",
             this->get_segment_id(),
             column_group_id.get(),
@@ -333,6 +334,10 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
             load_field_data_common(
                 field_id, column, num_rows, data_type, info.enable_mmap, true);
+        }
+
+        if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            stats_.mem_size += chunked_column_group->memory_size();
         }
     }
 }
@@ -1912,7 +1917,10 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (!enable_mmap) {
-        stats_.mem_size += column->DataByteSize();
+        if (!is_proxy_column || is_proxy_column &&
+            field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            stats_.mem_size += column->DataByteSize();
+        }
         if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
             LoadSkipIndex(field_id, data_type, column);
         }
