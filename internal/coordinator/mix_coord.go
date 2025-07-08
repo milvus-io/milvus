@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -580,6 +581,15 @@ func (s *mixCoordImpl) GetStatisticsChannel(ctx context.Context, req *internalpb
 func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	systemTopology := metricsinfo.SystemTopology{
 		NodesInfo: make([]metricsinfo.SystemTopologyNode, 0),
+	}
+
+	// If a processing role is specified, the corresponding role will be used for processing
+	ret := gjson.Parse(in.GetRequest())
+	processRole, _ := metricsinfo.ParseMetricProcessInRole(ret)
+	if len(processRole) > 0 && processRole == typeutil.QueryCoordRole {
+		return s.GetQcMetrics(ctx, in)
+	} else if len(processRole) > 0 && processRole == typeutil.DataCoordRole {
+		return s.GetDcMetrics(ctx, in)
 	}
 
 	identifierMap := make(map[string]int)
