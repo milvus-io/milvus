@@ -726,7 +726,7 @@ DataGen(SchemaPtr schema,
                     auto str = R"({"int":)" + std::to_string(random()%mod_count) +
                                R"(,"double":)" + std::to_string(static_cast<double>(random())) +
                                R"(,"string":")" + std::to_string(random()%mod_count) +
-                               R"(","bool": true)" + R"(, "array": [1,2,3])" +
+                               R"(","bool": )" + (random() % 2 ? "true" : "false") + R"(, "array": [1,2,3])" +
                                R"(,"int8":)" + std::to_string(static_cast<int8_t>(random()%mod_count)) +
                                R"(,"int16":)" + std::to_string(static_cast<int16_t>(random()%mod_count)) +
                                R"(,"int32":)" + std::to_string(static_cast<int32_t>(random()%mod_count)) +

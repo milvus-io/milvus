@@ -102,4 +102,119 @@ TEST(GroupBYJSON, SealedIndex) {
         ASSERT_EQ(topK * group_size, group_by_values.size());
         validate_group_by_search_result<int8_t>(group_by_values, search_result->distances_, group_size, topK);
     }
+
+    // 4. search group by json_field.int16
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 101
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 102
+                                          group_size: 2
+                                          json_path: "/int16"
+                                          json_cast_type: Int16
+                                          strict_group_size: true,
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+        auto search_result = run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        CheckGroupBySearchResult(*search_result, topK, 1, false);
+        auto& group_by_values = search_result->group_by_values_.value();
+        ASSERT_EQ(topK * group_size, group_by_values.size());
+        validate_group_by_search_result<int16_t>(group_by_values, search_result->distances_, group_size, topK);
+    }
+
+    // 5. search group by json_field.int32
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 101
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 102
+                                          group_size: 2
+                                          json_path: "/int32"
+                                          json_cast_type: Int32
+                                          strict_group_size: true,
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+        auto search_result = run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        CheckGroupBySearchResult(*search_result, topK, 1, false);
+        auto& group_by_values = search_result->group_by_values_.value();
+        ASSERT_EQ(topK * group_size, group_by_values.size());
+        validate_group_by_search_result<int32_t>(group_by_values, search_result->distances_, group_size, topK);
+    }
+
+    // 6. search group by json_field.int64
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 101
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 102
+                                          group_size: 2
+                                          json_path: "/int64"
+                                          json_cast_type: Int64
+                                          strict_group_size: true,
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+        auto search_result = run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        CheckGroupBySearchResult(*search_result, topK, 1, false);
+        auto& group_by_values = search_result->group_by_values_.value();
+        ASSERT_EQ(topK * group_size, group_by_values.size());
+        validate_group_by_search_result<int64_t>(group_by_values, search_result->distances_, group_size, topK);
+    }
+
+    // 7. search group by json_field.bool
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 101
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 102
+                                          group_size: 2
+                                          json_path: "/bool"
+                                          json_cast_type: Bool
+                                          strict_group_size: true,
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+        auto search_result = run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        CheckGroupBySearchResult(*search_result, topK, 1, false);
+        auto& group_by_values = search_result->group_by_values_.value();
+        ASSERT_EQ(2 * group_size, group_by_values.size());
+        validate_group_by_search_result<bool>(group_by_values, search_result->distances_, group_size, 2);
+    }
+
+    // 8. search group by json_field.string
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                        field_id: 101
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 102
+                                          group_size: 2
+                                          json_path: "/string"
+                                          json_cast_type: VarChar
+                                          strict_group_size: true,
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+        auto search_result = run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
+        CheckGroupBySearchResult(*search_result, topK, 1, false);
+        auto& group_by_values = search_result->group_by_values_.value();
+        ASSERT_EQ(topK * group_size, group_by_values.size());
+        validate_group_by_search_result<std::string>(group_by_values, search_result->distances_, group_size, topK);
+    }
 }
