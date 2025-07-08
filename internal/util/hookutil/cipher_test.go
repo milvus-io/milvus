@@ -17,6 +17,7 @@
 package hookutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -46,19 +47,22 @@ func (s *CipherSuite) TestGetTestCipher() {
 	s.NotNil(cipher)
 	s.IsType(testCipher{}, cipher)
 
-	encryptor, safeKey, err := GetCipher().GetEncryptor(1, 2)
+	ezID, collectionID := int64(1), int64(2)
+	encryptor, safeKey, err := GetCipher().GetEncryptor(ezID, collectionID)
 	s.NoError(err)
 	s.Equal([]byte("safe key"), safeKey)
 
-	got, err := encryptor.Encrypt([]byte("test"))
+	plainText := []byte("test plain text")
+	cipherText, err := encryptor.Encrypt(plainText)
 	s.NoError(err)
-	s.Equal([]byte("test"), got)
+	s.Equal(append(plainText, []byte(fmt.Sprintf("%d%d", ezID, collectionID))...), cipherText)
 
-	decryptor, err := GetCipher().GetDecryptor(1, 2, []byte("safe key"))
+	decryptor, err := GetCipher().GetDecryptor(ezID, collectionID, safeKey)
 	s.NoError(err)
-	got, err = decryptor.Decrypt([]byte("test"))
+	s.NotNil(decryptor)
+	gotPlainText, err := decryptor.Decrypt(cipherText)
 	s.NoError(err)
-	s.Equal([]byte("test"), got)
+	s.Equal(plainText, gotPlainText)
 
 	// test GetUnsafeKey
 	s.Equal([]byte("unsafe key"), GetCipher().GetUnsafeKey(1, 2))
