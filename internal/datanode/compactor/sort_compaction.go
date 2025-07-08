@@ -384,6 +384,9 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
+		if t.storageVersion == storage.StorageV2 {
+			return []string{}, nil
+		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
@@ -391,7 +394,8 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 		result := make([]string, 0, len(binlogs))
 		for _, binlog := range binlogs {
 			for _, file := range binlog.GetBinlogs() {
-				result = append(result, metautil.BuildInsertLogPath(t.compactionParams.StorageConfig.GetRootPath(), collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
+				result = append(result, metautil.BuildInsertLogPath(t.compactionParams.StorageConfig.GetRootPath(),
+					collectionID, partitionID, segmentID, fieldID, file.GetLogID()))
 			}
 		}
 		return result, nil
