@@ -11,6 +11,7 @@ def pytest_addoption(parser):
     parser.addoption("--release_name", action="store", default="my-release", help="release name")
     # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
     parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei endpoint")
+    parser.addoption("--tei_reranker_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei reranker endpoint")
 
 @pytest.fixture
 def endpoint(request):
@@ -44,3 +45,7 @@ def release_name(request):
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
+@pytest.fixture
+def tei_reranker_endpoint(request):
+    return request.config.getoption("--tei_reranker_endpoint")
