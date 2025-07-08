@@ -137,14 +137,15 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         });
     }
 
-    // Manually evicts the cell if it is not pinned.
-    // Returns true if the cell ends up in a state other than LOADED.
+    // Manually evicts the cell if it is LOADED and not pinned.
+    // Returns true if the eviction happened.
     bool
     ManualEvict(cid_t cid) {
         return cells_[cid].manual_evict();
     }
 
-    // Returns true if any cell is evicted.
+    // Manually evicts all cells that are LOADED and not pinned.
+    // Returns true if eviction happened on any cell.
     bool
     ManualEvictAll() {
         bool evicted = false;
@@ -163,7 +164,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     ResourceUsage
     size_of_cell(cid_t cid) const {
-        return translator_->estimated_byte_size_of_cell(cid);
+        return cells_[cid].size();
     }
 
     Meta*
@@ -190,6 +191,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         std::unordered_set<cid_t> need_load_cids;
         futures.reserve(cids.size());
         need_load_cids.reserve(cids.size());
+        auto resource_needed = ResourceUsage{0, 0};
         for (const auto& cid : cids) {
             if (cid >= cells_.size()) {
                 throw std::invalid_argument(fmt::format("cid {} out of range, slot has {} cells", cid, cells_.size()));
@@ -200,10 +202,11 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             futures.push_back(std::move(future));
             if (need_load) {
                 need_load_cids.insert(cid);
+                resource_needed += cells_[cid].size();
             }
         }
         if (!need_load_cids.empty()) {
-            RunLoad(std::move(need_load_cids));
+            RunLoad(std::move(need_load_cids), resource_needed);
         }
 
         auto pins = SemiInlineGet(folly::collect(futures));
@@ -224,10 +227,24 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     }
 
     void
-    RunLoad(std::unordered_set<cid_t>&& cids) {
+    RunLoad(std::unordered_set<cid_t>&& cids, ResourceUsage resource_needed) {
+        bool reserve_resource_failure = false;
         try {
             auto start = std::chrono::high_resolution_clock::now();
             std::vector<cid_t> cids_vec(cids.begin(), cids.end());
+
+            if (dlist_ && !dlist_->reserveMemory(resource_needed)) {
+                auto error_msg = fmt::format(
+                    "[MCL] CacheSlot failed to reserve memory for cells: "
+                    "key={}, cell_ids=[{}], total resource_needed={}",
+                    translator_->key(),
+                    fmt::join(cids_vec, ","),
+                    resource_needed.ToString());
+                LOG_ERROR(error_msg);
+                reserve_resource_failure = true;
+                throw std::runtime_error(error_msg);
+            }
+
             auto results = translator_->get_cells(cids_vec);
             auto latency =
                 std::chrono::duration_cast<std::chrono::microseconds>(
@@ -252,6 +269,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             for (auto cid : cids) {
                 cells_[cid].set_error(ew);
             }
+            // If the resource reservation failed, we don't need to release the memory.
+            if (dlist_ && !reserve_resource_failure) {
+                dlist_->releaseMemory(resource_needed);
+            }
         }
     }
 
@@ -263,7 +284,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         }
         ~CacheCell() {
             if (state_ == State::LOADING) {
-                LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading", key());
+                LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading",
+                          key());
             }
         }
 

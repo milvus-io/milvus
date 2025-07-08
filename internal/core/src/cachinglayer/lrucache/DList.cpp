@@ -27,6 +27,15 @@ namespace milvus::cachinglayer::internal {
 bool
 DList::reserveMemory(const ResourceUsage& size) {
     std::unique_lock<std::mutex> list_lock(list_mtx_);
+
+    if (!max_memory_.CanHold(size)) {
+        LOG_ERROR(
+            "[MCL] Failed to reserve size={} as it exceeds max_memory_={}.",
+            size.ToString(),
+            max_memory_.ToString());
+        return false;
+    }
+
     auto used = used_memory_.load();
 
     // Combined logical and physical memory limit check
