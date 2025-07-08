@@ -55,12 +55,13 @@ type sortCompactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	collectionID   int64
-	partitionID    int64
-	segmentID      int64
-	deltaLogs      []string
-	insertLogs     []*datapb.FieldBinlog
-	storageVersion int64
+	collectionID          int64
+	partitionID           int64
+	segmentID             int64
+	deltaLogs             []string
+	insertLogs            []*datapb.FieldBinlog
+	storageVersion        int64
+	segmentStorageVersion int64
 
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
@@ -127,6 +128,7 @@ func (t *sortCompactionTask) preCompact() error {
 
 	t.insertLogs = segment.GetFieldBinlogs()
 	t.storageVersion = t.compactionParams.StorageVersion
+	t.segmentStorageVersion = segment.GetStorageVersion()
 
 	log.Ctx(t.ctx).Info("preCompaction analyze",
 		zap.Int64("planID", t.GetPlanID()),
@@ -205,7 +207,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	rr, err := storage.NewBinlogRecordReader(ctx, t.insertLogs, t.plan.Schema,
-		storage.WithVersion(t.storageVersion),
+		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithBucketName(t.compactionParams.StorageConfig.BucketName),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
