@@ -205,6 +205,7 @@ func InitOnceCipher() {
 	})
 }
 
+// testCipher encryption will append magicStr to plainText, magicStr is str of ezID and collectionID
 type testCipher struct{}
 
 var (
@@ -235,7 +236,7 @@ type testCryptoImpl struct {
 }
 
 func createTestCryptoImpl(ezID, collectionID int64) testCryptoImpl {
-	return testCryptoImpl{strconv.FormatInt(ezID, 10) + strconv.FormatInt(collectionID, 10)}
+	return testCryptoImpl{fmt.Sprintf("%d%d", ezID, collectionID)}
 }
 
 func (c testCryptoImpl) Encrypt(plainText []byte) (cipherText []byte, err error) {
