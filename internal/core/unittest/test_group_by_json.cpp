@@ -46,7 +46,7 @@ void validate_group_by_search_result(const std::vector<GroupByValueType>& group_
     ASSERT_EQ(value_map.size(), expected_group_count);
 }
 
-TEST(GroupBYJSON, SealedIndex) {
+TEST(GroupBYJSON, SealedData) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -218,3 +218,63 @@ TEST(GroupBYJSON, SealedIndex) {
         validate_group_by_search_result<std::string>(group_by_values, search_result->distances_, group_size, topK);
     }
 }
+
+TEST(GroupBYJSON, GrowingRawData) {
+    // 0. set up growing segment
+    int dim = 64;
+    uint64_t seed = 512;
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    auto str_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto json_fid = schema->AddDebugField("json_field", DataType::JSON);
+    auto vec_fid = schema->AddDebugField(
+        "embeddings", DataType::VECTOR_FLOAT, dim, metric_type);
+    schema->set_primary_field_id(str_fid);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(128);
+    config.set_enable_interim_segment_index(
+        false);  // no growing index, test brute force
+    auto segment_growing = CreateGrowingSegment(schema, nullptr, 1, config);
+    auto segment_growing_impl =
+        dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
+
+    // 1. prepare raw data in growing segment
+    int64_t N = 100;
+    auto data_set =
+        DataGen(schema, N, 42, 0, 8, 10, 10, false, false);
+    auto offset = segment_growing_impl->PreInsert(N);
+    segment_growing_impl->Insert(offset,
+                                    N,
+                                    data_set.row_ids_.data(),
+                                    data_set.timestamps_.data(),
+                                    data_set.raw_);
+
+    // 2. Search group by json_field.int8
+    auto num_queries = 10;
+    auto topK = 10;
+    int group_size = 2;
+    const char* raw_plan = R"(vector_anns: <
+                                        field_id: 102
+                                        query_info: <
+                                          topk: 10
+                                          metric_type: "L2"
+                                          search_params: "{\"ef\": 10}"
+                                          group_by_field_id: 101
+                                          group_size: 2
+                                          json_path: "/int8"
+                                          json_cast_type: Int8,
+                                          strict_group_size: true,
+                                        >
+                                        placeholder_tag: "$0"
+         >)";
+    auto search_result = run_group_by_search(raw_plan, schema, segment_growing_impl, dim, topK);
+    auto& group_by_values = search_result->group_by_values_.value();
+    ASSERT_EQ(group_by_values.size(), num_queries * topK * group_size);
+    validate_group_by_search_result<int8_t>(group_by_values, search_result->distances_, group_size, topK);
+}
+
+
+
+
+
