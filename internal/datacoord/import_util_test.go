@@ -30,6 +30,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -43,6 +46,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -898,6 +902,79 @@ func TestImportTask_MarshalJSON(t *testing.T) {
 	assert.Equal(t, "ImportTask", importTask.TaskType)
 	assert.Equal(t, task.GetCreatedTime(), importTask.CreatedTime)
 	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
+}
+
+func TestLogResultSegmentsInfo(t *testing.T) {
+	// Create mock catalog and broker
+	mockCatalog := mocks.NewDataCoordCatalog(t)
+	meta := &meta{
+		segments: NewSegmentsInfo(),
+		catalog:  mockCatalog,
+	}
+
+	// Create test segments
+	segments := []*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: "ch1",
+				NumOfRows:     100,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: "ch1",
+				NumOfRows:     200,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  1,
+				PartitionID:   2,
+				InsertChannel: "ch2",
+				NumOfRows:     300,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+	}
+
+	// Add segments to meta
+	for _, segment := range segments {
+		meta.segments.SetSegment(segment.ID, segment)
+	}
+
+	// Create test logger with observer
+	core, recorded := observer.New(zapcore.InfoLevel)
+	logger := zap.New(core)
+	oldLogger := log.L()
+	log.ReplaceGlobals(logger, nil)
+	defer log.ReplaceGlobals(oldLogger, nil)
+
+	jobID := int64(2)
+	segmentIDs := []int64{1, 2, 3}
+
+	// Clear recorded logs
+	recorded.TakeAll()
+
+	// Call the function
+	LogResultSegmentsInfo(jobID, meta, segmentIDs)
+
+	// Get all logs
+	logs := recorded.All()
+
+	// Verify log messages
+	assert.Equal(t, 3, len(logs))
+	assert.Contains(t, logs[0].Message, "import segments info")
+	assert.Contains(t, logs[1].Message, "import segments info")
+	assert.Contains(t, logs[2].Message, "import result info")
 }
 
 // TestImportUtil_ValidateBinlogImportRequest tests the validation of binlog import request
