@@ -172,12 +172,6 @@ std::optional<TargetBitmap>
 NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  proto::plan::OpType op_type,
                                  exec::SegmentExpr* segment) {
-    LOG_INFO(
-        "debug=== ExecuteQuery for ngram index, field id: {}, literal: {}, "
-        "op_type: {}",
-        field_id_,
-        literal,
-        op_type);
     if (literal.length() < min_gram_) {
         return std::nullopt;
     }

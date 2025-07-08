@@ -465,6 +465,10 @@ TEST(NgramIndex, TestNgramJson) {
                            proto::plan::OpType>>
         test_cases;
     proto::plan::GenericValue value;
+    value.set_string_val("nothing");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{}, proto::plan::OpType::InnerMatch));
+
     value.set_string_val("il");
     test_cases.push_back(std::make_tuple(
         value, std::vector<int64_t>{1, 2, 9}, proto::plan::OpType::InnerMatch));
