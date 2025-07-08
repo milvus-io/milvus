@@ -496,11 +496,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         if (field.second.get_id().get() != field_id) {
                             continue;
                         }
+                        auto data_type = field.second.get_data_type();
                         auto field_data = storage::CreateFieldData(
-                            field.second.get_data_type(),
+                            data_type,
                             field.second.is_nullable(),
-                            field.second.is_vector() ? field.second.get_dim()
-                                                     : 0,
+                            IsVectorDataType(data_type) && !IsSparseFloatVectorDataType(data_type) ? field.second.get_dim()
+                                                     : 1,
                             batch_num_rows);
                         field_data->FillFieldData(table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
@@ -1167,7 +1168,7 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
             ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));
     }
-    iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
+    iter->second->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
 }
 
 void

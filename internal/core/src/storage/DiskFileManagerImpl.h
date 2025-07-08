@@ -27,6 +27,7 @@
 #include "storage/LocalChunkManager.h"
 #include "common/Consts.h"
 #include "storage/Types.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -184,11 +185,10 @@ class DiskFileManagerImpl : public FileManagerImpl {
                         get_remote_path) noexcept;
 
     void
-    CacheIndexToDiskInternal(
-        const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix,
-        milvus::proto::common::LoadPriority priority =
-            milvus::proto::common::LoadPriority::HIGH);
+    CacheIndexToDiskInternal(const std::vector<std::string>& remote_files,
+                             const std::string& local_index_prefix,
+                             milvus::proto::common::LoadPriority priority =
+                                 milvus::proto::common::LoadPriority::HIGH);
 
     template <typename DataType>
     std::string

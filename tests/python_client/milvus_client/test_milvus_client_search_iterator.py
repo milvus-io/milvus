@@ -55,7 +55,7 @@ def external_filter_with_outputs(hits):
     results = []
     for hit in hits:
         # equals filter nothing if there are output_fields
-        if hit.distance < 1.0 and len(hit.fields) > 0:
+        if hit.distance <= 4.0 and len(hit.fields) > 0:
             results.append(hit)
     return results
 
@@ -655,7 +655,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    @pytest.fixture(scope="function", params=["DOUBLE", "JSON", "varchar", "bool"])
     def supported_json_cast_type(self, request):
         yield request.param
 

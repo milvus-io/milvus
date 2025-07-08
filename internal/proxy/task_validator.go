@@ -18,26 +18,34 @@ type searchTaskValidator struct{}
 var searchTaskValidatorInstance validator[*searchTask] = &searchTaskValidator{}
 
 func (v *searchTaskValidator) validateSubSearch(subReq *internalpb.SubSearchRequest) error {
+	maxResultEntries := paramtable.Get().ProxyCfg.MaxResultEntries.GetAsInt64()
+	if maxResultEntries <= 0 {
+		return nil
+	}
 	// check if number of result entries is too large
 	nEntries := subReq.GetNq() * subReq.GetTopk()
 	// if there is group size, multiply it
 	if subReq.GetGroupSize() > 0 {
 		nEntries *= subReq.GroupSize
 	}
-	if nEntries > paramtable.Get().ProxyCfg.MaxResultEntries.GetAsInt64() {
+	if nEntries > maxResultEntries {
 		return fmt.Errorf("number of result entries is too large")
 	}
 	return nil
 }
 
 func (v *searchTaskValidator) validateSearch(search *searchTask) error {
+	maxResultEntries := paramtable.Get().ProxyCfg.MaxResultEntries.GetAsInt64()
+	if maxResultEntries <= 0 {
+		return nil
+	}
 	// check if number of result entries is too large
 	nEntries := search.GetNq() * search.GetTopk()
 	// if there is group size, multiply it
 	if search.GetGroupSize() > 0 {
 		nEntries *= search.GroupSize
 	}
-	if nEntries > paramtable.Get().ProxyCfg.MaxResultEntries.GetAsInt64() {
+	if nEntries > maxResultEntries {
 		return fmt.Errorf("number of result entries is too large")
 	}
 	return nil

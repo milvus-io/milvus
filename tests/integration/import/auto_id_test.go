@@ -179,7 +179,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 func (s *BulkInsertSuite) TestAutoID() {
 	// make buffer size small to trigger multiple sync
 	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().DataNodeCfg.ImportInsertBufferSize.Key: "0.000001",
+		paramtable.Get().DataNodeCfg.ImportBaseBufferSize.Key: "0.000001",
 	})
 	defer revertGuard()
 

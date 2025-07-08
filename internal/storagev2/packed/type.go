@@ -36,6 +36,7 @@ type PackedReader struct {
 	cPackedReader C.CPackedReader
 	arr           *cdata.CArrowArray
 	schema        *arrow.Schema
+	currentBatch  arrow.Record
 }
 
 type (

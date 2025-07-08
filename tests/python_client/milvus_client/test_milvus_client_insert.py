@@ -1099,7 +1099,7 @@ class TestMilvusClientInsertJsonPathIndexValid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "Double", "Varchar", "Bool"])
+    @pytest.fixture(scope="function", params=["BOOL", "Double", "Varchar", "json"])
     def supported_json_cast_type(self, request):
         yield request.param
 
