@@ -145,6 +145,13 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_core_search_latency_random_sample);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_optimize_expr_latency);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_core_expr_filter_ratio);
 
+// json stats metrics
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_json_stats_latency);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_term_query);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shredding);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_shared);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_json_stats_latency_load);
+
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_cgo_queue_duration_seconds_all);

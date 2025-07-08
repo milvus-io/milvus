@@ -41,6 +41,7 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
 #include "index/NgramInvertedIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 
 namespace milvus::segcore {
 
@@ -153,6 +154,9 @@ class SegmentInterface {
 
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const = 0;
+
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const = 0;
 
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
@@ -368,6 +372,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
 
+    virtual index::JsonKeyStats*
+    GetJsonStats(FieldId field_id) const override;
+
  public:
     virtual void
     vector_search(SearchInfo& search_info,
@@ -559,6 +566,9 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unordered_map<FieldId,
                        std::unique_ptr<index::JsonKeyStatsInvertedIndex>>
         json_indexes_;
+
+    std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+        json_stats_;
 };
 
 }  // namespace milvus::segcore
