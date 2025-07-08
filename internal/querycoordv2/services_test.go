@@ -405,7 +405,7 @@ func (suite *ServiceSuite) TestLoadCollectionWithUserSpecifiedReplicaMode() {
 		// Verify that IsUserSpecifiedReplicaMode is set to true
 		collection := suite.meta.GetCollection(ctx, collectionID)
 		suite.NotNil(collection)
-		suite.True(collection.IsUserSpecifiedReplicaMode)
+		suite.True(collection.UserSpecifiedReplicaMode)
 	})
 }
 
@@ -431,7 +431,7 @@ func (suite *ServiceSuite) TestLoadCollectionWithoutUserSpecifiedReplicaMode() {
 		// Verify that IsUserSpecifiedReplicaMode is not set to true
 		collection := suite.meta.GetCollection(ctx, collectionID)
 		suite.NotNil(collection)
-		suite.False(collection.IsUserSpecifiedReplicaMode)
+		suite.False(collection.UserSpecifiedReplicaMode)
 	})
 }
 
@@ -1035,7 +1035,7 @@ func (suite *ServiceSuite) TestLoadPartitionsWithUserSpecifiedReplicaMode() {
 		// Verify that IsUserSpecifiedReplicaMode is set to true
 		collection := suite.meta.GetCollection(ctx, collectionID)
 		suite.NotNil(collection)
-		suite.True(collection.IsUserSpecifiedReplicaMode)
+		suite.True(collection.UserSpecifiedReplicaMode)
 	})
 }
 
@@ -1063,7 +1063,7 @@ func (suite *ServiceSuite) TestLoadPartitionsWithoutUserSpecifiedReplicaMode() {
 		// Verify that IsUserSpecifiedReplicaMode is not set to true
 		collection := suite.meta.GetCollection(ctx, collectionID)
 		suite.NotNil(collection)
-		suite.False(collection.IsUserSpecifiedReplicaMode)
+		suite.False(collection.UserSpecifiedReplicaMode)
 	})
 }
 
@@ -1907,6 +1907,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()
@@ -1931,6 +1932,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()

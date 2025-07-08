@@ -449,16 +449,16 @@ func TestCheckLoadConfigChanges(t *testing.T) {
 		// Create mock collection with IsUserSpecifiedReplicaMode = false
 		mockCollection1 := &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:               1001,
-				IsUserSpecifiedReplicaMode: false,
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
 			},
 		}
 
 		// Create mock collection with IsUserSpecifiedReplicaMode = true
 		mockCollection2 := &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:               1002,
-				IsUserSpecifiedReplicaMode: true,
+				CollectionID:             1002,
+				UserSpecifiedReplicaMode: true,
 			},
 		}
 

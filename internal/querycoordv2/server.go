@@ -848,7 +848,7 @@ func (s *Server) checkLoadConfigChanges(ctx context.Context) {
 	collectionIDs := s.meta.GetAll(ctx)
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 		collection := s.meta.GetCollection(ctx, collectionID)
-		if collection.IsUserSpecifiedReplicaMode {
+		if collection.UserSpecifiedReplicaMode {
 			log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
 			return false
 		}
@@ -879,7 +879,7 @@ func (s *Server) watchLoadConfigChanges() {
 		}
 		collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 			collection := s.meta.GetCollection(s.ctx, collectionID)
-			if collection.IsUserSpecifiedReplicaMode {
+			if collection.UserSpecifiedReplicaMode {
 				log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
 				return false
 			}
@@ -914,7 +914,7 @@ func (s *Server) watchLoadConfigChanges() {
 		}
 		collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
 			collection := s.meta.GetCollection(s.ctx, collectionID)
-			if collection.IsUserSpecifiedReplicaMode {
+			if collection.UserSpecifiedReplicaMode {
 				log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
 				return false
 			}
