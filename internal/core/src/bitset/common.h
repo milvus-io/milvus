@@ -162,6 +162,8 @@ struct CompareOpFlip {
     static constexpr CompareOpType op =
         (CmpOp == CompareOpType::LE)   ? CompareOpType::GE
         : (CmpOp == CompareOpType::LT) ? CompareOpType::GT
+        : (CmpOp == CompareOpType::GE) ? CompareOpType::LE
+        : (CmpOp == CompareOpType::GT) ? CompareOpType::LT
                                        : CmpOp;
 };
 
