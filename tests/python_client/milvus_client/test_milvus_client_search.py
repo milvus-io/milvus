@@ -1591,7 +1591,11 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             }
         )
         vectors_to_search = rng.random((1, dim))
-        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn, group_by_field=ct.default_reranker_field_name)
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    group_by_field=ct.default_reranker_field_name)
+        self.add_collection_field(client, collection_name, field_name=ct.default_new_field_name, data_type=DataType.INT64,
+                                  nullable=True)
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn, group_by_field=ct.default_new_field_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_reranker_on_dynamic_fields(self):
@@ -2345,88 +2349,8 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("new_field_name", [default_dynamic_field_name, "new_field"])
-    def test_milvus_client_search_query_enable_dynamic_and_add_field(self, new_field_name):
-        """
-        target: test search (high level api) normal case
-        method: create connection, collection, insert, add field(same as dynamic and different as dynamic) and search
-        expected: search/query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = 8
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=True)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
-        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
-        # 2. insert
-        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i),
-                 default_dynamic_field_name: 1} for i in range(default_nb)]
-        results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
-        # 3. add new field same as dynamic field name
-        default_value = 1
-        self.add_collection_field(client, collection_name, field_name=new_field_name, data_type=DataType.INT64,
-                                  nullable=True, default_value=default_value)
-        vectors_to_search = [vectors[0]]
-        insert_ids = [i for i in range(default_nb)]
-        # 4. check old dynamic data search is not impacted after add new field
-        self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                    filter=f'$meta["{default_dynamic_field_name}"] == 1',
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
-        # 5. check old dynamic data query is not impacted after add new field
-        for row in rows:
-            row[new_field_name] = default_value
-        self.query(client, collection_name, filter=f'$meta["{default_dynamic_field_name}"] == 1',
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name,
-                                "vector_type": DataType.FLOAT_VECTOR})
-        # 6. search filtered with the new field
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f"{new_field_name} == 1",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f"{new_field_name} is null",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": 0})
-        # 7. query filtered with the new field
-        self.query(client, collection_name, filter=f"{new_field_name} == 1",
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
-        self.query(client, collection_name, filter=f"{new_field_name} is null",
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: [],
-                                "pk_name": default_primary_key_field_name})
-        self.release_collection(client, collection_name)
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue #36484")
     @pytest.mark.parametrize("nullable", [True, False])
     def test_milvus_client_search_query_self_creation_default(self, nullable):
         """
