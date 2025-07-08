@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
 func TestPackWriterV2Suite(t *testing.T) {
@@ -119,9 +121,15 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 		deletes.Append(pk, ts)
 	}
 
+	retryOpts := []retry.Option{
+		retry.Attempts(3),
+		retry.Sleep(10 * time.Millisecond),
+		retry.MaxSleepTime(100 * time.Millisecond),
+	}
+
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema)).WithDeleteData(deletes)
 
-	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0)
+	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, retryOpts...)
 
 	gotInserts, _, _, _, _, err := bw.Write(context.Background(), pack)
 	s.NoError(err)

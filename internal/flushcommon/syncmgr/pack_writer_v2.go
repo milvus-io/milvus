@@ -76,8 +76,13 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 		return
 	}
 
-	if inserts, err = bw.writeInserts(ctx, pack); err != nil {
-		log.Error("failed to write insert data", zap.Error(err))
+	err = retry.Do(ctx, func() error {
+		var innerErr error
+		inserts, innerErr = bw.writeInserts(ctx, pack)
+		return innerErr
+	}, bw.writeRetryOpts...)
+	if err != nil {
+		log.Error("failed to write insert data after retries", zap.Error(err))
 		return
 	}
 	if stats, err = bw.writeStats(ctx, pack); err != nil {
@@ -135,6 +140,14 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err != nil {
 		return nil, err
 	}
+
+	needCleanup := true
+	defer func() {
+		if needCleanup {
+			bw.cleanupPartialFiles(ctx, paths)
+		}
+	}()
+
 	if err = w.Write(rec); err != nil {
 		return nil, err
 	}
@@ -157,7 +170,28 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	if err = w.Close(); err != nil {
 		return nil, err
 	}
+
+	needCleanup = false
 	return logs, nil
+}
+
+func (bw *BulkPackWriterV2) cleanupPartialFiles(ctx context.Context, paths []string) {
+	log.Warn("cleaning up partial files due to write failure", zap.Strings("paths", paths))
+
+	for _, path := range paths {
+		exists, err := bw.chunkManager.Exist(ctx, path)
+		if err != nil {
+			log.Warn("failed to check file existence during cleanup", zap.String("path", path), zap.Error(err))
+			continue
+		}
+
+		if exists {
+			err = bw.chunkManager.Remove(ctx, path)
+			if err != nil {
+				log.Warn("failed to remove partial file during cleanup", zap.String("path", path), zap.Error(err))
+			}
+		}
+	}
 }
 
 func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack) (storage.Record, error) {
