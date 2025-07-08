@@ -378,6 +378,7 @@ func (t *clusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 			Field2StatslogPaths: segInfo.GetStatslogs(),
 			Deltalogs:           segInfo.GetDeltalogs(),
 			IsSorted:            segInfo.GetIsSorted(),
+			StorageVersion:      segInfo.GetStorageVersion(),
 		})
 	}
 	log.Info("Compaction handler build clustering compaction plan", zap.Any("PreAllocatedLogIDs", logIDRange))
@@ -420,6 +421,12 @@ func (t *clusteringCompactionTask) processStats() error {
 			return nil
 		}
 
+		task := t.ShadowClone(setResultSegments(resultSegments))
+		err := t.saveTaskMeta(task)
+		if err != nil {
+			return err
+		}
+
 		if err := t.regeneratePartitionStats(tmpToResultSegments); err != nil {
 			log.Warn("regenerate partition stats failed, wait for retry", zap.Error(err))
 			return merr.WrapErrClusteringCompactionMetaError("regeneratePartitionStats", err)
@@ -448,7 +455,7 @@ func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 		return err
 	}
 	partitionStatsFile := path.Join(cli.RootPath(), common.PartitionStatsPath,
-		metautil.JoinIDPath(t.GetTaskProto().GetCollectionID(), t.GetTaskProto().GetPartitionID()), t.plan.GetChannel(),
+		metautil.JoinIDPath(t.GetTaskProto().GetCollectionID(), t.GetTaskProto().GetPartitionID()), t.GetTaskProto().GetChannel(),
 		strconv.FormatInt(t.GetTaskProto().GetPlanID(), 10))
 
 	value, err := cli.Read(ctx, partitionStatsFile)
