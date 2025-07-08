@@ -95,15 +95,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
     PinAllCells() {
         return folly::makeSemiFuture().deferValue([this](auto&&) {
-            size_t index = 0;
-            return PinInternal(
-                [this, index]() mutable -> std::pair<cid_t, bool> {
-                    if (index >= cells_.size()) {
-                        return std::make_pair(cells_.size(), true);
-                    }
-                    return std::make_pair(index++, false);
-                },
-                cells_.size());
+            std::vector<cid_t> cids;
+            cids.resize(cells_.size());
+            std::iota(cids.begin(), cids.end(), 0);
+            return PinInternal(cids);
         });
     }
 
@@ -139,22 +134,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             decltype(involved_cids.begin()) it;
             bool initialized = false;
 
-            return PinInternal(
-                [this,
-                 cids = std::move(involved_cids),
-                 it,
-                 initialized]() mutable -> std::pair<cid_t, bool> {
-                    if (!initialized) {
-                        it = cids.begin();
-                        initialized = true;
-                    }
-                    if (it == cids.end()) {
-                        return std::make_pair(0, true);
-                    }
-                    auto cid = *it++;
-                    return std::make_pair(cid, false);
-                },
-                reserve_size);
+            return PinInternal(involved_cids);
         });
     }
 
@@ -205,21 +185,19 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
  private:
     friend class CellAccessor<CellT>;
 
-    template <typename Fn>
+    template <typename CidsT>
     std::shared_ptr<CellAccessor<CellT>>
-    PinInternal(Fn&& cid_iterator, size_t reserve_size) {
+    PinInternal(const CidsT& cids) {
         std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
         std::unordered_set<cid_t> need_load_cids;
-        futures.reserve(reserve_size);
-        need_load_cids.reserve(reserve_size);
-        auto [cid, end] = cid_iterator();
-        while (!end) {
+        futures.reserve(cids.size());
+        need_load_cids.reserve(cids.size());
+        for (const auto& cid : cids) {
             auto [need_load, future] = cells_[cid].pin();
             futures.push_back(std::move(future));
             if (need_load) {
                 need_load_cids.insert(cid);
             }
-            std::tie(cid, end) = cid_iterator();
         }
         if (!need_load_cids.empty()) {
             RunLoad(std::move(need_load_cids));
