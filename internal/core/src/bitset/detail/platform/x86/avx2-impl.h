@@ -1595,28 +1595,28 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
                 op_arith_compare(
                     res_u8, src, -1 * right_operand, -1 * value, size);
         }
-    } else {
-        // the restriction of the API
-        assert((size % 8) == 0);
-
-        //
-        const __m256 right_v = _mm256_set1_ps(right_operand);
-        const __m256 value_v = _mm256_set1_ps(value);
-
-        // todo: aligned reads & writes
-
-        const size_t size8 = (size / 8) * 8;
-        for (size_t i = 0; i < size8; i += 8) {
-            const __m256 v0s = _mm256_loadu_ps(src + i);
-            const __m256 cmp =
-                ArithHelperF32<AOp, CmpOp>::op(v0s, right_v, value_v);
-            const uint8_t mmask = _mm256_movemask_ps(cmp);
-
-            res_u8[i / 8] = mmask;
-        }
-
-        return true;
     }
+
+    // the restriction of the API
+    assert((size % 8) == 0);
+
+    //
+    const __m256 right_v = _mm256_set1_ps(right_operand);
+    const __m256 value_v = _mm256_set1_ps(value);
+
+    // todo: aligned reads & writes
+
+    const size_t size8 = (size / 8) * 8;
+    for (size_t i = 0; i < size8; i += 8) {
+        const __m256 v0s = _mm256_loadu_ps(src + i);
+        const __m256 cmp =
+            ArithHelperF32<AOp, CmpOp>::op(v0s, right_v, value_v);
+        const uint8_t mmask = _mm256_movemask_ps(cmp);
+
+        res_u8[i / 8] = mmask;
+    }
+
+    return true;
 }
 
 template <ArithOpType AOp, CompareOpType CmpOp>
@@ -1635,32 +1635,32 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
                 op_arith_compare(
                     res_u8, src, -1 * right_operand, -1 * value, size);
         }
-    } else {
-        // the restriction of the API
-        assert((size % 8) == 0);
-
-        //
-        const __m256d right_v = _mm256_set1_pd(right_operand);
-        const __m256d value_v = _mm256_set1_pd(value);
-
-        // todo: aligned reads & writes
-
-        const size_t size8 = (size / 8) * 8;
-        for (size_t i = 0; i < size8; i += 8) {
-            const __m256d v0s = _mm256_loadu_pd(src + i);
-            const __m256d v1s = _mm256_loadu_pd(src + i + 4);
-            const __m256d cmp0 =
-                ArithHelperF64<AOp, CmpOp>::op(v0s, right_v, value_v);
-            const __m256d cmp1 =
-                ArithHelperF64<AOp, CmpOp>::op(v1s, right_v, value_v);
-            const uint8_t mmask0 = _mm256_movemask_pd(cmp0);
-            const uint8_t mmask1 = _mm256_movemask_pd(cmp1);
-
-            res_u8[i / 8] = mmask0 + mmask1 * 16;
-        }
-
-        return true;
     }
+
+    // the restriction of the API
+    assert((size % 8) == 0);
+
+    //
+    const __m256d right_v = _mm256_set1_pd(right_operand);
+    const __m256d value_v = _mm256_set1_pd(value);
+
+    // todo: aligned reads & writes
+
+    const size_t size8 = (size / 8) * 8;
+    for (size_t i = 0; i < size8; i += 8) {
+        const __m256d v0s = _mm256_loadu_pd(src + i);
+        const __m256d v1s = _mm256_loadu_pd(src + i + 4);
+        const __m256d cmp0 =
+            ArithHelperF64<AOp, CmpOp>::op(v0s, right_v, value_v);
+        const __m256d cmp1 =
+            ArithHelperF64<AOp, CmpOp>::op(v1s, right_v, value_v);
+        const uint8_t mmask0 = _mm256_movemask_pd(cmp0);
+        const uint8_t mmask1 = _mm256_movemask_pd(cmp1);
+
+        res_u8[i / 8] = mmask0 + mmask1 * 16;
+    }
+
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////
