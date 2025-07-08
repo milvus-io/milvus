@@ -9,6 +9,43 @@ using namespace milvus::segcore;
 using namespace milvus::storage;
 using namespace milvus::tracer;
 
+static std::unique_ptr<SearchResult> run_group_by_search(const std::string& raw_plan,
+                               const SchemaPtr& schema,
+                               SegmentInternalInterface* segment,
+                               int dim,
+                               int topK) {
+    proto::plan::PlanNode plan_node;
+    auto ok = google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
+    auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
+    auto num_queries = 1;
+    auto seed = 1024;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto search_result = segment->Search(plan.get(), ph_group.get(), 1L << 63);
+    CheckGroupBySearchResult(*search_result, topK, 1, false);
+    return search_result;
+}
+
+template <typename T>
+void validate_group_by_search_result(const std::vector<GroupByValueType>& group_by_values,
+                                   const std::vector<float>& distances,
+                                   int group_size,
+                                   int expected_group_count) {
+    std::unordered_map<T, int> value_map;
+    float lastDistance = 0.0;
+    for (size_t i = 0; i < group_by_values.size(); i++) {
+        if (std::holds_alternative<T>(group_by_values[i].value())) {
+            T value = std::get<T>(group_by_values[i].value());
+            value_map[value] += 1;
+            ASSERT_TRUE(value_map[value] <= group_size);
+            auto distance = distances.at(i);
+            ASSERT_TRUE(lastDistance <= distance);
+            lastDistance = distance;
+        }
+    }
+    ASSERT_EQ(value_map.size(), expected_group_count);
+}
+
 TEST(GroupBYJSON, SealedIndex) {
     using namespace milvus;
     using namespace milvus::query;
@@ -22,11 +59,12 @@ TEST(GroupBYJSON, SealedIndex) {
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto json_fid = schema->AddDebugField("json_field", DataType::JSON);
     schema->set_primary_field_id(str_fid);
-    size_t N = 50;
+    size_t N = 100;
 
     // 1. load raw data
-    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, 10);
+    auto raw_data = DataGen(schema, N, 42, 0, 1, 10, 10);
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    SegmentInternalInterface* segment_ptr = segment.get();
 
     // 2. load index
     auto vector_data = raw_data.get_col<float>(vec_fid);
@@ -55,37 +93,13 @@ TEST(GroupBYJSON, SealedIndex) {
                                           group_size: 2
                                           json_path: "/int8"
                                           json_cast_type: Int8
+                                          strict_group_size: true,
                                         >
                                         placeholder_tag: "$0"
          >)";
-        proto::plan::PlanNode plan_node;
-        auto ok =
-            google::protobuf::TextFormat::ParseFromString(raw_plan, &plan_node);
-        auto plan = CreateSearchPlanFromPlanNode(schema, plan_node);
-        auto num_queries = 1;
-        auto seed = 1024;
-        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, seed);
-        auto ph_group =
-            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-        auto search_result =
-            segment->Search(plan.get(), ph_group.get(), 1L << 63);
-
-        CheckGroupBySearchResult(*search_result, topK, num_queries, false);
-
+        auto search_result = run_group_by_search(raw_plan, schema, segment_ptr, dim, topK);
         auto& group_by_values = search_result->group_by_values_.value();
-        ASSERT_EQ(20, group_by_values.size());
-        std::unordered_map<int64_t, int> int8_map;
-        float lastDistance = 0.0;
-        for (size_t i = 0; i < group_by_values.size(); i++) {
-            if (std::holds_alternative<int64_t>(group_by_values[i].value())) {
-                int64_t brand = std::get<int64_t>(group_by_values[i].value());
-                int8_map[brand] += 1;
-                ASSERT_TRUE(int8_map[brand] <= group_size);
-                auto distance = search_result->distances_.at(i);
-                ASSERT_TRUE(lastDistance <= distance);
-                lastDistance = distance;
-            }
-        }
-        ASSERT_EQ(int8_map.size(), 10);
+        ASSERT_EQ(topK * group_size, group_by_values.size());
+        validate_group_by_search_result<int8_t>(group_by_values, search_result->distances_, group_size, topK);
     }
 }

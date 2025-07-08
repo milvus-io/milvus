@@ -735,6 +735,7 @@ DataGen(SchemaPtr schema,
                                R"(,"nested": {"level1": {"level2": "value"}})" +
                                "}";
                     data[i] = str;
+                    std::cout << "hc===json data[i]: " << data[i] << std::endl;
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
