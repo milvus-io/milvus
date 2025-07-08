@@ -183,7 +183,7 @@ class SegmentInternalInterface : public SegmentInterface {
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
-                res.emplace_back(str_view);
+                res.emplace_back(Json(str_view));
             }
             return {std::move(res), std::move(valid_data)};
         }
