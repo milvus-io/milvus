@@ -236,7 +236,7 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 		},
 	}
 
-	groups := RegroupImportFiles(job, files, false)
+	groups := RegroupImportFiles(job, files, int(dataSize))
 	total := 0
 	for i, fs := range groups {
 		sum := lo.SumBy(fs, func(f *datapb.ImportFileStats) int64 {
