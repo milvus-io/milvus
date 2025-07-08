@@ -227,10 +227,10 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const override {
-        // AssertInfo(offset >= 0 && offset < num_rows_,
-        //            "offset {} is out of range, num_rows: {}",
-        //            offset,
-        //            num_rows_);
+        AssertInfo(offset >= 0 && offset < num_rows_,
+                   "offset {} is out of range, num_rows: {}",
+                   offset,
+                   num_rows_);
         auto& num_rows_until_chunk = GetNumRowsUntilChunk();
         return ::milvus::GetChunkIDByOffset(offset, num_rows_until_chunk);
     }

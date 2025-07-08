@@ -177,7 +177,17 @@ class ChunkedColumnInterface {
  protected:
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
-        // AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
+        AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
+        auto num_rows = NumRows();
+        for (int64_t i = 0; i < count; i++) {
+            if (offsets[i] < 0 || offsets[i] >= num_rows) {
+                PanicInfo(ErrorCode::OutOfRange,
+                          "offsets[{}] {} is out of range, num_rows: {}",
+                          i,
+                          offsets[i],
+                          num_rows);
+            }
+        }
         return GetChunkIDsByOffsets(offsets, count);
     }
 };
