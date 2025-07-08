@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -692,6 +691,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 				TotalRows:  200,
 			},
 		},
+		SortedSegmentIDs: []int64{100, 110, 120},
 	}
 	it1 := &importTask{}
 	it1.task.Store(taskProto1)
@@ -721,6 +721,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 				TotalRows:  300,
 			},
 		},
+		SortedSegmentIDs: []int64{200, 210, 220},
 	}
 	it2 := &importTask{}
 	it2.task.Store(taskProto2)
@@ -743,13 +744,13 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
 	assert.NoError(t, err)
 
-	progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), importMeta, meta, nil)
+	progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.Equal(t, mockErr, reason)
 
 	// job does not exist
-	progress, state, _, _, reason = GetJobProgress(ctx, -1, importMeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(ctx, -1, importMeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.NotEqual(t, "", reason)
@@ -757,7 +758,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// pending state
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Pending, state)
 	assert.Equal(t, "", reason)
@@ -765,7 +766,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// preImporting state
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(10+30), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -773,7 +774,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// importing state, segmentImportedRows/totalRows = 0.5
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(10+30+30*0.5), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -791,36 +792,81 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 	err = meta.UpdateSegmentsInfo(context.TODO(), UpdateImportedRows(22, 100))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, nil)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(float32(10+30+30)), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
 	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 0.5
-	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
+	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	assert.NoError(t, err)
-	sjm := NewMockStatsJobManager(t)
-	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).RunAndReturn(func(segmentID int64, _ indexpb.StatsSubJob) *indexpb.StatsTask {
-		if lo.Contains([]int64{10, 11, 12}, segmentID) {
-			return &indexpb.StatsTask{
-				State: indexpb.JobState_JobStateFinished,
-			}
-		}
-		return &indexpb.StatsTask{
-			State: indexpb.JobState_JobStateInProgress,
-		}
+
+	err = meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             100,
+			IsImporting:    true,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      100,
+			IsSorted:       true,
+			CompactionFrom: []int64{10},
+		},
 	})
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, sjm)
+	err = meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             110,
+			IsImporting:    true,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      100,
+			IsSorted:       true,
+			CompactionFrom: []int64{11},
+		},
+	})
+	err = meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             120,
+			IsImporting:    true,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      100,
+			IsSorted:       true,
+			CompactionFrom: []int64{12},
+		},
+	})
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(10+30+30+10*0.5), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
 
-	// stats state, len(statsSegmentIDs) / (len(originalSegmentIDs) = 1
-	sjm = NewMockStatsJobManager(t)
-	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
-		State: indexpb.JobState_JobStateFinished,
+	err = meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             200,
+			IsImporting:    true,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      100,
+			IsSorted:       true,
+			CompactionFrom: []int64{20},
+		},
 	})
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, sjm)
+	err = meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             210,
+			IsImporting:    true,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      100,
+			IsSorted:       true,
+			CompactionFrom: []int64{21},
+		},
+	})
+	err = meta.AddSegment(ctx, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             220,
+			IsImporting:    true,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      100,
+			IsSorted:       true,
+			CompactionFrom: []int64{22},
+		},
+	})
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(10+30+30+10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -828,7 +874,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// completed state
 	err = importMeta.UpdateJob(context.TODO(), job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
-	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta, sjm)
+	progress, state, _, _, reason = GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
 	assert.Equal(t, int64(100), progress)
 	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)
