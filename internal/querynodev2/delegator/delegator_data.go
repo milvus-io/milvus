@@ -139,7 +139,13 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
 			// check whether segment has been excluded
-			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
+			// all segment in excluded segment should not be add again
+			// don not check excluded ts
+			// because dropped segment in excluded segment may use wrong excluded ts
+			// which use checkpoint ts as excluded ts
+			// but checkpoint_ts < segment_end_ts cause exclueded data is not filtered out at filter node
+			// should be excluded here
+			if ok := sd.VerifyExcludedSegments(segmentID, 0); !ok {
 				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
 				sd.growingSegmentLock.Unlock()
 				growing.Release(context.Background())
