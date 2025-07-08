@@ -316,7 +316,8 @@ proxy:
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
-  maxResultEntries: 1000000
+  # Disabled if the value is less or equal to 0.
+  maxResultEntries: -1
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -677,7 +678,6 @@ dataCoord:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
     missingTolerance: 86400 # The retention duration of the unrecorded binary log (binlog) files. Setting a reasonably large value for this parameter avoids erroneously deleting the newly created binlog files that lack metadata. Unit: second.
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
-    removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
   enableActiveStandby: false
@@ -687,13 +687,15 @@ dataCoord:
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
-    maxSizeInMBPerImportTask: 6144 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
+    maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
+    fileNumPerSlot: 1 # The files number per slot for pre-import/import task.
+    memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65536 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -719,7 +721,7 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncMgrTasks: 64 # The max concurrent sync task number of datanode sync mgr globally
+    maxParallelSyncMgrTasksPerCPUCore: 16 # The max concurrent sync task number of datanode sync mgr per CPU core
     skipMode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
@@ -751,11 +753,12 @@ dataNode:
     maxChannelCheckpointsPerPRC: 128 # The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.
     channelCheckpointUpdateTickInSeconds: 10 # The frequency, in seconds, at which the channel checkpoint updater executes updates.
   import:
-    maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
-    readBufferSizeInMB: 64 # The insert buffer size (in MB) during import.
+    readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     maxTaskSlotNum: 16 # The maximum number of slots occupied by each import/pre-import task.
+    memoryLimitPercentage: 20 # The percentage of memory limit for import/pre-import tasks.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.

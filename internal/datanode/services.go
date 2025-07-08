@@ -286,6 +286,7 @@ func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChanne
 func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("jobID", req.GetJobID()),
+		zap.Int64("taskSlot", req.GetTaskSlot()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 		zap.Strings("vchannels", req.GetVchannels()),
@@ -321,6 +322,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
 		zap.Int64("jobID", req.GetJobID()),
+		zap.Int64("taskSlot", req.GetTaskSlot()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 		zap.Strings("vchannels", req.GetVchannels()),

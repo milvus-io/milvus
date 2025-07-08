@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 type Scheduler interface {
@@ -36,54 +37,86 @@ type Scheduler interface {
 }
 
 type scheduler struct {
-	manager TaskManager
+	manager         TaskManager
+	memoryAllocator MemoryAllocator
 
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
 
 func NewScheduler(manager TaskManager) Scheduler {
+	memoryAllocator := NewMemoryAllocator(int64(hardware.GetMemoryCount()))
 	return &scheduler{
-		manager:   manager,
-		closeChan: make(chan struct{}),
+		manager:         manager,
+		memoryAllocator: memoryAllocator,
+		closeChan:       make(chan struct{}),
 	}
 }
 
 func (s *scheduler) Start() {
 	log.Info("start import scheduler")
+
 	var (
 		exeTicker = time.NewTicker(1 * time.Second)
 		logTicker = time.NewTicker(10 * time.Minute)
 	)
 	defer exeTicker.Stop()
 	defer logTicker.Stop()
+
 	for {
 		select {
 		case <-s.closeChan:
 			log.Info("import scheduler exited")
 			return
 		case <-exeTicker.C:
-			tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
-			sort.Slice(tasks, func(i, j int) bool {
-				return tasks[i].GetTaskID() < tasks[j].GetTaskID()
-			})
-			futures := make(map[int64][]*conc.Future[any])
-			for _, task := range tasks {
-				fs := task.Execute()
-				futures[task.GetTaskID()] = fs
-				tryFreeFutures(futures)
-			}
-			for taskID, fs := range futures {
-				err := conc.AwaitAll(fs...)
-				if err != nil {
-					continue
-				}
-				s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
-				log.Info("preimport/import done", zap.Int64("taskID", taskID))
-			}
+			s.scheduleTasks()
 		case <-logTicker.C:
 			LogStats(s.manager)
 		}
+	}
+}
+
+// scheduleTasks implements memory-based task scheduling using MemoryAllocator
+// It selects tasks that can fit within the available memory.
+func (s *scheduler) scheduleTasks() {
+	pendingTasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
+	sort.Slice(pendingTasks, func(i, j int) bool {
+		return pendingTasks[i].GetTaskID() < pendingTasks[j].GetTaskID()
+	})
+
+	selectedTasks := make([]Task, 0)
+	tasksBufferSize := make(map[int64]int64)
+	for _, task := range pendingTasks {
+		taskBufferSize := task.GetBufferSize()
+		if s.memoryAllocator.TryAllocate(task.GetTaskID(), taskBufferSize) {
+			selectedTasks = append(selectedTasks, task)
+			tasksBufferSize[task.GetTaskID()] = taskBufferSize
+		}
+	}
+
+	log.Info("processing selected tasks",
+		zap.Int("pending", len(pendingTasks)),
+		zap.Int("selected", len(selectedTasks)))
+
+	if len(selectedTasks) == 0 {
+		return
+	}
+
+	futures := make(map[int64][]*conc.Future[any])
+	for _, task := range selectedTasks {
+		fs := task.Execute()
+		futures[task.GetTaskID()] = fs
+	}
+
+	for taskID, fs := range futures {
+		err := conc.AwaitAll(fs...)
+		if err != nil {
+			s.memoryAllocator.Release(taskID, tasksBufferSize[taskID])
+			continue
+		}
+		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
+		s.memoryAllocator.Release(taskID, tasksBufferSize[taskID])
+		log.Info("preimport/import done", zap.Int64("taskID", taskID))
 	}
 }
 

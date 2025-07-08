@@ -1066,7 +1066,8 @@ std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
-                           int64_t dim) {
+                           int64_t dim,
+                           milvus_storage::ArrowFileSystemPtr fs) {
     AssertInfo(remote_files.size() > 0, "remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
@@ -1086,8 +1087,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         remote_chunk_files = column_group_files[field_id];
     }
 
-    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
-                  .GetArrowFileSystem();
+    AssertInfo(fs != nullptr,
+               "storage v2 arrow file system is not initialized");
 
     // set up channel for arrow reader
     auto field_data_info = FieldDataInfo();

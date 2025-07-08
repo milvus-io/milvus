@@ -442,7 +442,7 @@ func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context,
 						},
 					},
 				},
-			}, job, m.allocator, m.meta, m.importMeta)
+			}, job, m.allocator, m.meta, m.importMeta, paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt())
 			if err != nil {
 				log.Warn("new import tasks failed", zap.Error(err))
 				return err

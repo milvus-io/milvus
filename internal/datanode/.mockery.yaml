@@ -18,3 +18,4 @@ packages:
   github.com/milvus-io/milvus/internal/datanode/importv2:
     interfaces:
       Task:
+      TaskManager:
