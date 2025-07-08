@@ -178,6 +178,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 		}
 	}
 	sealed, growing = current.Get(partitions...)
+	version = current.version
 	if requiredLoadRatio == 1.0 {
 		// if require full result, current target is fully loaded, so we can use current target version to filter segments
 		// Note: we can also use query view's segment list to filter segments, but it's not efficient enough
