@@ -34,9 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
@@ -51,15 +51,17 @@ type ClusteringCompactionTaskStorageV2Suite struct {
 
 func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storageType", "local")
 	paramtable.Get().Save("common.storage.enableV2", "true")
+<<<<<<< HEAD
 	initcore.InitStorageV2FileSystem(paramtable.Get())
 	s.task.compactionParams = compaction.GenParams()
+=======
+	refreshPlanParams(s.plan)
+>>>>>>> 3d3a711376 (fix unittest and add storage config in sync task)
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
-	paramtable.Get().Reset("common.storageType")
 	paramtable.Get().Reset("common.storage.enableV2")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
@@ -282,7 +284,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)})
 	pack := new(syncmgr.SyncPack).WithCollectionID(CollectionID).WithPartitionID(PartitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, segmentID, genCollectionSchema())).WithDeleteData(deleteData)
-	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, nil)
+	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    rootPath,
+	})
 	return bw.Write(context.Background(), pack)
 }
 
