@@ -1348,7 +1348,7 @@ template <CompareOpType CmpOp>
 struct ArithHelperF32<ArithOpType::Div, CmpOp> {
     static inline __m256
     op(const __m256 left, const __m256 right, const __m256 value) {
-        // right must be positive
+        // right must not be less than 0
         // left == right * value
         constexpr auto pred = ComparePredicate<float, CmpOp>::value;
         return _mm256_cmp_ps(left, _mm256_mul_ps(right, value), pred);
