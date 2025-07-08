@@ -44,12 +44,38 @@ namespace milvus {
 using namespace milvus::cachinglayer;
 
 std::pair<size_t, size_t> inline GetChunkIDByOffset(
-    int64_t offset, std::vector<int64_t>& num_rows_until_chunk) {
+    int64_t offset, const std::vector<int64_t>& num_rows_until_chunk) {
     auto iter = std::lower_bound(
         num_rows_until_chunk.begin(), num_rows_until_chunk.end(), offset + 1);
     size_t chunk_idx = std::distance(num_rows_until_chunk.begin(), iter) - 1;
     size_t offset_in_chunk = offset - num_rows_until_chunk[chunk_idx];
     return {chunk_idx, offset_in_chunk};
+}
+
+std::pair<std::vector<milvus::cachinglayer::cid_t>,
+          std::vector<
+              int64_t>> inline GetChunkIDsByOffsets(const int64_t* offsets,
+                                                    int64_t count,
+                                                    const std::vector<int64_t>&
+                                                        num_rows_until_chunk) {
+    std::vector<milvus::cachinglayer::cid_t> cids(count, 1);
+    std::vector<int64_t> offsets_in_chunk(count);
+    int64_t len = num_rows_until_chunk.size() - 1;
+    while (len > 1) {
+        const int64_t half = len / 2;
+        len -= half;
+        for (size_t i = 0; i < count; ++i) {
+            const bool cmp =
+                num_rows_until_chunk[cids[i] + half - 1] < offsets[i] + 1;
+            cids[i] += static_cast<int64_t>(cmp) * half;
+        }
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+        offsets_in_chunk[i] = offsets[i] - num_rows_until_chunk[--cids[i]];
+    }
+
+    return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
 }
 
 class ChunkedColumnBase : public ChunkedColumnInterface {
@@ -205,8 +231,15 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         //            "offset {} is out of range, num_rows: {}",
         //            offset,
         //            num_rows_);
-        auto num_rows_until_chunk = GetNumRowsUntilChunk();
+        auto& num_rows_until_chunk = GetNumRowsUntilChunk();
         return ::milvus::GetChunkIDByOffset(offset, num_rows_until_chunk);
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
+        auto& num_rows_until_chunk = GetNumRowsUntilChunk();
+        return ::milvus::GetChunkIDsByOffsets(
+            offsets, count, num_rows_until_chunk);
     }
 
     PinWrapper<Chunk*>

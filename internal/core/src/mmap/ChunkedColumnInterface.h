@@ -93,6 +93,9 @@ class ChunkedColumnInterface {
     virtual std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const = 0;
 
+    virtual std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const = 0;
+
     virtual PinWrapper<Chunk*>
     GetChunk(int64_t chunk_id) const = 0;
 
@@ -175,17 +178,7 @@ class ChunkedColumnInterface {
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
         // AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
-        std::vector<milvus::cachinglayer::cid_t> cids;
-        cids.reserve(count);
-        std::vector<int64_t> offsets_in_chunk;
-        offsets_in_chunk.reserve(count);
-
-        for (int64_t i = 0; i < count; i++) {
-            auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
-            cids.push_back(chunk_id);
-            offsets_in_chunk.push_back(offset_in_chunk);
-        }
-        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+        return GetChunkIDsByOffsets(offsets, count);
     }
 };
 
