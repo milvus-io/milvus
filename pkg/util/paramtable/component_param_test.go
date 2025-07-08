@@ -529,6 +529,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		assert.Equal(t, hardware.GetCPUNum(), Params.GCRemoveConcurrent.GetAsInt())
+		params.Save("dataCoord.gc.removeConcurrent", "32")
+		assert.Equal(t, 32, Params.GCRemoveConcurrent.GetAsInt())
 		assert.Equal(t, 0.6, Params.GCSlowDownCPUUsageThreshold.GetAsFloat())
 		params.Save("dataCoord.gc.slowDownCPUUsageThreshold", "0.5")
 		assert.Equal(t, 0.5, Params.GCSlowDownCPUUsageThreshold.GetAsFloat())

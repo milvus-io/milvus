@@ -4738,9 +4738,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCRemoveConcurrent = ParamItem{
 		Key:          "dataCoord.gc.removeConcurrent",
 		Version:      "2.3.4",
-		DefaultValue: "32",
-		Doc:          "number of concurrent goroutines to remove dropped s3 objects",
-		Export:       true,
+		DefaultValue: "0",
+		Formatter: func(value string) string {
+			num, err := strconv.Atoi(value)
+			if err != nil || num == 0 {
+				return strconv.Itoa(hardware.GetCPUNum())
+			}
+			return value
+		},
+		Doc:    "number of concurrent goroutines to remove dropped s3 objects",
+		Export: false,
 	}
 	p.GCRemoveConcurrent.Init(base.mgr)
 

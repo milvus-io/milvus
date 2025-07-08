@@ -678,7 +678,6 @@ dataCoord:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
     missingTolerance: 86400 # The retention duration of the unrecorded binary log (binlog) files. Setting a reasonably large value for this parameter avoids erroneously deleting the newly created binlog files that lack metadata. Unit: second.
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
-    removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
     slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
   enableActiveStandby: false
