@@ -99,7 +99,6 @@ func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string
 				}
 			}
 			entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
-			sr = append(sr, entry)
 		}()
 	}
 	return sr, nil
