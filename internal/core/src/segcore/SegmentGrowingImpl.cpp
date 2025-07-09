@@ -101,6 +101,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         field_id_to_offset.emplace(field_id, field_offset++);
         // may be added field, add the null if has existed data
         if (exist_rows > 0 && !insert_record_.is_data_exist(field_id)) {
+            LOG_WARN(
+                "heterogeneous insert data found for segment {}, field id {}, "
+                "data type {}",
+                id_,
+                field_id.get(),
+                field.type());
             schema_->AddField(FieldName(field.field_name()),
                               field_id,
                               DataType(field.type()),
@@ -124,6 +130,13 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_id_to_offset.count(field_id) > 0) {
             continue;
         }
+        LOG_INFO(
+            "schema newer than insert data found for segment {}, attach empty "
+            "field data"
+            "not exist field {}, data type {}",
+            id_,
+            field_id.get(),
+            field_meta.get_data_type());
         auto data = bulk_subscript_not_exist_field(field_meta, num_rows);
         insert_record_proto->add_fields_data()->CopyFrom(*data);
         field_id_to_offset.emplace(field_id, field_offset++);
@@ -500,8 +513,10 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         auto field_data = storage::CreateFieldData(
                             data_type,
                             field.second.is_nullable(),
-                            IsVectorDataType(data_type) && !IsSparseFloatVectorDataType(data_type) ? field.second.get_dim()
-                                                     : 1,
+                            IsVectorDataType(data_type) &&
+                                    !IsSparseFloatVectorDataType(data_type)
+                                ? field.second.get_dim()
+                                : 1,
                             batch_num_rows);
                         field_data->FillFieldData(table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
@@ -1236,6 +1251,12 @@ SegmentGrowingImpl::BulkGetJsonData(
 void
 SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
+        LOG_INFO(
+            "lazy check schema segment {} found newer schema version, current "
+            "schema version {}, new schema version {}",
+            id_,
+            schema_->get_schema_version(),
+            sch->get_schema_version());
         Reopen(sch);
     }
 }
@@ -1271,6 +1292,10 @@ SegmentGrowingImpl::FinishLoad() {
 void
 SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
+    LOG_INFO("start fill empty field {} (data type {}) for growing segment {}",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
     // append meta only needed when schema is old
     // loading old segment with new schema will have meta appended
     if (!insert_record_.is_data_exist(field_id)) {
@@ -1286,9 +1311,10 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     insert_record_.get_data_base(field_id)->set_data_raw(
         0, total_row_num, data.get(), field_meta);
 
-    LOG_INFO("Growing segment {} fill empty field {} done",
-             this->get_segment_id(),
-             field_meta.get_id().get());
+    LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
 }
 
 }  // namespace milvus::segcore
