@@ -110,21 +110,12 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                                                        uids)](auto&&)
                                                       -> std::shared_ptr<
                                                           CellAccessor<CellT>> {
-            auto count = uids.size();
+            auto count = std::min(uids.size(), cells_.size());
             ska::flat_hash_set<cid_t> involved_cids;
             involved_cids.reserve(count);
             switch (cell_id_mapping_mode_) {
                 case CellIdMappingMode::IDENTICAL: {
                     for (auto& uid : uids) {
-                        if (uid >= cells_.size()) {
-                            throw std::invalid_argument(
-                                fmt::format("CacheSlot {}: identical mode, "
-                                            "translator returned cell_id {} "
-                                            "for uid {} which is out of range",
-                                            translator_->key(),
-                                            uid,
-                                            uid));
-                        }
                         involved_cids.insert(uid);
                     }
                     break;
@@ -138,28 +129,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 default: {
                     for (auto& uid : uids) {
                         auto cid = cell_id_of(uid);
-                        if (cid >= cells_.size()) {
-                            throw std::invalid_argument(
-                                fmt::format("CacheSlot {}: customized mode, "
-                                            "translator returned cell_id {} "
-                                            "for uid {} which is out of range",
-                                            translator_->key(),
-                                            cid,
-                                            uid));
-                        }
                         involved_cids.insert(cid);
                     }
                 }
             }
-            auto reserve_size = involved_cids.size();
-
-            // must be captured by value.
-            // theoretically, we can initialize it outside, and it will not be invalidated
-            // even though we moved involved_cids afterwards, but for safety we initialize it
-            // inside the lambda.
-            decltype(involved_cids.begin()) it;
-            bool initialized = false;
-
             return PinInternal(involved_cids);
         });
     }
@@ -217,6 +190,11 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         std::unordered_set<cid_t> need_load_cids;
         futures.reserve(cids.size());
         need_load_cids.reserve(cids.size());
+        for (const auto& cid : cids) {
+            if (cid >= cells_.size()) {
+                throw std::invalid_argument(fmt::format("cid {} out of range, slot has {} cells", cid, cells_.size()));
+            }
+        }
         for (const auto& cid : cids) {
             auto [need_load, future] = cells_[cid].pin();
             futures.push_back(std::move(future));
