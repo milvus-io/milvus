@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -189,7 +190,7 @@ func (it *indexBuildTask) PreExecute(ctx context.Context) error {
 			var err error
 			it.req.Dim, err = strconv.ParseInt(dimStr, 10, 64)
 			if err != nil {
-				log.Ctx(ctx).Error("parse dimesion failed", zap.Error(err))
+				log.Ctx(ctx).Error("parse dimension failed", zap.Error(err))
 				// ignore error
 			}
 		}
@@ -297,7 +298,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 
 	if buildIndexParams.StorageVersion == storage.StorageV2 {
-		buildIndexParams.SegmentInsertFiles = GetSegmentInsertFiles(
+		buildIndexParams.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			it.req.GetInsertLogs(),
 			it.req.GetStorageConfig(),
 			it.req.GetCollectionID(),

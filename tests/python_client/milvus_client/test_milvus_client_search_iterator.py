@@ -54,7 +54,7 @@ def external_filter_with_outputs(hits):
     results = []
     for hit in hits:
         # equals filter nothing if there are output_fields
-        if hit.distance < 1.0 and len(hit.fields) > 0:
+        if hit.distance <= 4.0 and len(hit.fields) > 0:
             results.append(hit)
     return results
 
@@ -654,7 +654,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    @pytest.fixture(scope="function", params=["DOUBLE", "JSON", "varchar", "bool"])
     def supported_json_cast_type(self, request):
         yield request.param
 
@@ -666,7 +666,8 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("metric_type", ct.dense_metrics)
-    def test_milvus_client_search_iterator_default(self, metric_type):
+    @pytest.mark.parametrize("add_field", [True, False])
+    def test_milvus_client_search_iterator_default(self, metric_type, add_field):
         """
         target: test search iterator (high level api) normal case
         method: create connection, collection, insert and search iterator
@@ -710,6 +711,9 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                           check_items={"nq": 1, "limit": limit, 
                                        "enable_milvus_client_api": True,
                                        "pk_name": default_primary_key_field_name})[0]
+        if add_field:
+            self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                      nullable=True)
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
                 radius = res[0][limit // 2].get('distance', 0) - 0.1  # pick a radius to make sure there exists results

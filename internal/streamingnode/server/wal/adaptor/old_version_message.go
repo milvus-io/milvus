@@ -42,7 +42,7 @@ func newOldVersionImmutableMessage(
 	case *msgstream.InsertMsg:
 		mutableMessage = newV1InsertMsgFromV0(underlyingMsg, uint64(len(msg.Payload())))
 	case *msgstream.DeleteMsg:
-		mutableMessage = newV1DeleteMsgFromV0(underlyingMsg)
+		mutableMessage = newV1DeleteMsgFromV0(underlyingMsg, uint64(underlyingMsg.NumRows))
 	case *msgstream.TimeTickMsg:
 		mutableMessage = newV1TimeTickMsgFromV0(underlyingMsg)
 	case *msgstream.CreatePartitionMsg:
@@ -131,11 +131,12 @@ func newV1InsertMsgFromV0(msg *msgstream.InsertMsg, binarySize uint64) message.M
 }
 
 // newV1DeleteMsgFromV0 creates a new delete message from the old version delete message.
-func newV1DeleteMsgFromV0(msg *msgstream.DeleteMsg) message.MutableMessage {
+func newV1DeleteMsgFromV0(msg *msgstream.DeleteMsg, rows uint64) message.MutableMessage {
 	mutableMessage, err := message.NewDeleteMessageBuilderV1().
 		WithVChannel(msg.ShardName).
 		WithHeader(&message.DeleteMessageHeader{
 			CollectionId: msg.CollectionID,
+			Rows:         rows,
 		}).
 		WithBody(msg.DeleteRequest).
 		BuildMutable()

@@ -20,7 +20,6 @@ type Type = string
 
 const (
 	TypeNone   Type = "None"
-	QuerySlot  Type = "QuerySlot"
 	PreImport  Type = "PreImport"
 	Import     Type = "Import"
 	Compaction Type = "Compaction"
@@ -28,3 +27,12 @@ const (
 	Stats      Type = "Stats"
 	Analyze    Type = "Analyze"
 )
+
+var TypeList = []Type{
+	PreImport,
+	Import,
+	Compaction,
+	Index,
+	Stats,
+	Analyze,
+}

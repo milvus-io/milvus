@@ -16,9 +16,24 @@
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
 #include "storage/MmapManager.h"
+
 namespace milvus::index {
 constexpr const char* TMP_JSON_INVERTED_LOG_PREFIX =
     "/tmp/milvus/json-key-inverted-index-log/";
+constexpr size_t MEMORY_THRESHOLD = 128 * 1024 * 1024;
+constexpr size_t VECTOR_ELEMENT_SIZE = 8;
+constexpr size_t KEY_OVERHEAD = 2;
+size_t current_batch_size_ = 0;
+
+size_t
+calculateMemoryUsage(const std::map<std::string, std::vector<int64_t>>& mp) {
+    size_t total_memory = 0;
+    for (const auto& [key, vec] : mp) {
+        total_memory += (key.length());
+        total_memory += (vec.size() * VECTOR_ELEMENT_SIZE);
+    }
+    return total_memory * KEY_OVERHEAD;
+}
 
 void
 JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
@@ -50,6 +65,10 @@ JsonKeyStatsInvertedIndex::AddJSONEncodeValue(
     }
 
     mp[key].push_back(combine_id);
+
+    if (calculateMemoryUsage(mp) >= MEMORY_THRESHOLD) {
+        AddInvertedRecord(mp);
+    }
 }
 
 void
@@ -70,6 +89,8 @@ JsonKeyStatsInvertedIndex::AddInvertedRecord(
                                                json_offsets.data(),
                                                json_offsets_lens.data(),
                                                keys.size());
+    mp.clear();
+    current_batch_size_ = 0;
 }
 
 void
@@ -266,11 +287,9 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx);
     if (is_load) {
-        auto prefix = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
-        path_ = prefix;
+        path_ = disk_file_manager_->GetLocalJsonKeyIndexPrefix();
     } else {
-        auto prefix = disk_file_manager_->GetJsonKeyIndexIdentifier();
-        path_ = std::string(TMP_JSON_INVERTED_LOG_PREFIX) + prefix;
+        path_ = disk_file_manager_->GetLocalTempJsonKeyIndexPrefix();
         boost::filesystem::create_directories(path_);
         std::string field_name =
             std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
@@ -290,6 +309,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
       last_commit_time_(stdclock::now()) {
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, "", TANTIVY_INDEX_LATEST_VERSION, true /* in_ram */);
+    set_is_growing(true);
 }
 
 JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
@@ -304,6 +324,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     boost::filesystem::create_directories(path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, path_.c_str(), TANTIVY_INDEX_LATEST_VERSION);
+    set_is_growing(true);
 }
 
 IndexStatsPtr
@@ -313,7 +334,8 @@ JsonKeyStatsInvertedIndex::Upload(const Config& config) {
     index_build_timestamps_.index_build_done_ =
         std::chrono::system_clock::now();
     LOG_INFO(
-        "build json key index done for field id:{}, json parse duration: {}s, "
+        "index build done for json key index, field id:{}, json parse "
+        "duration: {}s, "
         "tantivy document add schedule duration : {}s, "
         "tantivy total duration : {}s, "
         "total duration : {}s",
@@ -368,7 +390,7 @@ void
 JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                                 const Config& config) {
     auto index_files =
-        GetValueFromConfig<std::vector<std::string>>(config, "index_files");
+        GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load json key index");
     for (auto& index_file : index_files.value()) {
@@ -379,14 +401,26 @@ JsonKeyStatsInvertedIndex::Load(milvus::tracer::TraceContext ctx,
             index_file = remote_prefix + "/" + index_file;
         }
     }
-    disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value());
+    disk_file_manager_->CacheJsonKeyIndexToDisk(index_files.value(),
+                                                config[milvus::LOAD_PRIORITY]);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(path_.c_str(),
-                                                     milvus::index::SetBitset);
-    LOG_INFO("load json key index done for field id:{} with dir:{}",
-             field_id_,
-             path_);
+
+    auto load_in_mmap =
+        GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        path_.c_str(), load_in_mmap, milvus::index::SetBitsetSealed);
+
+    if (!load_in_mmap) {
+        // the index is loaded in ram, so we can remove files in advance
+        disk_file_manager_->RemoveJsonKeyIndexFiles();
+    }
+
+    LOG_INFO(
+        "load json key index done for field id:{} with dir:{}, load_in_mmap:{}",
+        field_id_,
+        path_,
+        load_in_mmap);
 }
 
 void
@@ -493,8 +527,8 @@ JsonKeyStatsInvertedIndex::Reload() {
 }
 
 void
-JsonKeyStatsInvertedIndex::CreateReader() {
-    wrapper_->create_reader();
+JsonKeyStatsInvertedIndex::CreateReader(SetBitsetFn set_bitset) {
+    wrapper_->create_reader(set_bitset);
 }
 
 }  // namespace milvus::index

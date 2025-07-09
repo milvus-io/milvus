@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -37,7 +38,7 @@ import (
 type embeddingNode struct {
 	BaseNode
 
-	schema      *schemapb.CollectionSchema
+	metaCache   metacache.MetaCache
 	pkField     *schemapb.FieldSchema
 	channelName string
 
@@ -45,7 +46,7 @@ type embeddingNode struct {
 	functionRunners map[int64]function.FunctionRunner
 }
 
-func newEmbeddingNode(channelName string, schema *schemapb.CollectionSchema) (*embeddingNode, error) {
+func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embeddingNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
@@ -53,9 +54,11 @@ func newEmbeddingNode(channelName string, schema *schemapb.CollectionSchema) (*e
 	node := &embeddingNode{
 		BaseNode:        baseNode,
 		channelName:     channelName,
-		schema:          schema,
+		metaCache:       metaCache,
 		functionRunners: make(map[int64]function.FunctionRunner),
 	}
+
+	schema := metaCache.Schema()
 
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {
@@ -152,7 +155,7 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 		return []Msg{fgMsg}
 	}
 
-	insertData, err := writebuffer.PrepareInsert(eNode.schema, eNode.pkField, fgMsg.InsertMessages)
+	insertData, err := writebuffer.PrepareInsert(eNode.metaCache.Schema(), eNode.pkField, fgMsg.InsertMessages)
 	if err != nil {
 		log.Error("failed to prepare insert data", zap.Error(err))
 		panic(err)
@@ -166,6 +169,12 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 
 	fgMsg.InsertData = insertData
 	return []Msg{fgMsg}
+}
+
+func (eNode *embeddingNode) Free() {
+	for _, runner := range eNode.functionRunners {
+		runner.Close()
+	}
 }
 
 func BuildSparseFieldData(array *schemapb.SparseFloatArray) storage.FieldData {

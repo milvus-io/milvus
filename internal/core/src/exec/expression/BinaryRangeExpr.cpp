@@ -305,17 +305,19 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [ lower_inclusive, upper_inclusive, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const T* data,
-            const bool* valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            HighPrecisionType val1,
-            HighPrecisionType val2) {
+    auto execute_sub_batch = [lower_inclusive,
+                              upper_inclusive,
+                              &processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const T* data,
+                                 const bool* valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 HighPrecisionType val1,
+                                 HighPrecisionType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFunc<T, true, true, filter_type> func;
             func(val1,
@@ -447,22 +449,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [
-            lower_inclusive,
-            upper_inclusive,
-            pointer,
-            &bitmap_input,
-            &processed_cursor
-        ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::Json* data,
-            const bool* valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            ValueType val1,
-            ValueType val2) {
+    auto execute_sub_batch = [lower_inclusive,
+                              upper_inclusive,
+                              pointer,
+                              &bitmap_input,
+                              &processed_cursor]<FilterType filter_type =
+                                                     FilterType::sequential>(
+                                 const milvus::Json* data,
+                                 const bool* valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 ValueType val1,
+                                 ValueType val2) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForJson<ValueType, true, true, filter_type>
                 func;
@@ -550,9 +550,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
-    auto real_batch_size = current_data_chunk_pos_ + batch_size_ > active_count_
-                               ? active_count_ - current_data_chunk_pos_
-                               : batch_size_;
+    auto real_batch_size =
+        (current_data_chunk_pos_ + batch_size_ > active_count_)
+            ? active_count_ - current_data_chunk_pos_
+            : batch_size_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 #define BinaryRangeJSONIndexCompare(cmp)                      \
     do {                                                      \
@@ -645,82 +646,104 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                             val1,
                             val2,
                             lower_inclusive,
-                            upper_inclusive](bool valid,
-                                             uint8_t type,
-                                             uint32_t row_id,
-                                             uint16_t offset,
-                                             uint16_t size,
-                                             int32_t value) {
-            if (valid) {
-                if constexpr (std::is_same_v<GetType, int64_t>) {
-                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                        type != uint8_t(milvus::index::JSONType::INT64) &&
-                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
-                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
-                        return false;
-                    }
-                } else if constexpr (std::is_same_v<GetType,
-                                                    std::string_view>) {
-                    if (type != uint8_t(milvus::index::JSONType::STRING) &&
-                        type !=
-                            uint8_t(milvus::index::JSONType::STRING_ESCAPE)) {
-                        return false;
-                    }
-                } else if constexpr (std::is_same_v<GetType, double>) {
-                    if (type != uint8_t(milvus::index::JSONType::INT32) &&
-                        type != uint8_t(milvus::index::JSONType::INT64) &&
-                        type != uint8_t(milvus::index::JSONType::FLOAT) &&
-                        type != uint8_t(milvus::index::JSONType::DOUBLE)) {
-                        return false;
-                    }
-                } else if constexpr (std::is_same_v<GetType, bool>) {
-                    if (type != uint8_t(milvus::index::JSONType::BOOL)) {
-                        return false;
-                    }
+                            upper_inclusive](const bool* valid_array,
+                                             const uint8_t* type_array,
+                                             const uint32_t* row_id_array,
+                                             const uint16_t* offset_array,
+                                             const uint16_t* size_array,
+                                             const int32_t* value_array,
+                                             TargetBitmap& bitset,
+                                             const size_t n) {
+            std::vector<int64_t> invalid_row_ids;
+            for (size_t i = 0; i < n; i++) {
+                auto valid = valid_array[i];
+                auto type = type_array[i];
+                auto row_id = row_id_array[i];
+                auto offset = offset_array[i];
+                auto size = size_array[i];
+                auto value = value_array[i];
+                if (!valid) {
+                    invalid_row_ids.push_back(row_id_array[i]);
+                    continue;
                 }
-                if (lower_inclusive && upper_inclusive) {
-                    if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
-                        BinaryRangeJSONTypeCompareWithValue(
-                            static_cast<float>(val1) <= val &&
-                            val <= static_cast<float>(val2));
-                    } else {
-                        BinaryRangeJSONTypeCompareWithValue(val1 <= val &&
-                                                            val <= val2);
+
+                auto f = [&]() {
+                    if constexpr (std::is_same_v<GetType, int64_t>) {
+                        if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                            type != uint8_t(milvus::index::JSONType::INT64) &&
+                            type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                            type != uint8_t(milvus::index::JSONType::DOUBLE)) {
+                            return false;
+                        }
+                    } else if constexpr (std::is_same_v<GetType,
+                                                        std::string_view>) {
+                        if (type != uint8_t(milvus::index::JSONType::STRING) &&
+                            type !=
+                                uint8_t(
+                                    milvus::index::JSONType::STRING_ESCAPE)) {
+                            return false;
+                        }
+                    } else if constexpr (std::is_same_v<GetType, double>) {
+                        if (type != uint8_t(milvus::index::JSONType::INT32) &&
+                            type != uint8_t(milvus::index::JSONType::INT64) &&
+                            type != uint8_t(milvus::index::JSONType::FLOAT) &&
+                            type != uint8_t(milvus::index::JSONType::DOUBLE)) {
+                            return false;
+                        }
+                    } else if constexpr (std::is_same_v<GetType, bool>) {
+                        if (type != uint8_t(milvus::index::JSONType::BOOL)) {
+                            return false;
+                        }
                     }
-                } else if (lower_inclusive && !upper_inclusive) {
-                    if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
-                        BinaryRangeJSONTypeCompareWithValue(
-                            static_cast<float>(val1) <= val &&
-                            val < static_cast<float>(val2));
+                    if (lower_inclusive && upper_inclusive) {
+                        if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
+                            BinaryRangeJSONTypeCompareWithValue(
+                                static_cast<float>(val1) <= val &&
+                                val <= static_cast<float>(val2));
+                        } else {
+                            BinaryRangeJSONTypeCompareWithValue(val1 <= val &&
+                                                                val <= val2);
+                        }
+                    } else if (lower_inclusive && !upper_inclusive) {
+                        if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
+                            BinaryRangeJSONTypeCompareWithValue(
+                                static_cast<float>(val1) <= val &&
+                                val < static_cast<float>(val2));
+                        } else {
+                            BinaryRangeJSONTypeCompareWithValue(val1 <= val &&
+                                                                val < val2);
+                        }
+                    } else if (!lower_inclusive && upper_inclusive) {
+                        if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
+                            BinaryRangeJSONTypeCompareWithValue(
+                                static_cast<float>(val1) < val &&
+                                val <= static_cast<float>(val2));
+                        } else {
+                            BinaryRangeJSONTypeCompareWithValue(val1 < val &&
+                                                                val <= val2);
+                        }
                     } else {
-                        BinaryRangeJSONTypeCompareWithValue(val1 <= val &&
-                                                            val < val2);
+                        if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
+                            BinaryRangeJSONTypeCompareWithValue(
+                                static_cast<float>(val1) < val &&
+                                val < static_cast<float>(val2));
+                        } else {
+                            BinaryRangeJSONTypeCompareWithValue(val1 < val &&
+                                                                val < val2);
+                        }
                     }
-                } else if (!lower_inclusive && upper_inclusive) {
-                    if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
-                        BinaryRangeJSONTypeCompareWithValue(
-                            static_cast<float>(val1) < val &&
-                            val <= static_cast<float>(val2));
-                    } else {
-                        BinaryRangeJSONTypeCompareWithValue(val1 < val &&
-                                                            val <= val2);
-                    }
-                } else {
-                    if (type == uint8_t(milvus::index::JSONType::FLOAT)) {
-                        BinaryRangeJSONTypeCompareWithValue(
-                            static_cast<float>(val1) < val &&
-                            val < static_cast<float>(val2));
-                    } else {
-                        BinaryRangeJSONTypeCompareWithValue(val1 < val &&
-                                                            val < val2);
-                    }
-                }
-            } else {
-                auto json_pair = segment->GetJsonData(field_id, row_id);
-                if (!json_pair.second) {
+                };
+                bitset[row_id] = f();
+            }
+
+            auto f = [&](const milvus::Json& json,
+                         uint8_t type,
+                         uint16_t offset,
+                         uint16_t size,
+                         bool is_valid) {
+                if (!is_valid) {
                     return false;
                 }
-                auto& json = json_pair.first;
                 if (lower_inclusive && upper_inclusive) {
                     if (type == uint8_t(milvus::index::JSONType::STRING) ||
                         type == uint8_t(milvus::index::JSONType::DOUBLE) ||
@@ -762,7 +785,18 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                             ValueType(val.value()) < val2);
                     }
                 }
-            }
+            };
+            segment->BulkGetJsonData(
+                field_id,
+                [&](const milvus::Json& json, size_t i, bool is_valid) {
+                    auto type = type_array[i];
+                    auto row_id = invalid_row_ids[i];
+                    auto offset = offset_array[i];
+                    auto size = size_array[i];
+                    bitset[row_id] = f(json, type, offset, size, is_valid);
+                },
+                invalid_row_ids.data(),
+                invalid_row_ids.size());
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;
@@ -819,18 +853,20 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
     }
 
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [ lower_inclusive, upper_inclusive, &processed_cursor, &
-          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::ArrayView* data,
-            const bool* valid_data,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res,
-            TargetBitmapView valid_res,
-            ValueType val1,
-            ValueType val2,
-            int index) {
+    auto execute_sub_batch = [lower_inclusive,
+                              upper_inclusive,
+                              &processed_cursor,
+                              &bitmap_input]<FilterType filter_type =
+                                                 FilterType::sequential>(
+                                 const milvus::ArrayView* data,
+                                 const bool* valid_data,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res,
+                                 TargetBitmapView valid_res,
+                                 ValueType val1,
+                                 ValueType val2,
+                                 int index) {
         if (lower_inclusive && upper_inclusive) {
             BinaryRangeElementFuncForArray<ValueType, true, true, filter_type>
                 func;

@@ -33,6 +33,7 @@ func TestStreamingNodeManager(t *testing.T) {
 				}
 			}
 		})
+	b.EXPECT().RegisterStreamingEnabledNotifier(mock.Anything).Return()
 	m.SetBalancerReady(b)
 
 	streamingNodes := m.GetStreamingQueryNodeIDs()
@@ -59,4 +60,16 @@ func TestStreamingNodeManager(t *testing.T) {
 	assert.Equal(t, node, int64(1))
 	streamingNodes = m.GetStreamingQueryNodeIDs()
 	assert.Equal(t, len(streamingNodes), 1)
+
+	assert.NoError(t, m.RegisterStreamingEnabledListener(context.Background(), NewStreamingReadyNotifier()))
+}
+
+func TestStreamingReadyNotifier(t *testing.T) {
+	n := NewStreamingReadyNotifier()
+	assert.False(t, n.IsReady())
+	n.inner.Cancel()
+	<-n.Ready()
+	assert.True(t, n.IsReady())
+	n.Release()
+	assert.True(t, n.IsReady())
 }

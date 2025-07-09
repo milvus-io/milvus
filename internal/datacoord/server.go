@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -46,16 +47,22 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/expr"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -130,8 +137,7 @@ type Server struct {
 	compactionInspector      CompactionInspector
 	compactionTriggerManager TriggerManager
 
-	syncSegmentsScheduler *SyncSegmentsScheduler
-	metricsCacheManager   *metricsinfo.MetricsCacheManager
+	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	flushCh         chan UniqueID
 	notifyIndexChan chan UniqueID
@@ -319,16 +325,79 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importInspector = NewImportInspector(s.meta, s.importMeta, s.globalScheduler)
+	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.meta, s.broker, s.allocator, s.importMeta, s.statsInspector, s.compactionTriggerManager)
-
-	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
 	log.Info("init datacoord done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", s.address))
+
+	s.initMessageCallback()
 	return nil
+}
+
+// initMessageCallback initializes the message callback.
+// TODO: we should build a ddl framework to handle the message ack callback for ddl messages
+func (s *Server) initMessageCallback() {
+	registry.RegisterMessageAckCallback(message.MessageTypeDropPartition, func(ctx context.Context, msg message.MutableMessage) error {
+		dropPartitionMsg := message.MustAsMutableDropPartitionMessageV1(msg)
+		return s.NotifyDropPartition(ctx, msg.VChannel(), []int64{dropPartitionMsg.Header().PartitionId})
+	})
+
+	registry.RegisterMessageAckCallback(message.MessageTypeImport, func(ctx context.Context, msg message.MutableMessage) error {
+		importMsg := message.MustAsMutableImportMessageV1(msg)
+		body := importMsg.MustBody()
+		importResp, err := s.ImportV2(ctx, &internalpb.ImportRequestInternal{
+			CollectionID:   body.GetCollectionID(),
+			CollectionName: body.GetCollectionName(),
+			PartitionIDs:   body.GetPartitionIDs(),
+			ChannelNames:   []string{msg.VChannel()},
+			Schema:         body.GetSchema(),
+			Files: lo.Map(body.GetFiles(), func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
+				return &internalpb.ImportFile{
+					Id:    file.GetId(),
+					Paths: file.GetPaths(),
+				}
+			}),
+			Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+			DataTimestamp: body.GetBase().GetTimestamp(),
+			JobID:         body.GetJobID(),
+		})
+		err = merr.CheckRPCCall(importResp, err)
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			log.Ctx(ctx).Warn("import message failed because of collection not found, skip it", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+			return nil
+		}
+		if err != nil {
+			log.Ctx(ctx).Warn("import message failed", zap.String("job_id", importResp.GetJobID()), zap.Error(err))
+			return err
+		}
+		log.Ctx(ctx).Info("import message handled", zap.String("job_id", importResp.GetJobID()))
+		return nil
+	})
+
+	registry.RegisterMessageCheckCallback(message.MessageTypeImport, func(ctx context.Context, msg message.BroadcastMutableMessage) error {
+		importMsg := message.MustAsMutableImportMessageV1(msg)
+		b, err := importMsg.Body()
+		if err != nil {
+			return err
+		}
+		options := funcutil.Map2KeyValuePair(b.GetOptions())
+		_, err = importutilv2.GetTimeoutTs(options)
+		if err != nil {
+			return err
+		}
+		err = ValidateBinlogImportRequest(ctx, s.meta.chunkManager, b.GetFiles(), options)
+		if err != nil {
+			return err
+		}
+		err = ValidateMaxImportJobExceed(ctx, s.importMeta)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:
@@ -595,7 +664,7 @@ func (s *Server) initStatsInspector() {
 }
 
 func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler)
+	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
@@ -641,10 +710,6 @@ func (s *Server) startServerLoop() {
 	go s.importInspector.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
-
-	if !(streamingutil.IsStreamingServiceEnabled() || paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool()) {
-		s.syncSegmentsScheduler.Start()
-	}
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
@@ -873,7 +938,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	// set segment to SegmentState_Flushed
 	var operators []UpdateOperator
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if enableSortCompaction() {
 		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
 	}
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
@@ -883,7 +948,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if enableSortCompaction() {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
@@ -959,7 +1024,6 @@ func (s *Server) Stop() error {
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
-	s.syncSegmentsScheduler.Stop()
 
 	s.stopCompaction()
 	log.Info("datacoord compaction stopped")
@@ -1145,4 +1209,14 @@ func (s *Server) updateBalanceConfig() bool {
 	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "false")
 	log.RatedDebug(10, "old data node exist", zap.Strings("sessions", lo.Keys(sessions)))
 	return false
+}
+
+func (s *Server) listLoadedSegments(ctx context.Context) ([]int64, error) {
+	req := &querypb.ListLoadedSegmentsRequest{}
+	resp, err := s.mixCoord.ListLoadedSegments(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+
+	return resp.SegmentIDs, nil
 }

@@ -91,6 +91,13 @@ class Json {
     }
 
     // WARN: this is used for fast non-copy construction,
+    // MUST make sure there at least SIMDJSON_PADDING bytes allocated
+    // after the string_view
+    explicit Json(const std::string_view& data)
+        : Json(data.data(), data.size()) {
+    }
+
+    // WARN: this is used for fast non-copy construction,
     // MUST make sure that the data points to a memory that
     // with size at least len + SIMDJSON_PADDING
     Json(const char* data, size_t len)
@@ -202,8 +209,12 @@ class Json {
     bool
     exist(std::string_view pointer) const {
         auto doc = this->doc();
-        auto res = doc.at_pointer(pointer);
-        return res.error() == simdjson::SUCCESS && !res.is_null();
+        if (pointer.empty()) {
+            return doc.error() == simdjson::SUCCESS && !doc.is_null();
+        } else {
+            auto res = doc.at_pointer(pointer);
+            return res.error() == simdjson::SUCCESS && !res.is_null();
+        }
     }
 
     // construct JSON pointer with provided path
@@ -219,6 +230,18 @@ class Json {
             });
         auto pointer = "/" + boost::algorithm::join(nested_path, "/");
         return pointer;
+    }
+
+    auto
+    type(const std::string& pointer) const {
+        return pointer.empty() ? doc().type()
+                               : doc().at_pointer(pointer).type();
+    }
+
+    auto
+    get_number_type(const std::string& pointer) const {
+        return pointer.empty() ? doc().get_number_type()
+                               : doc().at_pointer(pointer).get_number_type();
     }
 
     template <typename T>

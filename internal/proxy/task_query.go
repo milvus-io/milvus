@@ -492,6 +492,15 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.RetrieveRequest.IsIterator = queryParams.isIterator
 
+	if collectionInfo.collectionTTL != 0 {
+		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
+		expireTime := physicalTime.Add(-time.Duration(collectionInfo.collectionTTL))
+		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime, 0)
+		// preventing overflow, abort
+		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+			return merr.WrapErrServiceInternal(fmt.Sprintf("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.collectionTTL))
+		}
+	}
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
 		t.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
@@ -501,7 +510,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	log.Debug("Query PreExecute done.",
 		zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Uint64("mvcc_ts", t.GetMvccTimestamp()),
-		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()))
+		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
+		zap.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
 	return nil
 }
 

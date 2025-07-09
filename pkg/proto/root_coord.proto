@@ -152,6 +152,8 @@ service RootCoord {
     rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
     rpc DescribeDatabase(DescribeDatabaseRequest) returns(DescribeDatabaseResponse){}
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
+
+    rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
 }
 
 message AllocTimestampRequest {
@@ -254,6 +256,7 @@ message CollectionInfoOnPChannel {
   int64 collection_id = 1;
   repeated PartitionInfoOnPChannel partitions = 2;
   string vchannel = 3;
+  etcd.CollectionState state = 4;
 }
 
 message PartitionInfoOnPChannel {

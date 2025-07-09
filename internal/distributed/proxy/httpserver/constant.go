@@ -36,6 +36,7 @@ const (
 	CollectionFieldCategory = "/collections/fields/"
 	ResourceGroupCategory   = "/resource_groups/"
 	SegmentCategory         = "/segments/"
+	QuotaCenterCategory     = "/quotacenter/"
 
 	ListAction           = "list"
 	HasAction            = "has"
@@ -66,6 +67,7 @@ const (
 	RevokePrivilegeActionV2         = "revoke_privilege_v2"
 	AlterAction                     = "alter"
 	AlterPropertiesAction           = "alter_properties"
+	AddAction                       = `add`
 	DropPropertiesAction            = "drop_properties"
 	CompactAction                   = "compact"
 	CompactionStateAction           = "get_compaction_state"
@@ -161,6 +163,7 @@ const (
 
 	HTTPReturnMinIndexVersion = "minIndexVersion"
 	HTTPReturnMaxIndexVersion = "maxIndexVersion"
+	HTTPReturnIndexParams     = "indexParams"
 
 	HTTPReturnDistance = "distance"
 

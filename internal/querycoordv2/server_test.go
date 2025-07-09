@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -577,16 +576,13 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.nodeMgr,
 	)
 
-	syncTargetVersionFn := func(collectionID int64) {
-		suite.server.targetObserver.Check(context.Background(), collectionID, common.AllPartitionsID)
-	}
 	suite.server.distController = dist.NewDistController(
 		suite.server.cluster,
 		suite.server.nodeMgr,
 		suite.server.dist,
 		suite.server.targetMgr,
 		suite.server.taskScheduler,
-		syncTargetVersionFn,
+		suite.server.leaderCacheObserver.RegisterEvent,
 	)
 	suite.server.checkerController = checkers.NewCheckerController(
 		suite.server.meta,
@@ -627,13 +623,6 @@ func (suite *ServerSuite) hackServer() {
 func (suite *ServerSuite) hackBroker(server *Server) {
 	mockRootCoord := coordMocks.NewMixCoord(suite.T())
 	mockRootCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			StateCode: commonpb.StateCode_Healthy,
-		},
-		Status: merr.Success(),
-	}, nil).Maybe()
-	mockDataCoord := coordMocks.NewMockDataCoordClient(suite.T())
-	mockDataCoord.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			StateCode: commonpb.StateCode_Healthy,
 		},

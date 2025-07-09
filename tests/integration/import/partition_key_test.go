@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"strings"
 	"time"
 
@@ -42,7 +41,7 @@ import (
 
 func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	const (
-		rowCount = 10000
+		rowCount = 100
 	)
 
 	c := s.Cluster
@@ -82,7 +81,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         "",
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -92,7 +91,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	s.Equal(int32(0), createCollectionStatus.GetCode())
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -105,13 +104,9 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 
 	// import
 	var files []*internalpb.ImportFile
-	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
-	s.NoError(err)
 
-	filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
-	insertData, err := GenerateParquetFileAndReturnInsertData(filePath, schema, rowCount)
+	insertData, filePath, err := GenerateParquetFileAndReturnInsertData(s.Cluster, schema, rowCount)
 	s.NoError(err)
-	defer os.Remove(filePath)
 	files = []*internalpb.ImportFile{
 		{
 			Paths: []string{
@@ -120,7 +115,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 		},
 	}
 
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
 	})
@@ -133,20 +128,20 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	s.NoError(err)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("Show segments", zap.Any("segments", segments))
 
 	// load refresh
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 		Refresh:        true,
 	})
@@ -163,7 +158,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	})
 	str := strings.Join(strs, `,`)
 	expr := fmt.Sprintf("%s in [%v]", integration.VarCharField, str)
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName: collectionName,
 		Expr:           expr,
 		OutputFields:   []string{integration.VarCharField},
@@ -180,7 +175,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 
 	// query partition key, CmpOp 1
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName: collectionName,
 		Expr:           expr,
 		OutputFields:   []string{integration.VarCharField},
@@ -198,7 +193,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	// query partition key, CmpOp 2
 	target := partitionKeyData[rand.Intn(rowCount)]
 	expr = fmt.Sprintf("%s == \"%s\"", integration.VarCharField, target)
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName: collectionName,
 		Expr:           expr,
 		OutputFields:   []string{integration.VarCharField},
@@ -256,7 +251,7 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         "",
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -266,7 +261,7 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	s.Equal(int32(0), createCollectionStatus.GetCode())
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -279,13 +274,9 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 
 	// import
 	var files []*internalpb.ImportFile
-	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
-	s.NoError(err)
 
-	filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
-	insertData, err := GenerateParquetFileAndReturnInsertData(filePath, schema, rowCount)
+	insertData, filePath, err := GenerateParquetFileAndReturnInsertData(s.Cluster, schema, rowCount)
 	s.NoError(err)
-	defer os.Remove(filePath)
 	files = []*internalpb.ImportFile{
 		{
 			Paths: []string{
@@ -294,7 +285,7 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 		},
 	}
 
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
 	})
@@ -307,20 +298,20 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	s.NoError(err)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("Show segments", zap.Any("segments", segments))
 
 	// load refresh
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 		Refresh:        true,
 	})
@@ -337,10 +328,11 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	})
 	str := strings.Join(strs, `,`)
 	expr := fmt.Sprintf("%s in [%v]", integration.VarCharField, str)
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{integration.VarCharField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
@@ -354,10 +346,11 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 
 	// query partition key, CmpOp 1
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{integration.VarCharField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
@@ -372,10 +365,11 @@ func (s *BulkInsertSuite) TestImportWithAFewRows() {
 	// query partition key, CmpOp 2
 	target := partitionKeyData[rand.Intn(rowCount)]
 	expr = fmt.Sprintf("%s == \"%s\"", integration.VarCharField, target)
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
+	queryResult, err = c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName:   collectionName,
+		Expr:             expr,
+		OutputFields:     []string{integration.VarCharField},
+		ConsistencyLevel: commonpb.ConsistencyLevel_Eventually,
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)

@@ -49,7 +49,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
                                       int64_t segment_id,
-                                      bool TEST_skip_index_for_retrieve = false,
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
     void
@@ -118,22 +117,30 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return iter->second.get();
     }
 
+    bool
+    HasNgramIndex(FieldId field_id) const override {
+        std::shared_lock lck(mutex_);
+        return ngram_indexings_.find(field_id) != ngram_indexings_.end();
+    }
+
+    PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const override;
+
     // TODO(tiered storage 1): should return a PinWrapper
-    std::pair<milvus::Json, bool>
-    GetJsonData(FieldId field_id, size_t offset) const override {
+    void
+    BulkGetJsonData(FieldId field_id,
+                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const int64_t* offsets,
+                    int64_t count) const override {
         auto column = fields_.at(field_id);
-        bool is_valid = column->IsValid(offset);
-        if (!is_valid) {
-            return std::make_pair(milvus::Json(), false);
-        }
-        return std::make_pair(column->RawJsonAt(offset), is_valid);
+        column->BulkRawJsonAt(fn, offsets, count);
     }
 
     void
     Reopen(SchemaPtr sch) override;
 
     void
-    LazyCheckSchema(const Schema& sch) override;
+    LazyCheckSchema(SchemaPtr sch) override;
 
     void
     FinishLoad() override;
@@ -319,6 +326,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst);
 
+    template <typename T>
+    static void
+    bulk_subscript_vector_array_impl(
+        const ChunkedColumnInterface* column,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<T>* dst);
+
     static void
     bulk_subscript_impl(int64_t element_sizeof,
                         ChunkedColumnInterface* field,
@@ -343,7 +358,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                         Timestamp timestamp) const override;
+                         Timestamp timestamp,
+                         Timestamp collection_ttl) const override;
 
     void
     vector_search(SearchInfo& search_info,
@@ -373,7 +389,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadScalarIndex(const LoadIndexInfo& info);
 
     bool
-    generate_interim_index(const FieldId field_id);
+    generate_interim_index(const FieldId field_id, int64_t num_rows);
 
     void
     fill_empty_field(const FieldMeta& field_meta);
@@ -416,6 +432,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;
 
+    // ngram field index
+    std::unordered_map<FieldId, index::CacheIndexBasePtr> ngram_indexings_;
+
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
     // vector field index
@@ -443,10 +462,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SegmentStats stats_{};
 
-    // for sparse vector unit test only! Once a type of sparse index that
-    // doesn't has raw data is added, this should be removed.
-    bool TEST_skip_index_for_retrieve_ = false;
-
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
@@ -462,14 +477,12 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false,
     bool is_sorted_by_pk = false) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
         schema,
         index_meta,
         segcore_config,
         segment_id,
-        TEST_skip_index_for_retrieve,
         is_sorted_by_pk);
 }
 }  // namespace milvus::segcore

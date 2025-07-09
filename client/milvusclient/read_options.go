@@ -622,22 +622,41 @@ type RunAnalyzerOption interface {
 
 type runAnalyzerOption struct {
 	text           []string
+	collectionName string
+	fieldName      string
+	analyzerNames  []string
 	analyzerParams string
 	withDetail     bool
 	withHash       bool
+	err            error
 }
 
 func (opt *runAnalyzerOption) Request() (*milvuspb.RunAnalyzerRequest, error) {
+	if opt.err != nil {
+		return nil, opt.err
+	}
 	return &milvuspb.RunAnalyzerRequest{
 		Placeholder:    lo.Map(opt.text, func(str string, _ int) []byte { return []byte(str) }),
 		AnalyzerParams: opt.analyzerParams,
+		CollectionName: opt.collectionName,
+		FieldName:      opt.fieldName,
+		AnalyzerNames:  opt.analyzerNames,
 		WithDetail:     opt.withDetail,
-		WithHash:       opt.withHash,		
+		WithHash:       opt.withHash,
 	}, nil
 }
 
-func (opt *runAnalyzerOption) WithAnalyzerParams(params string) *runAnalyzerOption {
+func (opt *runAnalyzerOption) WithAnalyzerParamsStr(params string) *runAnalyzerOption {
 	opt.analyzerParams = params
+	return opt
+}
+
+func (opt *runAnalyzerOption) WithAnalyzerParams(params map[string]any) *runAnalyzerOption {
+	s, err := json.Marshal(params)
+	if err != nil {
+		opt.err = err
+	}
+	opt.analyzerParams = string(s)
 	return opt
 }
 
@@ -651,7 +670,18 @@ func (opt *runAnalyzerOption) WithHash() *runAnalyzerOption {
 	return opt
 }
 
-func NewRunAnalyzerOption(text []string) *runAnalyzerOption {
+func (opt *runAnalyzerOption) WithField(collectionName, fieldName string) *runAnalyzerOption {
+	opt.collectionName = collectionName
+	opt.fieldName = fieldName
+	return opt
+}
+
+func (opt *runAnalyzerOption) WithAnalyzerName(names ...string) *runAnalyzerOption {
+	opt.analyzerNames = names
+	return opt
+}
+
+func NewRunAnalyzerOption(text ...string) *runAnalyzerOption {
 	return &runAnalyzerOption{
 		text: text,
 	}

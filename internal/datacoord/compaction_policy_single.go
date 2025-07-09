@@ -51,64 +51,195 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	views := make([]CompactionView, 0)
+	sortViews := make([]CompactionView, 0)
 	for _, collection := range collections {
-		collectionViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
+		collectionViews, collectionSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
 			log.Warn("fail to trigger single compaction", zap.Int64("collectionID", collection.ID), zap.Error(err))
 		}
 		views = append(views, collectionViews...)
+		sortViews = append(sortViews, collectionSortViews...)
 	}
 	events[TriggerTypeSingle] = views
+	events[TriggerTypeSort] = sortViews
 	return events, nil
 }
 
-func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, int64, error) {
+func (policy *singleCompactionPolicy) triggerSegmentSortCompaction(
+	ctx context.Context,
+	segmentID int64,
+) CompactionView {
+	log := log.With(zap.Int64("segmentID", segmentID))
+	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
+		log.RatedInfo(20, "stats task disabled, skip sort compaction")
+		return nil
+	}
+	segment := policy.meta.GetHealthySegment(ctx, segmentID)
+	if segment == nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, segment not healthy")
+		return nil
+	}
+	if !canTriggerSortCompaction(segment) {
+		log.Warn("fail to apply triggerSegmentSortCompaction",
+			zap.String("state", segment.GetState().String()),
+			zap.String("level", segment.GetLevel().String()),
+			zap.Bool("isSorted", segment.GetIsSorted()),
+			zap.Bool("isImporting", segment.GetIsImporting()),
+			zap.Bool("isCompacting", segment.isCompacting),
+			zap.Bool("isInvisible", segment.GetIsInvisible()))
+		return nil
+	}
+
+	collection, err := policy.handler.GetCollection(ctx, segment.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, unable to get collection from handler",
+			zap.Error(err))
+		return nil
+	}
+	if collection == nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, collection not exist")
+		return nil
+	}
+	collectionTTL, err := getCollectionTTL(collection.Properties)
+	if err != nil {
+		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
+		return nil
+	}
+
+	newTriggerID, err := policy.allocator.AllocID(ctx)
+	if err != nil {
+		log.Warn("fail to apply triggerSegmentSortCompaction, unable to allocate triggerID", zap.Error(err))
+		return nil
+	}
+
+	segmentViews := GetViewsByInfo(segment)
+	view := &MixSegmentView{
+		label:         segmentViews[0].label,
+		segments:      segmentViews,
+		collectionTTL: collectionTTL,
+		triggerID:     newTriggerID,
+	}
+
+	log.Info("succeeded to apply triggerSegmentSortCompaction",
+		zap.Int64("triggerID", newTriggerID))
+	return view
+}
+
+func (policy *singleCompactionPolicy) triggerSortCompaction(
+	ctx context.Context,
+	triggerID int64,
+	collectionID int64,
+	collectionTTL time.Duration,
+) ([]CompactionView, error) {
+	log := log.With(zap.Int64("collectionID", collectionID))
+	if !Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
+		log.RatedInfo(20, "stats task disabled, skip sort compaction")
+		return nil, nil
+	}
+	views := make([]CompactionView, 0)
+
+	triggerableSegments := policy.meta.SelectSegments(ctx, WithCollection(collectionID),
+		SegmentFilterFunc(func(seg *SegmentInfo) bool {
+			return canTriggerSortCompaction(seg)
+		}))
+	if len(triggerableSegments) == 0 {
+		log.RatedInfo(20, "no triggerable segments")
+		return views, nil
+	}
+
+	gbSegments := lo.GroupBy(triggerableSegments, func(seg *SegmentInfo) bool {
+		return seg.GetIsInvisible()
+	})
+	invisibleSegments, ok := gbSegments[true]
+	if ok {
+		for _, segment := range invisibleSegments {
+			segmentViews := GetViewsByInfo(segment)
+			view := &MixSegmentView{
+				label:         segmentViews[0].label,
+				segments:      segmentViews,
+				collectionTTL: collectionTTL,
+				triggerID:     triggerID,
+			}
+			views = append(views, view)
+		}
+	}
+
+	visibleSegments, ok := gbSegments[false]
+	if ok {
+		for i, segment := range visibleSegments {
+			if i > Params.DataCoordCfg.SortCompactionTriggerCount.GetAsInt() {
+				break
+			}
+			segmentViews := GetViewsByInfo(segment)
+			view := &MixSegmentView{
+				label:         segmentViews[0].label,
+				segments:      segmentViews,
+				collectionTTL: collectionTTL,
+				triggerID:     triggerID,
+			}
+			views = append(views, view)
+		}
+	}
+
+	log.Info("succeeded to apply triggerSortCompaction",
+		zap.Int64("triggerID", triggerID),
+		zap.Int("triggered view num", len(views)))
+	return views, nil
+}
+
+func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, []CompactionView, int64, error) {
 	log := log.With(zap.Int64("collectionID", collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		log.Warn("fail to apply singleCompactionPolicy, unable to get collection from handler",
 			zap.Error(err))
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	if collection == nil {
 		log.Warn("fail to apply singleCompactionPolicy, collection not exist")
-		return nil, 0, nil
+		return nil, nil, 0, nil
 	}
-	if !isCollectionAutoCompactionEnabled(collection) {
-		log.RatedInfo(20, "collection auto compaction disabled")
-		return nil, 0, nil
+
+	collectionTTL, err := getCollectionTTL(collection.Properties)
+	if err != nil {
+		log.Warn("failed to apply singleCompactionPolicy, get collection ttl failed")
+		return nil, nil, 0, err
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn("fail to apply singleCompactionPolicy, unable to allocate triggerID", zap.Error(err))
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 
+	sortViews, err := policy.triggerSortCompaction(ctx, newTriggerID, collectionID, collectionTTL)
+	if err != nil {
+		log.Warn("failed to apply singleCompactionPolicy, trigger sort compaction failed", zap.Error(err))
+		return nil, nil, 0, err
+	}
+	if !isCollectionAutoCompactionEnabled(collection) {
+		log.RatedInfo(20, "collection auto compaction disabled")
+		return nil, sortViews, 0, nil
+	}
+
+	views := make([]CompactionView, 0)
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
-			isFlush(segment) &&
+			isFlushed(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
 			segment.GetLevel() == datapb.SegmentLevel_L2 && // only support L2 for now
 			!segment.GetIsInvisible()
 	}))
 
-	views := make([]CompactionView, 0)
 	for _, group := range partSegments {
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(policy.handler, policy.meta, false, group.segments...)
-		}
-
-		collectionTTL, err := getCollectionTTL(collection.Properties)
-		if err != nil {
-			log.Warn("failed to apply singleCompactionPolicy, get collection ttl failed")
-			return make([]CompactionView, 0), 0, err
+			group.segments = FilterInIndexedSegments(ctx, policy.handler, policy.meta, false, group.segments...)
 		}
 
 		for _, segment := range group.segments {
-			if isDeltalogTooManySegment(segment) || isDeleteRowsTooManySegment(segment) {
+			if hasTooManyDeletions(segment) {
 				segmentViews := GetViewsByInfo(segment)
 				view := &MixSegmentView{
 					label:         segmentViews[0].label,
@@ -126,7 +257,7 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 			zap.Int64("triggerID", newTriggerID),
 			zap.Int("triggered view num", len(views)))
 	}
-	return views, newTriggerID, nil
+	return views, sortViews, newTriggerID, nil
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)

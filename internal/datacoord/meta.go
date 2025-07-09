@@ -67,8 +67,6 @@ type CompactionMeta interface {
 	CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 	CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
-	CheckSegmentsStating(ctx context.Context, segmentID []UniqueID) (bool, bool)
-	SetSegmentStating(segmentID UniqueID, stating bool)
 
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
@@ -1487,31 +1485,6 @@ func (m *meta) SetLastWrittenTime(segmentID UniqueID) {
 	m.segments.SetLastWrittenTime(segmentID)
 }
 
-func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) (exist bool, hasStating bool) {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-	exist = true
-	for _, segmentID := range segmentIDs {
-		seg := m.segments.GetSegment(segmentID)
-		if seg != nil {
-			if seg.isStating {
-				hasStating = true
-			}
-		} else {
-			exist = false
-			break
-		}
-	}
-	return exist, hasStating
-}
-
-func (m *meta) SetSegmentStating(segmentID UniqueID, stating bool) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-
-	m.segments.SetIsStating(segmentID, stating)
-}
-
 // SetSegmentCompacting sets compaction state for segment
 func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segMu.Lock()
@@ -1653,7 +1626,10 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	return compactToSegInfos, metricMutation, nil
 }
 
-func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+func (m *meta) completeMixCompactionMutation(
+	t *datapb.CompactionTask,
+	result *datapb.CompactionPlanResult,
+) ([]*SegmentInfo, *segMetricMutation, error) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
 		zap.String("type", t.GetType().String()),
 		zap.Int64("collectionID", t.CollectionID),
@@ -1682,6 +1658,14 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
+	resultInvisible := false
+	if t.GetType() == datapb.CompactionType_SortCompaction {
+		resultInvisible = compactFromSegInfos[0].GetIsInvisible()
+		if !compactFromSegInfos[0].GetCreatedByCompaction() {
+			resultInvisible = false
+		}
+	}
+
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
 		compactToSegmentInfo := NewSegmentInfo(
@@ -1697,6 +1681,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				Statslogs:     compactToSegment.GetField2StatslogPaths(),
 				Deltalogs:     compactToSegment.GetDeltalogs(),
 				Bm25Statslogs: compactToSegment.GetBm25Logs(),
+				TextStatsLogs: compactToSegment.GetTextStatsLogs(),
 
 				CreatedByCompaction: true,
 				CompactionFrom:      compactFromSegIDs,
@@ -1709,7 +1694,8 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				IsSorted:    compactToSegment.GetIsSorted(),
+				IsInvisible: resultInvisible,
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -1767,7 +1753,7 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 		return m.completeMixCompactionMutation(t, result)
 	case datapb.CompactionType_ClusteringCompaction:
 		return m.completeClusterCompactionMutation(t, result)
@@ -1936,7 +1922,7 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
 	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
-			isFlush(segment) && // sealed segment
+			isFlushed(segment) && // sealed segment
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() // not importing now
 	}))
@@ -2217,4 +2203,46 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 	}
 
 	return segments
+}
+
+func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64) error {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+
+	// Filter out the segments of the partition to be dropped.
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]map[string]map[string]int),
+	}
+	modSegments := make([]*SegmentInfo, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
+	// set existed segments of channel to Dropped
+	for _, seg := range m.segments.segments {
+		if contains(partitionIDs, seg.PartitionID) {
+			clonedSeg := seg.Clone()
+			updateSegStateAndPrepareMetrics(clonedSeg, commonpb.SegmentState_Dropped, metricMutation)
+			modSegments = append(modSegments, clonedSeg)
+			segments = append(segments, clonedSeg.SegmentInfo)
+		}
+	}
+
+	// Save dropped segments in batch into meta.
+	err := m.catalog.SaveDroppedSegmentsInBatch(m.ctx, segments)
+	if err != nil {
+		return err
+	}
+	// update memory info
+	for _, segment := range modSegments {
+		m.segments.SetSegment(segment.GetID(), segment)
+	}
+	metricMutation.commit()
+	return nil
+}
+
+func contains(arr []int64, target int64) bool {
+	for _, val := range arr {
+		if val == target {
+			return true
+		}
+	}
+	return false
 }

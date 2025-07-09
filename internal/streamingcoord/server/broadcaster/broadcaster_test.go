@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -28,6 +29,7 @@ import (
 )
 
 func TestBroadcaster(t *testing.T) {
+	registry.ResetRegistration()
 	paramtable.Init()
 
 	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
@@ -85,9 +87,12 @@ func TestBroadcaster(t *testing.T) {
 
 	// only task 7 is not done.
 	ack(bc, 7, "v1")
+	ack(bc, 7, "v1") // test already acked, make the idempotent.
 	assert.Equal(t, len(done.Collect()), 6)
 	ack(bc, 7, "v2")
+	ack(bc, 7, "v2")
 	assert.Equal(t, len(done.Collect()), 6)
+	ack(bc, 7, "v3")
 	ack(bc, 7, "v3")
 	assert.Eventually(t, func() bool {
 		return appended.Load() == 9 && len(done.Collect()) == 7

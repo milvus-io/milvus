@@ -8,9 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -18,33 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 )
 
-// getVchannels gets the vchannels of current pchannel.
-func (impl *WALFlusherImpl) getVchannels(ctx context.Context, pchannel string) ([]string, error) {
-	var vchannels []string
-	rc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "when wait for rootcoord client ready")
-	}
-	retryCnt := -1
-	if err := retry.Do(ctx, func() error {
-		retryCnt++
-
-		resp, err := rc.GetPChannelInfo(ctx, &rootcoordpb.GetPChannelInfoRequest{
-			Pchannel: pchannel,
-		})
-		if err = merr.CheckRPCCall(resp, err); err != nil {
-			log.Warn("get pchannel info failed", zap.Error(err), zap.Int("retryCnt", retryCnt))
-			return err
-		}
-		for _, collection := range resp.GetCollections() {
-			vchannels = append(vchannels, collection.Vchannel)
-		}
-		return nil
-	}, retry.AttemptAlways()); err != nil {
-		return nil, errors.Wrapf(err, "when get existed vchannels of pchannel")
-	}
-	return vchannels, nil
-}
+var defaultCollectionNotFoundTolerance = 10
 
 // getRecoveryInfos gets the recovery info of the vchannels from datacoord
 func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []string) (map[string]*datapb.GetChannelRecoveryInfoResponse, message.MessageID, error) {
@@ -84,8 +56,10 @@ func (impl *WALFlusherImpl) getRecoveryInfos(ctx context.Context, vchannel []str
 func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string) (*datapb.GetChannelRecoveryInfoResponse, error) {
 	var resp *datapb.GetChannelRecoveryInfoResponse
 	retryCnt := -1
+	logger := impl.logger.With(zap.String("vchannel", vchannel))
 	err := retry.Do(ctx, func() error {
 		retryCnt++
+		logger := logger.With(zap.Int("retryCnt", retryCnt))
 		dc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 		if err != nil {
 			return err
@@ -93,16 +67,25 @@ func (impl *WALFlusherImpl) getRecoveryInfo(ctx context.Context, vchannel string
 		resp, err = dc.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
 		err = merr.CheckRPCCall(resp, err)
 		if errors.Is(err, merr.ErrChannelNotAvailable) {
-			impl.logger.Warn("channel not available because of collection dropped", zap.String("vchannel", vchannel), zap.Int("retryCnt", retryCnt))
+			logger.Warn("channel not available because of collection dropped", zap.Error(err))
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			if retryCnt >= defaultCollectionNotFoundTolerance {
+				// TODO: It's not strong guarantee to make no resource lost or leak. Should be removed after wal-driven-ddl framework is ready.
+				logger.Warn("too many collection not found, the create collection may undone by coord", zap.Error(err))
+				return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
+			}
+			logger.Warn("collection not found, maybe the create collection is not done or create collection undone by coord", zap.Error(err))
+			return err
+		}
 		if err != nil {
-			impl.logger.Warn("get channel recovery info failed", zap.Error(err), zap.String("vchannel", vchannel), zap.Int("retryCnt", retryCnt))
+			logger.Warn("get channel recovery info failed", zap.Error(err))
 			return err
 		}
 		// The channel has been dropped, skip to recover it.
 		if isDroppedChannel(resp) {
-			impl.logger.Info("channel has been dropped, the vchannel can not be recovered", zap.String("vchannel", vchannel))
+			logger.Info("channel has been dropped, the vchannel can not be recovered")
 			return retry.Unrecoverable(errChannelLifetimeUnrecoverable)
 		}
 		return nil

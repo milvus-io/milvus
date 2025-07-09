@@ -48,7 +48,7 @@ const auto search_plan = [] {
         >)";
     auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     return plan;
 }();
 auto ph_group = [] {

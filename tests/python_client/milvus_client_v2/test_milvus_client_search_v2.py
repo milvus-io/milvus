@@ -1,6 +1,6 @@
 import numpy as np
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
-from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, RRFRanker, WeightedRanker, Function, FunctionType
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
@@ -64,7 +64,6 @@ default_string_field_name = ct.default_string_field_name
 default_json_field_name = ct.default_json_field_name
 default_index_params = ct.default_index
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-range_search_supported_indexes = ct.all_index_types[:8]
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -80,101 +79,6 @@ index_name2 = cf.gen_unique_str("varhar")
 half_nb = ct.default_nb // 2
 max_hybrid_search_req_num = ct.max_hybrid_search_req_num
 
-
-class TestSearchBase(TestcaseBase):
-    @pytest.fixture(
-        scope="function",
-        params=[1, 10]
-    )
-    def get_top_k(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=[1, 10, 1100]
-    )
-    def get_nq(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[32, 128])
-    def dim(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def auto_id(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[False, True])
-    def _async(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[:6])
-    def test_each_index_with_mmap_enabled_search(self, index):
-        """
-        target: test each index with mmap enabled search
-        method: test each index with mmap enabled search
-        expected: search success
-        """
-        self._connect()
-        nb = 2000
-        dim = 32
-        collection_w = self.init_collection_general(prefix, True, nb, dim=dim, is_index=False)[0]
-        params = cf.get_index_params_params(index)
-        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
-        collection_w.create_index(field_name, default_index, index_name="mmap_index")
-        # mmap index
-        collection_w.alter_index("mmap_index", {'mmap.enabled': True})
-        # search
-        collection_w.load()
-        search_params = cf.gen_search_param(index)[0]
-        vector = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        collection_w.search(vector, default_search_field, search_params, ct.default_limit,
-                            output_fields=["*"],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": ct.default_limit})
-        # enable mmap
-        collection_w.release()
-        collection_w.alter_index("mmap_index", {'mmap.enabled': False})
-        collection_w.load()
-        collection_w.search(vector, default_search_field, search_params, ct.default_limit,
-                            output_fields=["*"],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": ct.default_limit})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", ct.all_index_types[8:10])
-    def test_enable_mmap_search_for_binary_indexes(self, index):
-        """
-        target: enable mmap for binary indexes
-        method: enable mmap for binary indexes
-        expected: search success
-        """
-        self._connect()
-        dim = 64
-        nb = 2000
-        collection_w = self.init_collection_general(prefix, True, nb, dim=dim, is_index=False, is_binary=True)[0]
-        params = cf.get_index_params_params(index)
-        default_index = {"index_type": index,
-                         "params": params, "metric_type": "JACCARD"}
-        collection_w.create_index(ct.default_binary_vec_field_name, default_index, index_name="binary_idx_name")
-        collection_w.alter_index("binary_idx_name", {'mmap.enabled': True})
-        collection_w.set_properties({'mmap.enabled': True})
-        collection_w.load()
-        pro = collection_w.describe()[0].get("properties")
-        assert pro["mmap.enabled"] == 'True'
-        assert collection_w.index()[0].params["mmap.enabled"] == 'True'
-        # search
-        binary_vectors = cf.gen_binary_vectors(default_nq, dim)[1]
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        output_fields = ["*"]
-        collection_w.search(binary_vectors, ct.default_binary_vec_field_name, search_params,
-                            default_limit, default_search_string_exp, output_fields=output_fields,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit})
 
 
 class TestCollectionSearch(TestcaseBase):
@@ -237,129 +141,6 @@ class TestCollectionSearch(TestcaseBase):
     #  The following are valid base cases
     ******************************************************************
     """
-
-    @pytest.mark.skip("enable this later using session/strong consistency")
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_search_new_data(self, nq, _async):
-        """
-        target: test search new inserted data without load
-        method: 1. search the collection
-                2. insert new data
-                3. search the collection without load again
-                4. Use guarantee_timestamp to guarantee data consistency
-        expected: new data should be searched
-        """
-        # 1. initialize with data
-        dim = 128
-        auto_id = False
-        limit = 1000
-        nb_old = 500
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb_old,
-                                                                                  auto_id=auto_id,
-                                                                                  dim=dim)[0:5]
-        # 2. search for original data after load
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        log.info("test_search_new_data: searching for original data after load")
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": nb_old,
-                                         "_async": _async})
-        # 3. insert new data
-        nb_new = 300
-        _, _, _, insert_ids_new, time_stamp = cf.insert_data(collection_w, nb_new,
-                                                             auto_id=auto_id, dim=dim,
-                                                             insert_offset=nb_old)
-        insert_ids.extend(insert_ids_new)
-        # 4. search for new data without load
-        # Using bounded staleness, maybe we could not search the "inserted" entities,
-        # since the search requests arrived query nodes earlier than query nodes consume the insert requests.
-        collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, limit,
-                            default_search_exp, _async=_async,
-                            guarantee_timestamp=time_stamp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": insert_ids,
-                                         "limit": nb_old + nb_new,
-                                         "_async": _async})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num", [-256, 0, ct.max_shards_num // 2, ct.max_shards_num])
-    def test_search_with_non_default_shard_nums(self, shards_num, _async):
-        """
-        target: test search with non_default shards_num
-        method: connect milvus, create collection with several shard numbers , insert, load and search
-        expected: search successfully with the non_default shards_num
-        """
-        auto_id = False
-        self._connect()
-        # 1. create collection
-        name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(
-            name=name, shards_num=shards_num)
-        # 2. rename collection
-        new_collection_name = cf.gen_unique_str(prefix + "new")
-        self.utility_wrap.rename_collection(
-            collection_w.name, new_collection_name)
-        collection_w = self.init_collection_wrap(
-            name=new_collection_name, shards_num=shards_num)
-        # 3. insert
-        dataframe = cf.gen_default_dataframe_data()
-        collection_w.insert(dataframe)
-        # 4. create index and load
-        collection_w.create_index(
-            ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_w.load()
-        # 5. search
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit,
-                                         "_async": _async})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("M", [4, 64])
-    @pytest.mark.parametrize("efConstruction", [8, 512])
-    def test_search_HNSW_index_with_redundant_param(self, M, efConstruction, _async):
-        """
-        target: test search HNSW index with redundant param
-        method: connect milvus, create collection , insert, create index, load and search
-        expected: search successfully
-        """
-        dim = M * 4
-        auto_id = False
-        enable_dynamic_field = False
-        self._connect()
-        collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, partition_num=1, auto_id=auto_id,
-                                         dim=dim, is_index=False, enable_dynamic_field=enable_dynamic_field)[0:5]
-        # nlist is of no use
-        HNSW_index_params = {
-            "M": M, "efConstruction": efConstruction, "nlist": 100}
-        HNSW_index = {"index_type": "HNSW",
-                      "params": HNSW_index_params, "metric_type": "L2"}
-        collection_w.create_index("float_vector", HNSW_index)
-        collection_w.load()
-        search_param = {"metric_type": "L2", "params": {
-            "ef": 32768, "nprobe": 10}}  # nprobe is of no use
-        vectors = [[random.random() for _ in range(dim)]
-                   for _ in range(default_nq)]
-        collection_w.search(vectors[:default_nq], default_search_field,
-                            search_param, default_limit,
-                            default_search_exp, _async=_async,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit,
-                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("M", [4, 64])
@@ -789,8 +570,7 @@ class TestCollectionSearch(TestcaseBase):
             self.init_collection_general(prefix, True, nb=nb, dim=dim, enable_dynamic_field=True)[0:4]
 
         # filter result with expression in collection
-        search_vectors = [[random.random() for _ in range(dim)]
-                          for _ in range(default_nq)]
+        search_vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         _vectors = _vectors[0]
         for expressions in cf.gen_json_field_expressions_and_templates():
             expr = expressions[0].replace("&&", "and").replace("||", "or")
@@ -859,12 +639,16 @@ class TestCollectionSearch(TestcaseBase):
                 ids = hits.ids
                 assert set(ids).issubset(filter_ids_set)
             # 7. create json index
-            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                            "json_path": f"{ct.default_json_field_name}['number']"}}
-            collection_w.create_index(ct.default_json_field_name, default_json_path_index, index_name = f"{ct.default_json_field_name}_0")
-            default_json_path_index = {"index_type": "INVERTED", "params": {"json_cast_type": "double",
-                                                                            "json_path": f"{ct.default_json_field_name}['float']"}}
-            collection_w.create_index(ct.default_json_field_name, default_json_path_index, index_name = f"{ct.default_json_field_name}_1")
+            default_json_path_index = {"index_type": "INVERTED",
+                                       "params": {"json_cast_type": "double",
+                                                  "json_path": f"{ct.default_json_field_name}['number']"}}
+            collection_w.create_index(ct.default_json_field_name, default_json_path_index,
+                                      index_name=f"{ct.default_json_field_name}_0")
+            default_json_path_index = {"index_type": "AUTOINDEX",
+                                       "params": {"json_cast_type": "double",
+                                                  "json_path": f"{ct.default_json_field_name}['float']"}}
+            collection_w.create_index(ct.default_json_field_name, default_json_path_index,
+                                      index_name=f"{ct.default_json_field_name}_1")
             # 8. release and load to make sure the new index is loaded
             collection_w.release()
             collection_w.load()
@@ -995,8 +779,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors, default_search_field, default_search_params,
                             default_limit, expression, output_fields=[field],
                             check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": 0})[0]
+                            check_items={"nq": default_nq, "limit": 0})
         # 4. search normal using all the scalar type as output fields
         collection_w.search(vectors, default_search_field, default_search_params,
                             default_limit, output_fields=[field],

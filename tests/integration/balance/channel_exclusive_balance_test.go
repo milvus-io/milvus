@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -41,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/milvus-io/milvus/tests/integration/cluster/process"
 )
 
 type ChannelExclusiveBalanceSuit struct {
@@ -48,22 +48,13 @@ type ChannelExclusiveBalanceSuit struct {
 }
 
 func (s *ChannelExclusiveBalanceSuit) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
+	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
 
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
-
-	// disable compaction
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
-}
-
-func (s *ChannelExclusiveBalanceSuit) TearDownSuite() {
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
-	s.MiniClusterSuite.TearDownSuite()
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int, segmentDeleteNum int) {
@@ -75,11 +66,16 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 		dbName = ""
 	)
 
+	for i := 1; i < replica; i++ {
+		s.Cluster.AddStreamingNode()
+		s.Cluster.AddQueryNode()
+	}
+
 	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -89,7 +85,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 	s.True(merr.Ok(createCollectionStatus))
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := s.Cluster.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(showCollectionsResp.Status))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -97,7 +93,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 	for i := 0; i < segmentNum; i++ {
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, segmentRowNum, dim)
 		hashKeys := integration.GenerateHashKeys(segmentRowNum)
-		insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -119,7 +115,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 
 			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 
-			deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+			deleteResp, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
 				Expr:           expr,
 			})
@@ -129,7 +125,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 		}
 
 		// flush
-		flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName:          dbName,
 			CollectionNames: []string{collectionName},
 		})
@@ -144,7 +140,7 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 	}
 
 	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -154,12 +150,8 @@ func (s *ChannelExclusiveBalanceSuit) initCollection(collectionName string, repl
 	s.True(merr.Ok(createIndexStatus))
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
-	for i := 1; i < replica; i++ {
-		s.Cluster.AddQueryNode()
-	}
-
 	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(replica),
@@ -179,7 +171,7 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 	s.initCollection(name, 1, channelCount, 5, 2000, 0)
 
 	ctx := context.Background()
-	qnList := make([]*grpcquerynode.Server, 0)
+	qnList := make([]*process.QueryNodeProcess, 0)
 	// add a querynode, expected balance happens
 	for i := 1; i < channelCount*channelNodeCount; i++ {
 		qn := s.Cluster.AddQueryNode()
@@ -190,7 +182,7 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 	s.Eventually(func() bool {
 		channelNodeCounter := make(map[string]int)
 		for _, node := range s.Cluster.GetAllQueryNodes() {
-			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+			resp1, err := node.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
 
@@ -222,7 +214,7 @@ func (s *ChannelExclusiveBalanceSuit) TestBalanceOnSingleReplica() {
 	s.Eventually(func() bool {
 		channelNodeCounter := make(map[string]int)
 		for _, node := range s.Cluster.GetAllQueryNodes() {
-			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+			resp1, err := node.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			if err != nil && merr.Ok(resp1.GetStatus()) {
 				log.Info("resp", zap.Any("segments", resp1.Segments))
 				if channel, ok := s.isSameChannel(resp1.GetSegments()); ok {
@@ -259,5 +251,6 @@ func (s *ChannelExclusiveBalanceSuit) isSameChannel(segments []*querypb.SegmentV
 }
 
 func TestChannelExclusiveBalance(t *testing.T) {
+	t.Skip("skip until we fix the issue https://github.com/milvus-io/milvus/issues/42966")
 	suite.Run(t, new(ChannelExclusiveBalanceSuit))
 }

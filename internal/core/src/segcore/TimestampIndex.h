@@ -16,7 +16,6 @@
 #include <utility>
 
 #include "common/Schema.h"
-
 namespace milvus::segcore {
 
 class TimestampIndex {
@@ -40,6 +39,12 @@ class TimestampIndex {
                    const Timestamp* timestamps,
                    int64_t size);
 
+    static BitsetType
+    GenerateTTLBitset(const Timestamp* timestamps,
+                      int64_t size,
+                      Timestamp expire_ts,
+                      std::pair<int64_t, int64_t> active_range);
+
  private:
     // numSlice
     std::vector<int64_t> lengths_;
@@ -56,5 +61,4 @@ std::vector<int64_t>
 GenerateFakeSlices(const Timestamp* timestamps,
                    int64_t size,
                    int min_slice_length = 1);
-
 }  // namespace milvus::segcore

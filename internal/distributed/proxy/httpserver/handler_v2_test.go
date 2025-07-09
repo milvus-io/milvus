@@ -29,6 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -2723,4 +2724,139 @@ func TestSearchV2(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 	validateTestCases(t, testEngine, queryTestCases, false)
+}
+
+func TestGetQuotaMetrics(t *testing.T) {
+	paramtable.Init()
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().GetQuotaMetrics(mock.Anything, mock.Anything).Return(&internalpb.GetQuotaMetricsResponse{
+		Status:      &StatusSuccess,
+		MetricsInfo: `{"proxy1": "1000", "proxy2": "2000"}`,
+	}, nil)
+	testEngine := initHTTPServerV2(mp, false)
+	testcase := requestBodyTestCase{
+		path:        DescribeAction,
+		requestBody: []byte(`{}`),
+	}
+
+	bodyReader := bytes.NewReader(testcase.requestBody)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(QuotaCenterCategory, testcase.path), bodyReader)
+	w := httptest.NewRecorder()
+	testEngine.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "case %d: ", string(testcase.requestBody))
+	returnBody := &ReturnErrMsg{}
+	err := json.Unmarshal(w.Body.Bytes(), returnBody)
+	assert.Nil(t, err)
+	assert.Equal(t, testcase.errCode, returnBody.Code, "case: %d, request body: %s ", string(testcase.requestBody))
+	if testcase.errCode != 0 {
+		assert.Contains(t, returnBody.Message, testcase.errMsg, "case: %d, request body: %s", string(testcase.requestBody))
+	}
+	fmt.Println(w.Body.String())
+}
+
+type AddCollectionFieldSuite struct {
+	suite.Suite
+	testEngine *gin.Engine
+	mp         *mocks.MockProxy
+}
+
+func (s *AddCollectionFieldSuite) SetupSuite() {
+	paramtable.Init()
+	// disable rate limit
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+}
+
+func (s *AddCollectionFieldSuite) TearDownSuite() {
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+}
+
+func (s *AddCollectionFieldSuite) SetupTest() {
+	s.mp = mocks.NewMockProxy(s.T())
+	s.testEngine = initHTTPServerV2(s.mp, false)
+}
+
+func (s *AddCollectionFieldSuite) TestAddCollectionFieldNormal() {
+	addFieldTestCases := []requestBodyTestCase{
+		{
+			path:        versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Int64", "nullable": true, "elementTypeParams": {}}}`),
+		},
+		{
+			path:        versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "VarChar", "nullable": true, "elementTypeParams": {"max_length": "256"}}}`),
+		},
+		{
+			path:        versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Int64", "nullable": true, "defaultValue": 42}}`),
+		},
+		{
+			path:        versionalV2(CollectionFieldCategory, AddAction),
+			requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Array", "elementDataType": "Int64", "nullable": true}}`),
+		},
+	}
+	s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
+}
+
+func (s *AddCollectionFieldSuite) TestAddCollectionFieldFail() {
+	s.Run("bad_request", func() {
+		addFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "nullable": true, "elementTypeParams": {}}}`),
+				errCode:     1802, // missing param
+				errMsg:      "missing required parameters, error: Key: 'CollectionFieldReqWithSchema.Schema.DataType' Error:Field validation for 'DataType' failed on the 'required' tag",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Int64", "nullable": true, "defaultValue": "aaa"}}`),
+				errCode:     1100, // invalid param
+				errMsg:      "convert defaultValue fail, err: Wrong defaultValue type: invalid parameter[expected=number][actual=aaa]: invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "LONGLONGLONGLONGTEXT", "nullable": true}}`),
+				errCode:     1100, // invalid param
+				errMsg:      "data type LONGLONGLONGLONGTEXT is invalid(case sensitive): invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Array", "nullable": true}}`),
+				errCode:     1100, // invalid param
+				errMsg:      "element data type  is invalid(case sensitive): invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Array", "elementDataType": "MYBLOB", "nullable": true}}`),
+				errCode:     1100, // missing param
+				errMsg:      "element data type MYBLOB is invalid(case sensitive): invalid parameter",
+			},
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field"`),
+				errCode:     1801, // bad request
+				errMsg:      "can only accept json format request, error: unexpected EOF",
+			},
+		}
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
+	})
+
+	s.Run("server_error", func() {
+		addFieldTestCases := []requestBodyTestCase{
+			{
+				path:        versionalV2(CollectionFieldCategory, AddAction),
+				requestBody: []byte(`{"collectionName": "book", "schema": {"fieldName": "new_field", "dataType": "Int64", "nullable": true, "elementTypeParams": {}}}`),
+				errCode:     5,
+				errMsg:      "service internal error: mock error",
+			},
+		}
+		s.mp.EXPECT().AddCollectionField(mock.Anything, mock.Anything).Return(merr.Status(merr.WrapErrServiceInternal("mock error")), nil).Maybe()
+
+		validateRequestBodyTestCases(s.T(), s.testEngine, addFieldTestCases, false)
+	})
+}
+
+func TestAddCollectionFieldSuite(t *testing.T) {
+	suite.Run(t, new(AddCollectionFieldSuite))
 }

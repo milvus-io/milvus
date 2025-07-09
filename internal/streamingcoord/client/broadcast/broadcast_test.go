@@ -22,11 +22,11 @@ import (
 func TestBroadcast(t *testing.T) {
 	s := newMockServer(t, 0)
 	bs := NewGRPCBroadcastService(walimplstest.WALName, s)
-	msg, _ := message.NewDropCollectionMessageBuilderV1().
+	msg := message.NewDropCollectionMessageBuilderV1().
 		WithHeader(&message.DropCollectionMessageHeader{}).
 		WithBody(&msgpb.DropCollectionRequest{}).
 		WithBroadcast([]string{"v1"}, message.NewCollectionNameResourceKey("r1")).
-		BuildBroadcast()
+		MustBuildBroadcast()
 	_, err := bs.Broadcast(context.Background(), msg)
 	assert.NoError(t, err)
 	err = bs.Ack(context.Background(), types.BroadcastAckRequest{
@@ -34,7 +34,6 @@ func TestBroadcast(t *testing.T) {
 		BroadcastID: 1,
 	})
 	assert.NoError(t, err)
-	bs.Close()
 }
 
 func newMockServer(t *testing.T, sendDelay time.Duration) lazygrpc.Service[streamingpb.StreamingCoordBroadcastServiceClient] {

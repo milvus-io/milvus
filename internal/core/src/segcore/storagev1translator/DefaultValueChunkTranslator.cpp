@@ -30,7 +30,8 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                      : milvus::cachinglayer::StorageType::MEMORY,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
-                /* is_index */ false),
+                /* is_index */ false,
+                /* in_load_list, set to false to reduce memory usage */ false),
             /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);
@@ -52,6 +53,7 @@ DefaultValueChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 milvus::cachinglayer::ResourceUsage
 DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
+    // TODO(tiered storage 1): provide a better estimation.
     return milvus::cachinglayer::ResourceUsage{0, 0};
 }
 
@@ -71,7 +73,8 @@ DefaultValueChunkTranslator::get_cells(
         milvus::storage::CreateArrowBuilder(field_meta_.get_data_type());
     arrow::Status ast;
     if (field_meta_.default_value().has_value()) {
-        builder->Reserve(num_rows);
+        ast = builder->Reserve(num_rows);
+        AssertInfo(ast.ok(), "reserve arrow build failed: {}", ast.ToString());
         auto scalar = storage::CreateArrowScalarFromDefaultValue(field_meta_);
         ast = builder->AppendScalar(*scalar, num_rows);
     } else {
@@ -82,13 +85,7 @@ DefaultValueChunkTranslator::get_cells(
                ast.ToString());
     arrow::ArrayVector array_vec;
     array_vec.emplace_back(builder->Finish().ValueOrDie());
-    auto chunk = create_chunk(
-        field_meta_,
-        IsVectorDataType(field_meta_.get_data_type()) &&
-                !IsSparseFloatVectorDataType(field_meta_.get_data_type())
-            ? field_meta_.get_dim()
-            : 1,
-        array_vec);
+    auto chunk = create_chunk(field_meta_, array_vec);
 
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>

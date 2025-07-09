@@ -38,26 +38,15 @@ const (
 )
 
 func (s *HTTPServerSuite) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().HTTPCfg.Port.Key, fmt.Sprintf("%d", PORT))
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DMLLimitEnabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DMLMaxInsertRate.Key, "1")
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerDB.Key, "1")
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerCollection.Key, "1")
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerPartition.Key, "1")
-	s.MiniClusterSuite.SetupSuite()
-}
+	s.WithMilvusConfig(paramtable.Get().HTTPCfg.Port.Key, fmt.Sprintf("%d", PORT))
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.DMLLimitEnabled.Key, "true")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.DMLMaxInsertRate.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerDB.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerCollection.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerPartition.Key, "1")
 
-func (s *HTTPServerSuite) TearDownSuite() {
-	paramtable.Get().Reset(paramtable.Get().HTTPCfg.Port.Key)
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.DMLLimitEnabled.Key)
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.DMLMaxInsertRate.Key)
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerDB.Key)
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerCollection.Key)
-	paramtable.Get().Reset(paramtable.Get().QuotaConfig.DMLMaxInsertRatePerPartition.Key)
-	s.MiniClusterSuite.TearDownSuite()
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *HTTPServerSuite) TestInsertThrottle() {

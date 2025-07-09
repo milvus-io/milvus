@@ -55,6 +55,6 @@ func TestTruncatorConfig(t *testing.T) {
 	paramtable.Init()
 	cfg := newTruncatorConfig()
 
-	assert.Equal(t, 1*time.Minute, cfg.sampleInterval)
-	assert.Equal(t, 5*time.Minute, cfg.retentionInterval)
+	assert.Equal(t, 30*time.Minute, cfg.sampleInterval)
+	assert.Equal(t, 72*time.Hour, cfg.retentionInterval)
 }

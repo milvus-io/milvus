@@ -1,6 +1,8 @@
 package recovery
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -59,7 +61,7 @@ type RecoveryStream interface {
 // RecoveryStorage is an interface that is used to observe the messages from the WAL.
 type RecoveryStorage interface {
 	// ObserveMessage observes the message from the WAL.
-	ObserveMessage(msg message.ImmutableMessage)
+	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
 
 	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
 	// TODO: should be removed in future, after merge the flusher logic into recovery storage.

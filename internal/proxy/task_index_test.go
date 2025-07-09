@@ -161,6 +161,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -185,6 +186,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -210,6 +212,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -241,6 +244,7 @@ func getMockQueryCoord() *mocks.MockMixCoordClient {
 				ChannelName: "channel-1",
 				NodeIds:     []int64{1, 2, 3},
 				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				Serviceable: []bool{true, true, true},
 			},
 		},
 	}, nil)
@@ -1155,6 +1159,94 @@ func Test_parseIndexParams(t *testing.T) {
 		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
 		assert.NoError(t, err)
 		assert.Equal(t, jsonPath, "DynamicField")
+	})
+}
+
+func Test_ngram_parseIndexParams(t *testing.T) {
+	t.Run("valid ngram index params", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "NGRAM"},
+			{Key: indexparamcheck.MinGramKey, Value: "2"},
+			{Key: indexparamcheck.MaxGramKey, Value: "3"},
+		}, cit.newIndexParams)
+		assert.Empty(t, cit.newTypeParams)
+	})
+
+	t.Run("ngram on non varchar field", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldInt", DataType: schemapb.DataType_Int64,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ngram missing params", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ngram non-integer params", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"a\", \"max_gram\": \"3\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("ngram invalid range", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "NGRAM"},
+					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"5\", \"max_gram\": \"3\"}"},
+				},
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID: 101, Name: "FieldID", DataType: schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.Error(t, err)
 	})
 }
 

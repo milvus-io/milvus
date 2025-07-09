@@ -26,6 +26,7 @@
 #include "knowhere/comp/index_param.h"
 #include "parquet/schema.h"
 #include "storage/Event.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
 #include "storage/BinlogReader.h"
@@ -33,10 +34,12 @@
 #include "storage/DataCodec.h"
 #include "storage/Types.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "storage/ThreadPools.h"
+#include "milvus-storage/common/metadata.h"
 
 namespace milvus::storage {
 
-StorageType
+void
 ReadMediumType(BinlogReaderPtr reader);
 
 void
@@ -86,43 +89,56 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
                            DataType data_type);
 
 std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
+GenIndexPathIdentifier(int64_t build_id,
+                       int64_t index_version,
+                       int64_t segment_id,
+                       int64_t field_id);
 
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
+GenIndexPathPrefix(ChunkManagerPtr cm,
+                   int64_t build_id,
+                   int64_t index_version,
+                   int64_t segment_id,
+                   int64_t field_id,
+                   bool is_temp);
 
-std::string
-GenTextIndexPathIdentifier(int64_t build_id,
-                           int64_t index_version,
-                           int64_t segment_id,
-                           int64_t field_id);
-
-std::string
-GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
-
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
 GenTextIndexPathPrefix(ChunkManagerPtr cm,
                        int64_t build_id,
                        int64_t index_version,
                        int64_t segment_id,
-                       int64_t field_id);
+                       int64_t field_id,
+                       bool is_temp);
 
-std::string
-GenJsonKeyIndexPathIdentifier(int64_t build_id,
-                              int64_t index_version,
-                              int64_t collection_id,
-                              int64_t partition_id,
-                              int64_t segment_id,
-                              int64_t field_id);
-
+// is_temp: true for temporary path used during index building,
+// false for path to store pre-built index contents downloaded from remote storage
 std::string
 GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
                           int64_t build_id,
                           int64_t index_version,
-                          int64_t collection_id,
-                          int64_t partition_id,
                           int64_t segment_id,
-                          int64_t field_id);
+                          int64_t field_id,
+                          bool is_temp);
+
+std::string
+GenRemoteJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
+                                int64_t build_id,
+                                int64_t index_version,
+                                int64_t collection_id,
+                                int64_t partition_id,
+                                int64_t segment_id,
+                                int64_t field_id);
+std::string
+GenNgramIndexPrefix(ChunkManagerPtr cm,
+                    int64_t build_id,
+                    int64_t index_version,
+                    int64_t segment_id,
+                    int64_t field_id,
+                    bool is_temp);
 
 std::string
 GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
@@ -131,11 +147,6 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
 
 std::string
 GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id);
-
-std::unique_ptr<DataCodec>
-DownloadAndDecodeRemoteFile(ChunkManager* chunk_manager,
-                            const std::string& file,
-                            bool is_field_data = true);
 
 std::pair<std::string, size_t>
 EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
@@ -146,14 +157,18 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           std::string object_key);
 
 std::vector<std::future<std::unique_ptr<DataCodec>>>
-GetObjectData(ChunkManager* remote_chunk_manager,
-              const std::vector<std::string>& remote_files);
+GetObjectData(
+    ChunkManager* remote_chunk_manager,
+    const std::vector<std::string>& remote_files,
+    milvus::ThreadPoolPriority priority = milvus::ThreadPoolPriority::HIGH,
+    bool is_field_data = true);
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
-                           int64_t dim);
+                           int64_t dim,
+                           milvus_storage::ArrowFileSystemPtr fs);
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
@@ -192,6 +207,9 @@ CollectFieldDataChannel(FieldDataChannelPtr& channel);
 
 FieldDataPtr
 MergeFieldData(std::vector<FieldDataPtr>& data_array);
+
+int64_t
+ExtractGroupIdFromPath(const std::string& path);
 
 template <typename T, typename = void>
 struct has_native_type : std::false_type {};
@@ -233,6 +251,10 @@ SortByPath(std::vector<std::pair<std::string, int64_t>>& paths) {
         });
 }
 
+std::vector<FieldDataPtr>
+CacheRawDataAndFillMissing(const MemFileManagerImplPtr& file_manager,
+                           const Config& config);
+
 // used only for test
 inline std::shared_ptr<ArrowDataWrapper>
 ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
@@ -256,5 +278,11 @@ ConvertFieldDataToArrowDataWrapper(const FieldDataPtr& field_data) {
         event_data.payload_reader->get_file_reader(),
         file_data);
 }
+
+milvus_storage::FieldIDList
+GetFieldIDList(FieldId column_group_id,
+               const std::string& filepath,
+               const std::shared_ptr<arrow::Schema>& arrow_schema,
+               milvus_storage::ArrowFileSystemPtr fs);
 
 }  // namespace milvus::storage

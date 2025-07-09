@@ -25,6 +25,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
@@ -33,10 +34,18 @@ import (
 
 const analyzerParams = "analyzer_params"
 
+type Analyzer interface {
+	BatchAnalyze(withDetail bool, withHash bool, inputs ...any) ([][]*milvuspb.AnalyzerToken, error)
+	GetInputFields() []*schemapb.FieldSchema
+}
+
 // BM25 Runner
 // Input: string
 // Output: map[uint32]float32
 type BM25FunctionRunner struct {
+	mu     sync.RWMutex
+	closed bool
+
 	tokenizer   tokenizerapi.Tokenizer
 	schema      *schemapb.FunctionSchema
 	outputField *schemapb.FieldSchema
@@ -116,6 +125,13 @@ func (v *BM25FunctionRunner) run(data []string, dst []map[uint32]float32) error 
 }
 
 func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, errors.New("analyzer receview request after function closed")
+	}
+
 	if len(inputs) > 1 {
 		return nil, errors.New("BM25 function received more than one input column")
 	}
@@ -159,6 +175,87 @@ func (v *BM25FunctionRunner) BatchRun(inputs ...any) ([]any, error) {
 	return []any{buildSparseFloatArray(embedData)}, nil
 }
 
+func (v *BM25FunctionRunner) analyze(data []string, dst [][]*milvuspb.AnalyzerToken, withDetail bool, withHash bool) error {
+	tokenizer, err := v.tokenizer.Clone()
+	if err != nil {
+		return err
+	}
+	defer tokenizer.Destroy()
+
+	for i := 0; i < len(data); i++ {
+		result := []*milvuspb.AnalyzerToken{}
+		tokenStream := tokenizer.NewTokenStream(data[i])
+		defer tokenStream.Destroy()
+		for tokenStream.Advance() {
+			var token *milvuspb.AnalyzerToken
+			if withDetail {
+				token = tokenStream.DetailedToken()
+			} else {
+				token = &milvuspb.AnalyzerToken{
+					Token: tokenStream.Token(),
+				}
+			}
+
+			if withHash {
+				token.Hash = typeutil.HashString2LessUint32(token.GetToken())
+			}
+			result = append(result, token)
+		}
+		dst[i] = result
+	}
+	return nil
+}
+
+func (v *BM25FunctionRunner) BatchAnalyze(withDetail bool, withHash bool, inputs ...any) ([][]*milvuspb.AnalyzerToken, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.closed {
+		return nil, errors.New("analyzer receview request after function closed")
+	}
+
+	if len(inputs) > 1 {
+		return nil, errors.New("analyze received should only receive text input column(not set analyzer name)")
+	}
+
+	text, ok := inputs[0].([]string)
+	if !ok {
+		return nil, errors.New("batch input not string list")
+	}
+
+	rowNum := len(text)
+	result := make([][]*milvuspb.AnalyzerToken, rowNum)
+	wg := sync.WaitGroup{}
+
+	errCh := make(chan error, v.concurrency)
+	for i, j := 0, 0; i < v.concurrency && j < rowNum; i++ {
+		start := j
+		end := start + rowNum/v.concurrency
+		if i < rowNum%v.concurrency {
+			end += 1
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := v.analyze(text[start:end], result[start:end], withDetail, withHash)
+			if err != nil {
+				errCh <- err
+				return
+			}
+		}()
+		j = end
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
 func (v *BM25FunctionRunner) GetSchema() *schemapb.FunctionSchema {
 	return v.schema
 }
@@ -169,6 +266,14 @@ func (v *BM25FunctionRunner) GetOutputFields() []*schemapb.FieldSchema {
 
 func (v *BM25FunctionRunner) GetInputFields() []*schemapb.FieldSchema {
 	return []*schemapb.FieldSchema{v.inputField}
+}
+
+func (v *BM25FunctionRunner) Close() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	v.closed = true
+	v.tokenizer.Destroy()
 }
 
 func buildSparseFloatArray(mapdata []map[uint32]float32) *schemapb.SparseFloatArray {

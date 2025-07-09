@@ -31,8 +31,29 @@ ScalarIndexCreator::ScalarIndexCreator(
     const storage::FileManagerContext& file_manager_context)
     : config_(config), dtype_(dtype) {
     milvus::index::CreateIndexInfo index_info;
-    if (config.contains("index_type")) {
-        index_type_ = config.at("index_type").get<std::string>();
+    if (config.contains(milvus::index::INDEX_TYPE)) {
+        index_type_ = config.at(milvus::index::INDEX_TYPE).get<std::string>();
+
+        if (index_type_ == milvus::index::NGRAM_INDEX_TYPE) {
+            if (!config.contains(milvus::index::MIN_GRAM) ||
+                !config.contains(milvus::index::MAX_GRAM)) {
+                PanicInfo(
+                    milvus::ErrorCode::InvalidParameter,
+                    "Ngram index must specify both min_gram and max_gram");
+            }
+
+            milvus::index::NgramParams ngram_params{};
+            ngram_params.loading_index = false;
+            ngram_params.min_gram =
+                std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                               config, milvus::index::MIN_GRAM)
+                               .value());
+            ngram_params.max_gram =
+                std::stoul(milvus::index::GetValueFromConfig<std::string>(
+                               config, milvus::index::MAX_GRAM)
+                               .value());
+            index_info.ngram_params = std::make_optional(ngram_params);
+        }
     }
     // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
     // Use value_or(1) for unit test without setting this value
@@ -52,6 +73,10 @@ ScalarIndexCreator::ScalarIndexCreator(
         index_info.json_cast_type = milvus::JsonCastType::FromString(
             config.at(JSON_CAST_TYPE).get<std::string>());
         index_info.json_path = config.at(JSON_PATH).get<std::string>();
+        if (config.contains(JSON_CAST_FUNCTION)) {
+            index_info.json_cast_function =
+                config.at(JSON_CAST_FUNCTION).get<std::string>();
+        }
     }
     index_ = index::IndexFactory::GetInstance().CreateIndex(
         index_info, file_manager_context);

@@ -25,11 +25,12 @@ source $BASEDIR/setenv.sh
 
 TEST_CMD=$@
 if [ -z "$TEST_CMD" ]; then
-   TEST_CMD="go test" 
+   TEST_CMD="go test -failfast -count=1" 
 fi
 
 set -e
 echo "mode: atomic" > ${FILE_COVERAGE_INFO}
+echo "MILVUS_WORK_DIR: $MILVUS_WORK_DIR"
 
 # starting the timer
 beginTime=`date +%s`
@@ -41,7 +42,7 @@ for d in $(go list ./tests/integration/...); do
         # simplified command to speed up coord init test since it is large.
         $TEST_CMD -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=30m
     elif [[ $d == *"import"* ]]; then
-        go test -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=60m
+        $TEST_CMD -tags dynamic,test -v -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=20m -timeout=60m
     else
         $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d" -caseTimeout=15m -timeout=30m
     fi

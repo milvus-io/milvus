@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -163,6 +164,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
+		zap.Any("storageConfig", st.req.StorageConfig),
 	)
 	return nil
 }
@@ -189,6 +191,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 			return st.binlogIO.Upload(ctx, kvs)
 		}),
 		storage.WithVersion(st.req.GetStorageVersion()),
+		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
 		log.Ctx(ctx).Warn("sort segment wrong, unable to init segment writer",
@@ -234,13 +237,16 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		storage.WithVersion(st.req.StorageVersion),
 		storage.WithDownloader(st.binlogIO.Download),
 		storage.WithBucketName(st.req.StorageConfig.BucketName),
+		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {
 		log.Warn("error creating insert binlog reader", zap.Error(err))
 		return nil, err
 	}
+	defer rr.Close()
+
 	rrs := []storage.RecordReader{rr}
-	numValidRows, err := storage.Sort(st.req.Schema, rrs, srw, predicate)
+	numValidRows, err := storage.Sort(st.req.GetBinlogMaxSize(), st.req.GetSchema(), rrs, srw, predicate)
 	if err != nil {
 		log.Warn("sort failed", zap.Int64("taskID", st.req.GetTaskID()), zap.Error(err))
 		return nil, err
@@ -426,6 +432,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
+		if st.req.GetStorageVersion() == storage.StorageV2 {
+			return []string{}, nil
+		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
@@ -457,7 +466,9 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, 0)
+		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
+		req.InsertLogs = insertBinlogs
+		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, 0)
 
 		uploaded, err := indexcgowrapper.CreateTextIndex(ctx, buildIndexParams)
 		if err != nil {
@@ -517,6 +528,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	})
 
 	getInsertFiles := func(fieldID int64) ([]string, error) {
+		if st.req.GetStorageVersion() == storage.StorageV2 {
+			return []string{}, nil
+		}
 		binlogs, ok := fieldBinlogs[fieldID]
 		if !ok {
 			return nil, fmt.Errorf("field binlog not found for field %d", fieldID)
@@ -547,7 +561,9 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 			return err
 		}
 
-		buildIndexParams := buildIndexParams(st.req, files, field, newStorageConfig, tantivyMemory)
+		req := proto.Clone(st.req).(*workerpb.CreateStatsRequest)
+		req.InsertLogs = insertBinlogs
+		buildIndexParams := buildIndexParams(req, files, field, newStorageConfig, tantivyMemory)
 
 		uploaded, err := indexcgowrapper.CreateJSONKeyStats(ctx, buildIndexParams)
 		if err != nil {
@@ -605,12 +621,14 @@ func buildIndexParams(
 	}
 
 	if req.GetStorageVersion() == storage.StorageV2 {
-		params.SegmentInsertFiles = GetSegmentInsertFiles(
+		params.SegmentInsertFiles = util.GetSegmentInsertFiles(
 			req.GetInsertLogs(),
 			req.GetStorageConfig(),
 			req.GetCollectionID(),
 			req.GetPartitionID(),
-			req.GetTargetSegmentID())
+			req.GetTargetSegmentID(),
+		)
+		log.Info("build index params", zap.Any("segment insert files", params.SegmentInsertFiles))
 	}
 
 	return params

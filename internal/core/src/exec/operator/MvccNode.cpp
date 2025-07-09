@@ -33,6 +33,7 @@ PhyMvccNode::PhyMvccNode(int32_t operator_id,
     query_timestamp_ = query_context->get_query_timestamp();
     active_count_ = query_context->get_active_count();
     is_source_node_ = mvcc_node->sources().size() == 0;
+    collection_ttl_timestamp_ = query_context->get_collection_ttl();
 }
 
 void
@@ -63,7 +64,8 @@ PhyMvccNode::GetOutput() {
 
     TargetBitmapView data(col_input->GetRawData(), col_input->size());
     // need to expose null?
-    segment_->mask_with_timestamps(data, query_timestamp_);
+    segment_->mask_with_timestamps(
+        data, query_timestamp_, collection_ttl_timestamp_);
     segment_->mask_with_delete(data, active_count_, query_timestamp_);
     is_finished_ = true;
 

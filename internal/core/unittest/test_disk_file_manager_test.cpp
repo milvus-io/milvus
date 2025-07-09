@@ -94,7 +94,8 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         std::cout << file2size.first << std::endl;
         remote_files.emplace_back(file2size.first);
     }
-    diskAnnFileManager->CacheIndexToDisk(remote_files);
+    diskAnnFileManager->CacheIndexToDisk(
+        remote_files, milvus::proto::common::LoadPriority::HIGH);
     auto local_files = diskAnnFileManager->GetLocalFilePaths();
     for (auto& file : local_files) {
         auto file_size = lcm->Size(file);
@@ -397,4 +398,41 @@ TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskOnlyOneCategory) {
         auto res = file_manager->CacheOptFieldToDisk(opt_fileds);
         ASSERT_TRUE(res.empty());
     }
+}
+
+TEST_F(DiskAnnFileManagerTest, FileCleanup) {
+    std::string local_index_file_path;
+    std::string local_text_index_file_path;
+    std::string local_json_key_index_file_path;
+
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+
+    {
+        auto file_manager = CreateFileManager(cm_);
+
+        auto random_file_suffix = std::to_string(rand());
+        local_text_index_file_path =
+            file_manager->GetLocalTextIndexPrefix() + random_file_suffix;
+        local_json_key_index_file_path =
+            file_manager->GetLocalJsonKeyIndexPrefix() + random_file_suffix;
+        local_index_file_path =
+            file_manager->GetLocalIndexObjectPrefix() + random_file_suffix;
+
+        local_chunk_manager->CreateFile(local_text_index_file_path);
+        local_chunk_manager->CreateFile(local_json_key_index_file_path);
+        local_chunk_manager->CreateFile(local_index_file_path);
+
+        // verify these files exist
+        EXPECT_TRUE(
+            file_manager->IsExisted(local_text_index_file_path).value());
+        EXPECT_TRUE(
+            file_manager->IsExisted(local_json_key_index_file_path).value());
+        EXPECT_TRUE(file_manager->IsExisted(local_index_file_path).value());
+    }
+
+    // verify these files not exist
+    EXPECT_FALSE(local_chunk_manager->Exist(local_text_index_file_path));
+    EXPECT_FALSE(local_chunk_manager->Exist(local_json_key_index_file_path));
+    EXPECT_FALSE(local_chunk_manager->Exist(local_index_file_path));
 }

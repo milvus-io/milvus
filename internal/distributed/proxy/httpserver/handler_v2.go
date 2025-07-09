@@ -88,6 +88,9 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	router.POST(CollectionFieldCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithParams{} }, wrapperTraceLog(h.alterCollectionFieldProperties))))
 
+	// /collections/fields/add
+	router.POST(CollectionFieldCategory+AddAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionFieldReqWithSchema{} }, wrapperTraceLog(h.addCollectionField))))
+
 	router.POST(DataBaseCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.createDatabase))))
 	router.POST(DataBaseCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqRequiredName{} }, wrapperTraceLog(h.dropDatabase))))
 	router.POST(DataBaseCategory+DropPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DropDatabasePropertiesReq{} }, wrapperTraceLog(h.dropDatabaseProperties))))
@@ -205,6 +208,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 
 	// segment group
 	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
+	router.POST(QuotaCenterCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetQuotaMetricsReq{} }, wrapperTraceLog(h.getQuotaMetrics))))
 }
 
 type (
@@ -768,6 +772,37 @@ func (h *HandlersV2) alterCollectionFieldProperties(ctx context.Context, c *gin.
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AlterCollectionField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterCollectionField(reqCtx, req.(*milvuspb.AlterCollectionFieldRequest))
 	})
+	if err == nil {
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionFieldReqWithSchema)
+
+	schemaProto, err := httpReq.Schema.GetProto(ctx)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+
+	bs, err := proto.Marshal(schemaProto)
+	if err != nil {
+		return nil, err
+	}
+
+	req := &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Schema:         bs,
+	}
+
+	c.Set(ContextRequest, req)
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/AddCollectionField", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.AddCollectionField(reqCtx, req.(*milvuspb.AddCollectionFieldRequest))
+	})
+
 	if err == nil {
 		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
@@ -2239,10 +2274,13 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
 	indexGetter, _ := anyReq.(IndexNameGetter)
+	timeGetter, _ := anyReq.(TimestampGetter)
+
 	req := &milvuspb.DescribeIndexRequest{
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 		IndexName:      indexGetter.GetIndexName(),
+		Timestamp:      timeGetter.GetTimestamp(),
 	}
 	c.Set(ContextRequest, req)
 
@@ -2282,6 +2320,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 				HTTPReturnIndexFailReason:      indexDescription.IndexStateFailReason,
 				HTTPReturnMinIndexVersion:      indexDescription.MinIndexVersion,
 				HTTPReturnMaxIndexVersion:      indexDescription.MaxIndexVersion,
+				HTTPReturnIndexParams:          indexDescription.Params,
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}
@@ -2685,5 +2724,18 @@ func (h *HandlersV2) getSegmentsInfo(ctx context.Context, c *gin.Context, anyReq
 		returnData["segmentInfos"] = infos
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
+	return resp, err
+}
+
+func (h *HandlersV2) getQuotaMetrics(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	req := &internalpb.GetQuotaMetricsRequest{}
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/GetQuotaMetrics", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.GetQuotaMetrics(reqCtx, req.(*internalpb.GetQuotaMetricsRequest))
+	})
+	if err == nil {
+		response := resp.(*internalpb.GetQuotaMetricsResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: response.GetMetricsInfo()})
+	}
+
 	return resp, err
 }

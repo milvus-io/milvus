@@ -1,3 +1,6 @@
+import random
+
+import pandas
 import pytest
 import numpy as np
 import time
@@ -10,7 +13,6 @@ from base.client_v2_base import TestMilvusClientV2Base
 from pymilvus import DataType, FieldSchema, CollectionSchema
 
 # Test parameters
-default_dim = ct.default_dim
 default_nb = ct.default_nb
 default_nq = ct.default_nq
 default_limit = ct.default_limit
@@ -28,7 +30,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("flush_enable", [True, False])
     @pytest.mark.parametrize("scalar_index_enable", [True, False])
-    def test_milvus_client_e2e_default(self, flush_enable, scalar_index_enable):
+    @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR])
+    def test_milvus_client_e2e_default(self, flush_enable, scalar_index_enable, vector_type):
         """
         target: test high level api: client.create_collection, insert, search, query
         method: create connection, collection, insert and search with:
@@ -37,13 +40,14 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        
+        dim = 8
+
         # 1. Create collection with custom schema
         collection_name = cf.gen_collection_name_by_testcase_name()
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         # Primary key and vector field
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("vector", vector_type, dim=dim)
         # Boolean type
         schema.add_field("bool_field", DataType.BOOL, nullable=True)
         # Integer types
@@ -59,7 +63,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # JSON type
         schema.add_field("json_field", DataType.JSON, nullable=True)
         # Array type
-        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=12, nullable=True)
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=12, nullable=True)
 
         # Create collection
         self.create_collection(client, collection_name, schema=schema)
@@ -68,14 +72,16 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         num_inserts = 5  # insert data for 5 times
         total_rows = []
         for batch in range(num_inserts):
-            vectors = cf.gen_vectors(default_nb, default_dim)
+            vectors = list(cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)) \
+                if vector_type == DataType.FLOAT_VECTOR \
+                else cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)
             rows = []
             start_id = batch * default_nb  # ensure id is not duplicated
 
             for i in range(default_nb):
                 row = {
                     "id": start_id + i,  # ensure id is not duplicated
-                    "embeddings": list(vectors[i])
+                    "vector": vectors[i]
                 }
 
                 # Add nullable fields with null values for every 5th record
@@ -99,11 +105,11 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
                         "int16_field": i % 32768,
                         "int32_field": i,
                         "int64_field": i,
-                        "float_field": float(i),
-                        "double_field": float(i) * 1.0,
+                        "float_field": random.random(), 
+                        "double_field": random.random(),
                         "varchar_field": f"varchar_{start_id + i}",
                         "json_field": {"id": start_id + i, "value": f"json_{start_id + i}"},
-                        "array_field": [i, i + 1, i + 2]
+                        "array_field": [random.random() for _ in range(5)]
                     })
                 rows.append(row)
                 total_rows.append(row)
@@ -124,7 +130,7 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
 
         # Create index parameters
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index("embeddings", metric_type="COSINE")
+        index_params.add_index("vector", metric_type="COSINE")
 
         # Add autoindex for scalar fields if enabled
         if scalar_index_enable:
@@ -160,13 +166,13 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         
         # 4. Search
         t0 = time.time()
-        vectors_to_search = cf.gen_vectors(1, default_dim)
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=vector_type)
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 100}}
         search_res, _ = self.search(
             client, 
             collection_name,
             vectors_to_search,
-            anns_field="embeddings",
+            anns_field="vector",
             search_params=search_params,
             limit=default_limit,
             output_fields=['*'],
@@ -182,26 +188,34 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         
         # 5. Query with filters on each scalar field
         t0 = time.time()
-
         # Query on boolean field
+        output_fields = ['id', 'int8_field', 'json_field']
         bool_filter = "bool_field == true"
-        bool_expected = [r for r in total_rows if r["bool_field"] is not None and r["bool_field"]]
+        bool_expected = [
+            {
+                'id': r['id'],
+                'int8_field': r['int8_field'],
+                'json_field': r['json_field']
+            }
+            for r in total_rows if r["bool_field"] is not None and r["bool_field"]]
         query_res, _ = self.query(
             client,
             collection_name,
             filter=bool_filter,
-            output_fields=['*'],
+            output_fields=output_fields,
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": bool_expected,
-                "with_vec": True,
+                "with_vec": False,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on int8 field
-        int8_filter = "int8_field < 50"
-        int8_expected = [r for r in total_rows if r["int8_field"] is not None and r["int8_field"] < 50]
+        with_vec = True
+        int8_filter = "int8_field is null || int8_field < 10"
+        int8_expected = [r for r in total_rows if r["int8_field"] is None or r["int8_field"] < 10]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -210,14 +224,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": int8_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on int16 field
-        int16_filter = "int16_field < 1000"
-        int16_expected = [r for r in total_rows if r["int16_field"] is not None and r["int16_field"] < 1000]
+        int16_filter = "100 <= int16_field < 200"
+        int16_expected = [r for r in total_rows if r["int16_field"] is not None and 100 <= r["int16_field"] < 200]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -226,14 +241,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": int16_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on int32 field
-        int32_filter = "int32_field in [1,2,3,4,5]"
-        int32_expected = [r for r in total_rows if r["int32_field"] is not None and r["int32_field"] in [1,2,3,4,5]]
+        int32_filter = "int32_field in [1,2,5,6]"
+        int32_expected = [r for r in total_rows if r["int32_field"] is not None and r["int32_field"] in [1,2,5,6]]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -242,14 +258,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": int32_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on int64 field
-        int64_filter = "int64_field >= 10"
-        int64_expected = [r for r in total_rows if r["int64_field"] is not None and r["int64_field"] >= 10]
+        int64_filter = "int64_field >= 4678 and int64_field < 5050"
+        int64_expected = [r for r in total_rows if r["int64_field"] is not None and r["int64_field"] >= 4678 and r["int64_field"] < 5050]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -258,14 +275,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": int64_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on float field
-        float_filter = "float_field > 5.0"
-        float_expected = [r for r in total_rows if r["float_field"] is not None and r["float_field"] > 5.0]
+        float_filter = "float_field > 0.5 and float_field <= 0.7"
+        float_expected = [r for r in total_rows if r["float_field"] is not None and r["float_field"] > 0.5 and r["float_field"] <= 0.7]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -274,14 +292,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": float_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on double field
-        double_filter = "3.0 <=double_field <= 7.0"
-        double_expected = [r for r in total_rows if r["double_field"] is not None and 3.0 <= r["double_field"] <= 7.0]
+        double_filter = "0.5 <=double_field <= 0.7"
+        double_expected = [r for r in total_rows if r["double_field"] is not None and 0.5 <= r["double_field"] <= 0.7]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -290,7 +309,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": double_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -306,7 +326,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": varchar_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -322,7 +343,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": varchar_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -338,7 +360,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": json_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -354,7 +377,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": array_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -370,7 +394,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": multi_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -386,15 +411,16 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": mix_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Query on is not null conditions for each scalar field
         # Int8 field is not null
-        int8_not_null_filter = "int8_field is not null"
-        int8_not_null_expected = [r for r in total_rows if r["int8_field"] is not None]
+        int8_not_null_filter = "int8_field is not null and int8_field > 100"
+        int8_not_null_expected = [r for r in total_rows if r["int8_field"] is not None and r["int8_field"] > 100]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -403,14 +429,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": int8_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Int16 field is not null
-        int16_not_null_filter = "int16_field is not null"
-        int16_not_null_expected = [r for r in total_rows if r["int16_field"] is not None]
+        int16_not_null_filter = "int16_field is not null and int16_field < 100"
+        int16_not_null_expected = [r for r in total_rows if r["int16_field"] is not None and r["int16_field"] < 100]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -419,14 +446,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": int16_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Float field is not null
-        float_not_null_filter = "float_field is not null"
-        float_not_null_expected = [r for r in total_rows if r["float_field"] is not None]
+        float_not_null_filter = "float_field is not null and float_field > 0.5 and float_field <= 0.7"
+        float_not_null_expected = [r for r in total_rows if r["float_field"] is not None and r["float_field"] > 0.5 and r["float_field"] <= 0.7]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -435,14 +463,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": float_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Double field is not null
-        double_not_null_filter = "double_field is not null"
-        double_not_null_expected = [r for r in total_rows if r["double_field"] is not None]
+        double_not_null_filter = "double_field is not null and double_field <= 0.2"
+        double_not_null_expected = [r for r in total_rows if r["double_field"] is not None and r["double_field"] <= 0.2]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -451,7 +480,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": double_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -467,14 +497,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": varchar_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # JSON field is not null
-        json_not_null_filter = "json_field is not null"
-        json_not_null_expected = [r for r in total_rows if r["json_field"] is not None]
+        json_not_null_filter = "json_field is not null and json_field['id'] < 100"
+        json_not_null_expected = [r for r in total_rows if r["json_field"] is not None and r["json_field"]["id"] < 100]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -483,14 +514,15 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": json_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Array field is not null
-        array_not_null_filter = "array_field is not null"
-        array_not_null_expected = [r for r in total_rows if r["array_field"] is not None]
+        array_not_null_filter = "array_field is not null and array_field[0] < 100"
+        array_not_null_expected = [r for r in total_rows if r["array_field"] is not None and r["array_field"][0] < 100]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -499,14 +531,16 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": array_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Multiple fields is not null
         multi_not_null_filter = "varchar_field is not null and json_field is not null and array_field is not null"
-        multi_not_null_expected = [r for r in total_rows if r["varchar_field"] is not None and r["json_field"] is not None and r["array_field"] is not None]
+        multi_not_null_expected = [r for r in total_rows if r["varchar_field"] is not None and
+                                   r["json_field"] is not None and r["array_field"] is not None]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -515,17 +549,18 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": multi_not_null_expected,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Complex mixed conditions with is null, is not null, and comparison operators
         # Test case 1: int field is null AND float field > value AND varchar field is not null
-        complex_mix_filter1 = "int32_field is null and float_field > 10.0 and varchar_field is not null"
+        complex_mix_filter1 = "int32_field is null and float_field > 0.7 and varchar_field is not null"
         complex_mix_expected1 = [r for r in total_rows if r["int32_field"] is None and
-                               r["float_field"] is not None and r["float_field"] > 10.0 and
-                               r["varchar_field"] is not None]
+                                 r["float_field"] is not None and r["float_field"] > 0.7 and
+                                 r["varchar_field"] is not None]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -534,7 +569,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": complex_mix_expected1,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
@@ -542,8 +578,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # Test case 2: varchar field is not null AND int field between values AND float field is null
         complex_mix_filter2 = "varchar_field is not null and 5 <= int64_field <= 15 and float_field is null"
         complex_mix_expected2 = [r for r in total_rows if r["varchar_field"] is not None and
-                               r["int64_field"] is not None and 5 <= r["int64_field"] <= 15 and
-                               r["float_field"] is None]
+                                 r["int64_field"] is not None and 5 <= r["int64_field"] <= 15 and
+                                 r["float_field"] is None]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -552,16 +588,18 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": complex_mix_expected2,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )
 
         # Test case 3: Multiple fields with mixed null/not null conditions and range comparisons
-        complex_mix_filter3 = "int8_field is not null and int8_field < 50 and double_field is null and varchar_field is not null and varchar_field like \"varchar_2%\""
-        complex_mix_expected3 = [r for r in total_rows if r["int8_field"] is not None and r["int8_field"] < 50 and
-                               r["double_field"] is None and
-                               r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_2")]
+        complex_mix_filter3 = ("int8_field is not null and int8_field < 15 and double_field is null and "
+                               "varchar_field is not null and varchar_field like \"varchar_2%\"")
+        complex_mix_expected3 = [r for r in total_rows if r["int8_field"] is not None and r["int8_field"] < 15 and
+                                 r["double_field"] is None and
+                                 r["varchar_field"] is not None and r["varchar_field"].startswith("varchar_2")]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -570,7 +608,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
             check_task=CheckTasks.check_query_results,
             check_items={
                 "exp_res": complex_mix_expected3,
-                "with_vec": True,
+                "with_vec": with_vec,
+                "vector_type": vector_type,
                 "pk_name": "id"
             }
         )

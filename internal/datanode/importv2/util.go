@@ -38,7 +38,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -141,23 +143,16 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 		return field.GetFieldID()
 	})
 
-	var field int64
-	var rows int
+	rows, baseFieldID := GetInsertDataRowCount(data, schema)
 	for fieldID, d := range data.Data {
-		if idToField[fieldID].GetIsPrimaryKey() && idToField[fieldID].GetAutoID() {
-			continue
-		}
-		field, rows = fieldID, d.RowNum()
-		break
-	}
-	for fieldID, d := range data.Data {
-		if idToField[fieldID].GetIsPrimaryKey() && idToField[fieldID].GetAutoID() {
+		tempField := idToField[fieldID]
+		if d.RowNum() == 0 && (CanBeZeroRowField(tempField)) {
 			continue
 		}
 		if d.RowNum() != rows {
 			return merr.WrapErrImportFailed(
 				fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, field '%s' with '%d' rows",
-					idToField[field].GetName(), rows, idToField[fieldID].GetName(), d.RowNum()))
+					idToField[baseFieldID].GetName(), rows, tempField.GetName(), d.RowNum()))
 		}
 	}
 	return nil
@@ -201,6 +196,200 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData, rowNum i
 	return nil
 }
 
+type nullDefaultAppender[T any] struct{}
+
+func (h *nullDefaultAppender[T]) AppendDefault(fieldData storage.FieldData, defaultVal T, rowNum int) error {
+	values := make([]T, rowNum)
+	if fieldData.GetNullable() {
+		validData := make([]bool, rowNum)
+		for i := 0; i < rowNum; i++ {
+			validData[i] = true    // all true
+			values[i] = defaultVal // fill with default value
+		}
+		return fieldData.AppendRows(values, validData)
+	} else {
+		for i := 0; i < rowNum; i++ {
+			values[i] = defaultVal // fill with default value
+		}
+		return fieldData.AppendDataRows(values)
+	}
+}
+
+func (h *nullDefaultAppender[T]) AppendNull(fieldData storage.FieldData, rowNum int) error {
+	if fieldData.GetNullable() {
+		values := make([]T, rowNum)
+		validData := make([]bool, rowNum)
+		for i := 0; i < rowNum; i++ {
+			validData[i] = false
+		}
+		return fieldData.AppendRows(values, validData)
+	}
+	return nil
+}
+
+func IsFillableField(field *schemapb.FieldSchema) bool {
+	nullable := field.GetNullable()
+	defaultVal := field.GetDefaultValue()
+	return nullable || defaultVal != nil
+}
+
+func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int) error {
+	for _, field := range schema.GetFields() {
+		if !IsFillableField(field) {
+			continue
+		}
+
+		tempData, ok := data.Data[field.GetFieldID()]
+		if ok && tempData != nil {
+			// values have been read from data file, row number must be equal to other fields
+			// checked by CheckRowsEqual() in preImportTask , double-check here
+			if tempData.RowNum() == rowNum {
+				continue
+			}
+			if tempData.RowNum() > 0 && tempData.RowNum() != rowNum {
+				return merr.WrapErrImportFailed(
+					fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, other fields with '%d' rows",
+						field.GetName(), tempData.RowNum(), rowNum))
+			}
+		}
+
+		// if the FieldData is not found, or it is nil, add a new column and fill with null or default
+		dataType := field.GetDataType()
+		fieldData, err := storage.NewFieldData(dataType, field, rowNum)
+		if err != nil {
+			return err
+		}
+		data.Data[field.GetFieldID()] = fieldData
+
+		nullable := field.GetNullable()
+		defaultVal := field.GetDefaultValue()
+
+		// bool/int8/int16/int32/int64/float/double/varchar/json/array can be null value
+		// bool/int8/int16/int32/int64/float/double/varchar can be default value
+		switch dataType {
+		case schemapb.DataType_Bool:
+			appender := &nullDefaultAppender[bool]{}
+			if defaultVal != nil {
+				v := defaultVal.GetBoolData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int8:
+			appender := &nullDefaultAppender[int8]{}
+			if defaultVal != nil {
+				v := defaultVal.GetIntData()
+				err = appender.AppendDefault(fieldData, int8(v), rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int16:
+			appender := &nullDefaultAppender[int16]{}
+			if defaultVal != nil {
+				v := defaultVal.GetIntData()
+				err = appender.AppendDefault(fieldData, int16(v), rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int32:
+			appender := &nullDefaultAppender[int32]{}
+			if defaultVal != nil {
+				v := defaultVal.GetIntData()
+				err = appender.AppendDefault(fieldData, int32(v), rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Int64:
+			appender := &nullDefaultAppender[int64]{}
+			if defaultVal != nil {
+				v := defaultVal.GetLongData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Float:
+			appender := &nullDefaultAppender[float32]{}
+			if defaultVal != nil {
+				v := defaultVal.GetFloatData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Double:
+			appender := &nullDefaultAppender[float64]{}
+			if defaultVal != nil {
+				v := defaultVal.GetDoubleData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_VarChar:
+			appender := &nullDefaultAppender[string]{}
+			if defaultVal != nil {
+				v := defaultVal.GetStringData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_JSON:
+			if nullable {
+				appender := &nullDefaultAppender[[]byte]{}
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		case schemapb.DataType_Array:
+			if nullable {
+				appender := &nullDefaultAppender[*schemapb.ScalarField]{}
+				err = appender.AppendNull(fieldData, rowNum)
+			}
+		default:
+			return fmt.Errorf("Unexpected data type: %d, cannot be filled with default value", dataType)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int) error {
+	if !schema.GetEnableDynamicField() {
+		return nil
+	}
+	dynamicField := typeutil.GetDynamicField(schema)
+	if dynamicField == nil {
+		return merr.WrapErrImportFailed("collection schema is illegal, enable_dynamic_field is true but the dynamic field doesn't exist")
+	}
+
+	tempData, ok := data.Data[dynamicField.GetFieldID()]
+	if ok && tempData != nil {
+		// values have been read from data file, row number must be equal to other fields
+		// checked by CheckRowsEqual() in preImportTask , double-check here
+		if tempData.RowNum() == rowNum {
+			return nil
+		}
+		if tempData.RowNum() > 0 && tempData.RowNum() != rowNum {
+			return merr.WrapErrImportFailed(
+				fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, other fields with '%d' rows",
+					dynamicField.GetName(), tempData.RowNum(), rowNum))
+		}
+	}
+
+	// if the FieldData is not found, or it is nil, add a new column and fill with empty json
+	fieldData, err := storage.NewFieldData(dynamicField.GetDataType(), dynamicField, rowNum)
+	if err != nil {
+		return err
+	}
+	jsonFD := fieldData.(*storage.JSONFieldData)
+	bs := []byte("{}")
+	for i := 0; i < rowNum; i++ {
+		jsonFD.Data = append(jsonFD.Data, bs)
+	}
+	data.Data[dynamicField.GetFieldID()] = fieldData
+	return nil
+}
+
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 	if err := RunBm25Function(task, data); err != nil {
 		return err
@@ -236,6 +425,8 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 		if runner == nil {
 			continue
 		}
+
+		defer runner.Close()
 
 		inputFieldIDs := lo.Map(runner.GetInputFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })
 		inputDatas := make([]any, 0, len(inputFieldIDs))
@@ -275,19 +466,41 @@ func RunBm25Function(task *ImportTask, data *storage.InsertData) error {
 	return nil
 }
 
-func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
+func CanBeZeroRowField(field *schemapb.FieldSchema) bool {
+	if field.GetIsPrimaryKey() && field.GetAutoID() {
+		return true // auto-generated primary key, the row count must be 0
+	}
+	if field.GetIsDynamic() {
+		return true // dyanmic field, row count could be 0
+	}
+	if field.GetIsFunctionOutput() {
+		return true // function output field, row count could be 0
+	}
+	if IsFillableField(field) {
+		return true // nullable/default_value field can be automatically filled if the file doesn't contain this column
+	}
+	return false
+}
+
+func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.CollectionSchema) (int, int64) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
 	for fieldID, fd := range data.Data {
-		if fields[fieldID].GetIsDynamic() {
+		if fd == nil {
+			// normaly is impossible, just to avoid potential crash here
 			continue
 		}
+		if fd.RowNum() == 0 && CanBeZeroRowField(fields[fieldID]) {
+			continue
+		}
+
+		// each collection must contains at least one vector field, there must be one field that row number is not 0
 		if fd.RowNum() != 0 {
-			return fd.RowNum()
+			return fd.RowNum(), fieldID
 		}
 	}
-	return 0
+	return 0, 0
 }
 
 func LogStats(manager TaskManager) {
@@ -333,4 +546,20 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 		metaCaches[channel] = metaCache
 	}
 	return metaCaches
+}
+
+// GetBufferSize returns the memory buffer size required by this task
+func GetTaskBufferSize(task Task) int64 {
+	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
+	vchannelNum := len(task.GetVchannels())
+	partitionNum := len(task.GetPartitionIDs())
+	totalBufferSize := int64(baseBufferSize * vchannelNum * partitionNum)
+
+	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
+	memoryLimit := int64(float64(hardware.GetMemoryCount()) * percentage / 100.0)
+
+	if totalBufferSize > memoryLimit {
+		return memoryLimit
+	}
+	return totalBufferSize
 }

@@ -51,26 +51,8 @@ ScalarIndexSort<T>::Build(const Config& config) {
     if (is_built_) {
         return;
     }
-    auto field_datas = file_manager_->CacheRawDataToMemory(config);
-
-    auto lack_binlog_rows =
-        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value() && lack_binlog_rows.value() > 0) {
-        auto field_schema = file_manager_->GetFieldDataMeta().field_schema;
-        auto default_value = [&]() -> std::optional<DefaultValueType> {
-            if (!field_schema.has_default_value()) {
-                return std::nullopt;
-            }
-            return field_schema.default_value();
-        }();
-        auto field_data = storage::CreateFieldData(
-            static_cast<DataType>(field_schema.data_type()),
-            true,
-            1,
-            lack_binlog_rows.value());
-        field_data->FillFieldData(default_value, lack_binlog_rows.value());
-        field_datas.insert(field_datas.begin(), field_data);
-    }
+    auto field_datas =
+        storage::CacheRawDataAndFillMissing(file_manager_, config);
 
     BuildWithFieldData(field_datas);
 }
@@ -224,7 +206,8 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(
+        index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     LoadWithoutAssemble(binary_set, config);

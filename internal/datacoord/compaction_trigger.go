@@ -333,6 +333,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 	}
 
+	log.Info("handleSignal receive")
 	groups, err := t.getCandidates(signal)
 	if err != nil {
 		log.Warn("handle signal failed, get candidates return error", zap.Error(err))
@@ -356,7 +357,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		}
 
 		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, signal.isForce, group.segments...)
+			group.segments = FilterInIndexedSegments(context.Background(), t.handler, t.meta, signal.isForce, group.segments...)
 		}
 
 		coll, err := t.getCollection(group.collectionID)
@@ -458,18 +459,14 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 	}
 
 	buckets := [][]*SegmentInfo{}
-	toUpdate := newSegmentPacker("update", prioritizedCandidates)
-	toMerge := newSegmentPacker("merge", smallCandidates)
-	toPack := newSegmentPacker("pack", nonPlannedSegments)
+	toUpdate := newSegmentPacker("update", prioritizedCandidates, compactTime)
+	toMerge := newSegmentPacker("merge", smallCandidates, compactTime)
 
 	maxSegs := int64(4096) // Deprecate the max segment limit since it is irrelevant in simple compactions.
 	minSegs := Params.DataCoordCfg.MinSegmentToMerge.GetAsInt64()
 	compactableProportion := Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()
 	satisfiedSize := int64(float64(expectedSize) * compactableProportion)
-	expantionRate := Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()
 	maxLeftSize := expectedSize - satisfiedSize
-	expectedExpandedSize := int64(float64(expectedSize) * expantionRate)
-	maxExpandedLeftSize := expectedExpandedSize - satisfiedSize
 	reasons := make([]string, 0)
 	// 1. Merge small segments if they can make a full bucket
 	for {
@@ -492,11 +489,12 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		reasons = append(reasons, fmt.Sprintf("packing %d prioritized segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
-	// if there is any segment toUpdate left, its size must greater than expectedSize, add it to the buckets
+	// if there is any segment toUpdate left, its size must be greater than expectedSize, add it to the buckets
 	for _, s := range toUpdate.candidates {
 		buckets = append(buckets, []*SegmentInfo{s})
 		reasons = append(reasons, fmt.Sprintf("force packing prioritized segment %d", s.GetID()))
 	}
+
 	// 2.+ legacy: squeeze small segments
 	// Try merge all small segments, and then squeeze
 	for {
@@ -507,18 +505,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		reasons = append(reasons, fmt.Sprintf("packing all %d small segments", len(pack)))
 		buckets = append(buckets, pack)
 	}
-	remaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
-	toMerge = newSegmentPacker("merge", remaining)
-
-	// 3. pack remaining small segments with non-planned segments
-	for {
-		pack, _ := toMerge.packWith(expectedExpandedSize, maxExpandedLeftSize, minSegs, maxSegs, toPack)
-		if len(pack) == 0 {
-			break
-		}
-		reasons = append(reasons, fmt.Sprintf("packing %d small segments and non-planned segments", len(pack)))
-		buckets = append(buckets, pack)
-	}
+	smallRemaining := t.squeezeSmallSegmentsToBuckets(toMerge.candidates, buckets, expectedSize)
 
 	tasks := make([]*typeutil.Pair[int64, []int64], len(buckets))
 	for i, b := range buckets {
@@ -540,6 +527,13 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 			zap.Int("nonPlannedSegments", len(nonPlannedSegments)),
 			zap.Strings("reasons", reasons))
 	}
+	if len(smallRemaining) > 0 {
+		log.RatedInfo(300, "remain small segments",
+			zap.Int64("collectionID", signal.collectionID),
+			zap.Int64("partitionID", signal.partitionID),
+			zap.String("channel", signal.channel),
+			zap.Int("smallRemainingCount", len(smallRemaining)))
+	}
 	return tasks
 }
 
@@ -551,12 +545,13 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 	filters := []SegmentFilter{
 		SegmentFilterFunc(func(segment *SegmentInfo) bool {
 			return isSegmentHealthy(segment) &&
-				isFlush(segment) &&
+				isFlushed(segment) &&
 				!segment.isCompacting && // not compacting now
 				!segment.GetIsImporting() && // not importing now
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible()
+				!segment.GetIsInvisible() &&
+				segment.GetIsSorted()
 		}),
 	}
 
@@ -630,12 +625,8 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
-func isDeltalogTooManySegment(segment *SegmentInfo) bool {
-	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	return deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()
-}
-
-func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
+func hasTooManyDeletions(segment *SegmentInfo) bool {
+	deltaLogCount := 0
 	totalDeletedRows := 0
 	totalDeleteLogSize := int64(0)
 	for _, deltaLogs := range segment.GetDeltalogs() {
@@ -643,35 +634,74 @@ func isDeleteRowsTooManySegment(segment *SegmentInfo) bool {
 			totalDeletedRows += int(l.GetEntriesNum())
 			totalDeleteLogSize += l.GetMemorySize()
 		}
+		deltaLogCount += len(deltaLogs.GetBinlogs())
 	}
 
-	// currently delta log size and delete ratio policy is applied
-	is := float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
-		totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()
-	if is {
-		log.Ctx(context.TODO()).Info("total delete entities is too much",
+	// Too many deltalog files, accumulates IO count.
+	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+		log.Ctx(context.TODO()).Info("delta logs file count exceeds threshold",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int("delta log count", deltaLogCount),
+			zap.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
+		)
+		return true
+	}
+
+	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
+	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
+		log.Ctx(context.TODO()).Info("deleted entities rows proportion exceeds threshold",
+			zap.Int64("segmentID", segment.ID),
+			zap.Int64("number of rows", segment.GetNumOfRows()),
+			zap.Int("deleted rows", totalDeletedRows),
+			zap.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
+		)
+		return true
+	}
+
+	// Delete size is too large, varchar PK tends to accumulates deltalog size.
+	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
+		log.Ctx(context.TODO()).Info("total delete entries size exceeds threshold",
 			zap.Int64("segmentID", segment.ID),
 			zap.Int64("numRows", segment.GetNumOfRows()),
-			zap.Int("deleted rows", totalDeletedRows),
-			zap.Int64("delete log size", totalDeleteLogSize))
+			zap.Int64("delete entries size", totalDeleteLogSize),
+			zap.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
+		)
+		return true
 	}
-	return is
+
+	return false
+}
+
+func (t *compactionTrigger) ShouldCompactExpiry(fromTs uint64, compactTime *compactTime, segment *SegmentInfo) bool {
+	if Params.DataCoordCfg.CompactionExpiryTolerance.GetAsInt() >= 0 {
+		tolerantDuration := Params.DataCoordCfg.CompactionExpiryTolerance.GetAsDuration(time.Hour)
+		expireTime, _ := tsoutil.ParseTS(compactTime.expireTime)
+		earliestTolerance := expireTime.Add(-tolerantDuration)
+		earliestFromTime, _ := tsoutil.ParseTS(fromTs)
+		if earliestFromTime.Before(earliestTolerance) {
+			log.Info("Trigger strict expiry compaction for segment",
+				zap.Int64("segmentID", segment.GetID()),
+				zap.Int64("collectionID", segment.GetCollectionID()),
+				zap.Int64("partition", segment.GetPartitionID()),
+				zap.String("channel", segment.GetInsertChannel()),
+				zap.Time("compaction expire time", expireTime),
+				zap.Time("earliest tolerance", earliestTolerance),
+				zap.Time("segment earliest from time", earliestFromTime),
+			)
+			return true
+		}
+	}
+	return false
 }
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
-
 	log := log.Ctx(context.TODO())
-	binlogCount := GetBinlogCount(segment.GetBinlogs())
-	deltaLogCount := GetBinlogCount(segment.GetDeltalogs())
-	if isDeltalogTooManySegment(segment) {
-		log.Info("total delta number is too much, trigger compaction", zap.Int64("segmentID", segment.ID), zap.Int("Bin logs", binlogCount), zap.Int("Delta logs", deltaLogCount))
-		return true
-	}
 
 	// if expire time is enabled, put segment into compaction candidate
 	totalExpiredSize := int64(0)
 	totalExpiredRows := 0
+	var earliestFromTs uint64 = math.MaxUint64
 	for _, binlogs := range segment.GetBinlogs() {
 		for _, l := range binlogs.GetBinlogs() {
 			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
@@ -684,7 +714,11 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 				totalExpiredRows += int(l.GetEntriesNum())
 				totalExpiredSize += l.GetMemorySize()
 			}
+			earliestFromTs = min(earliestFromTs, l.TimestampFrom)
 		}
+	}
+	if t.ShouldCompactExpiry(earliestFromTs, compactTime, segment) {
+		return true
 	}
 
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() ||
@@ -695,8 +729,8 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		return true
 	}
 
-	// currently delta log size and delete ratio policy is applied
-	if isDeleteRowsTooManySegment(segment) {
+	// check if deltalog count, size, and deleted rowcount ratio exceeds threshold
+	if hasTooManyDeletions(segment) {
 		return true
 	}
 
@@ -746,6 +780,10 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *SegmentInfo) bool
 	return false
 }
 
+func isFlushed(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed
+}
+
 func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
 }
@@ -779,4 +817,12 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 
 func getExpandedSize(size int64) int64 {
 	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
+}
+
+func canTriggerSortCompaction(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed &&
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		!segment.GetIsSorted() &&
+		!segment.GetIsImporting() &&
+		!segment.isCompacting
 }

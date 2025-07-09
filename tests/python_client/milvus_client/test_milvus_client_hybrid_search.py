@@ -317,7 +317,7 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    @pytest.fixture(scope="function", params=["JSON", "BOOL", "double", "varchar"])
     def supported_json_cast_type(self, request):
         yield request.param
 
@@ -361,6 +361,16 @@ class TestMilvusClientHybridSearchValid(TestMilvusClientV2Base):
         sub_search2 = AnnSearchRequest(vectors_to_search, default_vector_field_name+"new", {"level": 1}, 20, expr="id>=0")
         ranker = WeightedRanker(0.2, 0.8)
         self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
+                           check_task=CheckTasks.check_search_results,
+                           check_items={"enable_milvus_client_api": True,
+                                        "nq": len(vectors_to_search),
+                                        "ids": insert_ids,
+                                        "limit": default_limit,
+                                        "pk_name": default_primary_key_field_name})
+        self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+                                  nullable=True, max_length=100)
+        self.hybrid_search(client, collection_name, [sub_search1, sub_search2], ranker, limit=default_limit,
+                           filter="field_new is null",
                            check_task=CheckTasks.check_search_results,
                            check_items={"enable_milvus_client_api": True,
                                         "nq": len(vectors_to_search),

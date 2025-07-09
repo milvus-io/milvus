@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -291,11 +292,18 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestAssignSegmentWithGrowing() 
 	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.DelegatorMemoryOverloadFactor.Key)
 
 	// mock 50 growing row count in node 1, which is delegator, expect all segment assign to node 2
-	leaderView := &meta.LeaderView{
-		ID:           1,
-		CollectionID: 1,
-	}
-	suite.balancer.dist.LeaderViewManager.Update(1, leaderView)
+	suite.balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "v1",
+		},
+		Node: 1,
+		View: &meta.LeaderView{
+			ID:               1,
+			CollectionID:     1,
+			NumOfGrowingRows: 50,
+		},
+	})
 	plans := balancer.AssignSegment(ctx, 1, toAssign, lo.Keys(distributions), false)
 	for _, p := range plans {
 		suite.Equal(int64(2), p.To)
@@ -752,12 +760,12 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 			},
 			channelDist: map[int64][]*meta.DmChannel{
 				1: {
-					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1},
-					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 1},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1, View: &meta.LeaderView{ID: 1, CollectionID: 1}},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 1, View: &meta.LeaderView{ID: 2, CollectionID: 1}},
 				},
 				3: {
-					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3},
-					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 3},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3, View: &meta.LeaderView{ID: 3, CollectionID: 1}},
+					{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 3, View: &meta.LeaderView{ID: 4, CollectionID: 1}},
 				},
 			},
 			expectPlans:        []SegmentAssignPlan{},
@@ -815,10 +823,10 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 			suite.Len(channelPlans, 2)
 
 			// mock new distribution after channel balance
-			balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1})
-			balancer.dist.ChannelDistManager.Update(2, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 2})
-			balancer.dist.ChannelDistManager.Update(3, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3})
-			balancer.dist.ChannelDistManager.Update(4, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 4})
+			balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1, View: &meta.LeaderView{ID: 1, CollectionID: 1}})
+			balancer.dist.ChannelDistManager.Update(2, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 2, View: &meta.LeaderView{ID: 2, CollectionID: 1}})
+			balancer.dist.ChannelDistManager.Update(3, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3, View: &meta.LeaderView{ID: 3, CollectionID: 1}})
+			balancer.dist.ChannelDistManager.Update(4, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 4, View: &meta.LeaderView{ID: 4, CollectionID: 1}})
 
 			// expected to balance segment
 			segmentPlans, channelPlans = suite.getCollectionBalancePlans(balancer, c.collectionID)
@@ -876,7 +884,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"},
+		commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -909,6 +918,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 				ChannelName:  "channel2",
 			},
 			Node: ch1Nodes[0],
+			View: &meta.LeaderView{ID: 2, CollectionID: collectionID},
 		},
 	}...)
 
@@ -951,7 +961,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -984,6 +994,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 				ChannelName:  "channel1",
 			},
 			Node: ch1Nodes[0],
+			View: &meta.LeaderView{ID: ch1Nodes[0], CollectionID: collectionID},
 		},
 	}...)
 
@@ -994,6 +1005,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 				ChannelName:  "channel2",
 			},
 			Node: ch2Nodes[0],
+			View: &meta.LeaderView{ID: ch2Nodes[0], CollectionID: collectionID},
 		},
 	}...)
 
@@ -1049,7 +1061,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -1082,6 +1094,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 				ChannelName:  "channel1",
 			},
 			Node: ch1Nodes[0],
+			View: &meta.LeaderView{ID: ch1Nodes[0], CollectionID: collectionID},
 		},
 	}...)
 
@@ -1092,6 +1105,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 				ChannelName:  "channel2",
 			},
 			Node: ch2Nodes[0],
+			View: &meta.LeaderView{ID: ch2Nodes[0], CollectionID: collectionID},
 		},
 	}...)
 
@@ -1174,7 +1188,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	collection.Status = querypb.LoadStatus_Loaded
 	balancer.meta.CollectionManager.PutCollection(ctx, collection)
 	balancer.meta.CollectionManager.PutPartition(ctx, utils.CreateTestPartition(collectionID, partitionID))
-	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	balancer.meta.ReplicaManager.Spawn(ctx, 1, map[string]int{meta.DefaultResourceGroupName: 1}, []string{"channel1", "channel2"}, commonpb.LoadPriority_LOW)
 	balancer.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	balancer.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
@@ -1207,6 +1221,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 				ChannelName:  "channel1",
 			},
 			Node: ch1Nodes[0],
+			View: &meta.LeaderView{ID: ch1Nodes[0], CollectionID: collectionID},
 		},
 	}...)
 
@@ -1217,6 +1232,7 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 				ChannelName:  "channel2",
 			},
 			Node: ch2Nodes[0],
+			View: &meta.LeaderView{ID: ch2Nodes[0], CollectionID: collectionID},
 		},
 	}...)
 

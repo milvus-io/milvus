@@ -545,7 +545,7 @@ class TestMilvusClientV2Base(Base):
                                        index_name=index_name,
                                        **kwargs).run()
         return res, check_result
-    
+
     def wait_for_index_ready(self, client, collection_name, index_name, timeout=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         start_time = time.time()
@@ -555,7 +555,7 @@ class TestMilvusClientV2Base(Base):
                 return True
             time.sleep(2)
         return False
-            
+
     @trace()
     def list_indexes(self, client, collection_name, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
@@ -919,7 +919,7 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def alter_collection_properties(self, client, collection_name, properties, timeout=None,
-                               check_task=None, check_items=None, **kwargs):
+                                    check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         kwargs.update({"timeout": timeout})
 
@@ -1099,5 +1099,16 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        source_group=source_group, target_group=target_group,
                                        collection_name=collection_name, num_replicas=num_replicas,
+                                       **kwargs).run()
+        return res, check_result
+
+    @trace()
+    def add_collection_field(self, client, collection_name, field_name, data_type, desc="", timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([client.add_collection_field, collection_name, field_name, data_type, desc], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        **kwargs).run()
         return res, check_result

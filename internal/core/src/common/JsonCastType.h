@@ -22,7 +22,7 @@ namespace milvus {
 using MilvusDataType = milvus::DataType;
 class JsonCastType {
  public:
-    enum class DataType { UNKNOWN, BOOL, DOUBLE, VARCHAR, ARRAY };
+    enum class DataType { UNKNOWN, BOOL, DOUBLE, VARCHAR, ARRAY, JSON };
 
     static const JsonCastType UNKNOWN;
 
@@ -41,6 +41,9 @@ class JsonCastType {
 
     MilvusDataType
     ToMilvusDataType() const;
+
+    std::string
+    ToString() const;
 
  private:
     JsonCastType(DataType data_type, DataType element_type);

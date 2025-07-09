@@ -48,7 +48,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           const InsertRecordProto* insert_record_proto) override;
+           InsertRecordProto* insert_record_proto) override;
 
     bool
     Contain(const PkType& pk) const override {
@@ -103,7 +103,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Reopen(SchemaPtr sch) override;
 
     void
-    LazyCheckSchema(const Schema& sch) override;
+    LazyCheckSchema(SchemaPtr sch) override;
 
     void
     FinishLoad() override;
@@ -218,6 +218,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
                               int64_t count,
                               google::protobuf::RepeatedPtrField<T>* dst) const;
 
+    // for vector array vectors
+    template <typename T>
+    void
+    bulk_subscript_vector_array_impl(
+        const VectorBase& vec_raw,
+        const int64_t* seg_offsets,
+        int64_t count,
+        google::protobuf::RepeatedPtrField<T>* dst) const;
+
     template <typename T>
     void
     bulk_subscript_impl(FieldId field_id,
@@ -253,8 +262,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         int64_t count,
         const std::vector<std::string>& dynamic_field_names) const override;
 
-    virtual std::pair<milvus::Json, bool>
-    GetJsonData(FieldId field_id, size_t offset) const override;
+    virtual void
+    BulkGetJsonData(FieldId field_id,
+                    std::function<void(milvus::Json, size_t, bool)> fn,
+                    const int64_t* offsets,
+                    int64_t count) const override;
 
  public:
     friend std::unique_ptr<SegmentGrowing>
@@ -267,18 +279,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
                                 const SegcoreConfig& segcore_config,
                                 int64_t segment_id)
         : mmap_descriptor_(storage::MmapManager::GetInstance()
-                                   .GetMmapConfig()
-                                   .GetEnableGrowingMmap()
-                               ? storage::MmapChunkDescriptorPtr(
-                                     new storage::MmapChunkDescriptor(
-                                         {segment_id, SegmentType::Growing}))
-                               : nullptr),
+                               .GetMmapChunkManager()
+                               ->Register()),
           segcore_config_(segcore_config),
           schema_(std::move(schema)),
           index_meta_(indexMeta),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
-          indexing_record_(*schema_, index_meta_, segcore_config_),
+          indexing_record_(
+              *schema_, index_meta_, segcore_config_, &insert_record_),
           id_(segment_id),
           deleted_record_(
               &insert_record_,
@@ -286,13 +295,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   return this->search_pk(pk, timestamp);
               },
               segment_id) {
-        if (mmap_descriptor_ != nullptr) {
-            LOG_INFO("growing segment {} use mmap to hold raw data",
-                     this->get_segment_id());
-            auto mcm =
-                storage::MmapManager::GetInstance().GetMmapChunkManager();
-            mcm->Register(mmap_descriptor_);
-        }
         this->CreateTextIndexes();
         this->CreateJSONIndexes();
     }
@@ -307,7 +309,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     void
     mask_with_timestamps(BitsetTypeView& bitset_chunk,
-                         Timestamp timestamp) const override;
+                         Timestamp timestamp,
+                         Timestamp ttl = 0) const override;
 
     void
     vector_search(SearchInfo& search_info,
@@ -344,7 +347,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     HasIndex(FieldId field_id,
              const std::string& nested_path,
              DataType data_type,
-             bool any_type = false) const override {
+             bool any_type = false,
+             bool is_array = false) const override {
         return false;
     };
 
@@ -358,9 +362,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
         //growing index hold raw data when
         // 1. growing index enabled and it holds raw data
         // 2. growing index disabled then raw data held by chunk
+        // 3. growing index enabled and it not holds raw data, then raw data held by chunk
         if (indexing_record_.is_in(FieldId(field_id))) {
-            return indexing_record_.HasRawData(FieldId(field_id));
+            if (indexing_record_.HasRawData(FieldId(field_id))) {
+                // 1. growing index enabled and it holds raw data
+                return true;
+            } else {
+                // 3. growing index enabled and it not holds raw data, then raw data held by chunk
+                return insert_record_.get_data_base(FieldId(field_id))
+                           ->num_chunk() > 0;
+            }
         }
+        // 2. growing index disabled then raw data held by chunk
         return true;
     }
 
@@ -452,13 +465,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SchemaPtr schema_;
     IndexMetaPtr index_meta_;
 
-    // small indexes for every chunk
-    IndexingRecord indexing_record_;
-
     // inserted fields data and row_ids, timestamps
     InsertRecord<false> insert_record_;
 
     mutable std::shared_mutex chunk_mutex_;
+
+    // small indexes for every chunk
+    IndexingRecord indexing_record_;
 
     // deleted pks
     mutable DeletedRecord<false> deleted_record_;

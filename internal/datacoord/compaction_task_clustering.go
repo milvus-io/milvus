@@ -88,6 +88,10 @@ func (t *clusteringCompactionTask) GetTaskTime(timeType taskcommon.TimeType) tim
 	return timeType.GetTaskTime(t.times)
 }
 
+func (t *clusteringCompactionTask) GetTaskVersion() int64 {
+	return int64(t.GetTaskProto().GetRetryTimes())
+}
+
 func (t *clusteringCompactionTask) retryOnError(err error) {
 	if err != nil {
 		log.Warn("clustering compaction task failed", zap.Error(err))
@@ -322,10 +326,6 @@ func (t *clusteringCompactionTask) Clean() bool {
 	return t.doClean() == nil
 }
 
-func (t *clusteringCompactionTask) PreparePlan() bool {
-	return true
-}
-
 func (t *clusteringCompactionTask) CheckCompactionContainsSegment(segmentID int64) bool {
 	return false
 }
@@ -399,7 +399,7 @@ func (t *clusteringCompactionTask) processStats() error {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetTaskProto().GetPlanID()))
 	// just the memory step, if it crashes at this step, the state after recovery is CompactionTaskState_statistic.
 	resultSegments := make([]int64, 0, len(t.GetTaskProto().GetTmpSegments()))
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if Params.DataCoordCfg.EnableSortCompaction.GetAsBool() {
 		existNonStats := false
 		tmpToResultSegments := make(map[int64][]int64, len(t.GetTaskProto().GetTmpSegments()))
 		for _, segmentID := range t.GetTaskProto().GetTmpSegments() {

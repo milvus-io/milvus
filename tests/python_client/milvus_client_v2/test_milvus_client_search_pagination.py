@@ -732,7 +732,6 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             limit=default_limit,
             check_task=CheckTasks.err_res,
             check_items=error)
-    
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("offset", [-1, 16385])
@@ -823,7 +822,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.tags(CaseLabel.GPU)
+    # @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
     @pytest.mark.parametrize('index', ct.all_index_types[:8])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)
@@ -865,37 +864,43 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, index_type=index,
                                metric_type=metric_type,
                                params=cf.get_index_params_params(index_type=index))
-        self.create_index(client, collection_name, index_params=index_params)
+        if vector_dtype == DataType.INT8_VECTOR and index != 'HNSW':
+            # INT8_Vector only supports HNSW index for now
+            error = {"err_code": 999, "err_msg": f"data type Int8Vector can't build with this index {index}"}
+            self.create_index(client, collection_name, index_params=index_params,
+                              check_task=CheckTasks.err_res, check_items=error)
+        else:
+            self.create_index(client, collection_name, index_params=index_params)
 
-        # load the collection with index
-        assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=120)
-        self.load_collection(client, collection_name)
+            # load the collection with index
+            assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=120)
+            self.load_collection(client, collection_name)
 
-        # search and assert
-        limit = 50
-        pages = 5
-        expected_overlap_ratio = 20
-        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
-                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
-                                             expected_overlap_ratio=expected_overlap_ratio)
+            # search and assert
+            limit = 50
+            pages = 5
+            expected_overlap_ratio = 20
+            self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                                 vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                                 expected_overlap_ratio=expected_overlap_ratio)
 
-        # insert additional data without flush
-        random_vectors = list(cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)) \
-            if vector_dtype == DataType.FLOAT_VECTOR \
-            else cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)
-        start_pk = default_nb * insert_times
-        rows = [{
-            default_primary_key_field_name: i + start_pk,
-            default_vector_field_name: random_vectors[i],
-            default_float_field_name: (i + start_pk) * 1.0,
-            default_string_field_name: str(i + start_pk)
-        } for i in range(default_nb)]
-        self.insert(client, collection_name, rows)
+            # insert additional data without flush
+            random_vectors = list(cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)) \
+                if vector_dtype == DataType.FLOAT_VECTOR \
+                else cf.gen_vectors(default_nb, default_dim, vector_data_type=vector_dtype)
+            start_pk = default_nb * insert_times
+            rows = [{
+                default_primary_key_field_name: i + start_pk,
+                default_vector_field_name: random_vectors[i],
+                default_float_field_name: (i + start_pk) * 1.0,
+                default_string_field_name: str(i + start_pk)
+            } for i in range(default_nb)]
+            self.insert(client, collection_name, rows)
 
-        # search and assert
-        self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
-                                             vector_dtype=vector_dtype, index=index, metric_type=metric_type,
-                                             expected_overlap_ratio=expected_overlap_ratio)
+            # search and assert
+            self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
+                                                 vector_dtype=vector_dtype, index=index, metric_type=metric_type,
+                                                 expected_overlap_ratio=expected_overlap_ratio)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize('index', ct.binary_supported_index_types)

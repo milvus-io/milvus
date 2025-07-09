@@ -28,7 +28,8 @@ class ChunkedColumnInterface {
 
     // Default implementation does nothing.
     virtual void
-    ManualEvictCache() const {}
+    ManualEvictCache() const {
+    }
 
     // Get raw data pointer of a specific chunk
     virtual cachinglayer::PinWrapper<const char*>
@@ -80,6 +81,9 @@ class ChunkedColumnInterface {
     ArrayViews(int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
+    virtual PinWrapper<std::vector<VectorArrayView>>
+    VectorArrayViews(int64_t chunk_id) const = 0;
+
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     ViewsByOffsets(int64_t chunk_id,
@@ -118,19 +122,30 @@ class ChunkedColumnInterface {
                   "variable length type");
     }
 
-    virtual Json
-    RawJsonAt(size_t offset) const {
+    virtual void
+    BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
+                  const int64_t* offsets = nullptr,
+                  int64_t count = 0) const {
         PanicInfo(
             ErrorCode::Unsupported,
             "RawJsonAt only supported for ChunkColumnInterface of Json type");
     }
 
     virtual void
-    BulkArrayAt(std::function<void(ScalarArray&&, size_t)> fn,
+    BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const {
         PanicInfo(ErrorCode::Unsupported,
                   "BulkArrayAt only supported for ChunkedArrayColumn");
+    }
+
+    virtual void
+    BulkVectorArrayAt(std::function<void(VectorFieldProto&&, size_t)> fn,
+                      const int64_t* offsets,
+                      int64_t count) const {
+        PanicInfo(
+            ErrorCode::Unsupported,
+            "BulkVectorArrayAt only supported for ChunkedVectorArrayColumn");
     }
 
     static bool
@@ -143,6 +158,11 @@ class ChunkedColumnInterface {
     static bool
     IsChunkedArrayColumnDataType(DataType data_type) {
         return data_type == DataType::ARRAY;
+    }
+
+    static bool
+    IsChunkedVectorArrayColumnDataType(DataType data_type) {
+        return data_type == DataType::VECTOR_ARRAY;
     }
 
     static bool

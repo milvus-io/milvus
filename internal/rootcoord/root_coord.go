@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -215,10 +216,28 @@ func (c *Core) sendMinDdlTsAsTt() {
 func (c *Core) startTimeTickLoop() {
 	log := log.Ctx(c.ctx)
 	defer c.wg.Done()
+
+	streamingNotifier := snmanager.NewStreamingReadyNotifier()
+	defer streamingNotifier.Release()
+
+	if streamingutil.IsStreamingServiceEnabled() {
+		if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(c.ctx, streamingNotifier); err != nil {
+			log.Info("register streaming enabled listener failed", zap.Error(err))
+			return
+		}
+		if streamingNotifier.IsReady() {
+			log.Info("streaming service has been enabled, ddl timetick from rootcoord should not start")
+			return
+		}
+	}
+
 	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
 	for {
 		select {
+		case <-streamingNotifier.Ready():
+			log.Info("streaming service has been enabled, ddl timetick from rootcoord should stop")
+			return
 		case <-c.ctx.Done():
 			log.Info("rootcoord's timetick loop quit!")
 			return
@@ -425,22 +444,13 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	if !streamingutil.IsStreamingServiceEnabled() {
-		c.proxyWatcher = proxyutil.NewProxyWatcher(
-			c.etcdCli,
-			c.chanTimeTick.initSessions,
-			c.proxyClientManager.AddProxyClients,
-		)
-		c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-		c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
-	} else {
-		c.proxyWatcher = proxyutil.NewProxyWatcher(
-			c.etcdCli,
-			c.proxyClientManager.AddProxyClients,
-		)
-		c.proxyWatcher.AddSessionFunc(c.proxyClientManager.AddProxyClient)
-		c.proxyWatcher.DelSessionFunc(c.proxyClientManager.DelProxyClient)
-	}
+	c.proxyWatcher = proxyutil.NewProxyWatcher(
+		c.etcdCli,
+		c.chanTimeTick.initSessions,
+		c.proxyClientManager.AddProxyClients,
+	)
+	c.proxyWatcher.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyWatcher.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 	log.Info("init proxy manager done")
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
@@ -693,13 +703,10 @@ func (c *Core) startInternal() error {
 }
 
 func (c *Core) startServerLoop() {
-	c.wg.Add(1)
+	c.wg.Add(3)
 	go c.tsLoop()
-	if !streamingutil.IsStreamingServiceEnabled() {
-		c.wg.Add(2)
-		go c.startTimeTickLoop()
-		go c.chanTimeTick.startWatch(&c.wg)
-	}
+	go c.startTimeTickLoop()
+	go c.chanTimeTick.startWatch(&c.wg)
 }
 
 // Start starts RootCoord.
@@ -1776,6 +1783,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 	}
 
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
+	physicalTs, _ := tsoutil.ParseTS(ts)
 	if err != nil {
 		log.Ctx(ctx).Error("failed to allocate timestamp", zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err))
@@ -1787,7 +1795,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 
 	// return first available timestamp
 	ts = ts - uint64(in.GetCount()) + 1
-	metrics.RootCoordTimestamp.Set(float64(ts))
+	metrics.RootCoordTimestamp.Set(float64(physicalTs.Unix()))
 	return &rootcoordpb.AllocTimestampResponse{
 		Status:    merr.Success(),
 		Timestamp: ts,
@@ -2943,7 +2951,10 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 		return merr.Status(err), nil
 	}
 
-	log := log.Ctx(ctx).With(zap.String("oldCollectionName", req.GetOldName()), zap.String("newCollectionName", req.GetNewName()))
+	log := log.Ctx(ctx).With(zap.String("oldCollectionName", req.GetOldName()),
+		zap.String("newCollectionName", req.GetNewName()),
+		zap.String("oldDbName", req.GetDbName()),
+		zap.String("newDbName", req.GetNewDBName()))
 	log.Info("received request to rename collection")
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.TotalLabel).Inc()
@@ -3354,4 +3365,8 @@ func isVisibleCollectionForCurUser(collectionName string, visibleCollections typ
 		return true
 	}
 	return visibleCollections.Contain(collectionName)
+}
+
+func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return c.quotaCenter.getQuotaMetrics(), nil
 }

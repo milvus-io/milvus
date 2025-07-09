@@ -27,6 +27,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -182,20 +183,28 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 	for i, name := range names {
 		var ms msgstream.MsgStream
 		if !streamingutil.IsStreamingServiceEnabled() {
-			var err error
-			ms, err = factory.NewMsgStream(initCtx)
-			if err != nil {
-				log.Ctx(initCtx).Error("Failed to add msgstream",
-					zap.String("name", name),
-					zap.Error(err))
-				panic("Failed to add msgstream")
+			ms = d.newMsgstream(initCtx, factory, name)
+		} else {
+			notifier := snmanager.NewStreamingReadyNotifier()
+			if err := snmanager.StaticStreamingNodeManager.RegisterStreamingEnabledListener(initCtx, notifier); err != nil {
+				panic(err)
 			}
-
-			if params.PreCreatedTopicEnabled.GetAsBool() {
-				d.checkPreCreatedTopic(initCtx, factory, name)
+			logger := log.Ctx(initCtx).With(zap.String("pchannel", name))
+			if !notifier.IsReady() {
+				logger.Info("streaming service is not enabled, create a msgstream to use")
+				ms = d.newMsgstream(initCtx, factory, name)
+				go func() {
+					defer notifier.Release()
+					<-notifier.Ready()
+					// release the msgstream.
+					logger.Info("streaming service is enabled, release the msgstream...")
+					ms.Close()
+					logger.Info("streaming service is enabled, release the msgstream done")
+				}()
+			} else {
+				logger.Info("streaming service has been enabled, msgstream should not be created")
+				notifier.Release()
 			}
-
-			ms.AsProducer(initCtx, []string{name})
 		}
 		dms := &dmlMsgStream{
 			ms:     ms,
@@ -216,6 +225,24 @@ func newDmlChannels(initCtx context.Context, factory msgstream.Factory, chanName
 	metrics.RootCoordNumOfMsgStream.Add(float64(chanNum))
 
 	return d
+}
+
+func (d *dmlChannels) newMsgstream(initCtx context.Context, factory msgstream.Factory, name string) msgstream.MsgStream {
+	var err error
+	ms, err := factory.NewMsgStream(initCtx)
+	if err != nil {
+		log.Ctx(initCtx).Error("Failed to add msgstream",
+			zap.String("name", name),
+			zap.Error(err))
+		panic("Failed to add msgstream")
+	}
+
+	if paramtable.Get().CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
+		d.checkPreCreatedTopic(initCtx, factory, name)
+	}
+
+	ms.AsProducer(initCtx, []string{name})
+	return ms
 }
 
 func (d *dmlChannels) checkPreCreatedTopic(ctx context.Context, factory msgstream.Factory, name string) {

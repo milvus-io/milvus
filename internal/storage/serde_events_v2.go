@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -45,9 +46,10 @@ type packedRecordReader struct {
 	chunk  int
 	reader *packed.PackedReader
 
-	bufferSize  int64
-	arrowSchema *arrow.Schema
-	field2Col   map[FieldID]int
+	bufferSize    int64
+	arrowSchema   *arrow.Schema
+	field2Col     map[FieldID]int
+	storageConfig *indexpb.StorageConfig
 }
 
 var _ RecordReader = (*packedRecordReader)(nil)
@@ -63,7 +65,7 @@ func (pr *packedRecordReader) iterateNextBatch() error {
 		return io.EOF
 	}
 
-	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize)
+	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize, pr.storageConfig)
 	pr.chunk++
 	if err != nil {
 		return merr.WrapErrParameterInvalid("New binlog record packed reader error: %s", err.Error())
@@ -100,7 +102,7 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64,
+func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
@@ -111,17 +113,18 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 		field2Col[field.FieldID] = i
 	}
 	return &packedRecordReader{
-		paths:       paths,
-		bufferSize:  bufferSize,
-		arrowSchema: arrowSchema,
-		field2Col:   field2Col,
+		paths:         paths,
+		bufferSize:    bufferSize,
+		arrowSchema:   arrowSchema,
+		field2Col:     field2Col,
+		storageConfig: storageConfig,
 	}, nil
 }
 
 func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
 	bufferSize int64,
 ) (*DeserializeReaderImpl[*Value], error) {
-	reader, err := newPackedRecordReader(paths, schema, bufferSize)
+	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,12 +141,13 @@ type packedRecordWriter struct {
 	bufferSize              int64
 	columnGroups            []storagecommon.ColumnGroup
 	bucketName              string
-	paths                   []string
+	pathsMap                map[typeutil.UniqueID]string
 	schema                  *schemapb.CollectionSchema
 	arrowSchema             *arrow.Schema
 	rowNum                  int64
 	writtenUncompressed     uint64
-	columnGroupUncompressed []uint64
+	columnGroupUncompressed map[typeutil.UniqueID]uint64
+	storageConfig           *indexpb.StorageConfig
 }
 
 func (pw *packedRecordWriter) Write(r Record) error {
@@ -162,9 +166,9 @@ func (pw *packedRecordWriter) Write(r Record) error {
 	for col, arr := range rec.Columns() {
 		size := arr.Data().SizeInBytes()
 		pw.writtenUncompressed += size
-		for columnGroup, group := range pw.columnGroups {
-			if lo.Contains(group.Columns, col) {
-				pw.columnGroupUncompressed[columnGroup] += size
+		for _, columnGroup := range pw.columnGroups {
+			if lo.Contains(columnGroup.Columns, col) {
+				pw.columnGroupUncompressed[columnGroup.GroupID] += size
 				break
 			}
 		}
@@ -177,12 +181,18 @@ func (pw *packedRecordWriter) GetWrittenUncompressed() uint64 {
 	return pw.writtenUncompressed
 }
 
-func (pw *packedRecordWriter) GetColumnGroupWrittenUncompressed(columnGroup int) uint64 {
-	return pw.columnGroupUncompressed[columnGroup]
+func (pw *packedRecordWriter) GetColumnGroupWrittenUncompressed(columnGroup typeutil.UniqueID) uint64 {
+	if size, ok := pw.columnGroupUncompressed[columnGroup]; ok {
+		return size
+	}
+	return 0
 }
 
-func (pw *packedRecordWriter) GetWrittenPaths() []string {
-	return pw.paths
+func (pw *packedRecordWriter) GetWrittenPaths(columnGroup typeutil.UniqueID) string {
+	if path, ok := pw.pathsMap[columnGroup]; ok {
+		return path
+	}
+	return ""
 }
 
 func (pw *packedRecordWriter) GetWrittenRowNum() int64 {
@@ -196,7 +206,7 @@ func (pw *packedRecordWriter) Close() error {
 	return nil
 }
 
-func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup) (*packedRecordWriter, error) {
+func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig) (*packedRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
@@ -210,33 +220,43 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 		}
 		return path.Join(bucketName, p)
 	})
-	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups)
+	writer, err := packed.NewPackedWriter(truePaths, arrowSchema, bufferSize, multiPartUploadSize, columnGroups, storageConfig)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
 	}
-	columnGroupUncompressed := make([]uint64, len(columnGroups))
+	columnGroupUncompressed := make(map[typeutil.UniqueID]uint64)
+	pathsMap := make(map[typeutil.UniqueID]string)
+	if len(paths) != len(columnGroups) {
+		return nil, merr.WrapErrParameterInvalid(len(paths), len(columnGroups),
+			"paths length is not equal to column groups length for packed record writer")
+	}
+	for i, columnGroup := range columnGroups {
+		columnGroupUncompressed[columnGroup.GroupID] = 0
+		pathsMap[columnGroup.GroupID] = paths[i]
+	}
 	return &packedRecordWriter{
 		writer:                  writer,
 		schema:                  schema,
 		arrowSchema:             arrowSchema,
 		bufferSize:              bufferSize,
 		bucketName:              bucketName,
-		paths:                   paths,
+		pathsMap:                pathsMap,
 		columnGroups:            columnGroups,
 		columnGroupUncompressed: columnGroupUncompressed,
+		storageConfig:           storageConfig,
 	}, nil
 }
 
 func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
 	multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int,
 ) (*SerializeWriterImpl[*Value], error) {
-	PackedBinlogRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups)
+	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
 	}
-	return NewSerializeRecordWriter(PackedBinlogRecordWriter, func(v []*Value) (Record, error) {
+	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
 		return ValueSerializer(v, schema.Fields)
 	}, batchSize), nil
 }
@@ -259,6 +279,7 @@ type PackedBinlogRecordWriter struct {
 	bufferSize          int64
 	multiPartUploadSize int64
 	columnGroups        []storagecommon.ColumnGroup
+	storageConfig       *indexpb.StorageConfig
 
 	// writer and stats generated at runtime
 	writer              *packedRecordWriter
@@ -324,41 +345,22 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	return nil
 }
 
-func (pw *PackedBinlogRecordWriter) splitColumnByRecord(r Record) []storagecommon.ColumnGroup {
-	groups := make([]storagecommon.ColumnGroup, 0)
-	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0)}
-	for i, field := range pw.schema.Fields {
-		arr := r.Column(field.FieldID)
-		size := arr.Data().SizeInBytes()
-		rows := uint64(arr.Len())
-		if rows != 0 && int64(size/rows) >= packed.ColumnGroupSizeThreshold {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}})
-		} else {
-			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
-		}
-	}
-	if len(shortColumnGroup.Columns) > 0 {
-		groups = append(groups, shortColumnGroup)
-	}
-	return groups
-}
-
 func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 	if pw.writer == nil {
 		if len(pw.columnGroups) == 0 {
-			pw.columnGroups = pw.splitColumnByRecord(r)
+			pw.columnGroups = storagecommon.SplitBySchema(pw.schema.Fields)
 		}
 		logIdStart, _, err := pw.allocator.Alloc(uint32(len(pw.columnGroups)))
 		if err != nil {
 			return err
 		}
 		paths := []string{}
-		for columnGroup := range pw.columnGroups {
-			path := metautil.BuildInsertLogPath(pw.rootPath, pw.collectionID, pw.partitionID, pw.segmentID, typeutil.UniqueID(columnGroup), logIdStart)
+		for _, columnGroup := range pw.columnGroups {
+			path := metautil.BuildInsertLogPath(pw.rootPath, pw.collectionID, pw.partitionID, pw.segmentID, columnGroup.GroupID, logIdStart)
 			paths = append(paths, path)
 			logIdStart++
 		}
-		pw.writer, err = NewPackedRecordWriter(pw.bucketName, paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups)
+		pw.writer, err = NewPackedRecordWriter(pw.bucketName, paths, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig)
 		if err != nil {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("can not new packed record writer %s", err.Error()))
 		}
@@ -378,8 +380,10 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	if err := pw.writeBm25Stats(); err != nil {
 		return err
 	}
-	if err := pw.writer.Close(); err != nil {
-		return err
+	if pw.writer != nil {
+		if err := pw.writer.Close(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -393,17 +397,17 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
-	for columnGroup := range pw.columnGroups {
-		columnGroupID := typeutil.UniqueID(columnGroup)
+	for _, columnGroup := range pw.columnGroups {
+		columnGroupID := columnGroup.GroupID
 		if _, exists := pw.fieldBinlogs[columnGroupID]; !exists {
 			pw.fieldBinlogs[columnGroupID] = &datapb.FieldBinlog{
 				FieldID: columnGroupID,
 			}
 		}
 		pw.fieldBinlogs[columnGroupID].Binlogs = append(pw.fieldBinlogs[columnGroupID].Binlogs, &datapb.Binlog{
-			LogSize:       int64(pw.writer.columnGroupUncompressed[columnGroup]), // TODO: should provide the log size of each column group file in storage v2
-			MemorySize:    int64(pw.writer.columnGroupUncompressed[columnGroup]),
-			LogPath:       pw.writer.GetWrittenPaths()[columnGroupID],
+			LogSize:       int64(pw.writer.GetColumnGroupWrittenUncompressed(columnGroupID)),
+			MemorySize:    int64(pw.writer.GetColumnGroupWrittenUncompressed(columnGroupID)),
+			LogPath:       pw.writer.GetWrittenPaths(columnGroupID),
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
 			TimestampFrom: pw.tsFrom,
 			TimestampTo:   pw.tsTo,
@@ -525,6 +529,7 @@ func (pw *PackedBinlogRecordWriter) GetBufferUncompressed() uint64 {
 
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, bucketName, rootPath string, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
+	storageConfig *indexpb.StorageConfig,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
 	if err != nil {
@@ -567,5 +572,6 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		columnGroups:        columnGroups,
 		pkstats:             stats,
 		bm25Stats:           bm25Stats,
+		storageConfig:       storageConfig,
 	}, nil
 }

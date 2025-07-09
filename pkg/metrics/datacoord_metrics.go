@@ -355,13 +355,33 @@ var (
 			statusLabelName,
 		})
 
-	// TaskNum records the number of tasks of each type.
-	TaskNum = prometheus.NewGaugeVec(
+	// IndexStatsTaskNum records the number of tasks of each type.
+	IndexStatsTaskNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "task_count",
 			Help:      "number of index tasks of each type",
+		}, []string{TaskTypeLabel, TaskStateLabel})
+
+	// TaskVersion records the version of task(retry times of task).
+	TaskVersion = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "task_version",
+			Help:      "version of task",
+			Buckets:   buckets,
+		}, []string{
+			TaskTypeLabel,
+		})
+
+	TaskNumInGlobalScheduler = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "task_num_in_scheduler",
+			Help:      "number of tasks in global scheduler",
 		}, []string{TaskTypeLabel, TaskStateLabel})
 )
 
@@ -394,8 +414,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
 	registry.MustRegister(DataCoordTaskExecuteLatency)
-	registry.MustRegister(TaskNum)
-
+	registry.MustRegister(IndexStatsTaskNum)
+	registry.MustRegister(TaskVersion)
+	registry.MustRegister(TaskNumInGlobalScheduler)
 	registerStreamingCoord(registry)
 }
 

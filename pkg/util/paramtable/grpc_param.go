@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -581,4 +584,18 @@ func (p *InternalTLSConfig) Init(base *BaseTable) {
 		Doc:     "The server name indication (SNI) for internal TLS, should be the same as the name provided by the certificates ref: https://en.wikipedia.org/wiki/Server_Name_Indication",
 	}
 	p.InternalTLSSNI.Init(base.mgr)
+}
+
+func (p *InternalTLSConfig) GetClientCreds(ctx context.Context) (credentials.TransportCredentials, error) {
+	if !p.InternalTLSEnabled.GetAsBool() {
+		return insecure.NewCredentials(), nil
+	}
+	caPemPath := p.InternalTLSCaPemPath.GetValue()
+	sni := p.InternalTLSSNI.GetValue()
+	creds, err := credentials.NewClientTLSFromFile(caPemPath, sni)
+	if err != nil {
+		log.Ctx(ctx).Error("Failed to create internal TLS credentials", zap.Error(err))
+		return nil, fmt.Errorf("failed to create internal TLS credentials: %w", err)
+	}
+	return creds, nil
 }

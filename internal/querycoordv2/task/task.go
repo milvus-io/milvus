@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -324,7 +325,10 @@ func (task *baseTask) Name() string {
 type SegmentTask struct {
 	*baseTask
 
-	segmentID typeutil.UniqueID
+	segmentID    typeutil.UniqueID
+	loadPriority commonpb.LoadPriority
+	// for balance segment task, expected load and release execution on the same shard leader
+	shardLeaderID int64
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -335,6 +339,7 @@ func NewSegmentTask(ctx context.Context,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
+	loadPriority commonpb.LoadPriority,
 	actions ...Action,
 ) (*SegmentTask, error) {
 	if len(actions) == 0 {
@@ -359,9 +364,15 @@ func NewSegmentTask(ctx context.Context,
 	base := newBaseTask(ctx, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
-		baseTask:  base,
-		segmentID: segmentID,
+		baseTask:      base,
+		segmentID:     segmentID,
+		loadPriority:  loadPriority,
+		shardLeaderID: -1,
 	}, nil
+}
+
+func (task *SegmentTask) LoadPriority() commonpb.LoadPriority {
+	return task.loadPriority
 }
 
 func (task *SegmentTask) SegmentID() typeutil.UniqueID {
@@ -377,11 +388,19 @@ func (task *SegmentTask) Name() string {
 }
 
 func (task *SegmentTask) String() string {
-	return fmt.Sprintf("%s [segmentID=%d]", task.baseTask.String(), task.segmentID)
+	return fmt.Sprintf("%s [segmentID=%d][loadPriority=%d]", task.baseTask.String(), task.segmentID, task.loadPriority)
 }
 
 func (task *SegmentTask) MarshalJSON() ([]byte, error) {
 	return marshalJSON(task)
+}
+
+func (task *SegmentTask) ShardLeaderID() int64 {
+	return task.shardLeaderID
+}
+
+func (task *SegmentTask) SetShardLeaderID(id int64) {
+	task.shardLeaderID = id
 }
 
 type ChannelTask struct {

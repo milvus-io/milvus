@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tantivy::tokenizer::{BoxTokenStream, TextAnalyzer, Tokenizer};
 use whatlang::detect;
 
-pub trait Identifier : Sync + Send{
+pub trait Identifier: Sync + Send {
     fn detect(&self, text: &str) -> String;
     fn box_clone(&self) -> Box<dyn Identifier>;
 }
@@ -36,7 +36,7 @@ impl Identifier for WhatlangIdentifier {
         detect(text)
             .map_or("default", |info| {
                 if info.confidence() > self.confidence {
-                    info.lang().code()
+                    info.lang().eng_name()
                 } else {
                     "default"
                 }
@@ -245,7 +245,6 @@ impl<'a> LangIdentTokenizer<'a> {
         analyzer.token_stream(text)
     }
 }
-
 
 impl Tokenizer for LangIdentTokenizer<'static> {
     type TokenStream<'a> = BoxTokenStream<'a>;

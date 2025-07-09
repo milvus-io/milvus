@@ -46,12 +46,18 @@ type RerankBase struct {
 	pkType          schemapb.DataType
 	inputFieldIDs   []int64
 	inputFieldNames []string
+	inputFieldTypes []schemapb.DataType
 
 	// TODO: The parameter is passed to the reranker, and the reranker decides whether to implement the parameter
 	searchParams *searchParams
 }
 
-func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, rerankerName string, isSupportGroup bool, pkType schemapb.DataType) (*RerankBase, error) {
+func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema, rerankerName string, isSupportGroup bool) (*RerankBase, error) {
+	pkType, err := getPKType(coll)
+	if err != nil {
+		return nil, err
+	}
+
 	base := RerankBase{
 		inputFieldNames: funcSchema.InputFieldNames,
 		rerankerName:    rerankerName,
@@ -82,12 +88,17 @@ func newRerankBase(coll *schemapb.CollectionSchema, funcSchema *schemapb.Functio
 			return nil, fmt.Errorf("Function input field cannot be nullable: field %s", inputField.GetName())
 		}
 		base.inputFieldIDs = append(base.inputFieldIDs, inputField.FieldID)
+		base.inputFieldTypes = append(base.inputFieldTypes, inputField.DataType)
 	}
 	return &base, nil
 }
 
 func (base *RerankBase) GetInputFieldNames() []string {
 	return base.inputFieldNames
+}
+
+func (base *RerankBase) GetInputFieldTypes() []schemapb.DataType {
+	return base.inputFieldTypes
 }
 
 func (base *RerankBase) GetInputFieldIDs() []int64 {

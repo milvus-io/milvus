@@ -199,7 +199,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 			log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 			return err
 		}
-		size, err := mcm.getObjectSize(ctx, mcm.bucketName, filePath)
+		size, err := object.Size()
 		if err != nil {
 			log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 			return err

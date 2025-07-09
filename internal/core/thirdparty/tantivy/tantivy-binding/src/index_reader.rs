@@ -1,9 +1,12 @@
+use log::info;
 use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use tantivy::query::{Query, RangeQuery, RegexQuery, TermQuery};
+use tantivy::fastfield::FastValue;
+use tantivy::query::{BooleanQuery, ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
+use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
@@ -28,10 +31,18 @@ pub(crate) struct IndexReaderWrapper {
 }
 
 impl IndexReaderWrapper {
-    pub fn load(path: &str, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+    pub fn load(
+        path: &str,
+        load_in_mmap: bool,
+        set_bitset: SetBitsetFn,
+    ) -> Result<IndexReaderWrapper> {
         init_log();
 
-        let index = Index::open_in_dir(path)?;
+        let index = if load_in_mmap {
+            Index::open_in_dir(path)?
+        } else {
+            Index::open_in_dir_in_ram(path)?
+        };
 
         IndexReaderWrapper::from_index(Arc::new(index), set_bitset)
     }
@@ -288,6 +299,41 @@ impl IndexReaderWrapper {
         self.search_i64(&q)
     }
 
+    // **Note**: literal length must be larger or equal to min_gram.
+    pub fn inner_match_ngram(
+        &self,
+        literal: &str,
+        min_gram: usize,
+        max_gram: usize,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        // literal length should be larger or equal to min_gram.
+        assert!(
+            literal.chars().count() >= min_gram,
+            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
+            literal,
+            min_gram
+        );
+
+        if literal.chars().count() <= max_gram {
+            return self.term_query_keyword(literal, bitset);
+        }
+
+        let mut terms = vec![];
+        // So, str length is larger than 'max_gram' parse 'str' by 'max_gram'-gram and search all of them with boolean intersection
+        // nivers
+        let mut term_queries: Vec<Box<dyn Query>> = vec![];
+        let mut tokenizer = NgramTokenizer::new(max_gram, max_gram, false).unwrap();
+        let mut token_stream = tokenizer.token_stream(literal);
+        token_stream.process(&mut |token| {
+            let term = Term::from_field_text(self.field, &token.text);
+            term_queries.push(Box::new(TermQuery::new(term, IndexRecordOption::Basic)));
+            terms.push(token.text.clone());
+        });
+        let query = BooleanQuery::intersection(term_queries);
+        self.search(&query, bitset)
+    }
+
     pub fn lower_bound_range_query_keyword(
         &self,
         lower_bound: &str,
@@ -337,6 +383,146 @@ impl IndexReaderWrapper {
     pub fn regex_query(&self, pattern: &str, bitset: *mut c_void) -> Result<()> {
         let q = RegexQuery::from_pattern(&pattern, self.field)?;
         self.search(&q, bitset)
+    }
+
+    // JSON related query methods
+    // These methods support querying JSON fields with different data types
+
+    pub fn json_term_query_i64(
+        &self,
+        json_path: &str,
+        term: i64,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+        json_term.append_type_and_fast_value(term);
+        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_term_query_f64(
+        &self,
+        json_path: &str,
+        term: f64,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+        json_term.append_type_and_fast_value(term);
+        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_term_query_bool(
+        &self,
+        json_path: &str,
+        term: bool,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+        json_term.append_type_and_fast_value(term);
+        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_term_query_keyword(
+        &self,
+        json_path: &str,
+        term: &str,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let mut json_term = Term::from_field_json_path(self.field, json_path, false);
+        json_term.append_type_and_str(term);
+        let q = TermQuery::new(json_term, IndexRecordOption::Basic);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_exist_query(&self, json_path: &str, bitset: *mut c_void) -> Result<()> {
+        let full_json_path = if json_path == "" {
+            self.field_name.clone()
+        } else {
+            format!("{}.{}", self.field_name, json_path)
+        };
+        let q = ExistsQuery::new(full_json_path, true);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_range_query<T: FastValue>(
+        &self,
+        json_path: &str,
+        lower_bound: T,
+        higher_bound: T,
+        lb_unbounded: bool,
+        up_unbounded: bool,
+        lb_inclusive: bool,
+        ub_inclusive: bool,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let lb = if lb_unbounded {
+            Bound::Unbounded
+        } else {
+            let mut term = Term::from_field_json_path(self.field, json_path, false);
+            term.append_type_and_fast_value::<T>(lower_bound);
+            make_bounds(term, lb_inclusive)
+        };
+        let ub = if up_unbounded {
+            Bound::Unbounded
+        } else {
+            let mut term = Term::from_field_json_path(self.field, json_path, false);
+            term.append_type_and_fast_value::<T>(higher_bound);
+            make_bounds(term, ub_inclusive)
+        };
+        let q = RangeQuery::new(lb, ub);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_range_query_keyword(
+        &self,
+        json_path: &str,
+        lower_bound: &str,
+        higher_bound: &str,
+        lb_unbounded: bool,
+        up_unbounded: bool,
+        lb_inclusive: bool,
+        ub_inclusive: bool,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let lb = if lb_unbounded {
+            Bound::Unbounded
+        } else {
+            let mut term = Term::from_field_json_path(self.field, json_path, false);
+            term.append_type_and_str(lower_bound);
+            make_bounds(term, lb_inclusive)
+        };
+        let ub = if up_unbounded {
+            Bound::Unbounded
+        } else {
+            let mut term = Term::from_field_json_path(self.field, json_path, false);
+            term.append_type_and_str(higher_bound);
+            make_bounds(term, ub_inclusive)
+        };
+        let q = RangeQuery::new(lb, ub);
+        self.search(&q, bitset)
+    }
+
+    pub fn json_regex_query(
+        &self,
+        json_path: &str,
+        pattern: &str,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let q = RegexQuery::from_pattern_with_json_path(pattern, self.field, json_path)?;
+        self.search(&q, bitset)
+    }
+
+    pub fn json_prefix_query(
+        &self,
+        json_path: &str,
+        prefix: &str,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        let escaped = regex::escape(prefix);
+        let pattern = format!("{}(.|\n)*", escaped);
+        self.json_regex_query(json_path, &pattern, bitset)
     }
 }
 

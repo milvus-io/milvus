@@ -115,7 +115,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnNonStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -137,7 +137,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -163,7 +163,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -249,7 +249,8 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             }
             auto index = index::CreateStringIndexSort();
             std::vector<uint8_t> buffer(arr.ByteSizeLong());
-            ASSERT_TRUE(arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
+            ASSERT_TRUE(
+                arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
             index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
             LoadIndexInfo info{
                 .field_id = schema->get_field_id(FieldName("str")).get(),
@@ -321,7 +322,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnNonStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -342,7 +343,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -368,7 +369,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnJsonField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -393,7 +394,7 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnIndexedNonStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -418,7 +419,7 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnStlSortStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -448,7 +449,7 @@ TEST_F(SealedSegmentRegexQueryTest, PrefixMatchOnInvertedIndexStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -478,7 +479,7 @@ TEST_F(SealedSegmentRegexQueryTest, InnerMatchOnInvertedIndexStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -507,7 +508,7 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnInvertedIndexStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -537,7 +538,7 @@ TEST_F(SealedSegmentRegexQueryTest, PostfixMatchOnInvertedIndexStringField) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
@@ -566,7 +567,7 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnUnsupportedIndex) {
     auto expr = test::GenExpr();
     expr->set_allocated_unary_range_expr(unary_range_expr);
 
-    auto parser = ProtoParser(*schema);
+    auto parser = ProtoParser(schema);
     auto typed_expr = parser.ParseExprs(*expr);
     auto parsed =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);

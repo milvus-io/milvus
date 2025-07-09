@@ -19,6 +19,8 @@
 #include "common/Span.h"
 #include "mmap/ChunkData.h"
 #include "storage/MmapManager.h"
+#include "segcore/SegcoreConfig.h"
+#include "common/TypeTraits.h"
 
 namespace milvus {
 template <typename Type>
@@ -130,6 +132,13 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
                              src.byte_size(),
                              src.get_element_type(),
                              src.get_offsets_data());
+        } else if constexpr (std::is_same_v<VectorArray, Type>) {
+            auto& src = chunk[chunk_offset];
+            return VectorArrayView(const_cast<char*>(src.data()),
+                                   src.dim(),
+                                   src.length(),
+                                   src.byte_size(),
+                                   src.get_element_type());
         } else {
             return chunk[chunk_offset];
         }

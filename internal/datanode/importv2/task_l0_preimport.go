@@ -45,6 +45,7 @@ type L0PreImportTask struct {
 	partitionIDs []int64
 	vchannels    []string
 	schema       *schemapb.CollectionSchema
+	req          *datapb.PreImportRequest
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -73,6 +74,7 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		partitionIDs: req.GetPartitionIDs(),
 		vchannels:    req.GetVchannels(),
 		schema:       req.GetSchema(),
+		req:          req,
 		manager:      manager,
 		cm:           cm,
 	}
@@ -95,7 +97,12 @@ func (t *L0PreImportTask) GetSchema() *schemapb.CollectionSchema {
 }
 
 func (t *L0PreImportTask) GetSlots() int64 {
-	return 1
+	return t.req.GetTaskSlot()
+}
+
+// L0 preimport task buffer size is fixed
+func (t *L0PreImportTask) GetBufferSize() int64 {
+	return paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
 }
 
 func (t *L0PreImportTask) Cancel() {
@@ -115,17 +122,22 @@ func (t *L0PreImportTask) Clone() Task {
 }
 
 func (t *L0PreImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
+	bufferSize := int(t.GetBufferSize())
 	log.Info("start to preimport l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
+		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("schema", t.GetSchema()))...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	fn := func() (err error) {
 		defer func() {
 			if err != nil {
-				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.Error(err))...)
-				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+				var reason string = err.Error()
+				if len(t.GetFileStats()) == 1 {
+					reason = fmt.Sprintf("error: %v, file: %s", err, t.GetFileStats()[0].GetImportFile().String())
+				}
+				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.String("err", reason))...)
+				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
 

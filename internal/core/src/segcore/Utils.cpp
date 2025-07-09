@@ -23,7 +23,6 @@
 #include "common/FieldData.h"
 #include "common/Types.h"
 #include "index/ScalarIndex.h"
-#include "mmap/Utils.h"
 #include "log/Log.h"
 #include "storage/DataCodec.h"
 #include "storage/RemoteChunkManagerSingleton.h"
@@ -216,6 +215,23 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 result += data->vectors().sparse_float_vector().ByteSizeLong();
                 break;
             }
+            case DataType::VECTOR_ARRAY: {
+                auto& obj = data->vectors().vector_array().data();
+                switch (field_meta.get_element_type()) {
+                    case DataType::VECTOR_FLOAT: {
+                        for (auto& e : obj) {
+                            result += e.float_vector().ByteSizeLong();
+                        }
+                        break;
+                    }
+                    default: {
+                        PanicInfo(NotImplemented,
+                                  fmt::format("not implemented vector type {}",
+                                              field_meta.get_element_type()));
+                    }
+                }
+                break;
+            }
             default: {
                 PanicInfo(
                     DataTypeInvalid,
@@ -231,7 +247,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
 // modify bulk script implement to make process more clear
 
 std::unique_ptr<DataArray>
-CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
+CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
@@ -317,7 +333,7 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
 }
 
 std::unique_ptr<DataArray>
-CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
+CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
@@ -365,6 +381,16 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             auto length = count * dim;
             auto obj = vector_array->mutable_int8_vector();
             obj->resize(length);
+            break;
+        }
+        case DataType::VECTOR_ARRAY: {
+            auto obj = vector_array->mutable_vector_array();
+            obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
+                field_meta.get_element_type()));
+            obj->mutable_data()->Reserve(count);
+            for (int i = 0; i < count; i++) {
+                *(obj->mutable_data()->Add()) = proto::schema::VectorField();
+            }
             break;
         }
         default: {
@@ -453,7 +479,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             break;
         }
         case DataType::ARRAY: {
-            auto data = reinterpret_cast<const ScalarArray*>(data_raw);
+            auto data = reinterpret_cast<const ScalarFieldProto*>(data_raw);
             auto obj = scalar_array->mutable_array_data();
             obj->set_element_type(static_cast<milvus::proto::schema::DataType>(
                 field_meta.get_element_type()));
@@ -538,6 +564,28 @@ CreateVectorDataArrayFrom(const void* data_raw,
             obj->assign(data, length * sizeof(int8));
             break;
         }
+        case DataType::VECTOR_ARRAY: {
+            auto data = reinterpret_cast<const VectorFieldProto*>(data_raw);
+            auto vector_type = field_meta.get_element_type();
+            switch (vector_type) {
+                case DataType::VECTOR_FLOAT: {
+                    auto obj = vector_array->mutable_vector_array();
+                    obj->set_element_type(
+                        milvus::proto::schema::DataType::FloatVector);
+                    obj->set_dim(dim);
+                    for (auto i = 0; i < count; i++) {
+                        *(obj->mutable_data()->Add()) = data[i];
+                    }
+                    break;
+                }
+                default: {
+                    PanicInfo(NotImplemented,
+                              fmt::format("not implemented vector type {}",
+                                          vector_type));
+                }
+            }
+            break;
+        }
         default: {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
@@ -553,7 +601,7 @@ CreateDataArrayFrom(const void* data_raw,
                     const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
 
-    if (!IsVectorDataType(data_type)) {
+    if (!IsVectorDataType(data_type) && data_type != DataType::VECTOR_ARRAY) {
         return CreateScalarDataArrayFrom(
             data_raw, valid_data, count, field_meta);
     }
@@ -619,6 +667,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto data = VEC_FIELD_DATA(src_field_data, int8);
                 auto obj = vector_array->mutable_int8_vector();
                 obj->assign(data, dim * sizeof(int8));
+            } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+                PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
             } else {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));
@@ -893,33 +943,18 @@ ReverseDataFromIndex(const index::IndexBase* index,
 // segcore use default remote chunk manager to load data from minio/s3
 void
 LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
-                          std::shared_ptr<ArrowReaderChannel> channel) {
+                          std::shared_ptr<ArrowReaderChannel> channel,
+                          milvus::proto::common::LoadPriority priority) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
 
-        std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
-            futures;
-        futures.reserve(remote_files.size());
-        for (const auto& file : remote_files) {
-            auto future = pool.Submit([rcm, file]() {
-                auto fileSize = rcm->Size(file);
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-                rcm->Read(file, buf.get(), fileSize);
-                auto result =
-                    storage::DeserializeFileData(buf, fileSize, false);
-                result->SetData(buf);
-                return result->GetReader();
-            });
-            futures.emplace_back(std::move(future));
+        auto codec_futures = storage::GetObjectData(
+            rcm.get(), remote_files, milvus::PriorityForLoad(priority), false);
+        for (auto& codec_future : codec_futures) {
+            auto reader = codec_future.get()->GetReader();
+            channel->push(reader);
         }
-
-        for (auto& future : futures) {
-            auto field_data = future.get();
-            channel->push(field_data);
-        }
-
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -929,30 +964,17 @@ LoadArrowReaderFromRemote(const std::vector<std::string>& remote_files,
 
 void
 LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
-                         FieldDataChannelPtr channel) {
+                         FieldDataChannelPtr channel,
+                         milvus::proto::common::LoadPriority priority) {
     try {
         auto rcm = storage::RemoteChunkManagerSingleton::GetInstance()
                        .GetRemoteChunkManager();
-        auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::HIGH);
-
-        std::vector<std::future<FieldDataPtr>> futures;
-        futures.reserve(remote_files.size());
-        for (const auto& file : remote_files) {
-            auto future = pool.Submit([rcm, file]() {
-                auto fileSize = rcm->Size(file);
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
-                rcm->Read(file, buf.get(), fileSize);
-                auto result = storage::DeserializeFileData(buf, fileSize);
-                return result->GetFieldData();
-            });
-            futures.emplace_back(std::move(future));
-        }
-
-        for (auto& future : futures) {
-            auto field_data = future.get();
+        auto codec_futures = storage::GetObjectData(
+            rcm.get(), remote_files, milvus::PriorityForLoad(priority));
+        for (auto& codec_future : codec_futures) {
+            auto field_data = codec_future.get()->GetFieldData();
             channel->push(field_data);
         }
-
         channel->close();
     } catch (std::exception& e) {
         LOG_INFO("failed to load data from remote: {}", e.what());
@@ -978,8 +1000,12 @@ upper_bound(const ConcurrentVector<Timestamp>& timestamps,
 
 // Get the globally configured cache warmup policy for the given content type.
 CacheWarmupPolicy
-getCacheWarmupPolicy(bool is_vector, bool is_index) {
+getCacheWarmupPolicy(bool is_vector, bool is_index, bool in_load_list) {
     auto& manager = milvus::cachinglayer::Manager::GetInstance();
+    // if field not in load list(hint), disable warmup
+    if (!in_load_list) {
+        return CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    }
     if (is_index) {
         return is_vector ? manager.getVectorIndexCacheWarmupPolicy()
                          : manager.getScalarIndexCacheWarmupPolicy();

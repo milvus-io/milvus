@@ -20,7 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type DistributionSuite struct {
@@ -29,8 +35,8 @@ type DistributionSuite struct {
 }
 
 func (s *DistributionSuite) SetupTest() {
-	s.dist = NewDistribution()
-	s.Equal(initialTargetVersion, s.dist.getTargetVersion())
+	paramtable.Init()
+	s.dist = NewDistribution("channel-1", NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 }
 
 func (s *DistributionSuite) TearDownTest() {
@@ -44,6 +50,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 		growing              []SegmentEntry
 		expected             []SnapshotItem
 		expectedSignalClosed bool
+		expectedLoadRatio    float64
 	}
 
 	cases := []testCase{
@@ -177,7 +184,10 @@ func (s *DistributionSuite) TestAddDistribution() {
 			s.SetupTest()
 			defer s.TearDownTest()
 			s.dist.AddGrowing(tc.growing...)
-			_, _, version, err := s.dist.PinReadableSegments()
+			s.dist.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion: 1000,
+			}, nil)
+			_, _, version, err := s.dist.PinReadableSegments(1.0)
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
 			sealed, _ := s.dist.PeekSegments(false)
@@ -225,11 +235,6 @@ func (s *DistributionSuite) TestAddGrowing() {
 
 	cases := []testCase{
 		{
-			tag:      "nil input",
-			input:    nil,
-			expected: []SegmentEntry{},
-		},
-		{
 			tag: "normal_case",
 			input: []SegmentEntry{
 				{SegmentID: 1, PartitionID: 1},
@@ -260,8 +265,11 @@ func (s *DistributionSuite) TestAddGrowing() {
 			defer s.TearDownTest()
 
 			s.dist.AddGrowing(tc.input...)
-			s.dist.SyncTargetVersion(1000, tc.workingParts, []int64{1, 2}, nil, nil)
-			_, growing, version, err := s.dist.PinReadableSegments()
+			s.dist.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:   1000,
+				GrowingInTarget: []int64{1, 2},
+			}, tc.workingParts)
+			_, growing, version, err := s.dist.PinReadableSegments(1.0)
 			s.Require().NoError(err)
 			defer s.dist.Unpin(version)
 
@@ -447,10 +455,23 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 			s.dist.AddGrowing(tc.presetGrowing...)
 			s.dist.AddDistributions(tc.presetSealed...)
 
+			// update target version, make delegator serviceable
+			growingIDs := lo.Map(tc.presetGrowing, func(item SegmentEntry, idx int) int64 {
+				return item.SegmentID
+			})
+			sealedSegmentRowCount := lo.SliceToMap(tc.presetSealed, func(item SegmentEntry) (int64, int64) {
+				return item.SegmentID, 100
+			})
+			s.dist.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:         1000,
+				GrowingInTarget:       growingIDs,
+				SealedSegmentRowCount: sealedSegmentRowCount,
+			}, nil)
+
 			var version int64
 			if tc.withMockRead {
 				var err error
-				_, _, version, err = s.dist.PinReadableSegments()
+				_, _, version, err = s.dist.PinReadableSegments(1.0)
 				s.Require().NoError(err)
 			}
 
@@ -614,7 +635,7 @@ func (s *DistributionSuite) TestPeek() {
 	}
 }
 
-func (s *DistributionSuite) TestAddOfflines() {
+func (s *DistributionSuite) TestMarkOfflineSegments() {
 	type testCase struct {
 		tag         string
 		input       []SegmentEntry
@@ -665,12 +686,18 @@ func (s *DistributionSuite) TestAddOfflines() {
 			defer s.TearDownTest()
 
 			s.dist.AddDistributions(tc.input...)
-			s.dist.AddOfflines(tc.offlines...)
+			sealedSegmentRowCount := lo.SliceToMap(tc.input, func(t SegmentEntry) (int64, int64) {
+				return t.SegmentID, 100
+			})
+			s.dist.SyncTargetVersion(&querypb.SyncAction{
+				TargetVersion:         1000,
+				SealedSegmentRowCount: sealedSegmentRowCount,
+				DroppedInTarget:       nil,
+			}, nil)
+			s.dist.MarkOfflineSegments(tc.offlines...)
 			s.Equal(tc.serviceable, s.dist.Serviceable())
 
-			// current := s.dist.current.Load()
 			for _, offline := range tc.offlines {
-				// current.
 				s.dist.mut.RLock()
 				entry, ok := s.dist.sealedSegments[offline]
 				s.dist.mut.RUnlock()
@@ -728,29 +755,385 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 
 	s.dist.AddGrowing(growing...)
 	s.dist.AddDistributions(sealed...)
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{2, 3}, []int64{6}, []int64{})
+	s.dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2,
+		GrowingInTarget:       []int64{1},
+		SealedSegmentRowCount: map[int64]int64{4: 100, 5: 200},
+		DroppedInTarget:       []int64{6},
+	}, []int64{1})
 
-	s1, s2, _, err := s.dist.PinReadableSegments()
+	s1, s2, _, err := s.dist.PinReadableSegments(1.0)
 	s.Require().NoError(err)
-	s.Len(s1[0].Segments, 1)
-	s.Len(s2, 2)
+	s.Len(s1[0].Segments, 2)
+	s.Len(s2, 1)
 
 	s1, s2, _ = s.dist.PinOnlineSegments()
 	s.Len(s1[0].Segments, 3)
 	s.Len(s2, 3)
 
-	s.dist.serviceable.Store(true)
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{222}, []int64{}, []int64{})
-	s.True(s.dist.Serviceable())
-
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{})
+	s.dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2,
+		GrowingInTarget:       []int64{1},
+		SealedSegmentRowCount: map[int64]int64{333: 100},
+		DroppedInTarget:       []int64{},
+	}, []int64{1})
 	s.False(s.dist.Serviceable())
-
-	s.dist.SyncTargetVersion(2, []int64{1}, []int64{}, []int64{333}, []int64{1, 2, 3})
-	_, _, _, err = s.dist.PinReadableSegments()
+	_, _, _, err = s.dist.PinReadableSegments(1.0)
 	s.Error(err)
 }
 
 func TestDistributionSuite(t *testing.T) {
 	suite.Run(t, new(DistributionSuite))
+}
+
+func TestNewChannelQueryView(t *testing.T) {
+	growings := []int64{1, 2, 3}
+	sealedWithRowCount := map[int64]int64{4: 100, 5: 200, 6: 300}
+	partitions := []int64{7, 8, 9}
+	version := int64(10)
+
+	view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+	assert.NotNil(t, view)
+	assert.ElementsMatch(t, growings, view.growingSegments.Collect())
+	assert.ElementsMatch(t, lo.Keys(sealedWithRowCount), lo.Keys(view.sealedSegmentRowCount))
+	assert.True(t, view.partitions.Contain(7))
+	assert.True(t, view.partitions.Contain(8))
+	assert.True(t, view.partitions.Contain(9))
+	assert.Equal(t, version, view.version)
+	assert.Equal(t, float64(0), view.loadedRatio.Load())
+	assert.False(t, view.Serviceable())
+}
+
+func TestDistribution_NewDistribution(t *testing.T) {
+	channelName := "test_channel"
+	growings := []int64{1, 2, 3}
+	sealedWithRowCount := map[int64]int64{4: 100, 5: 200, 6: 300}
+	partitions := []int64{7, 8, 9}
+	version := int64(10)
+
+	view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+	dist := NewDistribution(channelName, view)
+
+	assert.NotNil(t, dist)
+	assert.Equal(t, channelName, dist.channelName)
+	assert.Equal(t, view, dist.queryView)
+	assert.NotNil(t, dist.growingSegments)
+	assert.NotNil(t, dist.sealedSegments)
+	assert.NotNil(t, dist.snapshots)
+	assert.NotNil(t, dist.current)
+}
+
+func TestDistribution_UpdateServiceable(t *testing.T) {
+	channelName := "test_channel"
+	growings := []int64{1, 2, 3}
+	sealedWithRowCount := map[int64]int64{4: 100, 5: 100, 6: 100}
+	partitions := []int64{7, 8, 9}
+	version := int64(10)
+
+	view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+	dist := NewDistribution(channelName, view)
+
+	// Test with no segments loaded
+	dist.updateServiceable("test")
+	assert.False(t, dist.Serviceable())
+	assert.Equal(t, float64(0), dist.queryView.GetLoadedRatio())
+
+	// Test with some segments loaded
+	dist.sealedSegments[4] = SegmentEntry{
+		SegmentID: 4,
+		Offline:   false,
+	}
+	dist.growingSegments[1] = SegmentEntry{
+		SegmentID: 1,
+	}
+	dist.updateServiceable("test")
+	assert.False(t, dist.Serviceable())
+	assert.Equal(t, float64(2)/float64(6), dist.queryView.GetLoadedRatio())
+
+	// Test with all segments loaded
+	for id := range sealedWithRowCount {
+		dist.sealedSegments[id] = SegmentEntry{
+			SegmentID: id,
+			Offline:   false,
+		}
+	}
+	for _, id := range growings {
+		dist.growingSegments[id] = SegmentEntry{
+			SegmentID: id,
+		}
+	}
+	dist.updateServiceable("test")
+	assert.Equal(t, float64(1), dist.queryView.GetLoadedRatio())
+	assert.False(t, dist.Serviceable())
+	dist.queryView.syncedByCoord = true
+	assert.True(t, dist.Serviceable())
+}
+
+func TestDistribution_SyncTargetVersion(t *testing.T) {
+	channelName := "test_channel"
+	growings := []int64{1, 2, 3}
+	sealedWithRowCount := map[int64]int64{4: 100, 5: 100, 6: 100}
+	partitions := []int64{7, 8, 9}
+	version := int64(10)
+
+	view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+	dist := NewDistribution(channelName, view)
+
+	// Add some initial segments
+	dist.growingSegments[1] = SegmentEntry{
+		SegmentID: 1,
+	}
+	dist.sealedSegments[4] = SegmentEntry{
+		SegmentID: 4,
+	}
+
+	// Create a new sync action
+	action := &querypb.SyncAction{
+		GrowingInTarget:       []int64{1, 2},
+		SealedSegmentRowCount: map[int64]int64{4: 100, 5: 100},
+		DroppedInTarget:       []int64{3},
+		TargetVersion:         version + 1,
+	}
+
+	// Sync the view
+	dist.SyncTargetVersion(action, partitions)
+
+	// Verify the changes
+	assert.Equal(t, action.GetTargetVersion(), dist.queryView.version)
+	assert.ElementsMatch(t, action.GetGrowingInTarget(), dist.queryView.growingSegments.Collect())
+	assert.ElementsMatch(t, lo.Keys(action.GetSealedSegmentRowCount()), lo.Keys(dist.queryView.sealedSegmentRowCount))
+	assert.True(t, dist.queryView.partitions.Contain(7))
+	assert.True(t, dist.queryView.partitions.Contain(8))
+	assert.True(t, dist.queryView.partitions.Contain(9))
+
+	// Verify growing segment target version
+	assert.Equal(t, action.GetTargetVersion(), dist.growingSegments[1].TargetVersion)
+
+	// Verify sealed segment target version
+	assert.Equal(t, action.GetTargetVersion(), dist.sealedSegments[4].TargetVersion)
+}
+
+func TestDistribution_MarkOfflineSegments(t *testing.T) {
+	channelName := "test_channel"
+	view := NewChannelQueryView([]int64{}, map[int64]int64{1: 100, 2: 200}, []int64{}, 0)
+	dist := NewDistribution(channelName, view)
+
+	// Add some segments
+	dist.sealedSegments[1] = SegmentEntry{
+		SegmentID: 1,
+		NodeID:    100,
+		Version:   1,
+	}
+	dist.sealedSegments[2] = SegmentEntry{
+		SegmentID: 2,
+		NodeID:    100,
+		Version:   1,
+	}
+
+	// Mark segments offline
+	dist.MarkOfflineSegments(1, 2)
+
+	// Verify the changes
+	assert.True(t, dist.sealedSegments[1].Offline)
+	assert.True(t, dist.sealedSegments[2].Offline)
+	assert.Equal(t, int64(-1), dist.sealedSegments[1].NodeID)
+	assert.Equal(t, int64(-1), dist.sealedSegments[2].NodeID)
+	assert.Equal(t, unreadableTargetVersion, dist.sealedSegments[1].Version)
+	assert.Equal(t, unreadableTargetVersion, dist.sealedSegments[2].Version)
+}
+
+// TestChannelQueryView_SyncedByCoord tests the syncedByCoord field functionality
+func TestChannelQueryView_SyncedByCoord(t *testing.T) {
+	mockey.PatchConvey("TestChannelQueryView_SyncedByCoord", t, func() {
+		// Mock GetAsFloat to return 1.0 (disable partial result) to avoid paramtable initialization
+		mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+
+		growings := []int64{1, 2, 3}
+		sealedWithRowCount := map[int64]int64{4: 100, 5: 200, 6: 300}
+		partitions := []int64{7, 8, 9}
+		version := int64(10)
+
+		t.Run("new channelQueryView has syncedByCoord false", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			assert.False(t, view.syncedByCoord, "New channelQueryView should have syncedByCoord = false")
+		})
+
+		t.Run("syncedByCoord can be set manually", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+
+			// Initially false
+			assert.False(t, view.syncedByCoord)
+
+			// Set to true
+			view.syncedByCoord = true
+			assert.True(t, view.syncedByCoord)
+
+			// Set back to false
+			view.syncedByCoord = false
+			assert.False(t, view.syncedByCoord)
+		})
+	})
+}
+
+// TestDistribution_SyncTargetVersionSetsSyncedByCoord tests that SyncTargetVersion sets syncedByCoord
+func TestDistribution_SyncTargetVersionSetsSyncedByCoord(t *testing.T) {
+	mockey.PatchConvey("TestDistribution_SyncTargetVersionSetsSyncedByCoord", t, func() {
+		// Mock GetAsFloat to return 1.0 (disable partial result) to avoid paramtable initialization
+		mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+
+		channelName := "test_channel"
+		growings := []int64{1, 2, 3}
+		sealedWithRowCount := map[int64]int64{4: 100, 5: 200, 6: 300}
+		partitions := []int64{7, 8, 9}
+		version := int64(10)
+
+		t.Run("SyncTargetVersion sets syncedByCoord to true", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Initially syncedByCoord should be false
+			assert.False(t, dist.queryView.syncedByCoord)
+
+			// Create sync action
+			action := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2},
+				SealedSegmentRowCount: map[int64]int64{4: 100, 5: 100},
+				TargetVersion:         version + 1,
+			}
+
+			// Sync the view
+			dist.SyncTargetVersion(action, partitions)
+
+			// Verify syncedByCoord is set to true after sync
+			assert.True(t, dist.queryView.syncedByCoord, "SyncTargetVersion should set syncedByCoord to true")
+			assert.Equal(t, action.GetTargetVersion(), dist.queryView.version)
+		})
+
+		t.Run("multiple SyncTargetVersion calls maintain syncedByCoord true", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// First sync
+			action1 := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2},
+				SealedSegmentRowCount: map[int64]int64{4: 100},
+				TargetVersion:         version + 1,
+			}
+			dist.SyncTargetVersion(action1, partitions)
+			assert.True(t, dist.queryView.syncedByCoord)
+
+			// Second sync
+			action2 := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2, 3},
+				SealedSegmentRowCount: map[int64]int64{4: 100, 5: 200},
+				TargetVersion:         version + 2,
+			}
+			dist.SyncTargetVersion(action2, partitions)
+			assert.True(t, dist.queryView.syncedByCoord, "syncedByCoord should remain true after multiple syncs")
+			assert.Equal(t, action2.GetTargetVersion(), dist.queryView.version)
+		})
+
+		t.Run("SyncTargetVersion creates new queryView with syncedByCoord true", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Store reference to original view
+			originalView := dist.queryView
+			assert.False(t, originalView.syncedByCoord)
+
+			// Sync should create new queryView
+			action := &querypb.SyncAction{
+				GrowingInTarget:       []int64{1, 2},
+				SealedSegmentRowCount: map[int64]int64{4: 100, 5: 100},
+				TargetVersion:         version + 1,
+			}
+			dist.SyncTargetVersion(action, partitions)
+
+			// Verify new queryView is created with syncedByCoord = true
+			newView := dist.queryView
+			assert.NotSame(t, originalView, newView, "SyncTargetVersion should create new queryView")
+			assert.True(t, newView.syncedByCoord, "New queryView should have syncedByCoord = true")
+			assert.False(t, originalView.syncedByCoord, "Original queryView should remain unchanged")
+		})
+	})
+}
+
+// TestDistribution_ServiceableWithSyncedByCoord tests serviceable logic considering syncedByCoord
+func TestDistribution_ServiceableWithSyncedByCoord(t *testing.T) {
+	mockey.PatchConvey("TestDistribution_ServiceableWithSyncedByCoord", t, func() {
+		// Mock GetAsFloat to return 1.0 (disable partial result) to avoid paramtable initialization
+		mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+
+		channelName := "test_channel"
+		growings := []int64{1, 2}
+		sealedWithRowCount := map[int64]int64{4: 100, 5: 100}
+		partitions := []int64{7, 8}
+		version := int64(10)
+
+		t.Run("distribution becomes serviceable after sync and full load", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Initially not serviceable
+			assert.False(t, dist.Serviceable())
+
+			// Add all segments to make it fully loaded
+			for _, id := range growings {
+				dist.growingSegments[id] = SegmentEntry{
+					SegmentID: id,
+				}
+			}
+			for id := range sealedWithRowCount {
+				dist.sealedSegments[id] = SegmentEntry{
+					SegmentID: id,
+					Offline:   false,
+				}
+			}
+
+			// Sync target version to set syncedByCoord = true
+			action := &querypb.SyncAction{
+				GrowingInTarget:       growings,
+				SealedSegmentRowCount: sealedWithRowCount,
+				TargetVersion:         version + 1,
+			}
+			dist.SyncTargetVersion(action, partitions)
+
+			// Update serviceable to calculate loaded ratio
+			dist.updateServiceable("test")
+
+			// Should be serviceable now
+			assert.True(t, dist.Serviceable())
+			assert.Equal(t, float64(1), dist.queryView.GetLoadedRatio())
+			assert.True(t, dist.queryView.syncedByCoord)
+		})
+
+		t.Run("distribution not serviceable without sync even with full load", func(t *testing.T) {
+			view := NewChannelQueryView(growings, sealedWithRowCount, partitions, version)
+			dist := NewDistribution(channelName, view)
+
+			// Add all segments to make it fully loaded
+			for _, id := range growings {
+				dist.growingSegments[id] = SegmentEntry{
+					SegmentID: id,
+				}
+			}
+			for id := range sealedWithRowCount {
+				dist.sealedSegments[id] = SegmentEntry{
+					SegmentID: id,
+					Offline:   false,
+				}
+			}
+
+			// Update serviceable to calculate loaded ratio but don't sync
+			dist.updateServiceable("test")
+
+			// Should not be serviceable without sync (assuming partial result is disabled by default)
+			// The exact behavior depends on paramtable configuration, but we test the basic structure
+			assert.Equal(t, float64(1), dist.queryView.GetLoadedRatio(), "Load ratio should be 1.0")
+			assert.False(t, dist.queryView.syncedByCoord, "Should not be synced by coord")
+
+			// Note: The actual serviceable result depends on partial result configuration
+			// We focus on testing that the fields are set correctly
+		})
+	})
 }

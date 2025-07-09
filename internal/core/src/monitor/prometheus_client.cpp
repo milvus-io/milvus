@@ -454,17 +454,24 @@ DEFINE_PROMETHEUS_GAUGE(internal_cache_capacity_bytes_mixed,
                         cacheMixedLabel);
 
 // Eviction count and resource size
-DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_eviction_count,
-                                 "[cpp]cache eviction count");
-DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_count_memory,
-                          internal_cache_eviction_count,
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_cell_eviction_count,
+                                 "[cpp]cache cell eviction count");
+DEFINE_PROMETHEUS_COUNTER(internal_cache_cell_eviction_count_memory,
+                          internal_cache_cell_eviction_count,
                           cacheMemoryLabel);
-DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_count_disk,
-                          internal_cache_eviction_count,
+DEFINE_PROMETHEUS_COUNTER(internal_cache_cell_eviction_count_disk,
+                          internal_cache_cell_eviction_count,
                           cacheDiskLabel);
-DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_count_mixed,
-                          internal_cache_eviction_count,
+DEFINE_PROMETHEUS_COUNTER(internal_cache_cell_eviction_count_mixed,
+                          internal_cache_cell_eviction_count,
                           cacheMixedLabel);
+
+// Eviction event count
+DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_eviction_event_count,
+                                 "[cpp]cache eviction event count");
+DEFINE_PROMETHEUS_COUNTER(internal_cache_eviction_event_count_all,
+                          internal_cache_eviction_event_count,
+                          {});
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(internal_cache_evicted_bytes,
                                  "[cpp]total bytes evicted from cache");
@@ -545,5 +552,23 @@ DEFINE_PROMETHEUS_GAUGE(internal_cache_memory_overhead_bytes_mixed,
                         cacheMixedLabel);
 
 // --- caching layer metrics end ---
+
+// --- file writer metrics ---
+
+std::map<std::string, std::string> diskWriteModeBufferedLabel = {
+    {"mode", "buffered"}};
+std::map<std::string, std::string> diskWriteModeDirectLabel = {
+    {"mode", "direct"}};
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(disk_write_total_bytes,
+                               "[cpp]disk write total bytes");
+DEFINE_PROMETHEUS_COUNTER(disk_write_total_bytes_buffered,
+                        disk_write_total_bytes,
+                        diskWriteModeBufferedLabel);
+DEFINE_PROMETHEUS_COUNTER(disk_write_total_bytes_direct,
+                        disk_write_total_bytes,
+                        diskWriteModeDirectLabel);
+
+// --- file writer metrics end ---
 
 }  // namespace milvus::monitor

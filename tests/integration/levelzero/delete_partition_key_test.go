@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -44,7 +45,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	c := s.Cluster
 
 	// create index and load
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -53,7 +54,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	err = merr.CheckRPCCall(createIndexStatus, err)
 	s.NoError(err)
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(loadStatus, err)
@@ -63,13 +64,22 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	// Generate 2 growing segments with 2 differenct partition key 0, 1001, with exactlly same PK start from 0
 	s.generateSegment(collectionName, 1000, 0, false, 0)
 	s.generateSegment(collectionName, 1001, 0, false, 1001)
-	segments, err := s.Cluster.MetaWatcher.ShowSegments()
+
 	s.Require().NoError(err)
-	s.Require().EqualValues(len(segments), 2)
-	for _, segment := range segments {
-		s.Require().EqualValues(commonpb.SegmentState_Growing, segment.GetState())
-		s.Require().EqualValues(commonpb.SegmentLevel_L1, segment.GetLevel())
-	}
+	var segments []*datapb.SegmentInfo
+	assert.Eventually(s.T(), func() bool {
+		var err error
+		segments, err = c.ShowSegments(collectionName)
+		s.NoError(err)
+		if len(segments) == 2 {
+			for _, segment := range segments {
+				s.Require().EqualValues(commonpb.SegmentState_Growing, segment.GetState())
+				s.Require().EqualValues(commonpb.SegmentLevel_L1, segment.GetLevel())
+			}
+			return true
+		}
+		return false
+	}, 5*time.Second, 100*time.Millisecond)
 
 	L1SegIDs := lo.Map(segments, func(seg *datapb.SegmentInfo, _ int) int64 {
 		return seg.GetID()
@@ -78,7 +88,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 
 	checkRowCount := func(rowCount int) {
 		// query
-		queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			CollectionName: collectionName,
 			OutputFields:   []string{"count(*)"},
 		})
@@ -92,7 +102,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	// expr: partition_key == 1001 && pk >= 0
 	//  - for previous implementation, the delete pk >= 0 will touch every segments and leave only 1 numRows
 	//  - for latest enhancements, the expr "pk >= 0" will only touch partitions that contains partition key == 1001
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		CollectionName: collectionName,
 		Expr:           fmt.Sprintf("partition_key == 1001 && %s >= 0", integration.Int64Field),
 	})
@@ -104,7 +114,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	// Flush will generates 2 Flushed L1 segments and 1 Flushed L0 segment
 	s.Flush(collectionName)
 
-	segments, err = s.Cluster.MetaWatcher.ShowSegments()
+	segments, err = s.Cluster.ShowSegments(collectionName)
 	s.Require().NoError(err)
 	s.Require().EqualValues(len(segments), 3)
 	for _, segment := range segments {
@@ -119,7 +129,7 @@ func (s *LevelZeroSuite) TestDeletePartitionKeyHint() {
 	}
 
 	l0Dropped := func() bool {
-		segments, err := s.Cluster.MetaWatcher.ShowSegments()
+		segments, err := s.Cluster.ShowSegments(collectionName)
 		s.Require().NoError(err)
 		s.Require().EqualValues(len(segments), 3)
 

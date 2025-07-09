@@ -73,12 +73,51 @@ TEST_F(StringIndexMarisaTest, In) {
     ASSERT_TRUE(Any(bitset));
 }
 
+TEST_F(StringIndexMarisaTest, InHasNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    FixedVector<bool> is_null(nb);
+    std::vector<std::string> in_strs(nb / 2);
+    int j = 0;
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+        if (i % 2 == 0) {
+            in_strs[j] = strs[i];
+            j++;
+        }
+    }
+
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->In(in_strs.size(), in_strs.data());
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
+}
+
 TEST_F(StringIndexMarisaTest, NotIn) {
     auto index = milvus::index::CreateStringIndexMarisa();
     index->Build(nb, strs.data());
     auto bitset = index->NotIn(strs.size(), strs.data());
     ASSERT_EQ(bitset.size(), strs.size());
     ASSERT_TRUE(BitSetNone(bitset));
+}
+
+TEST_F(StringIndexMarisaTest, NotInHasNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    FixedVector<bool> is_null(nb);
+    std::vector<std::string> in_strs(nb / 2);
+    int j = 0;
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+        if (i % 2 == 0) {
+            in_strs[j] = strs[i];
+            j++;
+        }
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->NotIn(in_strs.size(), in_strs.data());
+    ASSERT_EQ(bitset.size(), strs.size());
+    std::cout << "bitset: " << bitset.count() << std::endl;
+    ASSERT_TRUE(bitset.count() == 0);
 }
 
 TEST_F(StringIndexMarisaTest, Range) {
@@ -172,6 +211,48 @@ TEST_F(StringIndexMarisaTest, PrefixMatch) {
         ASSERT_EQ(bitset.size(), strs.size());
         ASSERT_TRUE(bitset[i]);
     }
+}
+
+TEST_F(StringIndexMarisaTest, IsNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    index->Build(nb, strs.data());
+    auto bitset = index->IsNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == 0);
+}
+
+TEST_F(StringIndexMarisaTest, IsNullHasNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    FixedVector<bool> is_null(nb);
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->IsNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
+}
+
+TEST_F(StringIndexMarisaTest, IsNotNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    index->Build(nb, strs.data());
+    auto bitset = index->IsNotNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == strs.size());
+}
+
+TEST_F(StringIndexMarisaTest, IsNotNullHasNull) {
+    auto index = milvus::index::CreateStringIndexMarisa();
+    FixedVector<bool> is_null(nb);
+    for (int i = 0; i < nb; i++) {
+        is_null[i] = i % 2 == 0;
+    }
+    index->Build(nb, strs.data(), is_null.data());
+    auto bitset = index->IsNotNull();
+    ASSERT_EQ(bitset.size(), strs.size());
+    ASSERT_TRUE(bitset.count() == (nb / 2))
+        << "count: " << bitset.count() << " nb: " << nb;
 }
 
 TEST_F(StringIndexMarisaTest, Query) {

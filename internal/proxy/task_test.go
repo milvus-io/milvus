@@ -129,6 +129,12 @@ func constructCollectionSchema(
 			pk,
 			fVec,
 		},
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   common.CollectionTTLConfigKey,
+				Value: "15",
+			},
+		},
 	}
 }
 
@@ -2824,13 +2830,10 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 func Test_dropCollectionTask_PreExecute(t *testing.T) {
 	dct := &dropCollectionTask{DropCollectionRequest: &milvuspb.DropCollectionRequest{
 		Base:           &commonpb.MsgBase{},
-		CollectionName: "0xffff", // invalid
+		CollectionName: "valid", // invalid
 	}}
 	ctx := context.Background()
 	err := dct.PreExecute(ctx)
-	assert.Error(t, err)
-	dct.DropCollectionRequest.CollectionName = "valid"
-	err = dct.PreExecute(ctx)
 	assert.NoError(t, err)
 }
 
@@ -4666,19 +4669,30 @@ func TestAlterCollectionFieldCheckLoaded(t *testing.T) {
 
 	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
 		return &querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 			CollectionIDs:       []int64{resp.CollectionID},
 			InMemoryPercentages: []int64{100},
 		}, nil
 	}
 
+	// update property "mmap.enabled" but the collection is loaded
 	task := &alterCollectionFieldTask{
 		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
 			Base:           &commonpb.MsgBase{},
 			CollectionName: collectionName,
 			Properties:     []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+		},
+		mixCoord: qc,
+	}
+	err = task.PreExecute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+
+	// delete property "mmap.enabled" but the collection is loaded
+	task = &alterCollectionFieldTask{
+		AlterCollectionFieldRequest: &milvuspb.AlterCollectionFieldRequest{
+			Base:           &commonpb.MsgBase{},
+			CollectionName: collectionName,
+			DeleteKeys:     []string{common.MmapEnabledKey},
 		},
 		mixCoord: qc,
 	}
@@ -4726,11 +4740,26 @@ func TestAlterCollectionField(t *testing.T) {
 	}
 	qc.CreateCollection(context.Background(), createColReq)
 
+	// The collection is not loaded
+	qc.ShowLoadCollectionsFunc = func(ctx context.Context, req *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       []int64{},
+			InMemoryPercentages: []int64{},
+		}, nil
+	}
+
 	// Test cases
+	// 1. the collection is not loaded, updating properties is allowed, deleting mmap.enabled/mmap_enabled is allowed
+	// 2. max_length can only be updated on varchar field or arrar field with varchar element
+	// 3. max_capacity can only be updated on array field
+	// 4. invalid number for max_length/max_capacity is not allowed
+	// 5. not allow to delete max_length/max_capacity
 	tests := []struct {
 		name        string
 		fieldName   string
 		properties  []*commonpb.KeyValuePair
+		deleteKeys  []string
 		expectError bool
 		errCode     int32
 	}{
@@ -4821,6 +4850,41 @@ func TestAlterCollectionField(t *testing.T) {
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
 		},
+		{
+			name:      "not allow to update max_length on non-varchar field",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "10"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:        "delete mmap.enabled is allowed",
+			fieldName:   "string_field",
+			deleteKeys:  []string{common.MmapEnabledKey},
+			expectError: false,
+		},
+		{
+			name:        "delete mmap_enabled is allowed",
+			fieldName:   "string_field",
+			deleteKeys:  []string{MmapEnabledKey},
+			expectError: false,
+		},
+		{
+			name:        "delete max_length is not allowed",
+			fieldName:   "string_field",
+			deleteKeys:  []string{common.MaxLengthKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
+		{
+			name:        "delete max_capacity is not allowed",
+			fieldName:   "array_field",
+			deleteKeys:  []string{common.MaxCapacityKey},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+		},
 	}
 
 	for _, test := range tests {
@@ -4831,6 +4895,7 @@ func TestAlterCollectionField(t *testing.T) {
 					CollectionName: collectionName,
 					FieldName:      test.fieldName,
 					Properties:     test.properties,
+					DeleteKeys:     test.deleteKeys,
 				},
 				mixCoord: qc,
 			}

@@ -46,8 +46,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -57,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -1666,7 +1669,7 @@ func TestGetCompactionState(t *testing.T) {
 				{State: datapb.CompactionTaskState_timeout},
 				{State: datapb.CompactionTaskState_timeout},
 			})
-		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil)
+		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil, newMockVersionManager())
 		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
@@ -2697,4 +2700,72 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 		cancel()
 		wg.Wait()
 	})
+}
+
+func TestServer_InitMessageCallback(t *testing.T) {
+	ctx := context.Background()
+
+	mockCatalog := mocks2.NewDataCoordCatalog(t)
+	mockChunkManager := mocks.NewChunkManager(t)
+	mockManager := NewMockManager(t)
+
+	server := &Server{
+		ctx: ctx,
+		meta: &meta{
+			catalog:      mockCatalog,
+			chunkManager: mockChunkManager,
+			segments:     NewSegmentsInfo(),
+		},
+		importMeta:     &importMeta{},
+		segmentManager: mockManager,
+	}
+	server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+	// Test initMessageCallback
+	server.initMessageCallback()
+
+	// Test DropPartition message callback
+	dropPartitionMsg, err := message.NewDropPartitionMessageBuilderV1().
+		WithVChannel("test_channel").
+		WithHeader(&message.DropPartitionMessageHeader{
+			CollectionId: 1,
+			PartitionId:  1,
+		}).
+		WithBody(&msgpb.DropPartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropPartition,
+			},
+		}).
+		BuildMutable()
+	assert.NoError(t, err)
+	err = registry.CallMessageAckCallback(ctx, dropPartitionMsg)
+	assert.Error(t, err) // server not healthy
+
+	// Test Import message check callback
+	resourceKey := message.NewImportJobIDResourceKey(1)
+	msg, err := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Import,
+			},
+		}).
+		WithBroadcast([]string{"ch-0"}, resourceKey).
+		BuildBroadcast()
+	err = registry.CallMessageCheckCallback(ctx, msg)
+	assert.NoError(t, err)
+
+	// Test Import message ack callback
+	importMsg, err := message.NewImportMessageBuilderV1().
+		WithVChannel("test_channel").
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Import,
+			},
+		}).
+		BuildMutable()
+	assert.NoError(t, err)
+	err = registry.CallMessageAckCallback(ctx, importMsg)
+	assert.Error(t, err) // server not healthy
 }

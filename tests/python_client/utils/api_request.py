@@ -44,10 +44,10 @@ def api_request(_list, **kwargs):
     if isinstance(_list, list):
         func = _list[0]
         if callable(func):
-            arg = _list[1:]
-            arg_str = str(arg)
-            log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
             if kwargs.get("enable_traceback", True):
+                arg = _list[1:]
+                arg_str = str(arg)
+                log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
                 log_kwargs = str(kwargs)[0:log_row_length] + '......' if len(str(kwargs)) > log_row_length else str(kwargs)
                 log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__qualname__, log_arg, log_kwargs))
             return func(*arg, **kwargs)
@@ -57,10 +57,10 @@ def api_request(_list, **kwargs):
 def logger_interceptor():
     def wrapper(func):
         def log_request(*arg, **kwargs):
-            arg = arg[1:]
-            arg_str = str(arg)
-            log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
             if kwargs.get("enable_traceback", True):
+                arg = arg[1:]
+                arg_str = str(arg)
+                log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
                 log_kwargs = str(kwargs)[0:log_row_length] + '......' if len(str(kwargs)) > log_row_length else str(kwargs)
                 log.debug("(api_request)  : [%s] args: %s, kwargs: %s" % (func.__name__, log_arg, log_kwargs))
 

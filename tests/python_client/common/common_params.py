@@ -274,6 +274,7 @@ class FieldParams(BasePrams):
     # auto_id: bool = None
     is_partition_key: bool = None
     is_clustering_key: bool = None
+    nullable: bool = None
 
 
 @dataclass

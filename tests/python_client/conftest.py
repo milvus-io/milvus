@@ -22,8 +22,8 @@ def pytest_addoption(parser):
     parser.addoption("--host", action="store", default="localhost", help="service's ip")
     parser.addoption("--service", action="store", default="", help="service address")
     parser.addoption("--port", action="store", default=19530, help="service's port")
-    parser.addoption("--user", action="store", default="", help="user name for connection")
-    parser.addoption("--password", action="store", default="", help="password for connection")
+    parser.addoption("--user", action="store", default="root", help="user name for connection")
+    parser.addoption("--password", action="store", default="Milvus", help="password for connection")
     parser.addoption("--db_name", action="store", default="default", help="database name for connection")
     parser.addoption("--secure", action="store", default=False, help="secure for connection")
     parser.addoption("--milvus_ns", action="store", default="chaos-testing", help="milvus_ns")
@@ -51,9 +51,11 @@ def pytest_addoption(parser):
     parser.addoption('--uri', action='store', default="", help="uri for milvus client")
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
-    # a tei endpoint for text embedding, default is http://10.104.26.196:80 which is deployed in house
-    parser.addoption("--tei_endpoint", action="store", default="http://10.104.26.196:80", help="tei endpoint")
+    # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
+    parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei embedding endpoint")
 
+    parser.addoption("--tei_reranker_endpoint", action="store", default="http://text-rerank-service.milvus-ci.svc.cluster.local:80", help="tei rerank endpoint")
+    parser.addoption("--vllm_reranker_endpoint", action="store", default="http://vllm-rerank-service.milvus-ci.svc.cluster.local:80", help="vllm rerank endpoint")
 
 @pytest.fixture
 def host(request):
@@ -213,6 +215,14 @@ def request_duration(request):
 @pytest.fixture
 def tei_endpoint(request):
     return request.config.getoption("--tei_endpoint")
+
+@pytest.fixture
+def tei_reranker_endpoint(request):
+    return request.config.getoption("--tei_reranker_endpoint")
+
+@pytest.fixture
+def vllm_reranker_endpoint(request):
+    return request.config.getoption("--vllm_reranker_endpoint")
 
 """ fixture func """
 

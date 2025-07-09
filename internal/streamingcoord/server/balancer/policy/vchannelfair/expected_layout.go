@@ -17,7 +17,7 @@ func newExpectedLayoutForVChannelFairPolicy(currentLayout balancer.CurrentLayout
 	// perfect average vchannel count per node.
 	averageVChannelPerNode := float64(totalVChannel) / float64(currentLayout.TotalNodes())
 	// current affinity of pchannel.
-	affinity := newPChannelAffinity(currentLayout.Channels)
+	affinity := newPChannelAffinity(currentLayout.Stats)
 
 	// Create the node info for all
 	nodes := make(map[int64]*streamingNodeInfo)
@@ -32,7 +32,7 @@ func newExpectedLayoutForVChannelFairPolicy(currentLayout balancer.CurrentLayout
 		CurrentLayout:          currentLayout,
 		AveragePChannelPerNode: averagePChannelPerNode,
 		AverageVChannelPerNode: averageVChannelPerNode,
-		Assignments:            make(map[types.ChannelID]types.StreamingNodeInfo),
+		Assignments:            make(map[types.ChannelID]types.PChannelInfoAssigned),
 		Nodes:                  nodes,
 	}
 	layout.updateAllScore()
@@ -41,7 +41,7 @@ func newExpectedLayoutForVChannelFairPolicy(currentLayout balancer.CurrentLayout
 
 // assignmentSnapshot is the assignment snapshot of the expected layout.
 type assignmentSnapshot struct {
-	Assignments           map[types.ChannelID]types.StreamingNodeInfo
+	Assignments           map[types.ChannelID]types.PChannelInfoAssigned
 	GlobalUnbalancedScore float64
 }
 
@@ -59,14 +59,14 @@ type expectedLayoutForVChannelFairPolicy struct {
 	AveragePChannelPerNode float64
 	AverageVChannelPerNode float64
 	PChannelAffinity       *pchannelAffinity
-	GlobalUnbalancedScore  float64                                     // the sum of unbalance score of all streamingnode, indicates how unbalanced the layout is, better if lower.
-	Assignments            map[types.ChannelID]types.StreamingNodeInfo // current assignment of pchannel to streamingnode.
+	GlobalUnbalancedScore  float64                                        // the sum of unbalance score of all streamingnode, indicates how unbalanced the layout is, better if lower.
+	Assignments            map[types.ChannelID]types.PChannelInfoAssigned // current assignment of pchannel to streamingnode.
 	Nodes                  map[int64]*streamingNodeInfo
 }
 
 // AssignmentSnapshot will return the assignment snapshot.
 func (p *expectedLayoutForVChannelFairPolicy) AssignmentSnapshot() assignmentSnapshot {
-	assignments := make(map[types.ChannelID]types.StreamingNodeInfo)
+	assignments := make(map[types.ChannelID]types.PChannelInfoAssigned)
 	for channelID, node := range p.Assignments {
 		assignments[channelID] = node
 	}
@@ -89,9 +89,13 @@ func (p *expectedLayoutForVChannelFairPolicy) Assign(channelID types.ChannelID, 
 	if _, ok := p.Assignments[channelID]; ok {
 		panic("channel already assigned")
 	}
-	stats, ok := p.CurrentLayout.Channels[channelID]
+	stats, ok := p.CurrentLayout.Stats[channelID]
 	if !ok {
 		panic("stats not found")
+	}
+	expectedAccessMode, ok := p.CurrentLayout.ExpectedAccessMode[channelID]
+	if !ok {
+		panic("expected access mode not found")
 	}
 	node, ok := p.CurrentLayout.AllNodesInfo[serverID]
 	if !ok {
@@ -99,7 +103,13 @@ func (p *expectedLayoutForVChannelFairPolicy) Assign(channelID types.ChannelID, 
 	}
 
 	// assign to the node that already has pchannel at highest priority.
-	p.Assignments[channelID] = node
+	info := p.CurrentLayout.Channels[channelID]
+	info.AccessMode = expectedAccessMode
+	info.Term++
+	p.Assignments[channelID] = types.PChannelInfoAssigned{
+		Channel: info,
+		Node:    node,
+	}
 	p.Nodes[node.ServerID].AssignedChannels[channelID] = struct{}{}
 	p.Nodes[node.ServerID].AssignedVChannelCount += len(stats.VChannels)
 	p.updateNodeScore(node.ServerID)
@@ -107,13 +117,14 @@ func (p *expectedLayoutForVChannelFairPolicy) Assign(channelID types.ChannelID, 
 
 // Unassign will unassign the channel from the node.
 func (p *expectedLayoutForVChannelFairPolicy) Unassign(channelID types.ChannelID) {
-	node, ok := p.Assignments[channelID]
+	assignment, ok := p.Assignments[channelID]
 	if !ok {
 		panic("channel is not assigned")
 	}
+	node := assignment.Node
 	delete(p.Assignments, channelID)
 	delete(p.Nodes[node.ServerID].AssignedChannels, channelID)
-	p.Nodes[node.ServerID].AssignedVChannelCount -= len(p.CurrentLayout.Channels[channelID].VChannels)
+	p.Nodes[node.ServerID].AssignedVChannelCount -= len(p.CurrentLayout.Stats[channelID].VChannels)
 	p.updateNodeScore(node.ServerID)
 }
 
@@ -160,7 +171,7 @@ func (p *expectedLayoutForVChannelFairPolicy) FindTheLeastUnbalanceScoreIncremen
 	var targetChannelID types.ChannelID
 	minScore := math.MaxFloat64
 	for channelID := range p.Assignments {
-		serverID := p.Assignments[channelID].ServerID
+		serverID := p.Assignments[channelID].Node.ServerID
 		p.Unassign(channelID)
 		currentScore := p.GlobalUnbalancedScore
 		if currentScore < minScore {

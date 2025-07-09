@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -124,8 +125,23 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.targetManager.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
-	suite.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	suite.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(2, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+		Node:    2,
+		Version: 1,
+		// View:    utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}),
+		View: &meta.LeaderView{
+			ID:      2,
+			Channel: "test-insert-channel",
+			Version: 1,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	})
 
 	counter := atomic.NewInt64(0)
 	suite.scheduler.EXPECT().Add(mock.Anything).Run(func(task task.Task) {
@@ -154,8 +170,22 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	}, 3*time.Second, 1*time.Millisecond)
 
 	// until new channel has been subscribed
-	suite.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel2"))
-	suite.dist.LeaderViewManager.Update(1, utils.CreateTestLeaderView(1, 1, "test-insert-channel2", map[int64]int64{}, map[int64]*meta.Segment{}))
+	suite.dist.ChannelDistManager.Update(1, &meta.DmChannel{
+		VchannelInfo: &datapb.VchannelInfo{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel2",
+		},
+		Node:    1,
+		Version: 1,
+		View: &meta.LeaderView{
+			ID:      1,
+			Channel: "test-insert-channel2",
+			Version: 1,
+			Status: &querypb.LeaderViewStatus{
+				Serviceable: true,
+			},
+		},
+	})
 
 	// expect assign segment after channel has been subscribed
 	suite.Eventually(func() bool {

@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -73,11 +74,40 @@ type garbageCollector struct {
 	wg         sync.WaitGroup
 	cmdCh      chan gcCmd
 	pauseUntil atomic.Time
+
+	systemMetricsListener *hardware.SystemMetricsListener
 }
+
 type gcCmd struct {
 	cmdType  datapb.GcCommand
 	duration time.Duration
 	done     chan struct{}
+}
+
+// newSystemMetricsListener creates a system metrics listener for garbage collector.
+// used to slow down the garbage collector when cpu usage is high.
+func newSystemMetricsListener(opt *GcOption) *hardware.SystemMetricsListener {
+	return &hardware.SystemMetricsListener{
+		Cooldown:  15 * time.Second,
+		Context:   false,
+		Condition: func(metrics hardware.SystemMetrics, listener *hardware.SystemMetricsListener) bool { return true },
+		Callback: func(metrics hardware.SystemMetrics, listener *hardware.SystemMetricsListener) {
+			isSlowDown := listener.Context.(bool)
+			if metrics.UsedRatio() > paramtable.Get().DataCoordCfg.GCSlowDownCPUUsageThreshold.GetAsFloat() {
+				if !isSlowDown {
+					log.Info("garbage collector slow down...", zap.Float64("cpuUsage", metrics.UsedRatio()))
+					opt.removeObjectPool.Resize(1)
+					listener.Context = true
+				}
+				return
+			}
+			if isSlowDown {
+				log.Info("garbage collector slow down finished", zap.Float64("cpuUsage", metrics.UsedRatio()))
+				opt.removeObjectPool.Resize(paramtable.Get().DataCoordCfg.GCRemoveConcurrent.GetAsInt())
+				listener.Context = false
+			}
+		},
+	}
 }
 
 // newGarbageCollector create garbage collector with meta and option
@@ -91,12 +121,13 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	ctx, cancel := context.WithCancel(context.Background())
 	return &garbageCollector{
-		ctx:     ctx,
-		cancel:  cancel,
-		meta:    meta,
-		handler: handler,
-		option:  opt,
-		cmdCh:   make(chan gcCmd),
+		ctx:                   ctx,
+		cancel:                cancel,
+		meta:                  meta,
+		handler:               handler,
+		option:                opt,
+		cmdCh:                 make(chan gcCmd),
+		systemMetricsListener: newSystemMetricsListener(&opt),
 	}
 }
 
@@ -182,6 +213,9 @@ func (gc *garbageCollector) work(ctx context.Context) {
 
 // startControlLoop start a control loop for garbageCollector.
 func (gc *garbageCollector) startControlLoop(_ context.Context) {
+	hardware.RegisterSystemMetricsListener(gc.systemMetricsListener)
+	defer hardware.UnregisterSystemMetricsListener(gc.systemMetricsListener)
+
 	for {
 		select {
 		case cmd := <-gc.cmdCh:
@@ -337,6 +371,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 
 		// ignore error since it could be cleaned up next time
 		file := chunkInfo.FilePath
+
 		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
 			logger := logger.With(zap.String("file", file))
 			logger.Info("garbageCollector recycleUnusedBinlogFiles remove file...")
@@ -425,26 +460,27 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 	compactTo := make(map[int64]*SegmentInfo)
 	channels := typeutil.NewSet[string]()
 	for _, segment := range all {
-		cloned := segment.Clone()
-		binlog.DecompressBinLogs(cloned.SegmentInfo)
-		if cloned.GetState() == commonpb.SegmentState_Dropped {
-			drops[cloned.GetID()] = cloned
-			channels.Insert(cloned.GetInsertChannel())
+		if segment.GetState() == commonpb.SegmentState_Dropped {
+			drops[segment.GetID()] = segment
+			channels.Insert(segment.GetInsertChannel())
 			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
-		for _, from := range cloned.GetCompactionFrom() {
-			compactTo[from] = cloned
+		for _, from := range segment.GetCompactionFrom() {
+			compactTo[from] = segment
 		}
 	}
 
-	droppedCompactTo := make(map[*SegmentInfo]struct{})
+	droppedCompactTo := make(map[int64]*SegmentInfo)
 	for id := range drops {
 		if to, ok := compactTo[id]; ok {
-			droppedCompactTo[to] = struct{}{}
+			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, false, lo.Keys(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Values(droppedCompactTo)...)
+	if ctx.Err() != nil {
+		return
+	}
 	indexedSet := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexedSet.Insert(segment.GetID())
@@ -456,6 +492,17 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 		channelCPs[channel] = pos.GetTimestamp()
 	}
 
+	// try to get loaded segments
+	loadedSegments := typeutil.NewSet[int64]()
+	segments, err := gc.handler.ListLoadedSegments(ctx)
+	if err != nil {
+		log.Warn("failed to get loaded segments", zap.Error(err))
+		return
+	}
+	for _, segmentID := range segments {
+		loadedSegments.Insert(segmentID)
+	}
+
 	log.Info("start to GC segments", zap.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
@@ -465,35 +512,45 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 
 		log := log.With(zap.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
+		if loadedSegments.Contain(segmentID) {
+			log.Info("skip GC segment since it is loaded", zap.Int64("segmentID", segmentID))
+			continue
+		}
 		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
 			continue
 		}
 
-		logs := getLogs(segment)
-		for key := range getTextLogs(segment) {
+		cloned := segment.Clone()
+		binlog.DecompressBinLogs(cloned.SegmentInfo)
+
+		logs := getLogs(cloned)
+		for key := range getTextLogs(cloned) {
 			logs[key] = struct{}{}
 		}
 
-		for key := range getJSONKeyLogs(segment, gc) {
+		for key := range getJSONKeyLogs(cloned, gc) {
 			logs[key] = struct{}{}
 		}
 
-		log.Info("GC segment start...", zap.Int("insert_logs", len(segment.GetBinlogs())),
-			zap.Int("delta_logs", len(segment.GetDeltalogs())),
-			zap.Int("stats_logs", len(segment.GetStatslogs())),
-			zap.Int("bm25_logs", len(segment.GetBm25Statslogs())),
-			zap.Int("text_logs", len(segment.GetTextStatsLogs())),
-			zap.Int("json_key_logs", len(segment.GetJsonKeyStats())))
+		log.Info("GC segment start...", zap.Int("insert_logs", len(cloned.GetBinlogs())),
+			zap.Int("delta_logs", len(cloned.GetDeltalogs())),
+			zap.Int("stats_logs", len(cloned.GetStatslogs())),
+			zap.Int("bm25_logs", len(cloned.GetBm25Statslogs())),
+			zap.Int("text_logs", len(cloned.GetTextStatsLogs())),
+			zap.Int("json_key_logs", len(cloned.GetJsonKeyStats())))
 		if err := gc.removeObjectFiles(ctx, logs); err != nil {
 			log.Warn("GC segment remove logs failed", zap.Error(err))
+			cloned = nil
 			continue
 		}
 
-		if err := gc.meta.DropSegment(ctx, segment.GetID()); err != nil {
+		if err := gc.meta.DropSegment(ctx, cloned.GetID()); err != nil {
 			log.Warn("GC segment meta failed to drop segment", zap.Error(err))
+			cloned = nil
 			continue
 		}
 		log.Info("GC segment meta drop segment done")
+		cloned = nil // release memory
 	}
 }
 
@@ -521,9 +578,13 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context) {
 
 		_, ok := collectionID2GcStatus[collectionID]
 		if !ok {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if ctx.Err() != nil {
+				// process canceled, stop.
+				return
+			}
+			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
-			has, err := gc.option.broker.HasCollection(ctx, collectionID)
+			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
 			if err == nil && !has {
 				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
 			} else {
@@ -688,7 +749,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context) {
 			}
 
 			// Remove meta from index meta.
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
 				log.Warn("delete index meta from etcd failed, wait to retry", zap.Error(err))
 				continue
 			}

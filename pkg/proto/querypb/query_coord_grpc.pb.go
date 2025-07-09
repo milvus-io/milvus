@@ -44,6 +44,7 @@ const (
 	QueryCoord_TransferReplica_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferReplica"
 	QueryCoord_ListResourceGroups_FullMethodName         = "/milvus.proto.query.QueryCoord/ListResourceGroups"
 	QueryCoord_DescribeResourceGroup_FullMethodName      = "/milvus.proto.query.QueryCoord/DescribeResourceGroup"
+	QueryCoord_ListLoadedSegments_FullMethodName         = "/milvus.proto.query.QueryCoord/ListLoadedSegments"
 	QueryCoord_ListCheckers_FullMethodName               = "/milvus.proto.query.QueryCoord/ListCheckers"
 	QueryCoord_ActivateChecker_FullMethodName            = "/milvus.proto.query.QueryCoord/ActivateChecker"
 	QueryCoord_DeactivateChecker_FullMethodName          = "/milvus.proto.query.QueryCoord/DeactivateChecker"
@@ -88,6 +89,7 @@ type QueryCoordClient interface {
 	TransferReplica(ctx context.Context, in *TransferReplicaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ListResourceGroups(ctx context.Context, in *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error)
 	DescribeResourceGroup(ctx context.Context, in *DescribeResourceGroupRequest, opts ...grpc.CallOption) (*DescribeResourceGroupResponse, error)
+	ListLoadedSegments(ctx context.Context, in *ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*ListLoadedSegmentsResponse, error)
 	// ops interfaces
 	ListCheckers(ctx context.Context, in *ListCheckersRequest, opts ...grpc.CallOption) (*ListCheckersResponse, error)
 	ActivateChecker(ctx context.Context, in *ActivateCheckerRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -311,6 +313,15 @@ func (c *queryCoordClient) DescribeResourceGroup(ctx context.Context, in *Descri
 	return out, nil
 }
 
+func (c *queryCoordClient) ListLoadedSegments(ctx context.Context, in *ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*ListLoadedSegmentsResponse, error) {
+	out := new(ListLoadedSegmentsResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_ListLoadedSegments_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryCoordClient) ListCheckers(ctx context.Context, in *ListCheckersRequest, opts ...grpc.CallOption) (*ListCheckersResponse, error) {
 	out := new(ListCheckersResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_ListCheckers_FullMethodName, in, out, opts...)
@@ -465,6 +476,7 @@ type QueryCoordServer interface {
 	TransferReplica(context.Context, *TransferReplicaRequest) (*commonpb.Status, error)
 	ListResourceGroups(context.Context, *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)
 	DescribeResourceGroup(context.Context, *DescribeResourceGroupRequest) (*DescribeResourceGroupResponse, error)
+	ListLoadedSegments(context.Context, *ListLoadedSegmentsRequest) (*ListLoadedSegmentsResponse, error)
 	// ops interfaces
 	ListCheckers(context.Context, *ListCheckersRequest) (*ListCheckersResponse, error)
 	ActivateChecker(context.Context, *ActivateCheckerRequest) (*commonpb.Status, error)
@@ -551,6 +563,9 @@ func (UnimplementedQueryCoordServer) ListResourceGroups(context.Context, *milvus
 }
 func (UnimplementedQueryCoordServer) DescribeResourceGroup(context.Context, *DescribeResourceGroupRequest) (*DescribeResourceGroupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeResourceGroup not implemented")
+}
+func (UnimplementedQueryCoordServer) ListLoadedSegments(context.Context, *ListLoadedSegmentsRequest) (*ListLoadedSegmentsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLoadedSegments not implemented")
 }
 func (UnimplementedQueryCoordServer) ListCheckers(context.Context, *ListCheckersRequest) (*ListCheckersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListCheckers not implemented")
@@ -1002,6 +1017,24 @@ func _QueryCoord_DescribeResourceGroup_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_ListLoadedSegments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLoadedSegmentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).ListLoadedSegments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_ListLoadedSegments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).ListLoadedSegments(ctx, req.(*ListLoadedSegmentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryCoord_ListCheckers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListCheckersRequest)
 	if err := dec(in); err != nil {
@@ -1350,6 +1383,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _QueryCoord_DescribeResourceGroup_Handler,
 		},
 		{
+			MethodName: "ListLoadedSegments",
+			Handler:    _QueryCoord_ListLoadedSegments_Handler,
+		},
+		{
 			MethodName: "ListCheckers",
 			Handler:    _QueryCoord_ListCheckers_Handler,
 		},
@@ -1437,6 +1474,7 @@ const (
 	QueryNode_Delete_FullMethodName               = "/milvus.proto.query.QueryNode/Delete"
 	QueryNode_DeleteBatch_FullMethodName          = "/milvus.proto.query.QueryNode/DeleteBatch"
 	QueryNode_UpdateSchema_FullMethodName         = "/milvus.proto.query.QueryNode/UpdateSchema"
+	QueryNode_RunAnalyzer_FullMethodName          = "/milvus.proto.query.QueryNode/RunAnalyzer"
 )
 
 // QueryNodeClient is the client API for QueryNode service.
@@ -1472,6 +1510,7 @@ type QueryNodeClient interface {
 	// it's basically same as `Delete` but cost less memory pressure.
 	DeleteBatch(ctx context.Context, in *DeleteBatchRequest, opts ...grpc.CallOption) (*DeleteBatchResponse, error)
 	UpdateSchema(ctx context.Context, in *UpdateSchemaRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 }
 
 type queryNodeClient struct {
@@ -1762,6 +1801,15 @@ func (c *queryNodeClient) UpdateSchema(ctx context.Context, in *UpdateSchemaRequ
 	return out, nil
 }
 
+func (c *queryNodeClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
+	out := new(milvuspb.RunAnalyzerResponse)
+	err := c.cc.Invoke(ctx, QueryNode_RunAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryNodeServer is the server API for QueryNode service.
 // All implementations should embed UnimplementedQueryNodeServer
 // for forward compatibility
@@ -1795,6 +1843,7 @@ type QueryNodeServer interface {
 	// it's basically same as `Delete` but cost less memory pressure.
 	DeleteBatch(context.Context, *DeleteBatchRequest) (*DeleteBatchResponse, error)
 	UpdateSchema(context.Context, *UpdateSchemaRequest) (*commonpb.Status, error)
+	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 }
 
 // UnimplementedQueryNodeServer should be embedded to have forward compatible implementations.
@@ -1878,6 +1927,9 @@ func (UnimplementedQueryNodeServer) DeleteBatch(context.Context, *DeleteBatchReq
 }
 func (UnimplementedQueryNodeServer) UpdateSchema(context.Context, *UpdateSchemaRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateSchema not implemented")
+}
+func (UnimplementedQueryNodeServer) RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
 }
 
 // UnsafeQueryNodeServer may be embedded to opt out of forward compatibility for this service.
@@ -2365,6 +2417,24 @@ func _QueryNode_UpdateSchema_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).RunAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_RunAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).RunAnalyzer(ctx, req.(*RunAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryNode_ServiceDesc is the grpc.ServiceDesc for QueryNode service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2467,6 +2537,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateSchema",
 			Handler:    _QueryNode_UpdateSchema_Handler,
+		},
+		{
+			MethodName: "RunAnalyzer",
+			Handler:    _QueryNode_RunAnalyzer_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

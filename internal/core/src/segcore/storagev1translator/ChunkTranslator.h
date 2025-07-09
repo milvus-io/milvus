@@ -40,7 +40,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
         FieldMeta field_meta,
         FieldDataInfo field_data_info,
         std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
-        bool use_mmap);
+        bool use_mmap,
+        milvus::proto::common::LoadPriority load_priority);
 
     size_t
     num_cells() const override;
@@ -60,9 +61,6 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     }
 
  private:
-    std::unique_ptr<milvus::Chunk>
-    load_chunk(milvus::cachinglayer::cid_t cid);
-
     std::vector<std::pair<std::string, int64_t>> files_and_rows_;
     int64_t segment_id_;
     int64_t field_id_;
@@ -71,6 +69,8 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     CTMeta meta_;
     FieldMeta field_meta_;
     std::string mmap_dir_path_;
+    milvus::proto::common::LoadPriority load_priority_{
+        milvus::proto::common::LoadPriority::HIGH};
 };
 
 }  // namespace milvus::segcore::storagev1translator

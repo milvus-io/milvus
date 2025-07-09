@@ -195,6 +195,9 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 	if jsonCastType, exist := indexParamsMap[common.JSONCastTypeKey]; exist {
 		indexParamsMap[common.JSONCastTypeKey] = strings.ToUpper(strings.TrimSpace(jsonCastType))
 	}
+	if jsonCastFunction, exist := indexParamsMap[common.JSONCastFunctionKey]; exist {
+		indexParamsMap[common.JSONCastFunctionKey] = strings.ToUpper(strings.TrimSpace(jsonCastFunction))
+	}
 
 	if err := ValidateAutoIndexMmapConfig(isVecIndex, indexParamsMap); err != nil {
 		return err
@@ -236,6 +239,8 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 					return getPrimitiveIndexType(dataType), nil
 				} else if typeutil.IsArrayType(dataType) {
 					return getPrimitiveIndexType(cit.fieldSchema.ElementType), nil
+				} else if typeutil.IsJSONType(dataType) {
+					return Params.AutoIndexConfig.ScalarJSONIndexType.GetValue(), nil
 				}
 				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}()
@@ -666,10 +671,6 @@ func (t *alterIndexTask) PreExecute(ctx context.Context) error {
 
 	if len(t.req.GetIndexName()) == 0 {
 		return merr.WrapErrParameterInvalidMsg("index name is empty")
-	}
-
-	if err = validateIndexName(t.req.GetIndexName()); err != nil {
-		return err
 	}
 
 	// TODO fubang should implement it when the alter index is reconstructed

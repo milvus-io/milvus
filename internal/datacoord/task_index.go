@@ -22,9 +22,9 @@ import (
 	"path"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -98,6 +98,10 @@ func (it *indexBuildTask) GetTaskTime(timeType taskcommon.TimeType) time.Time {
 
 func (it *indexBuildTask) GetTaskType() taskcommon.Type {
 	return taskcommon.Index
+}
+
+func (it *indexBuildTask) GetTaskVersion() int64 {
+	return it.IndexVersion
 }
 
 func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {

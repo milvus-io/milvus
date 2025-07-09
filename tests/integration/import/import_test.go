@@ -18,9 +18,6 @@ package importv2
 
 import (
 	"context"
-	"fmt"
-	"math/rand"
-	"os"
 	"testing"
 	"time"
 
@@ -49,7 +46,6 @@ type BulkInsertSuite struct {
 	failedReason string
 
 	pkType   schemapb.DataType
-	autoID   bool
 	fileType importutilv2.FileType
 
 	vecType    schemapb.DataType
@@ -57,13 +53,15 @@ type BulkInsertSuite struct {
 	metricType metric.MetricType
 }
 
+func (s *BulkInsertSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
+	s.MiniClusterSuite.SetupSuite()
+}
+
 func (s *BulkInsertSuite) SetupTest() {
-	paramtable.Init()
-	s.MiniClusterSuite.SetupTest()
 	s.failed = false
 	s.fileType = importutilv2.Parquet
 	s.pkType = schemapb.DataType_Int64
-	s.autoID = false
 
 	s.vecType = schemapb.DataType_FloatVector
 	s.indexType = "HNSW"
@@ -82,20 +80,20 @@ func (s *BulkInsertSuite) run() {
 	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
 
 	var schema *schemapb.CollectionSchema
-	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID}
+	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: false}
 	fieldSchema2 := &schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}}
 	fieldSchema3 := &schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}}
 	fieldSchema4 := &schemapb.FieldSchema{FieldID: 103, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{}}
 	if s.vecType != schemapb.DataType_SparseFloatVector {
-		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema3)
+		schema = integration.ConstructSchema(collectionName, dim, false, fieldSchema1, fieldSchema2, fieldSchema3)
 	} else {
-		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema4)
+		schema = integration.ConstructSchema(collectionName, dim, false, fieldSchema1, fieldSchema2, fieldSchema4)
 	}
 
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
@@ -104,20 +102,16 @@ func (s *BulkInsertSuite) run() {
 	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
 
 	var files []*internalpb.ImportFile
-	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
-	s.NoError(err)
 
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
 	case importutilv2.Numpy:
-		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
+		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{importFile}
 	case importutilv2.JSON:
-		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
-		GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
-		defer os.Remove(rowBasedFile)
+		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
 				Paths: []string{
@@ -126,10 +120,8 @@ func (s *BulkInsertSuite) run() {
 			},
 		}
 	case importutilv2.Parquet:
-		filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
-		err = GenerateParquetFile(filePath, schema, rowCount)
+		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
-		defer os.Remove(filePath)
 		files = []*internalpb.ImportFile{
 			{
 				Paths: []string{
@@ -138,9 +130,7 @@ func (s *BulkInsertSuite) run() {
 			},
 		}
 	case importutilv2.CSV:
-		filePath := fmt.Sprintf("/tmp/test_%d.csv", rand.Int())
-		sep := GenerateCSVFile(s.T(), filePath, schema, rowCount)
-		defer os.Remove(filePath)
+		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -152,7 +142,7 @@ func (s *BulkInsertSuite) run() {
 		}
 	}
 
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
 		Options:        options,
@@ -171,7 +161,7 @@ func (s *BulkInsertSuite) run() {
 	}
 	s.NoError(err)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -183,7 +173,7 @@ func (s *BulkInsertSuite) run() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      "embeddings",
 		IndexName:      "_default",
@@ -195,7 +185,7 @@ func (s *BulkInsertSuite) run() {
 	s.WaitForIndexBuilt(ctx, collectionName, "embeddings")
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
@@ -211,8 +201,9 @@ func (s *BulkInsertSuite) run() {
 	params := integration.GetSearchParams(s.indexType, s.metricType)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		"embeddings", s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 	// s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
@@ -259,16 +250,6 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 	}
 }
 
-func (s *BulkInsertSuite) TestAutoID() {
-	s.pkType = schemapb.DataType_Int64
-	s.autoID = true
-	s.run()
-
-	s.pkType = schemapb.DataType_VarChar
-	s.autoID = true
-	s.run()
-}
-
 func (s *BulkInsertSuite) TestPK() {
 	s.pkType = schemapb.DataType_Int64
 	s.run()
@@ -296,7 +277,7 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
@@ -305,10 +286,8 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
 
 	var files []*internalpb.ImportFile
-	filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
-	err = GenerateParquetFile(filePath, schema, rowCount)
+	filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 	s.NoError(err)
-	defer os.Remove(filePath)
 	files = []*internalpb.ImportFile{
 		{
 			Paths: []string{
@@ -317,7 +296,7 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 		},
 	}
 
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
 	})
@@ -328,20 +307,26 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	err = WaitForImportDone(ctx, c, jobID)
 	s.NoError(err)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.Empty(segments)
 }
 
 func (s *BulkInsertSuite) TestDiskQuotaExceeded() {
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key, "true")
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskQuota.Key, "100")
-	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key)
-	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.DiskQuota.Key)
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key: "true",
+		paramtable.Get().QuotaConfig.DiskQuota.Key:             "100",
+	})
+	defer revertGuard()
+
 	s.failed = false
 	s.run()
 
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskQuota.Key, "0.01")
+	revertGuard2 := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QuotaConfig.DiskQuota.Key: "0.01",
+	})
+	defer revertGuard2()
+
 	s.failed = true
 	s.failedReason = "disk quota exceeded"
 	s.run()

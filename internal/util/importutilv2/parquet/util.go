@@ -23,8 +23,10 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -55,17 +57,25 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("schema not equal, err=%v", err))
 	}
 
+	// this loop is for "how many fields are provided by this parquet file?"
+	readFields := make(map[string]int64)
 	crs := make(map[int64]*FieldReader)
 	for i, pqField := range pqSchema.Fields() {
 		field, ok := nameToField[pqField.Name]
 		if !ok {
-			// TODO @cai.zhang: handle dynamic field
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field: %s is not in schema, "+
-				"if it's a dynamic field, please reformat data by bulk_writer", pqField.Name))
+			// redundant fields, ignore. only accepts a special field "$meta" to store dynamic data
+			continue
 		}
+
+		// auto-id field must not provided
 		if typeutil.IsAutoPKField(field) {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
+		}
+		// function output field must not provided
+		if field.GetIsFunctionOutput() {
+			return nil, merr.WrapErrImportFailed(
+				fmt.Sprintf("the field '%s' is output by function, no need to provide", field.GetName()))
 		}
 
 		cr, err := NewFieldReader(ctx, fileReader, i, field)
@@ -77,17 +87,25 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 				fmt.Sprintf("there is multi field with name: %s", field.GetName()))
 		}
 		crs[field.GetFieldID()] = cr
+		readFields[field.GetName()] = field.GetFieldID()
 	}
 
+	// this loop is for "are there any fields not provided in the parquet file?"
 	for _, field := range nameToField {
-		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() {
+		// auto-id field, function output field already checked
+		// dynamic field, nullable field, default value field, not provided or provided both ok
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
+			field.GetNullable() || field.GetDefaultValue() != nil {
 			continue
 		}
+		// the other field must be provided
 		if _, ok := crs[field.GetFieldID()]; !ok {
 			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("no parquet field for milvus file '%s'", field.GetName()))
+				fmt.Sprintf("no parquet field for milvus field '%s'", field.GetName()))
 		}
 	}
+
+	log.Info("create parquet column readers", zap.Any("readFields", readFields))
 	return crs, nil
 }
 
@@ -285,12 +303,17 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		return field.Name
 	})
 	for _, field := range schema.GetFields() {
+		// ignore autoPKField and functionOutputField
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {
 			continue
 		}
 		arrField, ok := arrNameToField[field.GetName()]
 		if !ok {
-			if field.GetIsDynamic() {
+			// Special fields no need to provide in data files, the parquet file doesn't contain this field, no need to compare
+			// 1. dynamic field(name is "$meta"), ignore
+			// 2. nullable field, filled with null values
+			// 3. default value field, filled with default value
+			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
 				continue
 			}
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' not in arrow schema", field.GetName()))

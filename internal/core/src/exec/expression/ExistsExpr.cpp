@@ -55,7 +55,8 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
     if (cached_index_chunk_id_ != 0) {
         cached_index_chunk_id_ = 0;
         auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-        auto* index = segment_->GetJsonIndex(expr_->column_.field_id_, pointer);
+        auto pw = segment_->GetJsonIndex(expr_->column_.field_id_, pointer);
+        auto* index = pw.get();
         AssertInfo(index != nullptr,
                    "Cannot find json index with path: " + pointer);
         switch (index->GetCastType().data_type()) {
@@ -77,6 +78,15 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<bool>*>(index);
                 cached_index_chunk_res_ = json_index->IsNotNull().clone();
+                break;
+            }
+
+            case JsonCastType::DataType::JSON: {
+                auto* json_flat_index =
+                    dynamic_cast<index::JsonFlatIndex*>(index);
+                auto executor =
+                    json_flat_index->create_executor<double>(pointer);
+                cached_index_chunk_res_ = executor->IsNotNull().clone();
                 break;
             }
 
@@ -183,13 +193,19 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentForIndex() {
         auto field_id = expr_->column_.field_id_;
         auto* index = segment->GetJsonKeyIndex(field_id);
         Assert(index != nullptr);
-        auto filter_func = [segment, field_id, pointer](bool valid,
-                                                        uint8_t type,
-                                                        uint32_t row_id,
-                                                        uint16_t offset,
-                                                        uint16_t size,
-                                                        uint32_t value) {
-            return true;
+        auto filter_func = [segment, field_id, pointer](
+                               const bool* valid_array,
+                               const uint8_t* type_array,
+                               const uint32_t* row_id_array,
+                               const uint16_t* offset_array,
+                               const uint16_t* size_array,
+                               const int32_t* value_array,
+                               TargetBitmap& bitset,
+                               const size_t n) {
+            for (size_t i = 0; i < n; i++) {
+                auto row_id = row_id_array[i];
+                bitset[row_id] = true;
+            }
         };
         bool is_growing = segment_->type() == SegmentType::Growing;
         bool is_strong_consistency = consistency_level_ == 0;

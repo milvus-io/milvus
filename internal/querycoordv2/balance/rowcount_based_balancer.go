@@ -65,7 +65,7 @@ func (b *RowCountBasedBalancer) AssignSegment(ctx context.Context, collectionID 
 		return segments[i].GetNumOfRows() > segments[j].GetNumOfRows()
 	})
 
-	balanceBatchSize := paramtable.Get().QueryCoordCfg.CollectionBalanceSegmentBatchSize.GetAsInt()
+	balanceBatchSize := paramtable.Get().QueryCoordCfg.BalanceSegmentBatchSize.GetAsInt()
 	plans := make([]SegmentAssignPlan, 0, len(segments))
 	for _, s := range segments {
 		// pick the node with the least row count and allocate to it.
@@ -150,9 +150,9 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 		}
 
 		// calculate growing segment row count on node
-		views := b.dist.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(node))
-		for _, view := range views {
-			rowcnt += int(view.NumOfGrowingRows)
+		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
+		for _, channel := range channels {
+			rowcnt += int(channel.View.NumOfGrowingRows)
 		}
 
 		// calculate executing task cost in scheduler
@@ -209,11 +209,12 @@ func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balance
 	var rwNodes, roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
 		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+		roNodes = append(roNodes, replica.GetRONodes()...)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
 
-	if len(rwNodes) == 0 || !b.permitBalanceChannel(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 	if len(roNodes) != 0 {
@@ -234,7 +235,7 @@ func (b *RowCountBasedBalancer) balanceSegments(ctx context.Context, replica *me
 	rwNodes := replica.GetRWNodes()
 	roNodes := replica.GetRONodes()
 
-	if len(rwNodes) == 0 || !b.permitBalanceSegment(replica.GetCollectionID()) {
+	if len(rwNodes) == 0 {
 		return nil
 	}
 	// print current distribution before generating plans

@@ -169,7 +169,7 @@ func buildReqParams(c *gin.Context, metricsType string, customParams ...*commonp
 
 func getQueryComponentMetrics(node *Proxy, metricsType string, customParams ...*commonpb.KeyValuePair) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		params := buildReqParams(c, metricsType)
+		params := buildReqParams(c, metricsType, metricsinfo.RequestProcessInQCRole)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -191,7 +191,7 @@ func getQueryComponentMetrics(node *Proxy, metricsType string, customParams ...*
 
 func getDataComponentMetrics(node *Proxy, metricsType string, customParams ...*commonpb.KeyValuePair) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		params := buildReqParams(c, metricsType)
+		params := buildReqParams(c, metricsType, metricsinfo.RequestProcessInDCRole)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{

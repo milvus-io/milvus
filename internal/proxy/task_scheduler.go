@@ -19,6 +19,7 @@ package proxy
 import (
 	"container/list"
 	"context"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -131,6 +133,7 @@ func (queue *baseTaskQueue) AddActiveTask(t task) {
 	}
 
 	queue.activeTasks[tID] = t
+	t.SetExecutingTime()
 }
 
 func (queue *baseTaskQueue) PopActiveTask(taskID UniqueID) task {
@@ -649,4 +652,115 @@ func (sched *taskScheduler) Close() {
 
 func (sched *taskScheduler) getPChanStatistics() (map[pChan]*pChanStatistics, error) {
 	return sched.dmQueue.getPChanStatsInfo()
+}
+
+func (sched *taskScheduler) getTaskQueueMetrics(queue *baseTaskQueue, queueType string) metricsinfo.TaskQueueMetrics {
+	pendingTaskStats := make(map[string]*TaskStatsTracker, 0)
+	executingTaskStats := make(map[string]*TaskStatsTracker, 0)
+	queue.atLock.RLock()
+	atNum := len(queue.activeTasks)
+	for _, task := range queue.activeTasks {
+		taskType := task.Name()
+		executingTime := task.GetDurationInExecuting().Milliseconds()
+
+		tracker, ok := executingTaskStats[taskType]
+		if !ok {
+			tracker = NewTaskStatsTracker(taskType)
+			executingTaskStats[taskType] = tracker
+		}
+		tracker.AddSample(executingTime)
+	}
+	executingTaskMetrics := make([]metricsinfo.TaskMetrics, 0, len(executingTaskStats))
+	for _, tracker := range executingTaskStats {
+		executingTaskMetrics = append(executingTaskMetrics, metricsinfo.TaskMetrics{
+			Type:         tracker.TaskType,
+			MaxQueueTime: tracker.MaxQueueTime,
+			MinQueueTime: tracker.MinQueueTime,
+			AvgQueueTime: tracker.AvgQueueTime(),
+			Count:        tracker.Count,
+		})
+	}
+	queue.atLock.RUnlock()
+
+	queue.utLock.RLock()
+	defer queue.utLock.RUnlock()
+	utNum := queue.unissuedTasks.Len()
+
+	for e := queue.unissuedTasks.Front(); e != nil; e = e.Next() {
+		task := e.Value.(task)
+		taskType := task.Name()
+		queueTimeMs := task.GetDurationInQueue().Milliseconds()
+
+		tracker, ok := pendingTaskStats[taskType]
+		if !ok {
+			tracker = NewTaskStatsTracker(taskType)
+			pendingTaskStats[taskType] = tracker
+		}
+
+		tracker.AddSample(queueTimeMs)
+	}
+
+	pendingTaskMetrics := make([]metricsinfo.TaskMetrics, 0, len(pendingTaskStats))
+	for _, tracker := range pendingTaskStats {
+		pendingTaskMetrics = append(pendingTaskMetrics, metricsinfo.TaskMetrics{
+			Type:         tracker.TaskType,
+			MaxQueueTime: tracker.MaxQueueTime,
+			MinQueueTime: tracker.MinQueueTime,
+			AvgQueueTime: tracker.AvgQueueTime(),
+			Count:        tracker.Count,
+		})
+	}
+
+	return metricsinfo.TaskQueueMetrics{
+		Type:           queueType,
+		PendingCount:   int64(utNum),
+		ExecutingCount: int64(atNum),
+		PendingTasks:   pendingTaskMetrics,
+		ExecutingTasks: executingTaskMetrics,
+	}
+}
+
+type TaskStatsTracker struct {
+	TaskType       string
+	MaxQueueTime   int64
+	MinQueueTime   int64
+	TotalQueueTime int64
+	Count          int64
+}
+
+func NewTaskStatsTracker(taskType string) *TaskStatsTracker {
+	return &TaskStatsTracker{
+		TaskType:       taskType,
+		MaxQueueTime:   0,
+		MinQueueTime:   math.MaxInt64,
+		TotalQueueTime: 0,
+		Count:          0,
+	}
+}
+
+func (t *TaskStatsTracker) AddSample(queueTimeMs int64) {
+	t.MaxQueueTime = max(t.MaxQueueTime, queueTimeMs)
+	t.MinQueueTime = min(t.MinQueueTime, queueTimeMs)
+	t.TotalQueueTime += queueTimeMs
+	t.Count++
+}
+
+func (t *TaskStatsTracker) AvgQueueTime() int64 {
+	if t.Count == 0 {
+		return 0
+	}
+	return t.TotalQueueTime / t.Count
+}
+
+func (sched *taskScheduler) getMetrics() []metricsinfo.TaskQueueMetrics {
+	dmlQueueMetrics := sched.getTaskQueueMetrics(sched.dmQueue.baseTaskQueue, "dml")
+	ddlQueueMetrics := sched.getTaskQueueMetrics(sched.ddQueue.baseTaskQueue, "ddl")
+	dqlQueueMetrics := sched.getTaskQueueMetrics(sched.dqQueue.baseTaskQueue, "dql")
+	dcQueueMetrics := sched.getTaskQueueMetrics(sched.dcQueue.baseTaskQueue, "dc")
+	return []metricsinfo.TaskQueueMetrics{
+		dmlQueueMetrics,
+		ddlQueueMetrics,
+		dqlQueueMetrics,
+		dcQueueMetrics,
+	}
 }

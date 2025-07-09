@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <memory>
 
+#include "common/Consts.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "index/BitmapIndex.h"
@@ -131,7 +132,7 @@ class BitmapIndexTest : public testing::Test {
                     ptr[byteIndex] &= ~(1 << bitIndex);
                 }
             }
-            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            field_data->FillFieldData(data_.data(), ptr, data_.size(), 0);
             delete[] ptr;
         } else {
             field_data->FillFieldData(data_.data(), data_.size());
@@ -159,8 +160,9 @@ class BitmapIndexTest : public testing::Test {
         Config config;
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+        config[INDEX_NUM_ROWS_KEY] = nb_;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row_;
+            config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
 
         auto build_index =
@@ -191,6 +193,8 @@ class BitmapIndexTest : public testing::Test {
                                                   field_id);
             ;
         }
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
         index_->Load(milvus::tracer::TraceContext{}, config);

@@ -106,7 +106,7 @@ func newJSONData(fieldName string, rowNum int) *schemapb.FieldData {
 
 func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []*schemapb.FieldData) {
 	hashKeys := integration.GenerateHashKeys(s.rowNum)
-	insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         s.dbName,
 		CollectionName: s.collectionName,
 		FieldsData:     fieldData,
@@ -117,7 +117,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	s.NoError(merr.Error(insertResult.GetStatus()))
 
 	// flush
-	flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          s.dbName,
 		CollectionNames: []string{s.collectionName},
 	})
@@ -129,16 +129,16 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	flushTs, has := flushResp.GetCollFlushTs()[s.collectionName]
 	s.True(has)
 
-	segments, err := s.Cluster.MetaWatcher.ShowSegments()
+	s.WaitForFlush(ctx, ids, flushTs, s.dbName, s.collectionName)
+	segments, err := s.Cluster.ShowSegments(s.collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, s.dbName, s.collectionName)
 
 	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := s.Cluster.MilvusClient.CreateIndex(context.TODO(), &milvuspb.CreateIndexRequest{
 		CollectionName: s.collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -151,7 +151,7 @@ func (s *ExpressionSuite) insertFlushIndexLoad(ctx context.Context, fieldData []
 	log.Info("=========================Index created=========================")
 
 	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         s.dbName,
 		CollectionName: s.collectionName,
 	})
@@ -172,7 +172,7 @@ func (s *ExpressionSuite) setupData() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         s.dbName,
 		CollectionName: s.collectionName,
 		Schema:         marshaledSchema,
@@ -182,12 +182,12 @@ func (s *ExpressionSuite) setupData() {
 	err = merr.Error(createCollectionStatus)
 	s.NoError(err)
 
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	err = merr.Error(showCollectionsResp.GetStatus())
 	s.NoError(err)
 
-	describeCollectionResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: s.collectionName})
+	describeCollectionResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: s.collectionName})
 	s.NoError(err)
 	err = merr.Error(describeCollectionResp.GetStatus())
 	s.NoError(err)
@@ -220,7 +220,7 @@ func (s *ExpressionSuite) searchWithExpression() {
 		searchReq := integration.ConstructSearchRequest(s.dbName, s.collectionName, c.expr,
 			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, 1, s.dim, c.topK, -1)
 
-		searchResult, err := s.Cluster.Proxy.Search(context.Background(), searchReq)
+		searchResult, err := s.Cluster.MilvusClient.Search(context.Background(), searchReq)
 		s.NoError(err)
 		err = merr.Error(searchResult.GetStatus())
 		s.NoError(err)

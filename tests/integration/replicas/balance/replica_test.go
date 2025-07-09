@@ -46,15 +46,19 @@ type ReplicaTestSuit struct {
 }
 
 func (s *ReplicaTestSuit) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-	s.Require().NoError(s.SetupEmbedEtcd())
+	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
+	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *ReplicaTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	for i := 1; i < replica; i++ {
+		s.Cluster.AddQueryNode()
+		s.Cluster.AddStreamingNode()
+	}
 
 	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
 		DBName:           dbName,
@@ -65,12 +69,8 @@ func (s *ReplicaTestSuit) initCollection(collectionName string, replica int, cha
 		RowNumPerSegment: segmentRowNum,
 	})
 
-	for i := 1; i < replica; i++ {
-		s.Cluster.AddQueryNode()
-	}
-
 	// load
-	loadStatus, err := s.Cluster.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		ReplicaNumber:  int32(replica),
@@ -108,7 +108,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 
 				searchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
-				searchResult, err := s.Cluster.Proxy.Search(searchCtx, searchReq)
+				searchResult, err := s.Cluster.MilvusClient.Search(searchCtx, searchReq)
 
 				err = merr.CheckRPCCall(searchResult, err)
 				if err != nil {
@@ -122,7 +122,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnSingleReplica() {
 	s.Equal(failCounter.Load(), int64(0))
 
 	// stop qn in single replica expected got search failures
-	s.Cluster.QueryNode.Stop()
+	s.Cluster.DefaultQueryNode().ForceStop()
 	time.Sleep(10 * time.Second)
 	s.True(failCounter.Load() > 0)
 
@@ -138,7 +138,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 2, 2, 2, 2000)
 
-	resp, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{CollectionName: name})
+	resp, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{CollectionName: name})
 	s.NoError(err)
 	s.Len(resp.Replicas, 2)
 
@@ -162,7 +162,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 
 				searchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
-				searchResult, err := s.Cluster.Proxy.Search(searchCtx, searchReq)
+				searchResult, err := s.Cluster.MilvusClient.Search(searchCtx, searchReq)
 
 				err = merr.CheckRPCCall(searchResult, err)
 				if err != nil {
@@ -176,7 +176,7 @@ func (s *ReplicaTestSuit) TestNodeDownOnMultiReplica() {
 	s.Equal(failCounter.Load(), int64(0))
 
 	// stop qn in multi replica replica expected no search failures
-	s.Cluster.QueryNode.Stop()
+	s.Cluster.DefaultQueryNode().ForceStop()
 	time.Sleep(20 * time.Second)
 	s.Equal(failCounter.Load(), int64(0))
 

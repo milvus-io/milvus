@@ -140,3 +140,10 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 		return segment.Level() == level
 	})
 }
+
+// WithoutLevel is the segment filter for without segment level.
+func WithoutLevel(level datapb.SegmentLevel) SegmentFilter {
+	return SegmentFilterFunc(func(segment Segment) bool {
+		return segment.Level() != level
+	})
+}

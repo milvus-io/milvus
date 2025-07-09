@@ -20,7 +20,7 @@ services:
 
   minio:
     container_name: milvus-minio
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -38,7 +38,7 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.5.12-gpu
+    image: milvusdb/milvus:v2.5.14-gpu
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined

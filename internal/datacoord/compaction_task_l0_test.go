@@ -181,6 +181,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 	task = &mixCompactionTask{
 		allocator: s.mockAlloc,
 		meta:      meta,
+		ievm:      newMockVersionManager(),
 	}
 	task.SetTask(&datapb.CompactionTask{})
 	_, err = task.BuildCompactionRequest()
@@ -507,10 +508,22 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 		s.Equal(datapb.CompactionTaskState_failed, t.GetTaskProto().GetState())
 	})
 
-	s.Run("test unknown task", func() {
-		t := s.generateTestL0Task(datapb.CompactionTaskState_unknown)
+	s.Run("test process states", func() {
+		testCases := []struct {
+			state         datapb.CompactionTaskState
+			processResult bool
+		}{
+			{state: datapb.CompactionTaskState_unknown, processResult: false},
+			{state: datapb.CompactionTaskState_pipelining, processResult: false},
+			{state: datapb.CompactionTaskState_executing, processResult: false},
+			{state: datapb.CompactionTaskState_failed, processResult: true},
+			{state: datapb.CompactionTaskState_timeout, processResult: true},
+		}
 
-		got := t.Process()
-		s.True(got)
+		for _, tc := range testCases {
+			t := s.generateTestL0Task(tc.state)
+			res := t.Process()
+			s.Equal(tc.processResult, res)
+		}
 	})
 }

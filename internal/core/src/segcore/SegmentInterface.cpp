@@ -60,9 +60,9 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     std::unique_ptr<DataArray> field_data;
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
-        auto& field_meta = plan->schema_[field_id];
-        if (plan->schema_.get_dynamic_field_id().has_value() &&
-            plan->schema_.get_dynamic_field_id().value() == field_id &&
+        auto& field_meta = plan->schema_->operator[](field_id);
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
             field_data = bulk_subscript(field_id,
@@ -84,12 +84,13 @@ SegmentInternalInterface::Search(
     const query::Plan* plan,
     const query::PlaceholderGroup* placeholder_group,
     Timestamp timestamp,
-    int32_t consistency_level) const {
+    int32_t consistency_level,
+    Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
     milvus::tracer::AddEvent("obtained_segment_lock_mutex");
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(
-        *this, timestamp, placeholder_group, consistency_level);
+        *this, timestamp, placeholder_group, consistency_level, collection_ttl);
     auto results = std::make_unique<SearchResult>();
     *results = visitor.get_moved_result(*plan->plan_node_);
     results->segment_ = (void*)this;
@@ -102,11 +103,13 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    Timestamp timestamp,
                                    int64_t limit_size,
                                    bool ignore_non_pk,
-                                   int32_t consistency_level) const {
+                                   int32_t consistency_level,
+                                   Timestamp collection_ttl) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan());
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    query::ExecPlanNodeVisitor visitor(*this, timestamp, consistency_level);
+    query::ExecPlanNodeVisitor visitor(
+        *this, timestamp, consistency_level, collection_ttl);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
     results->set_has_more_result(retrieve_results.has_more_result);
@@ -165,7 +168,7 @@ SegmentInternalInterface::FillTargetEntry(
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
-    auto pk_field_id = plan->schema_.get_primary_field_id();
+    auto pk_field_id = plan->schema_->get_primary_field_id();
 
     auto is_pk_field = [&, pk_field_id](const FieldId& field_id) -> bool {
         return pk_field_id.has_value() && pk_field_id.value() == field_id;
@@ -195,8 +198,8 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
 
-        if (plan->schema_.get_dynamic_field_id().has_value() &&
-            plan->schema_.get_dynamic_field_id().value() == field_id &&
+        if (plan->schema_->get_dynamic_field_id().has_value() &&
+            plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
             auto& target_dynamic_fields = plan->target_dynamic_fields_;
             auto col =
@@ -205,12 +208,13 @@ SegmentInternalInterface::FillTargetEntry(
             continue;
         }
         std::unique_ptr<DataArray> col;
-        auto& field_meta = plan->schema_[field_id];
+        auto& field_meta = plan->schema_->operator[](field_id);
         if (!is_field_exist(field_id)) {
             col = std::move(bulk_subscript_not_exist_field(field_meta, size));
         } else {
             col = bulk_subscript(field_id, offsets, size);
         }
+        // todo(SpadeA): consider vector array?
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
@@ -284,7 +288,8 @@ SegmentInternalInterface::get_real_count() const {
     mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
     return bitset_holder.size() - bitset_holder.count();
 #endif
-    auto plan = std::make_unique<query::RetrievePlan>(get_schema());
+    auto plan = std::make_unique<query::RetrievePlan>(
+        std::make_shared<Schema>(get_schema()));
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     milvus::plan::PlanNodePtr plannode;
     std::vector<milvus::plan::PlanNodePtr> sources;
@@ -432,7 +437,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                   fmt::format("unsupported added field type {}",
                               field_meta.get_data_type()));
     }
-    auto result = CreateScalarDataArray(count, field_meta);
+    auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.default_value().has_value()) {
         auto res = result->mutable_valid_data()->mutable_data();
         for (int64_t i = 0; i < count; ++i) {
@@ -530,4 +535,11 @@ SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
     }
     return iter->second.get();
 }
+
+// Only sealed segment has ngram index
+PinWrapper<index::NgramInvertedIndex*>
+SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
+    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+}
+
 }  // namespace milvus::segcore

@@ -4056,6 +4056,65 @@ func (_c *MixCoord_GetQueryNodeDistribution_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// GetQuotaMetrics provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetQuotaMetrics(_a0 context.Context, _a1 *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQuotaMetrics")
+	}
+
+	var r0 *internalpb.GetQuotaMetricsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetQuotaMetricsRequest) *internalpb.GetQuotaMetricsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetQuotaMetricsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetQuotaMetricsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetQuotaMetrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQuotaMetrics'
+type MixCoord_GetQuotaMetrics_Call struct {
+	*mock.Call
+}
+
+// GetQuotaMetrics is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetQuotaMetricsRequest
+func (_e *MixCoord_Expecter) GetQuotaMetrics(_a0 interface{}, _a1 interface{}) *MixCoord_GetQuotaMetrics_Call {
+	return &MixCoord_GetQuotaMetrics_Call{Call: _e.mock.On("GetQuotaMetrics", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetQuotaMetrics_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetQuotaMetricsRequest)) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetQuotaMetricsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQuotaMetricsResponse, _a1 error) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetRecoveryInfo provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetRecoveryInfo(_a0 context.Context, _a1 *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -5372,6 +5431,65 @@ func (_c *MixCoord_ListIndexes_Call) RunAndReturn(run func(context.Context, *ind
 	return _c
 }
 
+// ListLoadedSegments provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ListLoadedSegments(_a0 context.Context, _a1 *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListLoadedSegments")
+	}
+
+	var r0 *querypb.ListLoadedSegmentsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListLoadedSegmentsRequest) *querypb.ListLoadedSegmentsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListLoadedSegmentsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListLoadedSegmentsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ListLoadedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListLoadedSegments'
+type MixCoord_ListLoadedSegments_Call struct {
+	*mock.Call
+}
+
+// ListLoadedSegments is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ListLoadedSegmentsRequest
+func (_e *MixCoord_Expecter) ListLoadedSegments(_a0 interface{}, _a1 interface{}) *MixCoord_ListLoadedSegments_Call {
+	return &MixCoord_ListLoadedSegments_Call{Call: _e.mock.On("ListLoadedSegments", _a0, _a1)}
+}
+
+func (_c *MixCoord_ListLoadedSegments_Call) Run(run func(_a0 context.Context, _a1 *querypb.ListLoadedSegmentsRequest)) *MixCoord_ListLoadedSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ListLoadedSegmentsRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ListLoadedSegments_Call) Return(_a0 *querypb.ListLoadedSegmentsResponse, _a1 error) *MixCoord_ListLoadedSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ListLoadedSegments_Call) RunAndReturn(run func(context.Context, *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error)) *MixCoord_ListLoadedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListPolicy provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ListPolicy(_a0 context.Context, _a1 *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -5899,6 +6017,54 @@ func (_c *MixCoord_MarkSegmentsDropped_Call) Return(_a0 *commonpb.Status, _a1 er
 }
 
 func (_c *MixCoord_MarkSegmentsDropped_Call) RunAndReturn(run func(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error)) *MixCoord_MarkSegmentsDropped_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// NotifyDropPartition provides a mock function with given fields: ctx, channel, partitionIDs
+func (_m *MixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	ret := _m.Called(ctx, channel, partitionIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NotifyDropPartition")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) error); ok {
+		r0 = rf(ctx, channel, partitionIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MixCoord_NotifyDropPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NotifyDropPartition'
+type MixCoord_NotifyDropPartition_Call struct {
+	*mock.Call
+}
+
+// NotifyDropPartition is a helper method to define mock.On call
+//   - ctx context.Context
+//   - channel string
+//   - partitionIDs []int64
+func (_e *MixCoord_Expecter) NotifyDropPartition(ctx interface{}, channel interface{}, partitionIDs interface{}) *MixCoord_NotifyDropPartition_Call {
+	return &MixCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", ctx, channel, partitionIDs)}
+}
+
+func (_c *MixCoord_NotifyDropPartition_Call) Run(run func(ctx context.Context, channel string, partitionIDs []int64)) *MixCoord_NotifyDropPartition_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]int64))
+	})
+	return _c
+}
+
+func (_c *MixCoord_NotifyDropPartition_Call) Return(_a0 error) *MixCoord_NotifyDropPartition_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MixCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, []int64) error) *MixCoord_NotifyDropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }

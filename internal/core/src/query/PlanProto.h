@@ -35,7 +35,7 @@ class ProtoParser {
     }
 
  public:
-    explicit ProtoParser(const Schema& schema) : schema(schema) {
+    explicit ProtoParser(SchemaPtr schema) : schema(std::move(schema)) {
     }
 
     std::unique_ptr<VectorPlanNode>
@@ -99,7 +99,7 @@ class ProtoParser {
     ParseValueExprs(const proto::plan::ValueExpr& expr_pb);
 
  private:
-    const Schema& schema;
+    const SchemaPtr schema;
 };
 
 }  // namespace milvus::query

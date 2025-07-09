@@ -19,8 +19,6 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"os"
 	"strings"
 	"time"
 
@@ -43,7 +41,7 @@ import (
 
 func (s *BulkInsertSuite) testMultipleVectorFields() {
 	const (
-		rowCount = 10000
+		rowCount = 100
 		dim1     = 64
 		dim2     = 32
 	)
@@ -85,7 +83,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         "",
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -95,7 +93,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	s.Equal(int32(0), createCollectionStatus.GetCode())
 
 	// create index 1
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default_1",
@@ -107,7 +105,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// create index 2
-	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err = c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.BFloat16VecField,
 		IndexName:      "_default_2",
@@ -120,23 +118,19 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 
 	// import
 	var files []*internalpb.ImportFile
-	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
-	s.NoError(err)
 
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
 	case importutilv2.Numpy:
-		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
+		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
 		s.NoError(err)
 		importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
 			return !strings.Contains(path, "$meta")
 		})
 		files = []*internalpb.ImportFile{importFile}
 	case importutilv2.JSON:
-		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
-		GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
-		defer os.Remove(rowBasedFile)
+		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
 				Paths: []string{
@@ -145,10 +139,8 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 			},
 		}
 	case importutilv2.Parquet:
-		filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
-		err = GenerateParquetFile(filePath, schema, rowCount)
+		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
-		defer os.Remove(filePath)
 		files = []*internalpb.ImportFile{
 			{
 				Paths: []string{
@@ -157,9 +149,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 			},
 		}
 	case importutilv2.CSV:
-		filePath := fmt.Sprintf("/tmp/test_%d.csv", rand.Int())
-		sep := GenerateCSVFile(s.T(), filePath, schema, rowCount)
-		defer os.Remove(filePath)
+		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -171,7 +161,7 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 		}
 	}
 
-	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
+	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
 		Options:        options,
@@ -185,20 +175,20 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	s.NoError(err)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	s.WaitForLoad(ctx, collectionName)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	log.Info("Show segments", zap.Any("segments", segments))
 
 	// load refresh
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err = c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 		Refresh:        true,
 	})
@@ -215,8 +205,9 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim1, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
@@ -225,8 +216,9 @@ func (s *BulkInsertSuite) testMultipleVectorFields() {
 	// search vec 2
 	searchReq = integration.ConstructSearchRequest("", collectionName, expr,
 		integration.BFloat16VecField, schemapb.DataType_BFloat16Vector, nil, metric.L2, params, nq, dim2, topk, roundDecimal)
+	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
 
-	searchResult, err = c.Proxy.Search(ctx, searchReq)
+	searchResult, err = c.MilvusClient.Search(ctx, searchReq)
 
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)

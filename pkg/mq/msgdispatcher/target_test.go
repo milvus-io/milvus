@@ -17,7 +17,7 @@ func TestSendTimeout(t *testing.T) {
 	target := newTarget(&StreamConfig{
 		VChannel: "test1",
 		Pos:      &msgpb.MsgPosition{},
-	})
+	}, false)
 
 	time.Sleep(paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second))
 
@@ -30,4 +30,26 @@ func TestSendTimeout(t *testing.T) {
 		}
 	}
 	assert.Equal(t, counter, 0)
+}
+
+func TestSendTimeTickFiltering(t *testing.T) {
+	target := newTarget(&StreamConfig{
+		VChannel: "test1",
+		Pos:      &msgpb.MsgPosition{},
+	}, true)
+	target.send(&msgstream.MsgPack{
+		EndPositions: []*msgpb.MsgPosition{
+			{
+				Timestamp: 1,
+			},
+		},
+	})
+
+	target.send(&msgstream.MsgPack{
+		EndPositions: []*msgpb.MsgPosition{
+			{
+				Timestamp: 1,
+			},
+		},
+	})
 }

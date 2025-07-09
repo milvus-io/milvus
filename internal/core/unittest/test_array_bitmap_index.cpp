@@ -65,7 +65,7 @@ GenerateArrayData(proto::schema::DataType element_type,
                   int cardinality,
                   int size,
                   int array_len) {
-    std::vector<ScalarArray> data(size);
+    std::vector<ScalarFieldProto> data(size);
     switch (element_type) {
         case proto::schema::DataType::Bool: {
             for (int i = 0; i < size; i++) {
@@ -201,7 +201,7 @@ class ArrayBitmapIndexTest : public testing::Test {
                     ptr[byteIndex] &= ~(1 << bitIndex);
                 }
             }
-            field_data->FillFieldData(data_.data(), ptr, data_.size());
+            field_data->FillFieldData(data_.data(), ptr, data_.size(), 0);
             delete[] ptr;
         } else {
             field_data->FillFieldData(data_.data(), data_.size());
@@ -231,8 +231,9 @@ class ArrayBitmapIndexTest : public testing::Test {
         config["index_type"] = milvus::index::HYBRID_INDEX_TYPE;
         config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
         config["bitmap_cardinality_limit"] = "100";
+        config[INDEX_NUM_ROWS_KEY] = nb_;
         if (has_lack_binlog_row_) {
-            config["lack_binlog_rows"] = lack_binlog_row_;
+            config[INDEX_NUM_ROWS_KEY] = nb_ + lack_binlog_row_;
         }
 
         {
@@ -254,7 +255,8 @@ class ArrayBitmapIndexTest : public testing::Test {
         index_info.field_type = DataType::ARRAY;
 
         config["index_files"] = index_files;
-
+        config[milvus::LOAD_PRIORITY] =
+            milvus::proto::common::LoadPriority::HIGH;
         ctx.set_for_loading_index(true);
         index_ =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);

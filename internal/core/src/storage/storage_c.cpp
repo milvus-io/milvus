@@ -15,13 +15,18 @@
 // limitations under the License.
 
 #include "storage/storage_c.h"
+#include "storage/FileWriter.h"
 #include "monitor/prometheus_client.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
+#include "storage/ThreadPools.h"
+#include "monitor/scope_metric.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto local_chunk_manager =
             milvus::storage::LocalChunkManagerSingleton::GetInstance()
@@ -99,7 +104,34 @@ InitMmapManager(CMmapConfig c_mmap_config) {
         mmap_config.growing_enable_mmap = c_mmap_config.growing_enable_mmap;
         mmap_config.scalar_index_enable_mmap =
             c_mmap_config.scalar_index_enable_mmap;
+        mmap_config.scalar_field_enable_mmap =
+            c_mmap_config.scalar_field_enable_mmap;
+        mmap_config.vector_index_enable_mmap =
+            c_mmap_config.vector_index_enable_mmap;
+        mmap_config.vector_field_enable_mmap =
+            c_mmap_config.vector_field_enable_mmap;
         milvus::storage::MmapManager::GetInstance().Init(mmap_config);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads) {
+    try {
+        std::string mode_str(mode);
+        if (mode_str == "direct") {
+            milvus::storage::FileWriter::SetMode(milvus::storage::FileWriter::WriteMode::DIRECT);
+            // buffer size checking is done in FileWriter::SetBufferSize,
+            // and it will try to find a proper and valid buffer size
+            milvus::storage::FileWriter::SetBufferSize(buffer_size_kb * 1024); // convert to bytes
+        } else if (mode_str == "buffered") {
+            milvus::storage::FileWriter::SetMode(milvus::storage::FileWriter::WriteMode::BUFFERED);
+        } else {
+            return milvus::FailureCStatus(milvus::ConfigInvalid, "Invalid mode");
+        }
+        milvus::storage::FileWriteWorkerPool::GetInstance().Configure(nr_threads);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
@@ -109,4 +141,10 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 void
 CleanRemoteChunkManagerSingleton() {
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Release();
+}
+
+void
+ResizeTheadPool(int64_t priority, float ratio) {
+    milvus::ThreadPools::ResizeThreadPool(
+        static_cast<milvus::ThreadPoolPriority>(priority), ratio);
 }

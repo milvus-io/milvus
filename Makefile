@@ -145,6 +145,10 @@ cppcheck:
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
 
+rustcheck:
+	@echo  "Running cargo format"
+	@env bash ${PWD}/scripts/run_cargo_format.sh ${PWD}/internal/core/thirdparty/tantivy/tantivy-binding/
+
 
 fmt:
 ifdef GO_DIFF_FILES
@@ -201,7 +205,7 @@ static-check: getdeps
 	@echo "Start check go_client e2e package"
 	@source $(PWD)/scripts/setenv.sh && cd tests/go_client && GO111MODULE=on GOFLAGS=-buildvcs=false $(INSTALL_PATH)/golangci-lint run --build-tags L0,L1,L2,test --timeout=30m --config $(PWD)/tests/go_client/.golangci.yml
 
-verifiers: build-cpp getdeps cppcheck fmt static-check
+verifiers: build-cpp getdeps cppcheck rustcheck fmt static-check
 
 # Build various components locally.
 binlog:
@@ -253,7 +257,7 @@ download-milvus-proto:
 
 build-3rdparty:
 	@echo "Build 3rdparty ..."
-	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal})
+	@(env bash $(PWD)/scripts/3rdparty_build.sh -o ${use_opendal} -t ${mode})
 
 generated-proto-without-cpp: download-milvus-proto get-proto-deps
 	@echo "Generate proto ..."
@@ -435,9 +439,18 @@ generate-mockery-types: getdeps
 	$(INSTALL_PATH)/mockery --name=QueryNodeComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_querynode.go --with-expecter --structname=MockQueryNode
 	# DataNode
 	$(INSTALL_PATH)/mockery --name=DataNodeComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datanode.go --with-expecter --structname=MockDataNode
+	# RootCoord
+	$(INSTALL_PATH)/mockery --name=RootCoordComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_rootcoord.go --with-expecter --structname=MockRootCoord
+	# QueryCoord
+	$(INSTALL_PATH)/mockery --name=QueryCoordComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_querycoord.go --with-expecter --structname=MockQueryCoord
+	# DataCoord
+	$(INSTALL_PATH)/mockery --name=DataCoordComponent --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datacoord.go --with-expecter --structname=MockDataCoord
 
 	# Clients
 	$(INSTALL_PATH)/mockery --name=MixCoordClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_mixcoord_client.go --with-expecter --structname=MockMixCoordClient
+	$(INSTALL_PATH)/mockery --name=RootCoordClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_rootcoord_client.go --with-expecter --structname=MockRootCoordClient
+	$(INSTALL_PATH)/mockery --name=QueryCoordClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_querycoord_client.go --with-expecter --structname=MockQueryCoordClient
+	$(INSTALL_PATH)/mockery --name=DataCoordClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datacoord_client.go --with-expecter --structname=MockDataCoordClient
 	$(INSTALL_PATH)/mockery --name=QueryNodeClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_querynode_client.go --with-expecter --structname=MockQueryNodeClient
 	$(INSTALL_PATH)/mockery --name=DataNodeClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_datanode_client.go --with-expecter --structname=MockDataNodeClient
 	$(INSTALL_PATH)/mockery --name=ProxyClient --dir=$(PWD)/internal/types --output=$(PWD)/internal/mocks --filename=mock_proxy_client.go --with-expecter --structname=MockProxyClient

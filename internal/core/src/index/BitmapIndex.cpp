@@ -33,6 +33,8 @@
 #include "storage/Util.h"
 #include "query/Utils.h"
 
+#include "storage/FileWriter.h"
+
 namespace milvus {
 namespace index {
 
@@ -71,27 +73,9 @@ BitmapIndex<T>::Build(const Config& config) {
     if (is_built_) {
         return;
     }
-    auto field_datas = file_manager_->CacheRawDataToMemory(config);
 
-    auto lack_binlog_rows =
-        GetValueFromConfig<int64_t>(config, "lack_binlog_rows");
-    if (lack_binlog_rows.has_value() && lack_binlog_rows.value() > 0) {
-        auto field_schema = file_manager_->GetFieldDataMeta().field_schema;
-        auto default_value = [&]() -> std::optional<DefaultValueType> {
-            if (!field_schema.has_default_value()) {
-                return std::nullopt;
-            }
-            return field_schema.default_value();
-        }();
-        auto field_data = storage::CreateFieldData(
-            static_cast<DataType>(field_schema.data_type()),
-            true,
-            1,
-            lack_binlog_rows.value());
-        field_data->FillFieldData(default_value, lack_binlog_rows.value());
-        field_datas.insert(field_datas.begin(), field_data);
-    }
-
+    auto field_datas =
+        storage::CacheRawDataAndFillMissing(file_manager_, config);
     BuildWithFieldData(field_datas);
 }
 
@@ -475,41 +459,36 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
     std::filesystem::create_directories(
         std::filesystem::path(file_name).parent_path());
 
-    auto file = File::Open(file_name, O_RDWR | O_CREAT | O_TRUNC);
     auto file_offset = 0;
     std::map<T, std::pair<int32_t, int32_t>> bitmaps;
+    {
+        auto file_writer = storage::FileWriter(file_name);
+        for (size_t i = 0; i < index_length; ++i) {
+            T key = ParseKey(&data_ptr);
 
-    for (size_t i = 0; i < index_length; ++i) {
-        T key = ParseKey(&data_ptr);
+            roaring::Roaring value;
+            value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+            for (const auto& v : value) {
+                valid_bitset_.set(v);
+            }
 
-        roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-        for (const auto& v : value) {
-            valid_bitset_.set(v);
+            // convert roaring vaule to frozen mode
+            int32_t frozen_size = value.getFrozenSizeInBytes();
+            auto aligned_size =
+                ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            std::vector<uint8_t> buf(aligned_size, 0);
+            value.writeFrozen(reinterpret_cast<char*>(buf.data()));
+
+            file_writer.Write(buf.data(), aligned_size);
+            bitmaps[key] = {file_offset, frozen_size};
+
+            file_offset += aligned_size;
+            data_ptr += value.getSizeInBytes();
         }
-
-        // convert roaring vaule to frozen mode
-        int32_t frozen_size = value.getFrozenSizeInBytes();
-        auto aligned_size =
-            ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
-        std::vector<uint8_t> buf(aligned_size, 0);
-        value.writeFrozen(reinterpret_cast<char*>(buf.data()));
-
-        auto written = file.Write(buf.data(), aligned_size);
-        if (written != aligned_size) {
-            file.Close();
-            remove(file_name.c_str());
-            PanicInfo(
-                ErrorCode::UnistdError,
-                fmt::format("write data to fd error: {}", strerror(errno)));
-        }
-        bitmaps[key] = {file_offset, frozen_size};
-
-        file_offset += aligned_size;
-        data_ptr += value.getSizeInBytes();
+        file_writer.Finish();
     }
 
-    file.Seek(0, SEEK_SET);
+    auto file = File::Open(file_name, O_RDONLY);
     mmap_data_ = static_cast<char*>(
         mmap(NULL, file_offset, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
     if (mmap_data_ == MAP_FAILED) {
@@ -584,12 +563,13 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
 template <typename T>
 void
 BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
-    LOG_DEBUG("load bitmap index with config {}", config.dump());
+    LOG_INFO("load bitmap index with config {}", config.dump());
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load bitmap index");
-    auto index_datas = file_manager_->LoadIndexToMemory(index_files.value());
+    auto index_datas = file_manager_->LoadIndexToMemory(
+        index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     LoadWithoutAssemble(binary_set, config);

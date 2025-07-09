@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
+func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (int, error) {
 	records := make([]Record, 0)
@@ -38,9 +38,10 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	}
 	indices := make([]*index, 0)
 
+	// release cgo records
 	defer func() {
-		for _, r := range records {
-			r.Release()
+		for _, rec := range records {
+			rec.Release()
 		}
 	}()
 
@@ -90,7 +91,6 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	}
 
 	rb := NewRecordBuilder(schema)
-	batchSize := 100000
 	writeRecord := func() error {
 		rec := rb.Build()
 		defer rec.Release()
@@ -100,9 +100,13 @@ func Sort(schema *schemapb.CollectionSchema, rr []RecordReader,
 		return nil
 	}
 
-	for i, idx := range indices {
-		rb.Append(records[idx.ri], idx.i, idx.i+1)
-		if (i+1)%batchSize == 0 {
+	for _, idx := range indices {
+		if err := rb.Append(records[idx.ri], idx.i, idx.i+1); err != nil {
+			return 0, err
+		}
+
+		// Write when accumulated data size reaches batchSize
+		if rb.GetSize() >= batchSize {
 			if err := writeRecord(); err != nil {
 				return 0, err
 			}
@@ -165,9 +169,14 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 	return &pq
 }
 
-func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
+func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (numRows int, err error) {
+	// Fast path: no readers provided
+	if len(rr) == 0 {
+		return 0, nil
+	}
+
 	type index struct {
 		ri int
 		i  int
@@ -177,10 +186,7 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	advanceRecord := func(i int) error {
 		rec, err := rr[i].Next()
 		recs[i] = rec // assign nil if err
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}
 
 	for i := range rr {
@@ -203,16 +209,38 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 	switch recs[0].Column(pkFieldId).(type) {
 	case *array.Int64:
 		pq = NewPriorityQueue(func(x, y *index) bool {
-			return recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
+			xVal := recs[x.ri].Column(pkFieldId).(*array.Int64).Value(x.i)
+			yVal := recs[y.ri].Column(pkFieldId).(*array.Int64).Value(y.i)
+
+			if xVal != yVal {
+				return xVal < yVal
+			}
+
+			if x.ri != y.ri {
+				return x.ri < y.ri
+			}
+			return x.i < y.i
 		})
 	case *array.String:
 		pq = NewPriorityQueue(func(x, y *index) bool {
-			return recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i) < recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
+			xVal := recs[x.ri].Column(pkFieldId).(*array.String).Value(x.i)
+			yVal := recs[y.ri].Column(pkFieldId).(*array.String).Value(y.i)
+
+			if xVal != yVal {
+				return xVal < yVal
+			}
+
+			if x.ri != y.ri {
+				return x.ri < y.ri
+			}
+			return x.i < y.i
 		})
 	}
 
-	enqueueAll := func(ri int) {
+	var enqueueAll func(ri int) error
+	enqueueAll = func(ri int) error {
 		r := recs[ri]
+		hasValid := false
 		for j := 0; j < r.Len(); j++ {
 			if predicate(r, ri, j) {
 				pq.Enqueue(&index{
@@ -220,32 +248,53 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 					i:  j,
 				})
 				numRows++
+				hasValid = true
 			}
 		}
+		if !hasValid {
+			err := advanceRecord(ri)
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return enqueueAll(ri)
+		}
+		return nil
 	}
 
 	for i, v := range recs {
 		if v != nil {
-			enqueueAll(i)
+			if err := enqueueAll(i); err != nil {
+				return 0, err
+			}
 		}
 	}
 
-	// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
-	//	small batch size will cause write performance degradation. To work around this issue, we accumulate
-	//	records and write them in batches. This requires additional memory copy.
-	batchSize := 100000
 	rb := NewRecordBuilder(schema)
+	writeRecord := func() error {
+		rec := rb.Build()
+		defer rec.Release()
+		if rec.Len() > 0 {
+			return rw.Write(rec)
+		}
+		return nil
+	}
 
 	for pq.Len() > 0 {
 		idx := pq.Dequeue()
 		rb.Append(recs[idx.ri], idx.i, idx.i+1)
-		if rb.GetRowNum()%batchSize == 0 {
-			if err := rw.Write(rb.Build()); err != nil {
+		// Due to current arrow impl (v12), the write performance is largely dependent on the batch size,
+		//	small batch size will cause write performance degradation. To work around this issue, we accumulate
+		//	records and write them in batches. This requires additional memory copy.
+		if rb.GetSize() >= batchSize {
+			if err := writeRecord(); err != nil {
 				return 0, err
 			}
 		}
 
-		// If poped idx reaches end of segment, invalidate cache and advance to next segment
+		// If poped idx reaches end of segment, invalidate cache and advance to next record
 		if idx.i == recs[idx.ri].Len()-1 {
 			err := advanceRecord(idx.ri)
 			if err == io.EOF {
@@ -254,13 +303,15 @@ func MergeSort(schema *schemapb.CollectionSchema, rr []RecordReader,
 			if err != nil {
 				return 0, err
 			}
-			enqueueAll(idx.ri)
+			if err := enqueueAll(idx.ri); err != nil {
+				return 0, err
+			}
 		}
 	}
 
 	// write the last batch
 	if rb.GetRowNum() > 0 {
-		if err := rw.Write(rb.Build()); err != nil {
+		if err := writeRecord(); err != nil {
 			return 0, err
 		}
 	}

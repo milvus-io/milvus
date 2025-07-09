@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -125,8 +126,7 @@ func (s *mixCoordImpl) Register() error {
 func (s *mixCoordImpl) Init() error {
 	log := log.Ctx(s.ctx)
 	var initErr error
-	if err := s.initSession(); err != nil {
-		initErr = err
+	if initErr = s.initSession(); initErr != nil {
 		return initErr
 	}
 	s.factory.Init(Params)
@@ -151,10 +151,9 @@ func (s *mixCoordImpl) Init() error {
 		s.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("MixCoord enter standby mode successfully")
 	} else {
-		var err error
 		s.initOnce.Do(func() {
-			if err = s.initInternal(); err != nil {
-				log.Error("mixCoord init failed", zap.Error(err))
+			if initErr = s.initInternal(); initErr != nil {
+				log.Error("mixCoord init failed", zap.Error(initErr))
 			}
 		})
 	}
@@ -167,6 +166,11 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 
+	if err := s.streamingCoord.Start(s.ctx); err != nil {
+		log.Error("streamCoord start failed", zap.Error(err))
+		return err
+	}
+
 	if err := s.rootcoordServer.Init(); err != nil {
 		log.Error("rootCoord init failed", zap.Error(err))
 		return err
@@ -177,18 +181,13 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
-	if err := s.streamingCoord.Start(s.ctx); err != nil {
-		log.Error("streamCoord init failed", zap.Error(err))
-		return err
-	}
-
 	if err := s.datacoordServer.Init(); err != nil {
 		log.Error("dataCoord init failed", zap.Error(err))
 		return err
 	}
 
 	if err := s.datacoordServer.Start(); err != nil {
-		log.Error("dataCoord init failed", zap.Error(err))
+		log.Error("dataCoord start failed", zap.Error(err))
 		return err
 	}
 
@@ -198,7 +197,7 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 
 	if err := s.queryCoordServer.Start(); err != nil {
-		log.Error("queryCoord init failed", zap.Error(err))
+		log.Error("queryCoord start failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -312,6 +311,7 @@ func (s *mixCoordImpl) GetStateCode() commonpb.StateCode {
 func (s *mixCoordImpl) GracefulStop() {
 	if s.streamingCoord != nil {
 		s.streamingCoord.Stop()
+		s.streamingCoord = nil
 	}
 }
 
@@ -581,6 +581,15 @@ func (s *mixCoordImpl) GetStatisticsChannel(ctx context.Context, req *internalpb
 func (s *mixCoordImpl) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	systemTopology := metricsinfo.SystemTopology{
 		NodesInfo: make([]metricsinfo.SystemTopologyNode, 0),
+	}
+
+	// If a processing role is specified, the corresponding role will be used for processing
+	ret := gjson.Parse(in.GetRequest())
+	processRole, _ := metricsinfo.ParseMetricProcessInRole(ret)
+	if len(processRole) > 0 && processRole == typeutil.QueryCoordRole {
+		return s.GetQcMetrics(ctx, in)
+	} else if len(processRole) > 0 && processRole == typeutil.DataCoordRole {
+		return s.GetDcMetrics(ctx, in)
 	}
 
 	identifierMap := make(map[string]int)
@@ -1052,7 +1061,19 @@ func (s *mixCoordImpl) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	return s.datacoordServer.AllocSegment(ctx, req)
 }
 
+func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	return s.datacoordServer.NotifyDropPartition(ctx, channel, partitionIDs)
+}
+
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
+}
+
+func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	return s.rootcoordServer.GetQuotaMetrics(ctx, req)
+}
+
+func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
+	return s.queryCoordServer.ListLoadedSegments(ctx, req)
 }

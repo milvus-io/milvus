@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -122,10 +123,11 @@ func (s *catchupScanner) consumeWithScanner(ctx context.Context, scanner walimpl
 				// the msgv1 will be read after all msgv0 is consumed as soon as possible.
 				// so the last confirm is set to the first msgv0 message for all old version message is ok.
 				var err error
+				messageID := msg.MessageID()
 				msg, err = newOldVersionImmutableMessage(ctx, s.innerWAL.Channel().Name, s.lastConfirmedMessageIDForOldVersion, msg)
 				if errors.Is(err, vchantempstore.ErrNotFound) {
 					// Skip the message's vchannel is not found in the vchannel temp store.
-					s.logger.Info("skip the old version message because vchannel not found", zap.Stringer("messageID", msg.MessageID()))
+					s.logger.Info("skip the old version message because vchannel not found", zap.Stringer("messageID", messageID))
 					continue
 				}
 				if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
@@ -178,9 +180,14 @@ func (s *catchupScanner) createReaderWithBackoff(ctx context.Context, deliverPol
 	})
 	backoffTimer.EnableBackoff()
 	for {
+		bufSize := paramtable.Get().StreamingCfg.WALReadAheadBufferLength.GetAsInt()
+		if bufSize < 0 {
+			bufSize = 0
+		}
 		innerScanner, err := s.innerWAL.Read(ctx, walimpls.ReadOption{
-			Name:          s.scannerName,
-			DeliverPolicy: deliverPolicy,
+			Name:                s.scannerName,
+			DeliverPolicy:       deliverPolicy,
+			ReadAheadBufferSize: bufSize,
 		})
 		if err == nil {
 			return innerScanner, nil

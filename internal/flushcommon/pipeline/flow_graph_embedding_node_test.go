@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -66,9 +67,13 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 		}},
 	}
 
+	metaCache := metacache.NewMockMetaCache(t)
+	metaCache.EXPECT().Schema().Return(collSchema)
+
 	t.Run("normal case", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", collSchema)
+		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Free()
 
 		var output []Msg
 		assert.NotPanics(t, func() {
@@ -108,8 +113,9 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	})
 
 	t.Run("with close msg", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", collSchema)
+		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Free()
 
 		var output []Msg
 
@@ -125,8 +131,9 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	})
 
 	t.Run("prepare insert failed", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", collSchema)
+		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Free()
 
 		assert.Panics(t, func() {
 			node.Operate([]Msg{
@@ -146,8 +153,9 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	})
 
 	t.Run("embedding failed", func(t *testing.T) {
-		node, err := newEmbeddingNode("test-channel", collSchema)
+		node, err := newEmbeddingNode("test-channel", metaCache)
 		assert.NoError(t, err)
+		defer node.Free()
 
 		node.functionRunners[0].GetSchema().Type = 0
 		assert.Panics(t, func() {

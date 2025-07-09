@@ -18,15 +18,16 @@ package task
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	mock "github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	taskcommon "github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	mock "github.com/stretchr/testify/mock"
 )
 
 func init() {
@@ -40,6 +41,7 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task := NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(1)
 	task.EXPECT().GetTaskState().Return(taskcommon.Init)
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, len(scheduler.(*globalTaskScheduler).pendingTasks.TaskIDs()))
@@ -49,6 +51,7 @@ func TestGlobalScheduler_Enqueue(t *testing.T) {
 	task = NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(2)
 	task.EXPECT().GetTaskState().Return(taskcommon.InProgress)
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	scheduler.Enqueue(task)
 	assert.Equal(t, 1, scheduler.(*globalTaskScheduler).runningTasks.Len())
@@ -63,6 +66,7 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	task := NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(1)
 	task.EXPECT().GetTaskState().Return(taskcommon.Init)
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	task.EXPECT().DropTaskOnWorker(mock.Anything).Return()
 	scheduler.Enqueue(task)
@@ -73,6 +77,7 @@ func TestGlobalScheduler_AbortAndRemoveTask(t *testing.T) {
 	task = NewMockTask(t)
 	task.EXPECT().GetTaskID().Return(2)
 	task.EXPECT().GetTaskState().Return(taskcommon.InProgress)
+	task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
 	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
 	task.EXPECT().DropTaskOnWorker(mock.Anything).Return()
 	scheduler.Enqueue(task)
@@ -87,12 +92,10 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	nodeID := scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     30,
 			AvailableSlots: 30,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     30,
 			AvailableSlots: 30,
 		},
 	}, 1)
@@ -101,12 +104,10 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     30,
 			AvailableSlots: 20,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     30,
 			AvailableSlots: 30,
 		},
 	}, 100)
@@ -115,12 +116,10 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 	nodeID = scheduler.pickNode(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     30,
 			AvailableSlots: 0,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     30,
 			AvailableSlots: 0,
 		},
 	}, 1)
@@ -132,23 +131,20 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
 		1: {
 			NodeID:         1,
-			TotalSlots:     100,
 			AvailableSlots: 100,
 		},
 		2: {
 			NodeID:         2,
-			TotalSlots:     100,
 			AvailableSlots: 100,
 		},
-	})
+	}).Maybe()
 
 	newTask := func() *MockTask {
 		task := NewMockTask(t)
-		task.EXPECT().GetTaskID().Return(1)
-		task.EXPECT().GetTaskType().Return(taskcommon.Compaction)
-		task.EXPECT().GetTaskState().Return(taskcommon.Init)
-		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return()
-		task.EXPECT().GetTaskSlot().Return(1)
+		task.EXPECT().GetTaskID().Return(1).Maybe()
+		task.EXPECT().GetTaskType().Return(taskcommon.Compaction).Maybe()
+		task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+		task.EXPECT().GetTaskSlot().Return(1).Maybe()
 		return task
 	}
 
@@ -158,12 +154,20 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		defer scheduler.Stop()
 
 		task := newTask()
+		var stateCounter atomic.Int32
+
+		// Set initial state
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			counter := stateCounter.Load()
+			if counter == 0 {
+				return taskcommon.Init
+			}
+			return taskcommon.Retry
+		}).Maybe()
+
 		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
-			task.ExpectedCalls = lo.Filter(task.ExpectedCalls, func(call *mock.Call, _ int) bool {
-				return call.Method != "GetTaskState"
-			})
-			task.EXPECT().GetTaskState().Return(taskcommon.Retry)
-		})
+			stateCounter.Store(1) // Mark that CreateTaskOnWorker was called
+		}).Maybe()
 
 		scheduler.Enqueue(task)
 		assert.Eventually(t, func() bool {
@@ -181,24 +185,33 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		defer scheduler.Stop()
 
 		task := newTask()
+		var stateCounter atomic.Int32
+
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			counter := stateCounter.Load()
+			switch counter {
+			case 0:
+				return taskcommon.Init
+			case 1:
+				return taskcommon.InProgress
+			default:
+				return taskcommon.Retry
+			}
+		}).Maybe()
+
 		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
-			task.ExpectedCalls = lo.Filter(task.ExpectedCalls, func(call *mock.Call, _ int) bool {
-				return call.Method != "GetTaskState"
-			})
-			task.EXPECT().GetTaskState().Return(taskcommon.InProgress)
-		})
+			stateCounter.Store(1) // CreateTaskOnWorker called
+		}).Maybe()
+
 		task.EXPECT().QueryTaskOnWorker(mock.Anything).Run(func(cluster session.Cluster) {
-			task.ExpectedCalls = lo.Filter(task.ExpectedCalls, func(call *mock.Call, _ int) bool {
-				return call.Method != "GetTaskState"
-			})
-			task.EXPECT().GetTaskState().Return(taskcommon.Retry)
-		})
+			stateCounter.Store(2) // QueryTaskOnWorker called
+		}).Maybe()
 
 		scheduler.Enqueue(task)
 		assert.Eventually(t, func() bool {
 			s := scheduler.(*globalTaskScheduler)
-			s.mu.RLock(task.GetTaskID())
-			defer s.mu.RUnlock(task.GetTaskID())
+			s.mu.RLock(1)
+			defer s.mu.RUnlock(1)
 			return task.GetTaskState() == taskcommon.Retry &&
 				s.runningTasks.Len() == 0 && len(s.pendingTasks.TaskIDs()) == 1
 		}, 10*time.Second, 10*time.Millisecond)
@@ -210,19 +223,31 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 		defer scheduler.Stop()
 
 		task := newTask()
+		var stateCounter atomic.Int32
+
+		task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+			counter := stateCounter.Load()
+			switch counter {
+			case 0:
+				return taskcommon.Init
+			case 1:
+				return taskcommon.InProgress
+			default:
+				return taskcommon.Finished
+			}
+		}).Maybe()
+
 		task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).Run(func(nodeID int64, cluster session.Cluster) {
-			task.ExpectedCalls = lo.Filter(task.ExpectedCalls, func(call *mock.Call, _ int) bool {
-				return call.Method != "GetTaskState"
-			})
-			task.EXPECT().GetTaskState().Return(taskcommon.InProgress)
-		})
+			stateCounter.Store(1) // CreateTaskOnWorker called
+		}).Maybe()
+
 		task.EXPECT().QueryTaskOnWorker(mock.Anything).Run(func(cluster session.Cluster) {
-			task.ExpectedCalls = lo.Filter(task.ExpectedCalls, func(call *mock.Call, _ int) bool {
-				return call.Method != "GetTaskState"
-			})
-			task.EXPECT().GetTaskState().Return(taskcommon.Finished)
-		})
-		task.EXPECT().DropTaskOnWorker(mock.Anything).Return()
+			stateCounter.Store(2) // QueryTaskOnWorker called
+		}).Maybe()
+
+		task.EXPECT().DropTaskOnWorker(mock.Anything).Run(func(cluster session.Cluster) {
+			stateCounter.Store(3) // DropTaskOnWorker called
+		}).Maybe()
 
 		scheduler.Enqueue(task)
 		assert.Eventually(t, func() bool {

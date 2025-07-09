@@ -31,6 +31,16 @@ namespace exec {
 
 namespace {
 
+template <typename T, typename U>
+decltype(auto)
+safe_mod(T a, U b) {
+    if constexpr (std::is_floating_point_v<T> || std::is_floating_point_v<U>) {
+        return std::fmod(a, b);
+    } else {
+        return a % b;
+    }
+}
+
 template <proto::plan::OpType cmp_op>
 struct CmpOpHelper {
     using op = void;

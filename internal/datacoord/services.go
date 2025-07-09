@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -44,9 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -542,7 +539,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
 			if err != nil || targetID != nodeID {
 				err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-				log.Warn("failed to get latest wal allocated", zap.Error(err))
+				log.Warn("failed to get latest wal allocated", zap.Int64("nodeID", nodeID), zap.Int64("channel nodeID", targetID), zap.Error(err))
 				return merr.Status(err), nil
 			}
 		} else if !s.channelManager.Match(nodeID, channelName) {
@@ -1030,6 +1027,17 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		resp.Status = merr.Status(merr.WrapErrChannelNotAvailable(req.GetVchannel(), "start position is nil"))
 		return resp, nil
 	}
+	segmentsNotCreatedByStreaming := make([]*datapb.SegmentNotCreatedByStreaming, 0)
+	for _, segmentID := range channelInfo.GetUnflushedSegmentIds() {
+		segment := s.meta.GetSegment(ctx, segmentID)
+		if segment != nil && !segment.IsCreatedByStreaming {
+			segmentsNotCreatedByStreaming = append(segmentsNotCreatedByStreaming, &datapb.SegmentNotCreatedByStreaming{
+				CollectionId: segment.CollectionID,
+				PartitionId:  segment.PartitionID,
+				SegmentId:    segmentID,
+			})
+		}
+	}
 
 	log.Info("datacoord get channel recovery info",
 		zap.String("channel", channelInfo.GetChannelName()),
@@ -1038,10 +1046,12 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 		zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 		zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
+		zap.Int("# of segments not created by streaming", len(segmentsNotCreatedByStreaming)),
 	)
 
 	resp.Info = channelInfo
 	resp.Schema = collection.Schema
+	resp.SegmentsNotCreatedByStreaming = segmentsNotCreatedByStreaming
 	return resp, nil
 }
 
@@ -1490,7 +1500,14 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	// For compatibility with old client
 	if req.GetVChannel() != "" && req.GetPosition() != nil {
 		channel := req.GetVChannel()
-		if !s.channelManager.Match(nodeID, channel) {
+		if streamingutil.IsStreamingServiceEnabled() {
+			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
+			if err != nil || targetID != nodeID {
+				err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
+				log.Warn("failed to get latest wal allocated", zap.Error(err))
+				return merr.Status(err), nil
+			}
+		} else if !s.channelManager.Match(nodeID, channel) {
 			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 			return merr.Status(merr.WrapErrChannelNotFound(channel, fmt.Sprintf("from node %d", nodeID))), nil
 		}
@@ -1504,11 +1521,19 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 	checkpoints := lo.Filter(req.GetChannelCheckpoints(), func(cp *msgpb.MsgPosition, _ int) bool {
 		channel := cp.GetChannelName()
-		matched := s.channelManager.Match(nodeID, channel)
-		if !matched {
+		if streamingutil.IsStreamingServiceEnabled() {
+			targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channel)
+			if err != nil || targetID != nodeID {
+				err := merr.WrapErrChannelNotFound(channel, fmt.Sprintf("for node %d", nodeID))
+				log.Warn("failed to get latest wal allocated", zap.Error(err))
+				return false
+			}
+			return true
+		} else if !s.channelManager.Match(nodeID, channel) {
 			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+			return false
 		}
-		return matched
+		return true
 	})
 
 	err := s.meta.UpdateChannelCheckpoints(ctx, checkpoints)
@@ -1529,6 +1554,11 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 
 // ReportDataNodeTtMsgs gets timetick messages from datanode.
 func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
+	if streamingutil.IsStreamingServiceEnabled() {
+		// milvus with streaming service will not handle timetick anymore.
+		return merr.Success(), nil
+	}
+
 	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -1768,59 +1798,12 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
 	if isBackup {
-		files = make([]*internalpb.ImportFile, 0)
-		pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
-		defer pool.Release()
-		futures := make([]*conc.Future[struct{}], 0, len(in.GetFiles()))
-		mu := &sync.Mutex{}
-		for _, importFile := range in.GetFiles() {
-			importFile := importFile
-			futures = append(futures, pool.Submit(func() (struct{}, error) {
-				segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
-				if err != nil {
-					return struct{}{}, err
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				files = append(files, segmentPrefixes...)
-				return struct{}{}, nil
-			}))
-		}
-		err = conc.AwaitAll(futures...)
+		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err)))
+			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-
-		files = lo.Filter(files, func(file *internalpb.ImportFile, _ int) bool {
-			return len(file.GetPaths()) > 0
-		})
-		if len(files) == 0 {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
-			return resp, nil
-		}
-		if len(files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
-				paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(files))))
-			return resp, nil
-		}
-		log.Info("list binlogs prefixes for import", zap.Int("num", len(files)), zap.Any("binlog_prefixes", files))
 	}
-
-	// The import task does not need to be controlled for the time being, and additional development is required later.
-	// Here is a comment, because the current importv2 communicates through messages and needs to ensure idempotence.
-	// Adding this part of the logic will cause importv2 to retry infinitely until the previous import task is completed.
-
-	// Check if the number of jobs exceeds the limit.
-	// maxNum := paramtable.Get().DataCoordCfg.MaxImportJobNum.GetAsInt()
-	// executingNum := s.importMeta.CountJobBy(ctx, WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed))
-	// if executingNum >= maxNum {
-	// 	resp.Status = merr.Status(merr.WrapErrImportFailed(
-	// 		fmt.Sprintf("The number of jobs has reached the limit, please try again later. " +
-	// 			"If your request is set to only import a single file, " +
-	// 			"please consider importing multiple files in one request for better efficiency.")))
-	// 	return resp, nil
-	// }
 
 	// Allocate file ids.
 	idStart, _, err := s.allocator.AllocN(int64(len(files)) + 1)
@@ -1908,7 +1891,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
 		return resp, nil
 	}
-	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta, s.statsInspector)
+	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -1917,7 +1900,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 	resp.CompleteTime = job.GetCompleteTime()
 	resp.ImportedRows = importedRows
 	resp.TotalRows = totalRows
-	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
+	resp.TaskProgresses = GetTaskProgresses(ctx, jobID, s.importMeta, s.meta)
 	log.Info("GetImportProgress done", zap.String("jobState", job.GetState().String()), zap.Any("resp", resp))
 	return resp, nil
 }
@@ -1945,7 +1928,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta, s.statsInspector)
+		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
@@ -1953,4 +1936,17 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
 	}
 	return resp, nil
+}
+
+// NotifyDropPartition notifies DataCoord to drop segments of specified partition
+func (s *Server) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		return err
+	}
+	log.Ctx(ctx).Info("receive NotifyDropPartition request",
+		zap.String("channelname", channel),
+		zap.Any("partitionID", partitionIDs))
+	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
+	// release all segments of the partition.
+	return s.meta.DropSegmentsOfPartition(ctx, partitionIDs)
 }

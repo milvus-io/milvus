@@ -95,10 +95,10 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &importTask{
-			alloc: alloc,
-			meta:  &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      alloc,
+			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -139,10 +139,10 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &importTask{
-			alloc: alloc,
-			meta:  &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      alloc,
+			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -184,10 +184,10 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &importTask{
-			alloc: alloc,
-			meta:  &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      alloc,
+			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -234,10 +234,10 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Pending,
 		}
 		task := &importTask{
-			alloc: alloc,
-			meta:  &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      alloc,
+			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -270,10 +270,10 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
 		task := &importTask{
-			alloc: nil,
-			meta:  &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      nil,
+			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -322,8 +322,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments:    NewSegmentsInfo(),
 			},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -363,8 +363,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments:    NewSegmentsInfo(),
 			},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -431,8 +431,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments:    NewSegmentsInfo(),
 			},
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -496,9 +496,9 @@ func TestImportTask_DropTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Completed,
 		}
 		task := &importTask{
-			alloc: nil,
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      nil,
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)
@@ -530,9 +530,9 @@ func TestImportTask_DropTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_Completed,
 		}
 		task := &importTask{
-			alloc: nil,
-			imeta: im,
-			tr:    timerecord.NewTimeRecorder(""),
+			alloc:      nil,
+			importMeta: im,
+			tr:         timerecord.NewTimeRecorder(""),
 		}
 		task.task.Store(taskProto)
 		err = im.AddTask(context.TODO(), task)

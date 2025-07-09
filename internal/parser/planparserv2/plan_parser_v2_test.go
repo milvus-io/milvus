@@ -155,6 +155,10 @@ func TestExpr_Call(t *testing.T) {
 	assert.Equal(t, int64(2), expr.GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
 	assert.Equal(t, false, expr.GetCallExpr().GetFunctionParameters()[1].GetValueExpr().GetValue().GetBoolVal())
 	assert.Equal(t, int64(20), expr.GetCallExpr().GetFunctionParameters()[2].GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
+
+	expr, err = ParseExpr(helper, "ceil(pow(1.5*Int32Field,0.58))", nil)
+	assert.Error(t, err)
+	assert.Nil(t, expr)
 }
 
 func TestExpr_Compare(t *testing.T) {
@@ -174,6 +178,23 @@ func TestExpr_Compare(t *testing.T) {
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
+	}
+
+	exprStrs = []string{
+		`BoolField == false + true`,
+		`StringField == "1" + "2"`,
+		`BoolField == false - true`,
+		`StringField == "1" - "2"`,
+		`BoolField == false * true`,
+		`StringField == "1" * "2"`,
+		`BoolField == false / true`,
+		`StringField == "1" / "2"`,
+		`BoolField == false % true`,
+		`StringField == "1" % "2"`,
+	}
+
+	for _, exprStr := range exprStrs {
+		assertInvalidExpr(t, helper, exprStr)
 	}
 }
 
@@ -422,11 +443,8 @@ func TestExpr_castValue(t *testing.T) {
 
 	exprStr := `Int64Field + 1.1 == 2.1`
 	expr, err := ParseExpr(helper, exprStr, nil)
-	assert.NoError(t, err, exprStr)
-	assert.NotNil(t, expr, exprStr)
-	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr())
-	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetRightOperand().GetFloatVal())
-	assert.NotNil(t, expr.GetBinaryArithOpEvalRangeExpr().GetValue().GetFloatVal())
+	assert.Error(t, err, exprStr)
+	assert.Nil(t, expr, exprStr)
 
 	exprStr = `FloatField +1 == 2`
 	expr, err = ParseExpr(helper, exprStr, nil)
@@ -458,6 +476,8 @@ func TestExpr_BinaryArith(t *testing.T) {
 		`ArrayField[0] % 19 >= 20`,
 		`JSONField + 15 == 16`,
 		`15 + JSONField == 16`,
+		`Int64Field + (2**3) > 0`,
+		`1 + FloatField > 100`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -467,6 +487,15 @@ func TestExpr_BinaryArith(t *testing.T) {
 	unsupported := []string{
 		`ArrayField + 15 == 16`,
 		`15 + ArrayField == 16`,
+		`Int64Field + 1.1 = 2.1`,
+		`Int64Field == 2.1`,
+		`Int64Field >= 2.1`,
+		`3 > Int64Field >= 2.1`,
+		`Int64Field + (2**-1) > 0`,
+		`Int64Field / 0 == 1`,
+		`Int64Field % 0 == 1`,
+		`FloatField / 0 == 1`,
+		`FloatField % 0 == 1`,
 	}
 	for _, exprStr := range unsupported {
 		assertInvalidExpr(t, helper, exprStr)
@@ -1520,7 +1549,7 @@ func TestRandomSampleWithFilter(t *testing.T) {
 		`VarCharField IS NOT NULL && random_sample(0.01)`,
 		`11.0 < DoubleField < 12.0 && random_sample(0.01)`,
 		`1 < JSONField < 3 && random_sample(0.01)`,
-		`Int64Field + 1.1 == 2.1 && random_sample(0.01)`,
+		`Int64Field + 1 == 2 && random_sample(0.01)`,
 		`Int64Field % 10 != 9 && random_sample(0.01)`,
 		`A * 15 > 16 && random_sample(0.01)`,
 		`(Int16Field - 3 == 4) and (Int32Field * 5 != 6) && random_sample(0.01)`,

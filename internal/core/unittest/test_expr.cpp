@@ -161,7 +161,7 @@ TEST_P(ExprTest, Range) {
     schema->AddDebugField("fakevec", data_type, 16, metric_type);
     schema->AddDebugField("age", DataType::INT32);
     auto plan =
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     Assert(plan->tag2field_.at("$0") ==
            schema->get_field_id(FieldName("fakevec")));
 }
@@ -212,7 +212,7 @@ TEST_P(ExprTest, InvalidRange) {
     schema->AddDebugField("fakevec", data_type, 16, metric_type);
     schema->AddDebugField("age", DataType::INT32);
     ASSERT_ANY_THROW(
-        CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size()));
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size()));
 }
 
 TEST_P(ExprTest, ShowExecutor) {
@@ -400,7 +400,7 @@ TEST_P(ExprTest, TestRange) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -780,7 +780,7 @@ TEST_P(ExprTest, TestRangeNullable) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -2229,7 +2229,7 @@ TEST_P(ExprTest, TestTerm) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -2379,7 +2379,7 @@ TEST_P(ExprTest, TestTermNullable) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -2505,7 +2505,7 @@ TEST_P(ExprTest, TestCall) {
     for (auto& [raw_plan, ref_func] : test_cases) {
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -2601,7 +2601,7 @@ TEST_P(ExprTest, TestCall) {
     for (auto& raw_plan : incorrect_test_cases) {
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         EXPECT_ANY_THROW(
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size()));
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size()));
     }
 }
 
@@ -2674,7 +2674,7 @@ TEST_P(ExprTest, TestCompare) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -2828,7 +2828,7 @@ TEST_P(ExprTest, TestCompareNullable) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -2982,7 +2982,7 @@ TEST_P(ExprTest, TestCompareNullable2) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -3104,7 +3104,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndex) {
         auto binary_plan =
             translate_text_plan_with_metric_type(dsl_string.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
         // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -3266,7 +3266,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable) {
         auto binary_plan =
             translate_text_plan_with_metric_type(dsl_string.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
         // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -3428,7 +3428,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexNullable2) {
         auto binary_plan =
             translate_text_plan_with_metric_type(dsl_string.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
         // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -3484,7 +3484,7 @@ TEST_P(ExprTest, test_term_pk_with_sorted) {
     schema->set_primary_field_id(int64_fid);
 
     auto seg = CreateSealedSegment(
-        schema, nullptr, 1, SegcoreConfig::default_config(), false, true);
+        schema, nullptr, 1, SegcoreConfig::default_config(), true);
     int N = 100000;
     auto raw_data = DataGen(schema, N);
     LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
@@ -4095,6 +4095,77 @@ TEST_P(ExprTest, TestCompareExprNullable2) {
     plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     std::cout << "end compare test" << std::endl;
+}
+
+TEST_P(ExprTest, TestBinaryArithOpEvalRangeExpr_forbigint_mod) {
+    // test (bigint mod 10 == 0)
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    schema->set_primary_field_id(int64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    size_t N = 1000;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    {
+        // insert pk fid
+        auto field_meta = schema->operator[](int64_fid);
+        std::vector<int64_t> data(N);
+        for (int i = 0; i < N; i++) {
+            data[i] = i;
+        }
+        InsertCol(insert_data.get(), data, field_meta, false);
+    }
+
+    BitsetType expect(N, false);
+    {
+        auto field_meta = schema->operator[](json_fid);
+        std::vector<std::string> data(N);
+
+        auto start = 1ULL << 54;
+        for (int i = 0; i < N; i++) {
+            data[i] = R"({"meta":)" + std::to_string(start + i) + "}";
+            std::cout << "data[i]: " << data[i] << std::endl;
+            if ((start + i) % 10 == 0) {
+                expect.set(i);
+            }
+        }
+        InsertCol(insert_data.get(), data, field_meta, false);
+    }
+
+    GeneratedData raw_data;
+    raw_data.schema_ = schema;
+    raw_data.raw_ = insert_data.release();
+    raw_data.raw_->set_num_rows(N);
+    for (int i = 0; i < N; ++i) {
+        raw_data.row_ids_.push_back(i);
+        raw_data.timestamps_.push_back(i);
+    }
+
+    LoadGeneratedDataIntoSegment(raw_data, seg.get(), true);
+
+    query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+
+    proto::plan::GenericValue val1;
+    val1.set_int64_val(10);
+    proto::plan::GenericValue val2;
+    val2.set_int64_val(0);
+    auto expr = std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+        expr::ColumnInfo(json_fid, DataType::JSON, {"meta"}),
+        proto::plan::OpType::Equal,
+        proto::plan::ArithOpType::Mod,
+        val2,
+        val1);
+
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    auto final = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
+    EXPECT_EQ(final.size(), expect.size())
+        << "final size: " << final.size() << " expect size: " << expect.size();
+    for (auto i = 0; i < final.size(); i++) {
+        EXPECT_EQ(final[i], expect[i])
+            << "i: " << i << " final: " << final[i] << " expect: " << expect[i];
+    }
 }
 
 TEST_P(ExprTest, TestMutiInConvert) {
@@ -6081,7 +6152,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
         auto binary_plan =
             translate_text_plan_with_metric_type(dsl_string.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
         //         std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -6238,7 +6309,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
         auto binary_plan =
             translate_text_plan_with_metric_type(dsl_string.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
         //         std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -6395,7 +6466,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
         auto binary_plan =
             translate_text_plan_with_metric_type(dsl_string.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
         //         std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -7130,7 +7201,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRange) {
         // dsl_string.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -8110,7 +8181,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeNullable) {
         // dsl_string.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_with_metric_type(raw_plan);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -8989,7 +9060,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
         raw_plan.replace(loc, 5, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -9934,7 +10005,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONNullable) {
         raw_plan.replace(loc, 5, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -10783,7 +10854,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
 
         auto binary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -11541,7 +11612,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeWithScalarSortIndexNullable) {
 
         auto binary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, binary_plan.data(), binary_plan.size());
+            schema, binary_plan.data(), binary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -11779,7 +11850,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSON) {
 
         auto unary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, unary_plan.data(), unary_plan.size());
+            schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -12039,7 +12110,7 @@ TEST_P(ExprTest, TestUnaryRangeWithJSONNullable) {
 
         auto unary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, unary_plan.data(), unary_plan.size());
+            schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -12176,7 +12247,7 @@ TEST_P(ExprTest, TestNullExprWithJSON) {
         raw_plan.replace(loc, 4, clause);
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
         BitsetType final;
         final = ExecuteQueryExpr(
             plan->plan_node_->plannodes_->sources()[0]->sources()[0],
@@ -12345,7 +12416,7 @@ TEST_P(ExprTest, TestTermWithJSON) {
 
         auto unary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, unary_plan.data(), unary_plan.size());
+            schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -12578,7 +12649,7 @@ TEST_P(ExprTest, TestTermWithJSONNullable) {
 
         auto unary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, unary_plan.data(), unary_plan.size());
+            schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -12763,7 +12834,7 @@ TEST_P(ExprTest, TestExistsWithJSON) {
 
         auto unary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, unary_plan.data(), unary_plan.size());
+            schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -12991,7 +13062,7 @@ TEST_P(ExprTest, TestExistsWithJSONNullable) {
 
         auto unary_plan = translate_text_plan_with_metric_type(expr.str());
         auto plan = CreateSearchPlanByExpr(
-            *schema, unary_plan.data(), unary_plan.size());
+            schema, unary_plan.data(), unary_plan.size());
 
         BitsetType final;
         final = ExecuteQueryExpr(
@@ -13795,7 +13866,7 @@ TEST_P(ExprTest, PraseJsonContainsExpr) {
         schema->AddDebugField("fakevec", data_type, 16, metric_type);
         schema->AddDebugField("json", DataType::JSON);
         auto plan =
-            CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
     }
 }
 
@@ -16480,12 +16551,16 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, this->json_path}};
+    // load_index_info.index = std::move(json_index);
+    load_index_info.index_params = {
+        {JSON_PATH, this->json_path},
+        {JSON_CAST_TYPE, this->cast_type.ToString()}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test_cache_index", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16614,12 +16689,14 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
 
     json_index->BuildWithFieldData({json_field, json_field2});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16717,12 +16794,14 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, json_index_path}};
+    load_index_info.index_params = {{JSON_PATH, json_index_path},
+                                    {JSON_CAST_TYPE, "DOUBLE"}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -16895,12 +16974,14 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
 
     json_index->BuildWithFieldData({json_field});
     json_index->finish();
-    json_index->create_reader();
+    json_index->create_reader(milvus::index::SetBitsetSealed);
 
     load_index_info.field_id = json_fid.get();
     load_index_info.field_type = DataType::JSON;
-    load_index_info.index = std::move(json_index);
-    load_index_info.index_params = {{JSON_PATH, "/a"}};
+    load_index_info.index_params = {{JSON_PATH, "/a"},
+                                    {JSON_CAST_TYPE, GetParam().ToString()}};
+    load_index_info.cache_index =
+        CreateTestCacheIndex("test", std::move(json_index));
     seg->LoadIndex(load_index_info);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()

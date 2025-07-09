@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -29,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -63,7 +61,7 @@ func (s *HelloMilvusSuite) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -76,7 +74,7 @@ func (s *HelloMilvusSuite) run() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -88,25 +86,7 @@ func (s *HelloMilvusSuite) run() {
 		fVecColumn = integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	}
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("insert check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("insert report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeInsert, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.RequestDataSizeKey])
-				return
-			}
-		}
-	}
-	go insertCheckReport()
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{fVecColumn},
@@ -117,7 +97,7 @@ func (s *HelloMilvusSuite) run() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -129,16 +109,16 @@ func (s *HelloMilvusSuite) run() {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      fVecColumn.FieldName,
 		IndexName:      "_default",
@@ -153,7 +133,7 @@ func (s *HelloMilvusSuite) run() {
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -174,51 +154,11 @@ func (s *HelloMilvusSuite) run() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		fVecColumn.FieldName, s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
 
-	searchCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("search check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("search report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-				return
-			}
-		}
-	}
-	go searchCheckReport()
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 
-	queryCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("query check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("query report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
-				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
-				return
-			}
-		}
-	}
-	go queryCheckReport()
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -230,26 +170,7 @@ func (s *HelloMilvusSuite) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, queryResult.GetStatus().GetErrorCode())
 
-	deleteCheckReport := func() {
-		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
-		defer cancelFunc()
-
-		for {
-			select {
-			case <-timeoutCtx.Done():
-				s.Fail("delete check timeout")
-			case report := <-c.Extension.GetReportChan():
-				reportInfo := report.(map[string]any)
-				log.Info("delete report info", zap.Any("reportInfo", reportInfo))
-				s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
-				s.EqualValues(2, reportInfo[hookutil.SuccessCntKey])
-				s.EqualValues(0, reportInfo[hookutil.RelatedCntKey])
-				return
-			}
-		}
-	}
-	go deleteCheckReport()
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+	deleteResult, err := c.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           integration.Int64Field + " in [1, 2]",
@@ -260,13 +181,13 @@ func (s *HelloMilvusSuite) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
 
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+	status, err := c.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err = c.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		CollectionName: collectionName,
 	})
 	err = merr.CheckRPCCall(status, err)

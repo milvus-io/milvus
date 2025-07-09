@@ -39,8 +39,8 @@ const (
 	CagraGraphDegree = "graph_degree"
 	CagraBuildAlgo   = "build_algo"
 
-	CargaBuildAlgoIVFPQ     = "IVF_PQ"
-	CargaBuildAlgoNNDESCENT = "NN_DESCENT"
+	CagraBuildAlgoIVFPQ     = "IVF_PQ"
+	CagraBuildAlgoNNDESCENT = "NN_DESCENT"
 
 	// Sparse Index Param
 	SparseDropRatioBuild = "drop_ratio_build"
@@ -52,10 +52,10 @@ const (
 )
 
 var (
-	FloatVectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
-	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}                                                     // const
-	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE} // const
-	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
+	FloatVectorMetrics       = []string{metric.L2, metric.IP, metric.COSINE}                                                          // const
+	SparseFloatVectorMetrics = []string{metric.IP, metric.BM25}                                                                       // const
+	BinaryVectorMetrics      = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD} // const
+	IntVectorMetrics         = []string{metric.L2, metric.IP, metric.COSINE}                                                          // const
 )
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
@@ -64,7 +64,7 @@ var (
 	BinIvfMetrics             = []string{metric.HAMMING, metric.JACCARD}                                             // const
 	HnswMetrics               = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
 	RaftMetrics               = []string{metric.L2, metric.IP}
-	CagraBuildAlgoTypes       = []string{CargaBuildAlgoIVFPQ, CargaBuildAlgoNNDESCENT}
+	CagraBuildAlgoTypes       = []string{CagraBuildAlgoIVFPQ, CagraBuildAlgoNNDESCENT}
 	supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}              // const
 	supportSubQuantizer       = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
 	SparseMetrics             = []string{metric.IP, metric.BM25}                                 // const

@@ -70,6 +70,7 @@ func TestValidateCollectionName(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		"abc ",
 	}
 
 	for _, name := range invalidNames {
@@ -978,6 +979,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -1002,6 +1004,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -1026,6 +1029,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -1057,6 +1061,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -1082,6 +1087,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)
@@ -1107,6 +1113,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 					ChannelName: "channel-1",
 					NodeIds:     []int64{1, 2, 3},
 					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+					Serviceable: []bool{true, true, true},
 				},
 			},
 		}, nil)

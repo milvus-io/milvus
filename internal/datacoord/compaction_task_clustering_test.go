@@ -589,7 +589,29 @@ func (s *ClusteringCompactionTaskSuite) TestQueryTaskOnWorker() {
 	})
 }
 
-func (s *ClusteringCompactionTaskSuite) TestProcessExecutingState() {
+func (s *ClusteringCompactionTaskSuite) TestProcess() {
+	s.Run("test process states", func() {
+		testCases := []struct {
+			state         datapb.CompactionTaskState
+			processResult bool
+		}{
+			{state: datapb.CompactionTaskState_unknown, processResult: false},
+			{state: datapb.CompactionTaskState_pipelining, processResult: false},
+			{state: datapb.CompactionTaskState_executing, processResult: false},
+			{state: datapb.CompactionTaskState_failed, processResult: true},
+			{state: datapb.CompactionTaskState_timeout, processResult: true},
+		}
+
+		for _, tc := range testCases {
+			task := s.generateBasicTask(false)
+			task.updateAndSaveTaskMeta(setState(tc.state))
+			res := task.Process()
+			s.Equal(tc.processResult, res)
+		}
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 	task := s.generateBasicTask(false)
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
@@ -973,8 +995,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 	})
 
 	s.Run("not enable stats task", func() {
-		Params.Save(Params.DataCoordCfg.EnableStatsTask.Key, "false")
-		defer Params.Reset(Params.DataCoordCfg.EnableStatsTask.Key)
+		Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic), setTmpSegments(task.GetTaskProto().GetResultSegments()), setResultSegments(nil))
 		task.maxRetryTimes = 3

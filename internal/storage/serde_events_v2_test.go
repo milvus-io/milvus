@@ -43,7 +43,7 @@ func TestPackedSerde(t *testing.T) {
 			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
 			assert.NoError(t, err)
 
-			group := storagecommon.ColumnGroup{}
+			group := storagecommon.ColumnGroup{GroupID: storagecommon.DefaultShortColumnGroupID}
 			for i := 0; i < len(schema.Fields); i++ {
 				group.Columns = append(group.Columns, i)
 			}

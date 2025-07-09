@@ -13,7 +13,6 @@ import (
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -77,7 +76,13 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	return
 }
 
-func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
+func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = fmt.Errorf("unsupported expression: %s", exprStr)
+		}
+	}()
+
 	if isEmptyExpression(exprStr) {
 		return trueLiteral
 	}
@@ -170,9 +175,6 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		return nil, err
 	}
 	// plan ok with schema, check ann field
-	if !schema.IsFieldLoaded(vectorField.GetFieldID()) {
-		return nil, merr.WrapErrParameterInvalidMsg("ann field \"%s\" not loaded", vectorFieldName)
-	}
 	fieldID := vectorField.FieldID
 	dataType := vectorField.DataType
 
