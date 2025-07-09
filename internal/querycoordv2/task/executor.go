@@ -582,6 +582,7 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 	elapsed := time.Since(startTs)
 	log.Info("drop index done", zap.Duration("elapsed", elapsed))
 }
+
 func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
 	action := task.Actions()[step].(*LeaderAction)
 	defer action.rpcReturned.Store(true)
