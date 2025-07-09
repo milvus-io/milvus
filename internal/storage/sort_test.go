@@ -114,7 +114,7 @@ func TestMergeSort(t *testing.T) {
 			return true
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, 6000, gotNumRows)
+		assert.Equal(t, 10000, gotNumRows)
 		err = rw.Close()
 		assert.NoError(t, err)
 	})
