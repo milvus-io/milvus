@@ -32,6 +32,7 @@ default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
+default_new_field_name = ct.default_new_field_name
 
 
 def external_filter_half(hits):
@@ -712,7 +713,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                        "enable_milvus_client_api": True,
                                        "pk_name": default_primary_key_field_name})[0]
         if add_field:
-            self.add_collection_field(client, collection_name, field_name="field_new", data_type=DataType.INT64,
+            self.add_collection_field(client, collection_name, field_name=default_new_field_name, data_type=DataType.INT64,
                                       nullable=True)
         for limit in [batch_size - 3, batch_size, batch_size * 2, -1]:
             if metric_type != "L2":
@@ -753,6 +754,13 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                  external_filter_func=external_filter_all,
                                  check_task=CheckTasks.check_search_iterator,
                                  check_items={"batch_size": 0, "iterate_times": 1})
+            if add_field:
+                # external filter with new field as output field
+                self.search_iterator(client, collection_name, vectors_to_search, batch_size,
+                                     search_params=search_params, limit=limit, output_fields=[default_new_field_name],
+                                     external_filter_func=external_filter_with_outputs,
+                                     check_task=CheckTasks.check_search_iterator,
+                                     check_items={"batch_size": expected_batch_size})
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
