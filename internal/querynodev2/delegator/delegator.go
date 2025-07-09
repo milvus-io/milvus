@@ -368,7 +368,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	log.Debug("Delegator search done")
+	log.Debug("Delegator search done", zap.Int("results", len(results)))
 
 	return results, nil
 }
