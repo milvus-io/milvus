@@ -279,13 +279,37 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	})
 	s.NoError(merr.CheckRPCCall(flushedSegmentsResp, err))
 	flushedSegments := flushedSegmentsResp.GetSegments()
-	log.Info("flushed segments", zap.Int64s("segments", flushedSegments))
+	segmentsInfoResp, err := c.ProxyClient.GetSegmentsInfo(ctx, &internalpb.GetSegmentsInfoRequest{
+		CollectionID: collectionID,
+		SegmentIDs:   flushedSegments,
+	})
+	s.NoError(merr.CheckRPCCall(segmentsInfoResp, err))
+	segmentsInfo := segmentsInfoResp.GetSegmentInfos()
+
+	l1Segments := lo.Filter(segmentsInfo, func(segment *internalpb.SegmentInfo, _ int) bool {
+		return segment.GetLevel() == commonpb.SegmentLevel_L1
+	})
+	l0Segments := lo.Filter(segmentsInfo, func(segment *internalpb.SegmentInfo, _ int) bool {
+		return segment.GetLevel() == commonpb.SegmentLevel_L0
+	})
+
+	l1SegmentIDs := lo.Map(l1Segments, func(segment *internalpb.SegmentInfo, _ int) int64 {
+		return segment.GetSegmentID()
+	})
+	l0SegmentIDs := lo.Map(l0Segments, func(segment *internalpb.SegmentInfo, _ int) int64 {
+		return segment.GetSegmentID()
+	})
+	s.Equal(len(flushedSegments), len(l1SegmentIDs)+len(l0SegmentIDs))
+
+	log.Info("flushed segments", zap.Int64s("segments", flushedSegments),
+		zap.Int64s("l1 segments", l1SegmentIDs),
+		zap.Int64s("l0 segments", l0SegmentIDs))
 
 	// binlog import
 	files := make([]*internalpb.ImportFile, 0)
-	for _, segmentID := range flushedSegments {
-		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
-			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
+	for _, segmentID := range l1SegmentIDs {
+		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d/%d",
+			s.Cluster.RootPath(), collectionID, partitionID, segmentID, segmentID)}})
 	}
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
@@ -324,13 +348,10 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 
 	// l0 import
 	if totalDeleteRowNum > 0 {
-		files = []*internalpb.ImportFile{
-			{
-				Paths: []string{
-					fmt.Sprintf("%s/delta_log/%d/%d/",
-						s.Cluster.RootPath(), collectionID, common.AllPartitionsID),
-				},
-			},
+		files = make([]*internalpb.ImportFile, 0)
+		for _, segmentID := range l0SegmentIDs {
+			files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/delta_log/%d/%d/%d",
+				s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
 		}
 		importResp, err = c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: collectionName,

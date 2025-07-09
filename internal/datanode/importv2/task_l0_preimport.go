@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -128,8 +127,12 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("schema", t.GetSchema()))...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	files := lo.Map(t.GetFileStats(),
+		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
+			return fileStat.GetImportFile()
+		})
 
-	fn := func() (err error) {
+	fn := func(i int, file *internalpb.ImportFile) (err error) {
 		defer func() {
 			if err != nil {
 				var reason string = err.Error()
@@ -140,42 +143,39 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
-
-		files := lo.Map(t.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
-			return fileStat.GetImportFile()
-		})
-		if len(files) != 1 {
-			err = merr.WrapErrImportFailed(
-				fmt.Sprintf("there should be one prefix for l0 import, but got %v", files))
-			return
-		}
 		pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
 		if err != nil {
 			return
 		}
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, files[0], bufferSize)
+		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize)
 		if err != nil {
 			return
 		}
 		start := time.Now()
-		err = t.readL0Stat(reader)
+		err = t.readL0Stat(reader, i)
 		if err != nil {
 			return
 		}
 		log.Info("l0 preimport done", WrapLogFields(t,
-			zap.Strings("l0 prefix", files[0].GetPaths()),
+			zap.Strings("l0 prefix", file.GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
 		return nil
 	}
 
-	f := GetExecPool().Submit(func() (any, error) {
-		err := fn()
-		return err, err
-	})
-	return []*conc.Future[any]{f}
+	futures := make([]*conc.Future[any], 0, len(files))
+	for i, file := range files {
+		i := i
+		file := file
+		f := GetExecPool().Submit(func() (any, error) {
+			err := fn(i, file)
+			return err, err
+		})
+		futures = append(futures, f)
+	}
+	return futures
 }
 
-func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader) error {
+func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, fileIdx int) error {
 	totalRows := 0
 	totalSize := 0
 	hashedStats := make(map[string]*datapb.PartitionImportStats)
@@ -204,6 +204,6 @@ func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader) error {
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
 	}
-	t.manager.Update(t.GetTaskID(), UpdateFileStat(0, stat))
+	t.manager.Update(t.GetTaskID(), UpdateFileStat(fileIdx, stat))
 	return nil
 }
