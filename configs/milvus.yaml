@@ -475,9 +475,6 @@ queryNode:
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
-      # Loading memory factor for estimating memory during loading. Defaults to 2.5.
-      # This factor is used to reserve enough memory space when loading data to prevent OOM.
-      loadingMemoryFactor: 2.5
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
