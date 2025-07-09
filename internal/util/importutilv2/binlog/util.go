@@ -114,13 +114,20 @@ func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog 
 	return binlogFields
 }
 
-func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
+func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
 	// check system fields (ts and rowID)
-	if _, ok := insertLogs[common.RowIDField]; !ok {
-		return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
-	}
-	if _, ok := insertLogs[common.TimeStampField]; !ok {
-		return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
+	if storageVersion == storage.StorageV1 {
+		if _, ok := insertLogs[common.RowIDField]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
+		}
+		if _, ok := insertLogs[common.TimeStampField]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
+		}
+	} else {
+		// storage v2
+		if _, ok := insertLogs[0]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for system fields")
+		}
 	}
 
 	// check binlog file count, must be equal for all fields
@@ -167,6 +174,14 @@ func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) (m
 			// they will be filled by AppendNullableDefaultFieldsData
 			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
 				continue
+			}
+
+			if storageVersion == storage.StorageV2 {
+				_, ok := insertLogs[0]
+				if ok {
+					// system fields and scalar fields are provided
+					continue
+				}
 			}
 
 			// primary key is required

@@ -333,7 +333,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	cm, originalInsertData := suite.createMockChunk(schema, insertBinlogs, true)
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(128, nil)
 
-	reader, err := NewReader(context.Background(), cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
+	reader, err := NewReader(context.Background(), cm, schema, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 	suite.NoError(err)
 	insertData, err := reader.Read()
 	suite.NoError(err)
@@ -530,18 +530,18 @@ func (suite *ReaderSuite) TestVerify() {
 
 	checkFunc := func() {
 		cm, _ := suite.createMockChunk(schema, insertBinlogs, false)
-		reader, err := NewReader(context.Background(), cm, schema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
+		reader, err := NewReader(context.Background(), cm, schema, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 		suite.Error(err)
 		suite.Nil(reader)
 	}
 
 	// no insert binlogs to import
-	reader, err := NewReader(context.Background(), nil, schema, []string{}, suite.tsStart, suite.tsEnd)
+	reader, err := NewReader(context.Background(), nil, schema, storage.StorageV1, []string{}, suite.tsStart, suite.tsEnd)
 	suite.Error(err)
 	suite.Nil(reader)
 
 	// too many input paths
-	reader, err = NewReader(context.Background(), nil, schema, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd)
+	reader, err = NewReader(context.Background(), nil, schema, storage.StorageV1, []string{insertPrefix, deltaPrefix, "dummy"}, suite.tsStart, suite.tsEnd)
 	suite.Error(err)
 	suite.Nil(reader)
 
@@ -694,7 +694,7 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 	checkFunc := func(targetSchema *schemapb.CollectionSchema, expectReadBinlogs map[int64][]string) {
 		cm := mockChunkFunc(sourceSchema, expectReadBinlogs)
-		reader, err := NewReader(context.Background(), cm, targetSchema, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
+		reader, err := NewReader(context.Background(), cm, targetSchema, storage.StorageV1, []string{insertPrefix, deltaPrefix}, suite.tsStart, suite.tsEnd)
 		suite.NoError(err)
 		suite.NotNil(reader)
 
