@@ -302,7 +302,7 @@ class Schema {
     }
 
     bool
-    ShallLoadFile(FieldId field_id) {
+    ShouldLoadField(FieldId field_id) {
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 

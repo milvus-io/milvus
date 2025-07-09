@@ -293,7 +293,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
             merged_in_load_list = merged_in_load_list ||
-                                  schema_->ShallLoadFile(milvus_field_ids[i]);
+                                  schema_->ShouldLoadField(milvus_field_ids[i]);
         }
 
         auto column_group_info = FieldDataInfo(column_group_id.get(),
@@ -360,7 +360,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
         auto field_data_info = FieldDataInfo(field_id.get(),
                                              num_rows,
                                              load_info.mmap_dir_path,
-                                             schema_->ShallLoadFile(field_id));
+                                             schema_->ShouldLoadField(field_id));
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
