@@ -995,8 +995,8 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 	})
 
 	s.Run("not enable stats task", func() {
-		Params.Save(Params.DataCoordCfg.EnableStatsTask.Key, "false")
-		defer Params.Reset(Params.DataCoordCfg.EnableStatsTask.Key)
+		Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic), setTmpSegments(task.GetTaskProto().GetResultSegments()), setResultSegments(nil))
 		task.maxRetryTimes = 3

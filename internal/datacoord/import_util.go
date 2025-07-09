@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -125,13 +124,13 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 			return nil, err
 		}
 		taskProto.SegmentIDs = segments
-		if paramtable.Get().DataCoordCfg.EnableStatsTask.GetAsBool() {
-			statsSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
+		if enableSortCompaction() {
+			sortedSegIDBegin, _, err := alloc.AllocN(int64(len(segments)))
 			if err != nil {
 				return nil, err
 			}
-			taskProto.StatsSegmentIDs = lo.RangeFrom(statsSegIDBegin, len(segments))
-			log.Info("preallocate stats segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.StatsSegmentIDs))...)
+			taskProto.SortedSegmentIDs = lo.RangeFrom(sortedSegIDBegin, len(segments))
+			log.Info("preallocate sorted segment ids", WrapTaskLog(task, zap.Int64s("segmentIDs", taskProto.SortedSegmentIDs))...)
 		}
 		tasks = append(tasks, task)
 	}
@@ -507,25 +506,25 @@ func getImportingProgress(ctx context.Context, jobID int64, importMeta ImportMet
 	return float32(importedRows) / float32(totalRows), importedRows, totalRows
 }
 
-func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, sjm StatsInspector) float32 {
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+func getStatsProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
+	if !enableSortCompaction() {
 		return 1
 	}
 	tasks := importMeta.GetTaskBy(ctx, WithJob(jobID), WithType(ImportTaskType))
-	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSegmentIDs()
+	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
+		return t.(*importTask).GetSortedSegmentIDs()
 	})
-	if len(originSegmentIDs) == 0 {
+	if len(targetSegmentIDs) == 0 {
 		return 1
 	}
 	doneCnt := 0
-	for _, originSegmentID := range originSegmentIDs {
-		t := sjm.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
-		if t.GetState() == indexpb.JobState_JobStateFinished {
+	for _, segID := range targetSegmentIDs {
+		seg := meta.GetHealthySegment(ctx, segID)
+		if seg != nil {
 			doneCnt++
 		}
 	}
-	return float32(doneCnt) / float32(len(originSegmentIDs))
+	return float32(doneCnt) / float32(len(targetSegmentIDs))
 }
 
 func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta ImportMeta, meta *meta) float32 {
@@ -538,12 +537,12 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 		return t.(*importTask).GetSegmentIDs()
 	})
 	targetSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetStatsSegmentIDs()
+		return t.(*importTask).GetSortedSegmentIDs()
 	})
 	if len(originSegmentIDs) == 0 {
 		return 1
 	}
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if !enableSortCompaction() {
 		targetSegmentIDs = originSegmentIDs
 	}
 	unindexed := meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), targetSegmentIDs)
@@ -561,7 +560,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // TODO: Wrap a function to map status to user status.
 // TODO: Save these progress to job instead of recalculating.
 func GetJobProgress(ctx context.Context, jobID int64,
-	importMeta ImportMeta, meta *meta, sjm StatsInspector,
+	importMeta ImportMeta, meta *meta,
 ) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := importMeta.GetJob(ctx, jobID)
 	if job == nil {
@@ -580,8 +579,8 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		progress, importedRows, totalRows := getImportingProgress(ctx, jobID, importMeta, meta)
 		return 10 + 30 + int64(progress*30), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
-	case internalpb.ImportJobState_Stats:
-		progress := getStatsProgress(ctx, jobID, importMeta, sjm)
+	case internalpb.ImportJobState_Sorting:
+		progress := getStatsProgress(ctx, jobID, importMeta, meta)
 		_, totalRows := getImportRowsInfo(ctx, jobID, importMeta, meta)
 		return 10 + 30 + 30 + int64(progress*10), internalpb.ImportJobState_Importing, totalRows, totalRows, ""
 
@@ -830,4 +829,66 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		return cpuBasedSlots
 	}
 	return memoryBasedSlots
+}
+
+func createSortCompactionTask(ctx context.Context,
+	originSegment *SegmentInfo,
+	targetSegmentID int64,
+	meta *meta,
+	handler Handler,
+	alloc allocator.Allocator) (*datapb.CompactionTask, error) {
+	if originSegment.GetNumOfRows() == 0 {
+		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
+		err := meta.UpdateSegmentsInfo(ctx, operator)
+		if err != nil {
+			log.Ctx(ctx).Warn("import zero num row segment, but mark it dropped failed", zap.Error(err))
+			return nil, err
+		}
+		return nil, nil
+	}
+	collection, err := handler.GetCollection(ctx, originSegment.GetCollectionID())
+	if err != nil {
+		log.Warn("Failed to create sort compaction task because get collection fail", zap.Error(err))
+		return nil, err
+	}
+
+	collectionTTL, err := getCollectionTTL(collection.Properties)
+	if err != nil {
+		log.Warn("failed to apply triggerSegmentSortCompaction, get collection ttl failed")
+		return nil, err
+	}
+
+	startID, _, err := alloc.AllocN(2)
+	if err != nil {
+		log.Warn("fFailed to submit compaction view to scheduler because allocate id fail", zap.Error(err))
+		return nil, err
+	}
+
+	expectedSize := getExpectedSegmentSize(meta, collection)
+	task := &datapb.CompactionTask{
+		PlanID:             startID + 1,
+		TriggerID:          startID,
+		State:              datapb.CompactionTaskState_pipelining,
+		StartTime:          time.Now().Unix(),
+		CollectionTtl:      collectionTTL.Nanoseconds(),
+		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
+		Type:               datapb.CompactionType_SortCompaction,
+		CollectionID:       originSegment.GetCollectionID(),
+		PartitionID:        originSegment.GetPartitionID(),
+		Channel:            originSegment.GetInsertChannel(),
+		Schema:             collection.Schema,
+		InputSegments:      []int64{originSegment.GetID()},
+		ResultSegments:     []int64{},
+		TotalRows:          originSegment.GetNumOfRows(),
+		LastStateStartTime: time.Now().Unix(),
+		MaxSize:            getExpandedSize(expectedSize),
+		PreAllocatedSegmentIDs: &datapb.IDRange{
+			Begin: targetSegmentID,
+			End:   targetSegmentID + 1,
+		},
+	}
+
+	log.Ctx(ctx).Info("create sort compaction task success", zap.Int64("segmentID", originSegment.GetID()),
+		zap.Int64("targetSegmentID", targetSegmentID), zap.Int64("num rows", originSegment.GetNumOfRows()))
+	return task, nil
 }

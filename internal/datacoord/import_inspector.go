@@ -132,7 +132,7 @@ func (s *importInspector) processPendingImport(task ImportTask) {
 func (s *importInspector) processFailed(task ImportTask) {
 	if task.GetType() == ImportTaskType {
 		originSegmentIDs := task.(*importTask).GetSegmentIDs()
-		statsSegmentIDs := task.(*importTask).GetStatsSegmentIDs()
+		statsSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		segments := append(originSegmentIDs, statsSegmentIDs...)
 		for _, segment := range segments {
 			op := UpdateStatusOperator(segment, commonpb.SegmentState_Dropped)

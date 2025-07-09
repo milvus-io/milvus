@@ -154,18 +154,20 @@ func NewClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	plan *datapb.CompactionPlan,
+	compactionParams compaction.Params,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &clusteringCompactionTask{
-		ctx:            ctx,
-		cancel:         cancel,
-		binlogIO:       binlogIO,
-		plan:           plan,
-		tr:             timerecord.NewTimeRecorder("clustering_compaction"),
-		done:           make(chan struct{}, 1),
-		clusterBuffers: make([]*ClusterBuffer, 0),
-		flushCount:     atomic.NewInt64(0),
-		writtenRowNum:  atomic.NewInt64(0),
+		ctx:              ctx,
+		cancel:           cancel,
+		binlogIO:         binlogIO,
+		plan:             plan,
+		tr:               timerecord.NewTimeRecorder("clustering_compaction"),
+		done:             make(chan struct{}, 1),
+		clusterBuffers:   make([]*ClusterBuffer, 0),
+		flushCount:       atomic.NewInt64(0),
+		writtenRowNum:    atomic.NewInt64(0),
+		compactionParams: compactionParams,
 	}
 }
 
@@ -197,11 +199,6 @@ func (t *clusteringCompactionTask) GetCollection() int64 {
 func (t *clusteringCompactionTask) init() error {
 	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
 		return merr.WrapErrIllegalCompactionPlan("illegal compaction type")
-	}
-	var err error
-	t.compactionParams, err = compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
-	if err != nil {
-		return err
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) == 0 {
@@ -264,7 +261,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	defer t.cleanUp(ctx)
 
 	// 1, decompose binlogs as preparation for later mapping
-	if err := binlog.DecompressCompactionBinlogs(t.plan.SegmentBinlogs); err != nil {
+	if err := binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), t.plan.SegmentBinlogs); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, err
 	}
@@ -587,8 +584,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return merr.WrapErrIllegalCompactionPlan()
 	}
 
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+	bucketName := t.compactionParams.StorageConfig.GetBucketName()
 
 	rr, err := storage.NewBinlogRecordReader(ctx,
 		segment.GetFieldBinlogs(),
@@ -597,7 +593,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize),
-		storage.WithBucketName(bucketName),
+		storage.WithBucketName(bucketName), storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
@@ -865,8 +861,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
+	bucketName := t.compactionParams.StorageConfig.GetBucketName()
 
 	rr, err := storage.NewBinlogRecordReader(ctx,
 		segment.GetFieldBinlogs(),
@@ -876,7 +871,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		}),
 		storage.WithVersion(segment.StorageVersion),
 		storage.WithBufferSize(t.memoryBufferSize),
-		storage.WithBucketName(bucketName),
+		storage.WithBucketName(bucketName), storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))

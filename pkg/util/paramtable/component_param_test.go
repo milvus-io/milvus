@@ -565,11 +565,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 
 		params.Save("datacoord.statsTask.enable", "true")
-		assert.True(t, Params.EnableStatsTask.GetAsBool())
+		assert.True(t, Params.EnableSortCompaction.GetAsBool())
 		params.Save("datacoord.taskCheckInterval", "500")
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
-		assert.Equal(t, 3, Params.StatsTaskTriggerCount.GetAsInt())
+		assert.Equal(t, 3, Params.SortCompactionTriggerCount.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
