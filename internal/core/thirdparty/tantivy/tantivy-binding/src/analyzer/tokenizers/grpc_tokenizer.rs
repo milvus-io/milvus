@@ -25,6 +25,7 @@ pub struct GrpcTokenizer {
     endpoint: String,
     parameters: Vec<Parameter>,
     client: TokenizerClient<Channel>,
+    default_tokens: Vec<Token>,
 }
 
 #[derive(Clone)]
@@ -36,6 +37,7 @@ pub struct GrpcTokenStream {
 const ENDPOINTKEY: &str = "endpoint";
 const PARAMTERSKEY: &str = "parameters";
 const TLSKEY: &str = "tls";
+const DEFAULTTOKENSKEY: &str = "default_tokens";
 
 impl TokenStream for GrpcTokenStream {
     fn advance(&mut self) -> bool {
@@ -58,8 +60,7 @@ impl TokenStream for GrpcTokenStream {
 
 impl GrpcTokenizer {
     pub fn from_json(params: &json::Map<String, json::Value>) -> crate::error::Result<GrpcTokenizer> {
-        let endpoint = params
-            .get(ENDPOINTKEY)
+        let endpoint = params.get(ENDPOINTKEY)
             .ok_or(TantivyBindingError::InvalidArgument(
                 "grpc tokenizer must set endpoint".to_string(),
             ))?
@@ -78,6 +79,34 @@ impl GrpcTokenizer {
                 "grpc tokenizer endpoint must start with http:// or https://".to_string(),
             ));
         }
+
+        let default_tokens = if let Some(val) = params.get(DEFAULTTOKENSKEY) {
+            if let Some(arr) = val.as_array() {
+                let mut offset = 0;
+                let mut position = 0;
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|text| {
+                        let start = offset;
+                        let end = start + text.len();
+                        offset = end + 1;
+                        let token = Token {
+                            offset_from: start,
+                            offset_to: end,
+                            position,
+                            text: text.to_string(),
+                            position_length: text.chars().count(),
+                        };
+                        position += 1;
+                        token
+                    }).collect()
+            } else {
+                warn!("grpc tokenizer default_tokens must be an array. ignoring.");
+                vec![]
+            }
+        } else {
+            vec![]
+        };
 
         let mut parameters = vec![];
         if let Some(val) = params.get(PARAMTERSKEY) {
@@ -217,6 +246,7 @@ impl GrpcTokenizer {
             endpoint: endpoint.to_string(),
             parameters: parameters,
             client: client,
+            default_tokens: default_tokens,
         })
     }
 
@@ -231,33 +261,30 @@ impl GrpcTokenizer {
         // gRPC client works asynchronously using the Tokio runtime.
         // It requires the Tokio runtime to create a gRPC client and send requests.
         // Use the Tokio runtime to send gRPC requests asynchronously and wait for responses.
-        let ori_tokens = tokio::task::block_in_place(|| {
-            match TOKIO_RT.block_on(async {
+        tokio::task::block_in_place(|| {
+            TOKIO_RT.block_on(async {
                 match client.tokenize(request).await {
-                    Ok(resp) => Some(resp),
+                    Ok(resp) => {
+                        let ori_tokens = resp.into_inner().tokens;
+                        let mut tokens = Vec::with_capacity(ori_tokens.len());
+                        for token in ori_tokens {
+                            tokens.push(Token {
+                                offset_from: token.offset_from as usize,
+                                offset_to: token.offset_to as usize,
+                                position: token.position as usize,
+                                text: token.text,
+                                position_length: (token.offset_to - token.offset_from) as usize,
+                            });
+                        }
+                        tokens
+                    }
                     Err(e) => {
                         warn!("gRPC tokenizer request error: {}", e);
-                        None
+                        self.default_tokens.clone()
                     }
                 }
-            }) {
-                Some(resp) => resp.into_inner().tokens,
-                None => vec![],
-            }
-        });
-
-        let mut tokens = Vec::with_capacity(ori_tokens.len());
-
-        for token in ori_tokens {
-            tokens.push(Token {
-                offset_from: token.offset_from as usize,
-                offset_to: token.offset_to as usize,
-                position: token.position as usize,
-                text: token.text,
-                position_length: (token.offset_to - token.offset_from) as usize,
-            });
-        }
-        tokens
+            })
+        })
     }
 }
 
