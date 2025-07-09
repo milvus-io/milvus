@@ -183,7 +183,7 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *RecoverySnapshot {
 
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
-	if msg.TimeTick() <= r.checkpoint.TimeTick {
+	if msg.TimeTick() <= r.checkpoint.TimeTick && msg.MessageType() != message.MessageTypeManualFlush {
 		if r.Logger().Level().Enabled(zap.DebugLevel) {
 			r.Logger().Debug("skip the message before the checkpoint",
 				log.FieldMessage(msg),
