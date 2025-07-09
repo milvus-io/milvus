@@ -308,8 +308,8 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	// binlog import
 	files := make([]*internalpb.ImportFile, 0)
 	for _, segmentID := range l1SegmentIDs {
-		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d/%d",
-			s.Cluster.RootPath(), collectionID, partitionID, segmentID, segmentID)}})
+		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
+			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
 	}
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
