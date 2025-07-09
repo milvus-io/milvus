@@ -715,8 +715,11 @@ func (v *ParserVisitor) VisitCall(ctx *parser.CallContext) interface{} {
 	numParams := len(ctx.AllExpr())
 	funcParameters := make([]*planpb.Expr, 0, numParams)
 	for _, param := range ctx.AllExpr() {
-		paramExpr := getExpr(param.Accept(v))
-		funcParameters = append(funcParameters, paramExpr.expr)
+		paramExpr := param.Accept(v)
+		if err := getError(paramExpr); err != nil {
+			return err
+		}
+		funcParameters = append(funcParameters, getExpr(param.Accept(v)).expr)
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
