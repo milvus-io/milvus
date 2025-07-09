@@ -424,7 +424,7 @@ func (t *clusteringCompactionTask) processStats() error {
 		task := t.ShadowClone(setResultSegments(resultSegments))
 		err := t.saveTaskMeta(task)
 		if err != nil {
-			return err
+			return merr.WrapErrClusteringCompactionMetaError("setResultSegments", err)
 		}
 
 		if err := t.regeneratePartitionStats(tmpToResultSegments); err != nil {
@@ -670,14 +670,26 @@ func (t *clusteringCompactionTask) doClean() error {
 		} else {
 			// after v2.5.0, mark the results segment as dropped
 			var operators []UpdateOperator
-			for _, segID := range t.GetTaskProto().GetResultSegments() {
-				// Don't worry about them being loaded; they are all invisible.
-				operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+			hasResultSegments := len(t.GetTaskProto().GetResultSegments()) != 0
+			if hasResultSegments {
+				for _, segID := range t.GetTaskProto().GetResultSegments() {
+					// Don't worry about them being loaded; they are all invisible.
+					operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+				}
 			}
+
 			for _, segID := range t.GetTaskProto().GetTmpSegments() {
 				// Don't worry about them being loaded; they are all invisible.
 				// tmpSegment is always invisible
 				operators = append(operators, UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
+				if !hasResultSegments {
+					toSegments, _ := t.meta.(*meta).GetCompactionTo(segID)
+					if toSegments != nil {
+						for _, toSeg := range toSegments {
+							operators = append(operators, UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
+						}
+					}
+				}
 			}
 			err := t.meta.UpdateSegmentsInfo(context.TODO(), operators...)
 			if err != nil {
