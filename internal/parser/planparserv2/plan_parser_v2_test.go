@@ -143,6 +143,10 @@ func TestExpr_Call(t *testing.T) {
 	assert.Equal(t, int64(2), expr.GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
 	assert.Equal(t, false, expr.GetCallExpr().GetFunctionParameters()[1].GetValueExpr().GetValue().GetBoolVal())
 	assert.Equal(t, int64(20), expr.GetCallExpr().GetFunctionParameters()[2].GetCallExpr().GetFunctionParameters()[0].GetValueExpr().GetValue().GetInt64Val())
+
+	expr, err = ParseExpr(helper, "ceil(pow(1.5*Int32Field,0.58))", nil)
+	assert.Error(t, err)
+	assert.Nil(t, expr)
 }
 
 func TestExpr_Compare(t *testing.T) {
