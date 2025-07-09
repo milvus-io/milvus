@@ -71,7 +71,7 @@ ChunkTranslator::ChunkTranslator(
     int64_t segment_id,
     FieldMeta field_meta,
     FieldDataInfo field_data_info,
-    std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
+    std::vector<FileInfo>&& file_infos,
     bool use_mmap,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
@@ -79,7 +79,7 @@ ChunkTranslator::ChunkTranslator(
       field_meta_(field_meta),
       key_(fmt::format("seg_{}_f_{}", segment_id, field_meta.get_id().get())),
       use_mmap_(use_mmap),
-      files_and_rows_(std::move(files_and_rows)),
+      file_infos_(std::move(file_infos)),
       mmap_dir_path_(field_data_info.mmap_dir_path),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
@@ -88,14 +88,14 @@ ChunkTranslator::ChunkTranslator(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
                 /* in_load_list*/ field_data_info.in_load_list),
-            /* support_eviction */ false),
+            /* support_eviction */ true),
       load_priority_(load_priority) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
                "ChunkTranslator not supported for system field");
     meta_.num_rows_until_chunk_.push_back(0);
-    for (auto& [file, rows] : files_and_rows_) {
+    for (const auto& info : file_infos_) {
         meta_.num_rows_until_chunk_.push_back(
-            meta_.num_rows_until_chunk_.back() + rows);
+            meta_.num_rows_until_chunk_.back() + info.row_count);
     }
     AssertInfo(meta_.num_rows_until_chunk_.back() == field_data_info.row_count,
                fmt::format("data lost while loading column {}: found "
@@ -104,7 +104,7 @@ ChunkTranslator::ChunkTranslator(
                            meta_.num_rows_until_chunk_.back(),
                            field_data_info.row_count));
     virtual_chunk_config(field_data_info.row_count,
-                         files_and_rows_.size(),
+                         file_infos_.size(),
                          meta_.num_rows_until_chunk_,
                          meta_.virt_chunk_order_,
                          meta_.vcid_to_cid_arr_);
@@ -112,7 +112,7 @@ ChunkTranslator::ChunkTranslator(
 
 size_t
 ChunkTranslator::num_cells() const {
-    return files_and_rows_.size();
+    return file_infos_.size();
 }
 
 milvus::cachinglayer::cid_t
@@ -125,7 +125,16 @@ ChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
 milvus::cachinglayer::ResourceUsage
 ChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    return {0, 0};
+    AssertInfo(cid < file_infos_.size(), "cid out of range");
+
+    int64_t memory_size = file_infos_[cid].memory_size;
+    if (use_mmap_) {
+        // For mmap, the memory is counted as disk usage
+        return {0, memory_size};
+    } else {
+        // For non-mmap, the memory is counted as memory usage
+        return {memory_size, 0};
+    }
 }
 
 const std::string&
@@ -145,7 +154,7 @@ ChunkTranslator::get_cells(
     std::vector<std::string> remote_files;
     remote_files.reserve(cids.size());
     for (auto cid : cids) {
-        remote_files.push_back(files_and_rows_[cid].first);
+        remote_files.push_back(file_infos_[cid].file_path);
     }
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
