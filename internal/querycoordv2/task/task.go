@@ -533,7 +533,7 @@ func NewDropIndexTask(ctx context.Context,
 	replica *meta.Replica,
 	action *DropIndexAction,
 ) *DropIndexTask {
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("DropIndexTask-%s", action.FieldIDs))
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard, fmt.Sprintf("DropIndexTask-%s", action.Type().String()))
 	base.actions = []Action{action}
 	return &DropIndexTask{
 		baseTask: base,
