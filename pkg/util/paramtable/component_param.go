@@ -1207,6 +1207,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Key:          "trace.otlp.headers",
 		Version:      "2.4.0",
 		DefaultValue: "",
+		Doc:          "otlp header that encoded in base64",
 		Export:       true,
 	}
 	t.OtlpHeaders.Init(base.mgr)
