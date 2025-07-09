@@ -19,7 +19,6 @@ package compactor
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/compaction"
 	"os"
 	"testing"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
@@ -282,7 +282,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)})
 	pack := new(syncmgr.SyncPack).WithCollectionID(CollectionID).WithPartitionID(PartitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, segmentID, genCollectionSchema())).WithDeleteData(deleteData)
-	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0)
+	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, nil)
 	return bw.Write(context.Background(), pack)
 }
 
