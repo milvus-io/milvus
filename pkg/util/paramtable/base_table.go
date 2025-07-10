@@ -143,7 +143,14 @@ func (bt *BaseTable) init() {
 		ret = strings.ReplaceAll(ret, ".", "")
 		return ret
 	}
-	bt.mgr, _ = config.Init()
+
+	var err error
+	bt.mgr, err = config.Init()
+	if err != nil {
+		log.Error("failed to initialize config manager", zap.Error(err))
+		panic(err)
+	}
+
 	if !bt.config.skipEnv {
 		err := bt.mgr.AddSource(config.NewEnvSource(formatter))
 		if err != nil {

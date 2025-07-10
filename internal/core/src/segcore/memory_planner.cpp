@@ -180,7 +180,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             futures.reserve(blocks.size());
 
             auto reader_memory_limit = std::max<int64_t>(
-                memory_limit / blocks.size(), FILE_SLICE_SIZE);
+                memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
 
             for (const auto& block : blocks) {
                 futures.emplace_back(pool.Submit([block,
