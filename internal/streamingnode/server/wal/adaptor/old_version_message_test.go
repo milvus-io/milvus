@@ -53,6 +53,7 @@ func TestNewOldVersionImmutableMessage(t *testing.T) {
 
 	msg, err := newOldVersionImmutableMessage(ctx, pchannel, lastConfirmedMessageID, message.NewImmutableMesasge(messageID, payload, map[string]string{}))
 	assert.NoError(t, err)
+	assert.Equal(t, message.VersionOld, msg.Version())
 	assert.NotNil(t, msg.LastConfirmedMessageID())
 	assert.Equal(t, msg.VChannel(), "test1-v0")
 	assert.Equal(t, msg.TimeTick(), tt)
