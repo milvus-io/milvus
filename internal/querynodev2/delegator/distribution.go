@@ -179,14 +179,13 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	}
 	sealed, growing = current.Get(partitions...)
 	version = current.version
-	if requiredLoadRatio == 1.0 {
-		// if require full result, current target is fully loaded, so we can use current target version to filter segments
-		// Note: we can also use query view's segment list to filter segments, but it's not efficient enough
+	if d.queryView.GetLoadedRatio() == 1.0 {
+		// if query view is fully loaded, we can use current target version to filter segments
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
 		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
 	} else {
-		// if require partial result, we need to filter segments by query view's segment list
+		// if query view is not fully loaded, we need to filter segments by query view's segment list to offer partial result
 		sealed = lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
 			return SnapshotItem{
 				NodeID: item.NodeID,
