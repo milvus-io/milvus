@@ -595,8 +595,8 @@ TEST_F(DListTest, UpdateLimitIncreaseMemDecreaseDisk) {
     EXPECT_CALL(*node2, clear_data()).Times(0);
 
     ResourceUsage new_limit{200, 35};
-    dlist->UpdateLowWatermark({200, 34});
-    dlist->UpdateHighWatermark({200, 34});
+    dlist->UpdateLowWatermark({90, 34});
+    dlist->UpdateHighWatermark({90, 34});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
 
     EXPECT_EQ(get_used_memory(), usage2);
