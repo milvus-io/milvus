@@ -50,15 +50,15 @@ func InitSegcore() {
 
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
-	C.InitIndexSliceSize(cIndexSliceSize)
+	C.SetIndexSliceSize(cIndexSliceSize)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
-	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
+	C.SetHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
 	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
-	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
+	C.SetMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
-	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	C.SetLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
 
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
