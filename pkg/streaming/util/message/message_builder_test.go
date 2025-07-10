@@ -45,6 +45,7 @@ func TestMessage(t *testing.T) {
 
 	lcMsgID := walimplstest.NewTestMessageID(1)
 	mutableMessage.WithLastConfirmed(lcMsgID)
+	mutableMessage.WithOldVersion()
 	v, ok = mutableMessage.Properties().Get("_lc")
 	assert.True(t, ok)
 	assert.Equal(t, v, "1")
@@ -53,6 +54,7 @@ func TestMessage(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "v1", v)
 	assert.Equal(t, "v1", mutableMessage.VChannel())
+	assert.Equal(t, message.VersionOld, mutableMessage.Version())
 
 	msgID := walimplstest.NewTestMessageID(1)
 	immutableMessage := message.NewImmutableMesasge(msgID,

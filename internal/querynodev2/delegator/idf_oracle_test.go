@@ -154,6 +154,14 @@ func (suite *IDFOracleSuite) TestSealed() {
 	suite.NoError(err)
 	suite.Equal(float64(1), avgdl)
 	suite.Equal(map[uint32]float32{4: 0.2876821}, typeutil.SparseFloatBytesToMap(bytes[0]))
+
+	// reload released segment and some sealed segment stats will not found
+	// should not happened
+	// will warn but not panic
+	suite.updateSnapshot(releasedSeg, []int64{}, []int64{})
+	suite.idfOracle.SetNext(suite.snapshot)
+	suite.waitTargetVersion(suite.targetVersion)
+	suite.Equal(int64(1), suite.idfOracle.current.NumRow())
 }
 
 func (suite *IDFOracleSuite) TestGrow() {

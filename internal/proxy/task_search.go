@@ -563,36 +563,40 @@ func (t *searchTask) fillResult() {
 
 func mergeIDs(idsList []*schemapb.IDs) (*schemapb.IDs, int) {
 	uniqueIDs := &schemapb.IDs{}
-	count := 0
-	switch idsList[0].GetIdField().(type) {
-	case *schemapb.IDs_IntId:
-		idsSet := typeutil.NewSet[int64]()
-		for _, ids := range idsList {
-			if data := ids.GetIntId().GetData(); data != nil {
-				idsSet.Insert(data...)
-			}
+	int64IDs := typeutil.NewSet[int64]()
+	strIDs := typeutil.NewSet[string]()
+
+	for _, ids := range idsList {
+		if ids == nil {
+			continue
 		}
-		count = idsSet.Len()
-		uniqueIDs.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: idsSet.Collect(),
-			},
-		}
-	case *schemapb.IDs_StrId:
-		idsSet := typeutil.NewSet[string]()
-		for _, ids := range idsList {
-			if data := ids.GetStrId().GetData(); data != nil {
-				idsSet.Insert(data...)
-			}
-		}
-		count = idsSet.Len()
-		uniqueIDs.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: idsSet.Collect(),
-			},
+		switch ids.GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			int64IDs.Insert(ids.GetIntId().GetData()...)
+		case *schemapb.IDs_StrId:
+			strIDs.Insert(ids.GetStrId().GetData()...)
 		}
 	}
-	return uniqueIDs, count
+
+	if int64IDs.Len() > 0 {
+		uniqueIDs.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: int64IDs.Collect(),
+			},
+		}
+		return uniqueIDs, int64IDs.Len()
+	}
+
+	if strIDs.Len() > 0 {
+		uniqueIDs.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: strIDs.Collect(),
+			},
+		}
+		return uniqueIDs, strIDs.Len()
+	}
+
+	return nil, 0
 }
 
 func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, multipleMilvusResults []*milvuspb.SearchResults, searchMetrics []string) error {

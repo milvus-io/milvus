@@ -97,6 +97,11 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 			collection.schema.Store(schema)
 			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
 			collection.schemaVersion = loadMeta.GetSchemaVersion()
+			log.Info("update collection schema",
+				zap.Int64("collectionID", collectionID),
+				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
+				zap.Any("schema", schema),
+			)
 		}
 		collection.Ref(1)
 		return nil

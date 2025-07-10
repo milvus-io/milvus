@@ -97,6 +97,12 @@ func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
 	return m
 }
 
+// WithOldVersion sets the version of current message to be old version.
+func (m *messageImpl) WithOldVersion() MutableMessage {
+	m.properties.Set(messageVersion, VersionOld.String())
+	return m
+}
+
 // WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
 func (m *messageImpl) WithLastConfirmedUseMessageID() MutableMessage {
 	m.properties.Delete(messageLastConfirmed)

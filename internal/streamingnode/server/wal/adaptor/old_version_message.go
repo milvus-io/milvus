@@ -57,7 +57,10 @@ func newOldVersionImmutableMessage(
 	if err != nil {
 		return nil, err
 	}
-	return mutableMessage.WithLastConfirmed(lastConfirmedMessageID).IntoImmutableMessage(msg.MessageID()), nil
+	return mutableMessage.
+		WithLastConfirmed(lastConfirmedMessageID).
+		WithOldVersion().
+		IntoImmutableMessage(msg.MessageID()), nil
 }
 
 // newV1CreateCollectionMsgFromV0 creates a new create collection message from the old version create collection message.
