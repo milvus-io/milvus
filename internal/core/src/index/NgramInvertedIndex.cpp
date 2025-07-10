@@ -148,7 +148,6 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
 
 inline void
 handle_batch(const std::string_view* data,
-             const bool* valid_data,
              const int32_t* offsets,
              const int size,
              TargetBitmapView res,
@@ -180,20 +179,21 @@ NgramInvertedIndex::ExecuteQueryWithPredicate(
     TargetBitmapView valid_res(valid.data(), valid.size());
 
     if (need_post_filter) {
-        auto execute_sub_batch =
+        auto execute_batch =
             [&predicate](
                 const std::string_view* data,
-                const bool* valid_data,
+                // `valid_data` is not used as the results returned  by ngram_match_query are all valid
+                const bool* _valid_data,
                 const int32_t* offsets,
                 const int size,
                 TargetBitmapView res,
-                // valid_res is not used as the results returned  by ngram_match_query are all valid
-                TargetBitmapView valid_res) {
-                handle_batch(data, valid_data, offsets, size, res, predicate);
+                // the same with `valid_data`
+                TargetBitmapView _valid_res) {
+                handle_batch(data, offsets, size, res, predicate);
             };
 
         segment->ProcessAllDataChunk<std::string_view>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res);
+            execute_batch, std::nullptr_t{}, res, valid_res);
     }
 
     return std::optional<TargetBitmap>(std::move(bitset));
@@ -253,19 +253,20 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
         return matcher(data);
     };
 
-    auto execute_sub_batch =
+    auto execute_batch =
         [&predicate](
             const std::string_view* data,
-            const bool* valid_data,
+            // `_valid_data` is not used as the results returned  by ngram_match_query are all valid
+            const bool* _valid_data,
             const int32_t* offsets,
             const int size,
             TargetBitmapView res,
-            // valid_res is not used as the results returned  by ngram_match_query are all valid
-            TargetBitmapView valid_res) {
-            handle_batch(data, valid_data, offsets, size, res, predicate);
+            // the same with `_valid_data`
+            TargetBitmapView _valid_res) {
+            handle_batch(data, offsets, size, res, predicate);
         };
     segment->ProcessAllDataChunk<std::string_view>(
-        execute_sub_batch, std::nullptr_t{}, res, valid_res);
+        execute_batch, std::nullptr_t{}, res, valid_res);
 
     return std::optional<TargetBitmap>(std::move(bitset));
 }
