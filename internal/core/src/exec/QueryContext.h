@@ -132,8 +132,9 @@ class QueryConfig : public MemConfig {
 
     int64_t
     get_expr_batch_size() const {
-        return BaseConfig::Get<int64_t>(kExprEvalBatchSize,
-                                        EXEC_EVAL_EXPR_BATCH_SIZE);
+        return BaseConfig::Get<int64_t>(
+            kExprEvalBatchSize,
+            EXEC_EVAL_EXPR_BATCH_SIZE.load(std::memory_order_acquire));
     }
 };
 
