@@ -32,13 +32,14 @@ import (
 
 type UpdateLoadConfigJob struct {
 	*BaseJob
-	collectionID       int64
-	newReplicaNumber   int32
-	newResourceGroups  []string
-	meta               *meta.Meta
-	targetMgr          meta.TargetManagerInterface
-	targetObserver     *observers.TargetObserver
-	collectionObserver *observers.CollectionObserver
+	collectionID             int64
+	newReplicaNumber         int32
+	newResourceGroups        []string
+	meta                     *meta.Meta
+	targetMgr                meta.TargetManagerInterface
+	targetObserver           *observers.TargetObserver
+	collectionObserver       *observers.CollectionObserver
+	userSpecifiedReplicaMode bool
 }
 
 func NewUpdateLoadConfigJob(ctx context.Context,
@@ -47,17 +48,19 @@ func NewUpdateLoadConfigJob(ctx context.Context,
 	targetMgr meta.TargetManagerInterface,
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
+	userSpecifiedReplicaMode bool,
 ) *UpdateLoadConfigJob {
 	collectionID := req.GetCollectionIDs()[0]
 	return &UpdateLoadConfigJob{
-		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), collectionID),
-		meta:               meta,
-		targetMgr:          targetMgr,
-		targetObserver:     targetObserver,
-		collectionObserver: collectionObserver,
-		collectionID:       collectionID,
-		newReplicaNumber:   req.GetReplicaNumber(),
-		newResourceGroups:  req.GetResourceGroups(),
+		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), collectionID),
+		meta:                     meta,
+		targetMgr:                targetMgr,
+		targetObserver:           targetObserver,
+		collectionObserver:       collectionObserver,
+		collectionID:             collectionID,
+		newReplicaNumber:         req.GetReplicaNumber(),
+		newResourceGroups:        req.GetResourceGroups(),
+		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	}
 }
 
@@ -158,7 +161,7 @@ func (job *UpdateLoadConfigJob) Execute() error {
 	utils.RecoverReplicaOfCollection(job.ctx, job.meta, job.collectionID)
 
 	// 7. update replica number in meta
-	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber)
+	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber, job.userSpecifiedReplicaMode)
 	if err != nil {
 		msg := "failed to update replica number"
 		log.Warn(msg, zap.Error(err))
