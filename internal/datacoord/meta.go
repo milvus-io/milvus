@@ -1595,7 +1595,8 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 				return info.GetDmlPosition()
 			})),
 			// visible after stats and index
-			IsInvisible: true,
+			IsInvisible:    true,
+			StorageVersion: seg.GetStorageVersion(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
