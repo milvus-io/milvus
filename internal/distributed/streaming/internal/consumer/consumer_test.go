@@ -2,6 +2,8 @@ package consumer
 
 import (
 	"context"
+	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
@@ -36,7 +38,7 @@ func TestResumableConsumer(t *testing.T) {
 						"key": "value",
 						"_t":  "1",
 						"_tt": message.EncodeUint64(456),
-						"_v":  "1",
+						"_v":  strconv.FormatInt(int64(rand.Int31n(2)), 10),
 						"_lc": walimplstest.NewTestMessageID(123).Marshal(),
 					}),
 			})
