@@ -180,6 +180,11 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		segmentLevel = datapb.SegmentLevel_L0
 	}
 
+	storageVersion := storage.StorageV1
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
+
 	// alloc new segments
 	segments := make([]int64, 0)
 	addSegment := func(vchannel string, partitionID int64, size int64) error {
@@ -187,7 +192,8 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		defer cancel()
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
-				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, job.GetDataTs(), segmentLevel)
+				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
 			if err != nil {
 				return err
 			}
@@ -234,6 +240,7 @@ func AllocImportSegment(ctx context.Context,
 	channelName string,
 	dataTimestamp uint64,
 	level datapb.SegmentLevel,
+	storageVersion int64,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	id, err := alloc.AllocID(ctx)
@@ -266,6 +273,7 @@ func AllocImportSegment(ctx context.Context,
 		LastExpireTime: math.MaxUint64,
 		StartPosition:  position,
 		DmlPosition:    position,
+		StorageVersion: storageVersion,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
@@ -289,6 +297,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
+
 	return &datapb.PreImportRequest{
 		JobID:         task.GetJobID(),
 		TaskID:        task.GetTaskID(),
@@ -298,8 +307,8 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		Schema:        job.GetSchema(),
 		ImportFiles:   importFiles,
 		Options:       job.GetOptions(),
-		StorageConfig: createStorageConfig(),
 		TaskSlot:      task.GetTaskSlot(),
+		StorageConfig: createStorageConfig(),
 	}
 }
 
@@ -353,6 +362,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
+
+	storageVersion := storage.StorageV1
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	return &datapb.ImportRequest{
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
@@ -367,6 +381,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
+		StorageVersion:  storageVersion,
 	}, nil
 }
 
