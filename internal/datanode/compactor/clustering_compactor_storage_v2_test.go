@@ -52,12 +52,7 @@ type ClusteringCompactionTaskStorageV2Suite struct {
 func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 	s.setupTest()
 	paramtable.Get().Save("common.storage.enableV2", "true")
-<<<<<<< HEAD
-	initcore.InitStorageV2FileSystem(paramtable.Get())
 	s.task.compactionParams = compaction.GenParams()
-=======
-	refreshPlanParams(s.plan)
->>>>>>> 3d3a711376 (fix unittest and add storage config in sync task)
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {

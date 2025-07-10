@@ -851,7 +851,8 @@ func createSortCompactionTask(ctx context.Context,
 	targetSegmentID int64,
 	meta *meta,
 	handler Handler,
-	alloc allocator.Allocator) (*datapb.CompactionTask, error) {
+	alloc allocator.Allocator,
+) (*datapb.CompactionTask, error) {
 	if originSegment.GetNumOfRows() == 0 {
 		operator := UpdateStatusOperator(originSegment.GetID(), commonpb.SegmentState_Dropped)
 		err := meta.UpdateSegmentsInfo(ctx, operator)

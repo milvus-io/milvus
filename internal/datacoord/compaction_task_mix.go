@@ -185,7 +185,8 @@ func (t *mixCompactionTask) GetTaskProto() *datapb.CompactionTask {
 func newMixCompactionTask(t *datapb.CompactionTask,
 	allocator allocator.Allocator,
 	meta CompactionMeta,
-	ievm IndexEngineVersionManager) *mixCompactionTask {
+	ievm IndexEngineVersionManager,
+) *mixCompactionTask {
 	task := &mixCompactionTask{
 		allocator: allocator,
 		meta:      meta,
