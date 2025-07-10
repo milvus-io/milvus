@@ -32,6 +32,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         this->wrapper_ = wrapper;
     }
 
+    ~JsonFlatIndexQueryExecutor() {
+        this->wrapper_ = nullptr;
+    }
+
     const TargetBitmap
     In(size_t n, const T* values) override {
         TargetBitmap bitset(this->Count());
