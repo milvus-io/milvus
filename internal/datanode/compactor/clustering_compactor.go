@@ -586,15 +586,18 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 	bucketName := t.compactionParams.StorageConfig.GetBucketName()
 
-	rr, err := storage.NewBinlogRecordReader(ctx,
-		segment.GetFieldBinlogs(),
-		t.plan.Schema,
+	opts := []storage.RwOption{
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
-		storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize),
-		storage.WithBucketName(bucketName), storage.WithStorageConfig(t.compactionParams.StorageConfig),
-	)
+		storage.WithCollectionID(t.GetCollection()),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithBucketName(bucketName),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+	}
+
+	rr, err := storage.NewBinlogRecordReader(ctx, segment.GetFieldBinlogs(), t.plan.Schema, opts...)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
@@ -871,7 +874,9 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		}),
 		storage.WithVersion(segment.StorageVersion),
 		storage.WithBufferSize(t.memoryBufferSize),
-		storage.WithBucketName(bucketName), storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithBucketName(bucketName),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithCollectionID(t.GetCollection()),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))

@@ -88,7 +88,7 @@ localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
-  path: /var/lib/milvus/data/
+  path: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -206,7 +206,7 @@ woodpecker:
       maxSize: 8M # The maximum size of the merged files, default is 8M.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
-    rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
+    rootPath: /tmp/milvus/woodpecker # The root path of the storage provider.
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -259,7 +259,7 @@ rocksmq:
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
   # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
-  path: /var/lib/milvus/rdb_data
+  path: /tmp/milvus/rdb_data
   lrucacheratio: 0.06 # rocksdb cache memory ratio
   rocksmqPageSize: 67108864 # The maximum size of messages in each page in RocksMQ. Messages in RocksMQ are checked and cleared (when expired) in batch based on this parameters. Unit: Byte.
   retentionTimeInMinutes: 4320 # The maximum retention time of acked messages in RocksMQ. Acked messages in RocksMQ are retained for the specified period of time and then cleared. Unit: Minute.
@@ -486,7 +486,7 @@ queryNode:
     memoryLimit: 2147483648 # Deprecated: 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
   mmap:
-    vectorField: true # Enable mmap for loading vector data
+    vectorField: false # Enable mmap for loading vector data
     vectorIndex: false # Enable mmap for loading vector index
     scalarField: false # Enable mmap for loading scalar data
     scalarIndex: false # Enable mmap for loading scalar index
@@ -545,6 +545,7 @@ queryNode:
     size: 10 # the size for worker querynode client pool
   idfOracle:
     enableDisk: true
+    localPath: /tmp/milvus/bm25_logs
     writeConcurrency: 4
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
@@ -832,7 +833,7 @@ msgChannel:
 log:
   # Milvus log level. Option: debug, info, warn, error, panic, and fatal.
   # It is recommended to use debug level under test and development environments, and info level in production environment.
-  level: info
+  level: debug
   file:
     # Root path to the log files.
     # The default value is set empty, indicating to output log files to standard output (stdout) and standard error (stderr).
