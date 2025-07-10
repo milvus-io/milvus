@@ -444,6 +444,8 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	}
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+
+	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
 	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
 }
 
