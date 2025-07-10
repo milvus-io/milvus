@@ -45,7 +45,15 @@ type DMLGroup struct {
 	deleteRowNums []int
 }
 
-func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64, int64, *schemapb.IDs) {
+type SourceCollectionInfo struct {
+	collectionID int64
+	partitionID  int64
+	l0SegmentIDs []int64
+	l1SegmentIDs []int64
+	insertedIDs  *schemapb.IDs
+}
+
+func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
@@ -161,14 +169,18 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 		}
 	}
 
+	// check segments
+	segments, err := c.ShowSegments(collectionName)
+	s.NoError(err)
+	s.NotEmpty(segments)
+	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L0
+	})
+	l1Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1
+	})
 	// check l0 segments
 	if totalDeleteRowNum > 0 {
-		segments, err := c.ShowSegments(collectionName)
-		s.NoError(err)
-		s.NotEmpty(segments)
-		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-			return segment.GetLevel() == datapb.SegmentLevel_L0
-		})
 		s.True(len(l0Segments) > 0)
 	}
 
@@ -224,13 +236,34 @@ func (s *BulkInsertSuite) PrepareCollectionA(dim int, dmlGroup *DMLGroup) (int64
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
 
-	return collectionID, partitionID, totalInsertedIDs
+	return &SourceCollectionInfo{
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		l0SegmentIDs: lo.Map(l0Segments, func(segment *datapb.SegmentInfo, _ int) int64 {
+			return segment.GetID()
+		}),
+		l1SegmentIDs: lo.Map(l1Segments, func(segment *datapb.SegmentInfo, _ int) int64 {
+			return segment.GetID()
+		}),
+		insertedIDs: totalInsertedIDs,
+	}
 }
 
 func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	const dim = 128
 
-	collectionID, partitionID, insertedIDs := s.PrepareCollectionA(dim, dmlGroup)
+	sourceCollectionInfo := s.PrepareSourceCollection(dim, dmlGroup)
+	collectionID := sourceCollectionInfo.collectionID
+	partitionID := sourceCollectionInfo.partitionID
+	l0SegmentIDs := sourceCollectionInfo.l0SegmentIDs
+	l1SegmentIDs := sourceCollectionInfo.l1SegmentIDs
+	insertedIDs := sourceCollectionInfo.insertedIDs
+
+	log.Info("prepare source collection done",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64s("l1 segments", l1SegmentIDs),
+		zap.Int64s("l0 segments", l0SegmentIDs))
 
 	c := s.Cluster
 	ctx := c.GetContext()
@@ -271,39 +304,6 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-
-	flushedSegmentsResp, err := c.MixCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
-		CollectionID:     collectionID,
-		PartitionID:      partitionID,
-		IncludeUnhealthy: false,
-	})
-	s.NoError(merr.CheckRPCCall(flushedSegmentsResp, err))
-	flushedSegments := flushedSegmentsResp.GetSegments()
-	segmentsInfoResp, err := c.ProxyClient.GetSegmentsInfo(ctx, &internalpb.GetSegmentsInfoRequest{
-		CollectionID: collectionID,
-		SegmentIDs:   flushedSegments,
-	})
-	s.NoError(merr.CheckRPCCall(segmentsInfoResp, err))
-	segmentsInfo := segmentsInfoResp.GetSegmentInfos()
-
-	l1Segments := lo.Filter(segmentsInfo, func(segment *internalpb.SegmentInfo, _ int) bool {
-		return segment.GetLevel() == commonpb.SegmentLevel_L1
-	})
-	l0Segments := lo.Filter(segmentsInfo, func(segment *internalpb.SegmentInfo, _ int) bool {
-		return segment.GetLevel() == commonpb.SegmentLevel_L0
-	})
-
-	l1SegmentIDs := lo.Map(l1Segments, func(segment *internalpb.SegmentInfo, _ int) int64 {
-		return segment.GetSegmentID()
-	})
-	l0SegmentIDs := lo.Map(l0Segments, func(segment *internalpb.SegmentInfo, _ int) int64 {
-		return segment.GetSegmentID()
-	})
-	s.Equal(len(flushedSegments), len(l1SegmentIDs)+len(l0SegmentIDs))
-
-	log.Info("flushed segments", zap.Int64s("segments", flushedSegments),
-		zap.Int64s("l1 segments", l1SegmentIDs),
-		zap.Int64s("l0 segments", l0SegmentIDs))
 
 	// binlog import
 	files := make([]*internalpb.ImportFile, 0)
@@ -351,7 +351,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		files = make([]*internalpb.ImportFile, 0)
 		for _, segmentID := range l0SegmentIDs {
 			files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/delta_log/%d/%d/%d",
-				s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
+				s.Cluster.RootPath(), collectionID, common.AllPartitionsID, segmentID)}})
 		}
 		importResp, err = c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: collectionName,
@@ -370,12 +370,9 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		segments, err = c.ShowSegments(collectionName)
 		s.NoError(err)
 		s.NotEmpty(segments)
-		segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-			return segment.GetCollectionID() == newCollectionID
-		})
 		log.Info("Show segments", zap.Any("segments", segments))
 		l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-			return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
+			return segment.GetLevel() == datapb.SegmentLevel_L0
 		})
 		s.Equal(1, len(l0Segments))
 		segment = l0Segments[0]
