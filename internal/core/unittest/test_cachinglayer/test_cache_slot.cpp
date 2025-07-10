@@ -516,9 +516,9 @@ TEST_F(CacheSlotTest, EvictionTest) {
     ResourceUsage new_limit = ResourceUsage(300, 0);
     ResourceUsage new_high_watermark = ResourceUsage(250, 0);
     ResourceUsage new_low_watermark = ResourceUsage(200, 0);
-    EXPECT_TRUE(dlist_->UpdateLimit(new_limit));
-    dlist_->UpdateHighWatermark(new_high_watermark);
     dlist_->UpdateLowWatermark(new_low_watermark);
+    dlist_->UpdateHighWatermark(new_high_watermark);
+    EXPECT_TRUE(dlist_->UpdateLimit(new_limit));
     EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_), new_limit);
 
     std::vector<cl_uid_t> uids_012 = {10, 20, 30};

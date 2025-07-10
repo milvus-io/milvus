@@ -416,7 +416,7 @@ DList::IsEmpty() const {
 
 void
 DList::addLoadingResource(const ResourceUsage& size) {
-    loading_memory_ += size;
+    loading_memory_ += size * eviction_config_.loading_memory_factor;
 }
 
 void
@@ -434,7 +434,8 @@ DList::checkPhysicalMemoryLimit(const ResourceUsage& size) const {
         static_cast<int64_t>(sys_mem.total_memory_bytes *
                              eviction_config_.overloaded_memory_threshold_percentage);
 
-    int64_t eviction_needed = std::max(0L, projected_usage - limit);
+    int64_t eviction_needed =
+        std::max(static_cast<int64_t>(0), projected_usage - limit);
 
     LOG_TRACE(
         "[MCL] Physical memory check: "

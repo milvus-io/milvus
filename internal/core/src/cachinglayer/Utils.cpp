@@ -59,7 +59,7 @@ getContainerMemLimit() {
 #ifdef __linux__
     std::vector<int64_t> limits;
 
-    // 1. Check MEM_LIMIT environment variable (Docker/container override)
+    // Check MEM_LIMIT environment variable (Docker/container override)
     const char* mem_limit_env = std::getenv("MEM_LIMIT");
     if (mem_limit_env) {
         try {
@@ -73,44 +73,7 @@ getContainerMemLimit() {
         }
     }
 
-    // 2. Check cgroups v2 memory limit
-    std::ifstream cgroup_v2("/sys/fs/cgroup/memory.max");
-    if (cgroup_v2.is_open()) {
-        std::string line;
-        if (std::getline(cgroup_v2, line) && line != "max") {
-            try {
-                int64_t v2_limit = std::stoll(line);
-                limits.push_back(v2_limit);
-                LOG_DEBUG("[MCL] Found cgroups v2 memory limit: {} bytes",
-                          v2_limit);
-            } catch (...) {
-                LOG_WARN("[MCL] Failed to parse cgroups v2 memory limit: {}",
-                         line);
-            }
-        }
-    }
-
-    // 3. Check cgroups v1 memory limit
-    std::ifstream cgroup_v1("/sys/fs/cgroup/memory/memory.limit_in_bytes");
-    if (cgroup_v1.is_open()) {
-        std::string line;
-        if (std::getline(cgroup_v1, line)) {
-            try {
-                int64_t v1_limit = std::stoll(line);
-                // Filter out unrealistic values (cgroups v1 sometimes returns very large numbers)
-                if (v1_limit < (1LL << 62)) {  // Reasonable upper bound
-                    limits.push_back(v1_limit);
-                    LOG_DEBUG("[MCL] Found cgroups v1 memory limit: {} bytes",
-                              v1_limit);
-                }
-            } catch (...) {
-                LOG_WARN("[MCL] Failed to parse cgroups v1 memory limit: {}",
-                         line);
-            }
-        }
-    }
-
-    // 4. Check process-specific cgroup limits from /proc/self/cgroup
+    // Check process-specific cgroup limits from /proc/self/cgroup
     std::ifstream proc_cgroup("/proc/self/cgroup");
     if (proc_cgroup.is_open()) {
         std::string line;
