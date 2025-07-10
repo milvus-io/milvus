@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -898,7 +898,7 @@ func validateFunction(coll *schemapb.CollectionSchema) error {
 		}
 	}
 
-	if err := function.ValidateFunctions(coll); err != nil {
+	if err := embedding.ValidateFunctions(coll); err != nil {
 		return err
 	}
 	return nil
@@ -915,7 +915,7 @@ func checkFunctionOutputField(fSchema *schemapb.FunctionSchema, fields []*schema
 			return fmt.Errorf("BM25 function output field must be a SparseFloatVector field, but got %s", fields[0].DataType.String())
 		}
 	case schemapb.FunctionType_TextEmbedding:
-		if err := function.TextEmbeddingOutputsCheck(fields); err != nil {
+		if err := embedding.TextEmbeddingOutputsCheck(fields); err != nil {
 			return err
 		}
 	default:

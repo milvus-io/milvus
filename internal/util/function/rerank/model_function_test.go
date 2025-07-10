@@ -31,7 +31,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/credentials"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -45,6 +47,11 @@ type RerankModelSuite struct {
 
 func (s *RerankModelSuite) SetupTest() {
 	paramtable.Init()
+	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
+		return map[string]string{
+			"mock.apikey": "mock",
+		}
+	}
 	paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 		return map[string]string{}
 	}
@@ -56,29 +63,12 @@ func (s *RerankModelSuite) TestNewProvider() {
 			{Key: providerParamName, Value: "unknown"},
 		}
 		_, err := newProvider(params)
-		s.ErrorContains(err, "Unknow rerank provider")
+		s.ErrorContains(err, "Unknow rerank model provider")
 	}
 
 	{
 		_, err := newProvider([]*commonpb.KeyValuePair{})
 		s.ErrorContains(err, "Lost rerank params")
-	}
-
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: "illegal"},
-		}
-		_, err := newProvider(params)
-		s.ErrorContains(err, "is not a valid http/https link")
-	}
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: "http://"},
-		}
-		_, err := newProvider(params)
-		s.ErrorContains(err, "is not a valid http/https link")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
@@ -90,8 +80,8 @@ func (s *RerankModelSuite) TestNewProvider() {
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
-			{Key: maxBatchKeyName, Value: "-1"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "-1"},
 		}
 		_, err := newProvider(params)
 		s.ErrorContains(err, "Rerank function params max_batch must > 0")
@@ -99,55 +89,33 @@ func (s *RerankModelSuite) TestNewProvider() {
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
-			{Key: maxBatchKeyName, Value: "NotNum"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "NotNum"},
 		}
 		_, err := newProvider(params)
-		s.ErrorContains(err, "Rerank params error, maxBatch")
+		s.ErrorContains(err, "is not a valid numbe")
 	}
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
-		}
-		provder, err := newProvider(params)
-		s.NoError(err)
-		s.Equal(provder.getURL(), "http://localhost:80/v2/rerank")
-	}
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
-		}
-		provder, err := newProvider(params)
-		s.NoError(err)
-		s.Equal(provder.getURL(), "http://localhost:80/rerank")
-	}
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
-		}
-		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
-			key := "tei.enable"
-			return map[string]string{
-				key: "false",
-			}
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 		}
 		_, err := newProvider(params)
-		s.ErrorContains(err, "TEI rerank is disabled")
-		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
-			return map[string]string{}
-		}
-		os.Setenv(function.EnableTeiEnvStr, "false")
-		_, err = newProvider(params)
-		s.ErrorContains(err, "TEI rerank is disabled")
-		os.Unsetenv(function.EnableTeiEnvStr)
+		s.NoError(err)
 	}
 	{
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.VllmTruncateParamName, Value: "unknow"},
+		}
+		_, err := newProvider(params)
+		s.Error(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "vllm"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 		}
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			key := "vllm.enable"
@@ -156,34 +124,144 @@ func (s *RerankModelSuite) TestNewProvider() {
 			}
 		}
 		_, err := newProvider(params)
-		s.ErrorContains(err, "Vllm rerank is disabled")
+		s.ErrorContains(err, "is not enabled")
 		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
 			return map[string]string{}
 		}
-		os.Setenv(function.EnableVllmEnvStr, "false")
+		os.Setenv(models.EnableVllmEnvStr, "false")
 		_, err = newProvider(params)
-		s.ErrorContains(err, "Vllm rerank is disabled")
-		os.Unsetenv(function.EnableVllmEnvStr)
+		s.ErrorContains(err, "is not enabled")
+		os.Unsetenv(models.EnableVllmEnvStr)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.TruncateParamKey, Value: "unknow"},
+		}
+		_, err := newProvider(params)
+		s.Error(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.TruncateParamKey, Value: "true"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
+			{Key: models.TruncationDirectionParamKey, Value: "unknow"},
+		}
+		_, err := newProvider(params)
+		s.Error(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.TruncateParamKey, Value: "true"},
+			{Key: models.TruncationDirectionParamKey, Value: "Left"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "tei"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
+		}
+		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
+			key := "tei.enable"
+			return map[string]string{
+				key: "false",
+			}
+		}
+		_, err := newProvider(params)
+		s.ErrorContains(err, "is not enabled")
+		paramtable.Get().FunctionCfg.RerankModelProviders.GetFunc = func() map[string]string {
+			return map[string]string{}
+		}
+		os.Setenv(models.EnableTeiEnvStr, "false")
+		_, err = newProvider(params)
+		s.ErrorContains(err, "is not enabled")
+		os.Unsetenv(models.EnableTeiEnvStr)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "siliconflow"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		_, err := newProvider(params)
+		s.ErrorContains(err, "siliconflow rerank model name is required")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "siliconflow"},
+			{Key: models.ModelNameParamKey, Value: "siliconflow-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "siliconflow"},
+			{Key: models.ModelNameParamKey, Value: "siliconflow-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
+			{Key: models.MaxChunksPerDocParamKey, Value: "10"},
+			{Key: models.OverlapTokensParamKey, Value: "10"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "cohere"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		_, err := newProvider(params)
+		s.ErrorContains(err, "cohere rerank model name is required")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "cohere"},
+			{Key: models.ModelNameParamKey, Value: "cohere-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
+			{Key: models.MaxTKsPerDocParamKey, Value: "10"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "voyageai"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		_, err := newProvider(params)
+		s.ErrorContains(err, "voyageai rerank model name is required")
+	}
+	{
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "voyageai"},
+			{Key: models.ModelNameParamKey, Value: "voyageai-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+			{Key: models.MaxClientBatchSizeParamKey, Value: "10"},
+			{Key: models.TruncateParamKey, Value: "true"},
+		}
+		_, err := newProvider(params)
+		s.NoError(err)
 	}
 }
 
 func (s *RerankModelSuite) TestCallVllm() {
-	{
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"results": [{"index": 0, "relevance_score": 0.1}, {"index": 1, "relevance_score": 0.2}]}`))
-		}))
-		defer ts.Close()
-
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
-		}
-		provder, err := newProvider(params)
-		s.NoError(err)
-		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call Rerank service failed, 3 docs but got 2 scores")
-	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -193,12 +271,12 @@ func (s *RerankModelSuite) TestCallVllm() {
 
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
+			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
 		provder, err := newProvider(params)
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Call rerank model failed")
+		s.ErrorContains(err, "Call service failed")
 	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,12 +287,12 @@ func (s *RerankModelSuite) TestCallVllm() {
 
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
+			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
 		provder, err := newProvider(params)
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Rerank error, parsing vllm response failed")
+		s.ErrorContains(err, "Call service failed")
 	}
 	{
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +303,7 @@ func (s *RerankModelSuite) TestCallVllm() {
 
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
+			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
 		provder, err := newProvider(params)
 		s.NoError(err)
@@ -245,7 +323,7 @@ func (s *RerankModelSuite) TestCallTEI() {
 
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
+			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
 		provder, err := newProvider(params)
 		s.NoError(err)
@@ -262,12 +340,76 @@ func (s *RerankModelSuite) TestCallTEI() {
 
 		params := []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
+			{Key: models.EndpointParamKey, Value: ts.URL},
 		}
 		provder, err := newProvider(params)
 		s.NoError(err)
 		_, err = provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
-		s.ErrorContains(err, "Rerank error, parsing TEI response failed")
+		s.ErrorContains(err, "Call service failed")
+	}
+}
+
+func (s *RerankModelSuite) TestCallSiliconFlow() {
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"results": [{"index": 0, "relevance_score": 0.1}, {"index": 1, "relevance_score": 0.2}]}`))
+		}))
+		defer ts.Close()
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "siliconflow"},
+			{Key: models.ModelNameParamKey, Value: "siliconflow-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		provder, err := newSiliconflowProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		s.NoError(err)
+		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2"})
+		s.NoError(err)
+		s.Equal([]float32{0.1, 0.2}, scores)
+	}
+}
+
+func (s *RerankModelSuite) TestCallCohere() {
+	{
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"results": [{"index": 0, "relevance_score": 0.1}, {"index": 1, "relevance_score": 0.2}]}`))
+		}))
+		defer ts.Close()
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "cohere"},
+			{Key: models.ModelNameParamKey, Value: "cohere-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		provder, err := newCohereProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		s.NoError(err)
+		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2"})
+		s.NoError(err)
+		s.Equal([]float32{0.1, 0.2}, scores)
+	}
+}
+
+func (s *RerankModelSuite) TestCallVoyageAI() {
+	{
+		repStr := `{
+			"object": "list", 
+			"data": [{"object": "rerank", "index": 0, "relevance_score": 0.0}, {"object": "rerank", "index": 2, "relevance_score": 0.2}, {"object": "rerank", "index": 1, "relevance_score": 0.1}]
+		}`
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(repStr))
+		}))
+		defer ts.Close()
+		params := []*commonpb.KeyValuePair{
+			{Key: providerParamName, Value: "voyageai"},
+			{Key: models.ModelNameParamKey, Value: "voyageai-test"},
+			{Key: models.CredentialParamKey, Value: "mock"},
+		}
+		provder, err := newVoyageaiProvider(params, map[string]string{models.URLParamKey: ts.URL}, credentials.NewCredentials(map[string]string{"mock.apikey": "mock"}))
+		s.NoError(err)
+		scores, err := provder.rerank(context.Background(), "mytest", []string{"t1", "t2", "t3"})
+		s.NoError(err)
+		s.Equal([]float32{0.0, 0.1, 0.2}, scores)
 	}
 }
 
@@ -292,7 +434,7 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 		InputFieldNames: []string{"text"},
 		Params: []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:80"},
+			{Key: models.EndpointParamKey, Value: "http://localhost:80"},
 			{Key: queryKeyName, Value: `["q1"]`},
 		},
 	}
@@ -330,74 +472,12 @@ func (s *RerankModelSuite) TestNewModelFunction() {
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: providerParamName, Value: `notExist`}
 		_, err := newModelFunction(schema, functionSchema)
-		s.ErrorContains(err, "Unknow rerank provider")
+		s.ErrorContains(err, "Unknow rerank model provider")
 	}
 	{
 		functionSchema.Params[0] = &commonpb.KeyValuePair{Key: "NotExist", Value: `notExist`}
 		_, err := newModelFunction(schema, functionSchema)
 		s.ErrorContains(err, "Lost rerank params")
-	}
-}
-
-func (s *RerankModelSuite) TestParseParams() {
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "mock"},
-			{Key: queryKeyName, Value: `["q1"]`},
-		}
-		_, _, _, err := parseParams(params)
-		s.ErrorContains(err, "is not a valid http/https link")
-	}
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
-			{Key: maxBatchKeyName, Value: "error"},
-		}
-		_, _, _, err := parseParams(params)
-		s.ErrorContains(err, "Rerank params error, maxBatch")
-	}
-
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
-			{Key: maxBatchKeyName, Value: "100"},
-			{Key: vllmTruncateParamName, Value: "error"},
-		}
-		_, _, _, err := parseParams(params)
-		s.ErrorContains(err, "Rerank params error")
-	}
-
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
-			{Key: maxBatchKeyName, Value: "100"},
-			{Key: vllmTruncateParamName, Value: "100"},
-			{Key: teiTruncationDirectionParamName, Value: "Left"},
-			{Key: tieTruncateParamName, Value: "error"},
-		}
-		_, _, _, err := parseParams(params)
-		s.ErrorContains(err, "Rerank params error")
-	}
-	{
-		params := []*commonpb.KeyValuePair{
-			{Key: providerParamName, Value: "tei"},
-			{Key: function.EndpointParamKey, Value: "http://localhost:9000"},
-			{Key: maxBatchKeyName, Value: "100"},
-			{Key: vllmTruncateParamName, Value: "101"},
-			{Key: teiTruncationDirectionParamName, Value: "Left"},
-			{Key: tieTruncateParamName, Value: "true"},
-		}
-		endpoint, maxBatch, truncateParams, err := parseParams(params)
-		s.NoError(err)
-		s.Equal("http://localhost:9000", endpoint)
-		s.Equal(100, maxBatch)
-		s.Equal(truncateParams[vllmTruncateParamName], int64(101))
-		s.Equal(truncateParams[teiTruncationDirectionParamName], "Left")
-		s.Equal(truncateParams[tieTruncateParamName], true)
 	}
 }
 
@@ -427,7 +507,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 			InputFieldNames: []string{"text"},
 			Params: []*commonpb.KeyValuePair{
 				{Key: providerParamName, Value: "tei"},
-				{Key: function.EndpointParamKey, Value: ts.URL},
+				{Key: models.EndpointParamKey, Value: ts.URL},
 				{Key: queryKeyName, Value: `["q1"]`},
 			},
 		}
@@ -448,7 +528,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		{
 			nq := int64(1)
 			f, err := newModelFunction(schema, functionSchema)
-			data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "noExist", 1000)
+			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "noExist", 1000)
 			s.NoError(err)
 
 			_, err = newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
@@ -482,7 +562,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		InputFieldNames: []string{"text"},
 		Params: []*commonpb.KeyValuePair{
 			{Key: providerParamName, Value: "vllm"},
-			{Key: function.EndpointParamKey, Value: ts.URL},
+			{Key: models.EndpointParamKey, Value: ts.URL},
 			{Key: queryKeyName, Value: `["q1", "q2"]`},
 		},
 	}
@@ -492,7 +572,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		{
 			f, err := newModelFunction(schema, functionSchema)
 			s.NoError(err)
-			data := function.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
+			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 			_, err = f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 			s.ErrorContains(err, "nq must equal to queries size, but got nq [1], queries size [2]")
@@ -501,7 +581,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 			functionSchema.Params[2].Value = `["q1"]`
 			f, err := newModelFunction(schema, functionSchema)
 			s.NoError(err)
-			data := function.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
+			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 			ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 0, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 			s.NoError(err)
@@ -514,7 +594,7 @@ func (s *RerankModelSuite) TestRerankProcess() {
 			functionSchema.Params[2].Value = `["q1", "q2", "q3"]`
 			f, err := newModelFunction(schema, functionSchema)
 			s.NoError(err)
-			data := function.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
+			data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 			inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 			ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE", "COSINE"}), inputs)
 			s.NoError(err)
@@ -530,9 +610,9 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		functionSchema.Params[2].Value = `["q1"]`
 		f, err := newModelFunction(schema, functionSchema)
 		s.NoError(err)
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 		// empty
-		data2 := function.GenSearchResultData(nq, 0, schemapb.DataType_VarChar, "text", 101)
+		data2 := embedding.GenSearchResultData(nq, 0, schemapb.DataType_VarChar, "text", 101)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 		s.NoError(err)
@@ -545,9 +625,9 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		f, err := newModelFunction(schema, functionSchema)
 		s.NoError(err)
 		// ts/id data: 0 - 9
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
 		// ts/id data: 0 - 3
-		data2 := function.GenSearchResultData(nq, 4, schemapb.DataType_VarChar, "text", 101)
+		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_VarChar, "text", 101)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
@@ -560,8 +640,8 @@ func (s *RerankModelSuite) TestRerankProcess() {
 		functionSchema.Params[2].Value = `["q1", "q2", "q3"]`
 		f, err := newModelFunction(schema, functionSchema)
 		s.NoError(err)
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
-		data2 := function.GenSearchResultData(nq, 4, schemapb.DataType_VarChar, "text", 101)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_VarChar, "text", 101)
+		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_VarChar, "text", 101)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, 1, -1, 1, false, "", []string{"COSINE", "COSINE", "COSINE"}), inputs)
 		s.NoError(err)

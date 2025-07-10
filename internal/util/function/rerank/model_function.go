@@ -22,279 +22,46 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
-	"os"
-	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function"
-	"github.com/milvus-io/milvus/internal/util/function/models/utils"
+	"github.com/milvus-io/milvus/internal/util/credentials"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 const (
-	providerParamName string = "provider"
-	vllmProviderName  string = "vllm"
-	teiProviderName   string = "tei"
+	providerParamName       string = "provider"
+	vllmProviderName        string = "vllm"
+	teiProviderName         string = "tei"
+	siliconflowProviderName string = "siliconflow"
+	cohereProviderName      string = "cohere"
+	voyageaiProviderName    string = "voyageai"
 
-	queryKeyName    string = "queries"
-	maxBatchKeyName string = "max_batch"
-
-	vllmTruncateParamName           string = "truncate_prompt_tokens"
-	tieTruncateParamName            string = "truncate"
-	teiTruncationDirectionParamName string = "truncation_direction"
+	queryKeyName string = "queries"
 )
+
+func parseMaxBatch(maxBatch string) (int, error) {
+	if batch, err := strconv.Atoi(maxBatch); err != nil {
+		return -1, fmt.Errorf("[%s param's value: %s] is not a valid number", models.MaxClientBatchSizeParamKey, maxBatch)
+	} else {
+		return batch, nil
+	}
+}
 
 type modelProvider interface {
 	rerank(context.Context, string, []string) ([]float32, error)
-	getURL() string
+	maxBatch() int
 }
 
-type baseModel struct {
-	url      string
-	maxBatch int
-
-	queryKey string
-	docKey   string
-
-	truncateParams map[string]any
-
-	parseScores func([]byte) ([]float32, error)
+type baseProvider struct {
+	batchSize int
 }
 
-func (base *baseModel) getURL() string {
-	return base.url
-}
-
-func (base *baseModel) rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	requestBodies, err := genRerankRequestBody(query, docs, base.maxBatch, base.queryKey, base.docKey, base.truncateParams)
-	if err != nil {
-		return nil, err
-	}
-	scores := []float32{}
-	for _, requestBody := range requestBodies {
-		rerankResp, err := base.callService(ctx, requestBody, 30)
-		if err != nil {
-			return nil, fmt.Errorf("Call rerank model failed: %v\n", err)
-		}
-		scores = append(scores, rerankResp...)
-	}
-
-	if len(scores) != len(docs) {
-		return nil, fmt.Errorf("Call Rerank service failed, %d docs but got %d scores", len(docs), len(scores))
-	}
-	return scores, nil
-}
-
-func (base *baseModel) callService(ctx context.Context, requestBody []byte, timeoutSec int64) ([]float32, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-	headers := map[string]string{
-		"Content-Type": "application/json",
-	}
-	body, err := utils.RetrySend(ctx, requestBody, http.MethodPost, base.url, headers, 3)
-	if err != nil {
-		return nil, err
-	}
-	return base.parseScores(body)
-}
-
-type vllmRerankRequest struct {
-	Query     string   `json:"query"`
-	Documents []string `json:"documents"`
-}
-
-type vllmRerankResponse struct {
-	ID      string       `json:"id"`
-	Model   string       `json:"model"`
-	Usage   vllmUsage    `json:"usage"`
-	Results []vllmResult `json:"results"`
-}
-
-type vllmUsage struct {
-	TotalTokens int `json:"total_tokens"`
-}
-
-type vllmResult struct {
-	Index          int          `json:"index"`
-	Document       vllmDocument `json:"document"`
-	RelevanceScore float32      `json:"relevance_score"`
-}
-
-type vllmDocument struct {
-	Text string `json:"text"`
-}
-
-type vllmProvider struct {
-	baseModel
-}
-
-func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string) (modelProvider, error) {
-	if !isEnable(conf, function.EnableVllmEnvStr) {
-		return nil, fmt.Errorf("Vllm rerank is disabled")
-	}
-	endpoint, maxBatch, truncateParams, err := parseParams(params)
-	if err != nil {
-		return nil, err
-	}
-
-	base, _ := url.Parse(endpoint)
-	base.Path = "/v2/rerank"
-	model := baseModel{
-		url:            base.String(),
-		maxBatch:       maxBatch,
-		queryKey:       "query",
-		docKey:         "documents",
-		truncateParams: truncateParams,
-		parseScores: func(body []byte) ([]float32, error) {
-			var rerankResp vllmRerankResponse
-			if err := json.Unmarshal(body, &rerankResp); err != nil {
-				return nil, fmt.Errorf("Rerank error, parsing vllm response failed: %v", err)
-			}
-
-			sort.Slice(rerankResp.Results, func(i, j int) bool {
-				return rerankResp.Results[i].Index < rerankResp.Results[j].Index
-			})
-
-			scores := make([]float32, 0, len(rerankResp.Results))
-			for _, result := range rerankResp.Results {
-				scores = append(scores, result.RelevanceScore)
-			}
-
-			return scores, nil
-		},
-	}
-	return &vllmProvider{baseModel: model}, nil
-}
-
-type teiProvider struct {
-	baseModel
-}
-
-type TEIResponse struct {
-	Index int     `json:"index"`
-	Score float32 `json:"score"`
-}
-
-func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string) (modelProvider, error) {
-	if !isEnable(conf, function.EnableTeiEnvStr) {
-		return nil, fmt.Errorf("TEI rerank is disabled")
-	}
-	endpoint, maxBatch, truncateParams, err := parseParams(params)
-	if err != nil {
-		return nil, err
-	}
-	base, _ := url.Parse(endpoint)
-	base.Path = "/rerank"
-	model := baseModel{
-		url:            base.String(),
-		maxBatch:       maxBatch,
-		queryKey:       "query",
-		docKey:         "texts",
-		truncateParams: truncateParams,
-		parseScores: func(body []byte) ([]float32, error) {
-			var results []TEIResponse
-			if err := json.Unmarshal(body, &results); err != nil {
-				return nil, fmt.Errorf("Rerank error, parsing TEI response failed: %v", err)
-			}
-			sort.Slice(results, func(i, j int) bool {
-				return results[i].Index < results[j].Index
-			})
-			scores := make([]float32, len(results))
-			for i, result := range results {
-				scores[i] = result.Score
-			}
-			return scores, nil
-		},
-	}
-	return &teiProvider{baseModel: model}, nil
-}
-
-func isEnable(conf map[string]string, envKey string) bool {
-	// milvus.yaml > env
-	value, exists := conf["enable"]
-	if exists {
-		return strings.ToLower(value) == "true"
-	} else {
-		return !(strings.ToLower(os.Getenv(envKey)) == "false")
-	}
-}
-
-func parseParams(params []*commonpb.KeyValuePair) (string, int, map[string]any, error) {
-	endpoint := ""
-	maxBatch := 32
-	truncateParams := map[string]any{}
-	for _, param := range params {
-		switch strings.ToLower(param.Key) {
-		case function.EndpointParamKey:
-			base, err := url.Parse(param.Value)
-			if err != nil {
-				return "", 0, nil, err
-			}
-			if base.Scheme != "http" && base.Scheme != "https" {
-				return "", 0, nil, fmt.Errorf("Rerank endpoint: [%s] is not a valid http/https link", param.Value)
-			}
-			if base.Host == "" {
-				return "", 0, nil, fmt.Errorf("Rerank endpoint: [%s] is not a valid http/https link", param.Value)
-			}
-			endpoint = base.String()
-		case maxBatchKeyName:
-			if batch, err := strconv.ParseInt(param.Value, 10, 64); err != nil {
-				return "", 0, nil, fmt.Errorf("Rerank params error, maxBatch: %s is not a number", param.Value)
-			} else {
-				maxBatch = int(batch)
-			}
-		case vllmTruncateParamName:
-			if vllmTrun, err := strconv.ParseInt(param.Value, 10, 64); err != nil {
-				return "", 0, nil, fmt.Errorf("Rerank params error, %s: %s is not a number", vllmTruncateParamName, param.Value)
-			} else {
-				truncateParams[vllmTruncateParamName] = vllmTrun
-			}
-		case teiTruncationDirectionParamName:
-			truncateParams[teiTruncationDirectionParamName] = param.Value
-		case tieTruncateParamName:
-			if teiTrun, err := strconv.ParseBool(param.Value); err != nil {
-				return "", 0, nil, fmt.Errorf("Rerank params error, %s: %s is not bool type", tieTruncateParamName, param.Value)
-			} else {
-				truncateParams[tieTruncateParamName] = teiTrun
-			}
-		}
-	}
-	if endpoint == "" {
-		return "", 0, nil, fmt.Errorf("Rerank function lost params endpoint")
-	}
-	if maxBatch <= 0 {
-		return "", 0, nil, fmt.Errorf("Rerank function params max_batch must > 0, but got %d", maxBatch)
-	}
-	return endpoint, maxBatch, truncateParams, nil
-}
-
-func genRerankRequestBody(query string, documents []string, maxSize int, queryKey string, docKey string, truncateParams map[string]any) ([][]byte, error) {
-	requestBodies := [][]byte{}
-	for i := 0; i < len(documents); i += maxSize {
-		end := i + maxSize
-		if end > len(documents) {
-			end = len(documents)
-		}
-		requestBody := map[string]interface{}{
-			queryKey: query,
-			docKey:   documents[i:end],
-		}
-		for k, v := range truncateParams {
-			requestBody[k] = v
-		}
-		jsonData, err := json.Marshal(requestBody)
-		if err != nil {
-			return nil, fmt.Errorf("Create model rerank request failed, err: %s", err)
-		}
-		requestBodies = append(requestBodies, jsonData)
-	}
-	return requestBodies, nil
+func (provider *baseProvider) maxBatch() int {
+	return provider.batchSize
 }
 
 func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
@@ -302,13 +69,20 @@ func newProvider(params []*commonpb.KeyValuePair) (modelProvider, error) {
 		if strings.ToLower(param.Key) == providerParamName {
 			provider := strings.ToLower(param.Value)
 			conf := paramtable.Get().FunctionCfg.GetRerankModelProviders(provider)
+			credentials := credentials.NewCredentials(paramtable.Get().CredentialCfg.GetCredentials())
 			switch provider {
 			case vllmProviderName:
-				return newVllmProvider(params, conf)
+				return newVllmProvider(params, conf, credentials)
 			case teiProviderName:
-				return newTeiProvider(params, conf)
+				return newTeiProvider(params, conf, credentials)
+			case siliconflowProviderName:
+				return newSiliconflowProvider(params, conf, credentials)
+			case cohereProviderName:
+				return newCohereProvider(params, conf, credentials)
+			case voyageaiProviderName:
+				return newVoyageaiProvider(params, conf, credentials)
 			default:
-				return nil, fmt.Errorf("Unknow rerank provider:%s", param.Value)
+				return nil, fmt.Errorf("Unknow rerank model provider:%s", param.Value)
 			}
 		}
 	}
@@ -380,9 +154,20 @@ func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchP
 		ids = append(ids, id)
 		texts = append(texts, text)
 	}
-	scores, err := model.provider.rerank(ctx, query, texts)
-	if err != nil {
-		return nil, err
+	scores := make([]float32, 0, len(texts))
+	for i := 0; i < len(texts); i += model.provider.maxBatch() {
+		end := i + model.provider.maxBatch()
+		if end > len(texts) {
+			end = len(texts)
+		}
+		newScores, err := model.provider.rerank(ctx, query, texts[i:end])
+		if err != nil {
+			return nil, err
+		}
+		if len(newScores) != end-i {
+			return nil, fmt.Errorf("Call Rerank service failed, %d docs but got %d scores", end-i, len(newScores))
+		}
+		scores = append(scores, newScores...)
 	}
 
 	rerankScores := map[T]float32{}

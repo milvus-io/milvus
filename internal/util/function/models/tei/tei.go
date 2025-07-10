@@ -17,15 +17,54 @@
 package tei
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
-	"time"
+	"maps"
+	"sort"
 
-	"github.com/milvus-io/milvus/internal/util/function/models/utils"
+	"github.com/milvus-io/milvus/internal/util/function/models"
 )
+
+type TEIClient struct {
+	apiKey   string
+	endpoint string
+}
+
+func NewTEIClient(apiKey string, endpoint string, enable string) (*TEIClient, error) {
+	if !models.IsEnable(enable, models.EnableTeiEnvStr) {
+		return nil, fmt.Errorf("TEI model serving is not enabled")
+	}
+
+	return &TEIClient{
+		apiKey:   apiKey,
+		endpoint: endpoint,
+	}, nil
+}
+
+func (c *TEIClient) headers() map[string]string {
+	headers := map[string]string{
+		"Content-Type": "application/json",
+	}
+	if c.apiKey != "" {
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", c.apiKey)
+	}
+	return headers
+}
+
+func (c *TEIClient) Embedding(texts []string, truncate bool, truncationDirection string, prompt string, timeoutSec int64) (*EmbeddingResponse, error) {
+	embClient, err := newTEIEmbedding(c.apiKey, c.endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return embClient.embedding(texts, truncate, truncationDirection, prompt, c.headers(), timeoutSec)
+}
+
+func (c *TEIClient) Rerank(query string, texts []string, params map[string]any, timeoutSec int64) (*RerankResponse, error) {
+	rerankClient, err := newTEIRerank(c.apiKey, c.endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return rerankClient.rerank(query, texts, params, c.headers(), timeoutSec)
+}
 
 type EmbeddingRequest struct {
 	Inputs              []string `json:"inputs"`
@@ -34,32 +73,27 @@ type EmbeddingRequest struct {
 	PromptName          string   `json:"prompt_name,omitempty"`
 }
 
-type TEIEmbedding struct {
+type EmbeddingResponse [][]float32
+
+type teiEmbedding struct {
 	apiKey string
 	url    string
 }
 
-func NewTEIEmbeddingClient(apiKey string, endpoint string) (*TEIEmbedding, error) {
-	base, err := url.Parse(endpoint)
+func newTEIEmbedding(apiKey string, endpoint string) (*teiEmbedding, error) {
+	base, err := models.NewBaseURL(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	if base.Scheme != "http" && base.Scheme != "https" {
-		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
-	}
-	if base.Host == "" {
-		return nil, fmt.Errorf("endpoint: [%s] is not a valid http/https link", endpoint)
-	}
-
 	base.Path = "/embed"
 
-	return &TEIEmbedding{
+	return &teiEmbedding{
 		apiKey: apiKey,
 		url:    base.String(),
 	}, nil
 }
 
-func (c *TEIEmbedding) Embedding(texts []string, truncate bool, truncationDirection string, prompt string, timeoutSec int64) ([][]float32, error) {
+func (c *teiEmbedding) embedding(texts []string, truncate bool, truncationDirection string, prompt string, headers map[string]string, timeoutSec int64) (*EmbeddingResponse, error) {
 	var r EmbeddingRequest
 	if prompt != "" {
 		var newTexts []string
@@ -76,31 +110,51 @@ func (c *TEIEmbedding) Embedding(texts []string, truncate bool, truncationDirect
 		r.TruncationDirection = truncationDirection
 	}
 
-	data, err := json.Marshal(r)
+	res, err := models.PostRequest[EmbeddingResponse](r, c.url, headers, timeoutSec)
 	if err != nil {
 		return nil, err
 	}
+	return res, nil
+}
 
-	if timeoutSec <= 0 {
-		timeoutSec = utils.DefaultTimeout
-	}
+/*[{"index":0,"score":0.0},{"index":1,"score":0.2}, {"index":2,"score":0.1}]*/
+type RerankResponseItem struct {
+	Index int     `json:"index"`
+	Score float32 `json:"score"`
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-	headers := map[string]string{
-		"Content-Type": "application/json",
-	}
-	if c.apiKey != "" {
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", c.apiKey)
-	}
-	body, err := utils.RetrySend(ctx, data, http.MethodPost, c.url, headers, 3)
+type RerankResponse []RerankResponseItem
+
+type teiRerank struct {
+	apiKey string
+	url    string
+}
+
+func newTEIRerank(apiKey string, endpoint string) (*teiRerank, error) {
+	base, err := models.NewBaseURL(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	var res [][]float32
-	err = json.Unmarshal(body, &res)
+	base.Path = "/rerank"
+	return &teiRerank{
+		apiKey: apiKey,
+		url:    base.String(),
+	}, nil
+}
+
+func (c *teiRerank) rerank(query string, texts []string, params map[string]any, headers map[string]string, timeoutSec int64) (*RerankResponse, error) {
+	r := map[string]any{
+		"query": query,
+		"texts": texts,
+	}
+	maps.Copy(r, params)
+
+	res, err := models.PostRequest[RerankResponse](r, c.url, headers, timeoutSec)
 	if err != nil {
 		return nil, err
 	}
-	return res, err
+	sort.Slice(*res, func(i, j int) bool {
+		return (*res)[i].Index < (*res)[j].Index
+	})
+	return res, nil
 }

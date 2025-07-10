@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -454,7 +454,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 		})
 		return future, nil
 	})
-	ts := function.CreateOpenAIEmbeddingServer()
+	ts := embedding.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 		return map[string]string{

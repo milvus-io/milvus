@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -521,7 +521,8 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 
 	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(it.schema.CollectionSchema)...)
 	// Calculate embedding fields
-	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+
+	if embedding.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
 		if it.req.PartialUpdate {
 			// remove the old bm25 fields
 			ret := make([]*schemapb.FieldData, 0)
@@ -535,7 +536,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
 		defer sp.End()
-		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(it.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}
