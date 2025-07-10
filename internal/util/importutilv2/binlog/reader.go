@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -52,6 +53,7 @@ func NewReader(ctx context.Context,
 	paths []string,
 	tsStart,
 	tsEnd uint64,
+	storageConfig *indexpb.StorageConfig,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -69,14 +71,14 @@ func NewReader(ctx context.Context,
 		schema:   schema,
 		fileSize: atomic.NewInt64(0),
 	}
-	err := r.init(paths, tsStart, tsEnd)
+	err := r.init(paths, tsStart, tsEnd, storageConfig)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
@@ -112,6 +114,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.cm.MultiRead(ctx, paths)
 		}),
+		storage.WithStorageConfig(storageConfig),
 	)
 	if err != nil {
 		return err

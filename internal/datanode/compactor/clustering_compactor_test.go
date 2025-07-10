@@ -63,6 +63,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 }
 
 func (s *ClusteringCompactionTaskSuite) setupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -116,6 +118,7 @@ func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
 
 func (s *ClusteringCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 }
 
 func (s *ClusteringCompactionTaskSuite) TestWrongCompactionType() {
@@ -421,6 +424,9 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	s.task.compactionParams = compaction.GenParams()
 	s.prepareCompactionWithBM25FunctionTask()
+
+	err := s.task.init()
+	s.Require().NoError(err)
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
