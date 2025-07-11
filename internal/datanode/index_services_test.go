@@ -128,9 +128,7 @@ func (s *IndexServiceSuite) SetupTest() {
 		GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 	}
 
-	var (
-		ctx = context.TODO()
-	)
+	ctx := context.TODO()
 
 	s.node = NewDataNode(ctx)
 

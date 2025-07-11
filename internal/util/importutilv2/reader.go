@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -50,6 +51,7 @@ func NewReader(ctx context.Context,
 	importFile *internalpb.ImportFile,
 	options Options,
 	bufferSize int,
+	storageConfig *indexpb.StorageConfig,
 ) (Reader, error) {
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
@@ -61,7 +63,7 @@ func NewReader(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		return binlog.NewReader(ctx, cm, schema, storageVersion, paths, tsStart, tsEnd)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd)
 	}
 
 	fileType, err := GetFileType(importFile)

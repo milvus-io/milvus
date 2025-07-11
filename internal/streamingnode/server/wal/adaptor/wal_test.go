@@ -146,6 +146,8 @@ func (f *testOneWALFramework) Run() {
 		assert.NoError(f.t, err)
 		assert.NotNil(f.t, rwWAL)
 		assert.Equal(f.t, pChannel.Name, rwWAL.Channel().Name)
+		// TODO: add test here after remove the flusher component.
+		// metrics := rwWAL.Metrics()
 
 		pChannel.AccessMode = types.AccessModeRO
 		roWAL, err := f.opener.Open(ctx, &wal.OpenOption{
@@ -153,6 +155,8 @@ func (f *testOneWALFramework) Run() {
 			DisableFlusher: true,
 		})
 		assert.NoError(f.t, err)
+		metrics := roWAL.Metrics()
+		_ = metrics.(types.ROWALMetrics)
 		f.testReadAndWrite(ctx, rwWAL, roWAL)
 		// close the wal
 		roWAL.Close()
