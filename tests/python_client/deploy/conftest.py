@@ -18,14 +18,5 @@ dimension = 128
 delete_timeout = 60
 
 
-def pytest_addoption(parser):
-
-    parser.addoption('--data_size', type=int, action='store', default=3000, help="data size for deploy test")
-
-
-@pytest.fixture
-def data_size(request):
-    return request.config.getoption("--data_size")
-
 # add a fixture for all index?
 

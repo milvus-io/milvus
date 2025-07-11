@@ -51,6 +51,8 @@ def pytest_addoption(parser):
     parser.addoption('--uri', action='store', default="", help="uri for milvus client")
     parser.addoption('--token', action='store', default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
+    parser.addoption('--data_size', type=int, action='store', default=3000, help="data size for deploy test")
+    parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
     # a tei endpoint for text embedding, default is http://text-embeddings-service.milvus-ci.svc.cluster.local:80 which is deployed in house
     parser.addoption("--tei_endpoint", action="store", default="http://text-embeddings-service.milvus-ci.svc.cluster.local:80", help="tei embedding endpoint")
 
@@ -223,6 +225,14 @@ def tei_reranker_endpoint(request):
 @pytest.fixture
 def vllm_reranker_endpoint(request):
     return request.config.getoption("--vllm_reranker_endpoint")
+
+@pytest.fixture
+def data_size(request):
+    return request.config.getoption("--data_size")
+
+@pytest.fixture
+def is_check(request):
+    return request.config.getoption("--is_check")
 
 """ fixture func """
 
