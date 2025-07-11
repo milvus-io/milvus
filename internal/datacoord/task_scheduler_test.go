@@ -2362,7 +2362,7 @@ func (s *taskSchedulerSuite) Test_zeroSegmentStats() {
 		ctx:                       ctx,
 		cancel:                    cancel,
 		meta:                      mt,
-		pendingTasks:              newFairQueuePolicy(),
+		pendingTasks:              newPriorityQueuePolicy(),
 		runningTasks:              typeutil.NewConcurrentMap[UniqueID, Task](),
 		notifyChan:                make(chan struct{}, 1),
 		taskLock:                  lock.NewKeyLock[int64](),
