@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "common/FieldMeta.h"
 #include "common/Schema.h"
 #include "query/Plan.h"
 
@@ -21,6 +20,8 @@
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
+
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -28,30 +29,6 @@ using namespace milvus::storage;
 using namespace milvus::tracer;
 
 const char* METRICS_TYPE = "metric_type";
-
-int
-GetSearchResultBound(const SearchResult& search_result) {
-    int i = 0;
-    for (; i < search_result.seg_offsets_.size(); i++) {
-        if (search_result.seg_offsets_[i] == INVALID_SEG_OFFSET)
-            break;
-    }
-    return i - 1;
-}
-
-void
-CheckGroupBySearchResult(const SearchResult& search_result,
-                         int topK,
-                         int nq,
-                         bool strict) {
-    int size = search_result.group_by_values_.value().size();
-    ASSERT_EQ(search_result.seg_offsets_.size(), size);
-    ASSERT_EQ(search_result.distances_.size(), size);
-    ASSERT_TRUE(search_result.seg_offsets_[0] != INVALID_SEG_OFFSET);
-    ASSERT_TRUE(search_result.seg_offsets_[size - 1] != INVALID_SEG_OFFSET);
-    ASSERT_EQ(search_result.topk_per_nq_prefix_sum_.size(), nq + 1);
-    ASSERT_EQ(size, search_result.topk_per_nq_prefix_sum_[nq]);
-}
 
 TEST(GroupBY, SealedIndex) {
     using namespace milvus;
@@ -73,7 +50,7 @@ TEST(GroupBY, SealedIndex) {
     size_t N = 50;
 
     //2. load raw data
-    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, false, false);
+    auto raw_data = DataGen(schema, N, 42, 0, 8, 10, 1, false, false);
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     //3. load index
@@ -415,7 +392,7 @@ TEST(GroupBY, SealedData) {
     size_t N = 100;
 
     //2. load raw data
-    auto raw_data = DataGen(schema, N, 42, 0, 20, 10, false, false);
+    auto raw_data = DataGen(schema, N, 42, 0, 20, 10, 1, false, false);
     auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
 
     int topK = 10;
@@ -616,7 +593,7 @@ TEST(GroupBY, GrowingRawData) {
     int n_batch = 3;
     for (int i = 0; i < n_batch; i++) {
         auto data_set =
-            DataGen(schema, rows_per_batch, 42, 0, 8, 10, false, false);
+            DataGen(schema, rows_per_batch, 42, 0, 8, 10, 1, false, false);
         auto offset = segment_growing_impl->PreInsert(rows_per_batch);
         segment_growing_impl->Insert(offset,
                                      rows_per_batch,
