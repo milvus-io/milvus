@@ -70,6 +70,7 @@ CStatus
 AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
                         int64_t entries_num,
+                        int64_t memory_size,
                         const char* c_file_path) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -86,6 +87,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
             file_path);
         load_field_data_info->field_infos[field_id].entries_nums.emplace_back(
             entries_num);
+        load_field_data_info->field_infos[field_id].memory_sizes.emplace_back(
+            memory_size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

@@ -35,13 +35,18 @@ struct CTMeta : public milvus::cachinglayer::Meta {
 // For this translator each Chunk is a CacheCell, cid_t == uid_t.
 class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
  public:
-    ChunkTranslator(
-        int64_t segment_id,
-        FieldMeta field_meta,
-        FieldDataInfo field_data_info,
-        std::vector<std::pair<std::string, int64_t>>&& files_and_rows,
-        bool use_mmap,
-        milvus::proto::common::LoadPriority load_priority);
+    struct FileInfo {
+        std::string file_path;
+        int64_t row_count;
+        int64_t memory_size;
+    };
+
+    ChunkTranslator(int64_t segment_id,
+                    FieldMeta field_meta,
+                    FieldDataInfo field_data_info,
+                    std::vector<FileInfo>&& file_infos,
+                    bool use_mmap,
+                    milvus::proto::common::LoadPriority load_priority);
 
     size_t
     num_cells() const override;
@@ -61,7 +66,7 @@ class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {
     }
 
  private:
-    std::vector<std::pair<std::string, int64_t>> files_and_rows_;
+    std::vector<FileInfo> file_infos_;
     int64_t segment_id_;
     int64_t field_id_;
     std::string key_;
