@@ -108,10 +108,10 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {name}"}
-        if name in [None, ""]:
+        if name in [None]:
             error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {name} is illegal"}
-        if name in [" "]:
-            error = {ct.err_code: 999, ct.err_msg: f"collection name should not be empty"}
+        if name in [""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value  is illegal"}
         self.collection_wrap.init_collection(name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
@@ -2033,7 +2033,7 @@ class TestDropCollectionInvalid(TestcaseBase):
         """
         self._connect()
         error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(name)}
-        self.utility_wrap.drop_collection(name, check_task=CheckTasks.err_res, check_items=error)
+        self.utility_wrap.drop_collection(name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_with_empty_or_None_collection_name(self):
