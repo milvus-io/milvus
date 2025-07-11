@@ -17,9 +17,12 @@
 #include "common/EasyAssert.h"
 #include "knowhere/binaryset.h"
 #include "common/binary_set_c.h"
+#include "monitor/scope_metric.h"
 
 CStatus
 NewBinarySet(CBinarySet* c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto binary_set = std::make_unique<knowhere::BinarySet>();
         *c_binary_set = binary_set.release();
@@ -37,6 +40,8 @@ NewBinarySet(CBinarySet* c_binary_set) {
 
 void
 DeleteBinarySet(CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     delete binary_set;
 }
@@ -46,6 +51,8 @@ AppendIndexBinary(CBinarySet c_binary_set,
                   void* index_binary,
                   int64_t index_size,
                   const char* c_index_key) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         auto binary_set = (knowhere::BinarySet*)c_binary_set;
@@ -67,12 +74,16 @@ AppendIndexBinary(CBinarySet c_binary_set,
 
 int
 GetBinarySetSize(CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     return binary_set->binary_map_.size();
 }
 
 void
 GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     auto& map_ = binary_set->binary_map_;
     const char** data_ = (const char**)data;
@@ -84,6 +95,8 @@ GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
 
 int
 GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     int64_t ret_ = 0;
     try {
@@ -97,6 +110,8 @@ GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
 
 CStatus
 CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     try {

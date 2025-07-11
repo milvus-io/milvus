@@ -566,31 +566,46 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
         with_vec = check_items.get("with_vec", False)
-        pk_name = check_items.get("pk_name", ct.default_primary_field_name)
-        vector_type = check_items.get("vector_type", "FLOAT_VECTOR")
-        if vector_type == DataType.FLOAT16_VECTOR:
-            for single_exp_res in exp_res:
-                single_exp_res['vector'] = single_exp_res['vector'] .tolist()
-            for single_query_result in query_res:
-                single_query_result['vector'] = np.frombuffer(single_query_result['vector'][0], dtype=np.float16).tolist()
-        if vector_type == DataType.BFLOAT16_VECTOR:
-            for single_exp_res in exp_res:
-                single_exp_res['vector'] = single_exp_res['vector'] .tolist()
-            for single_query_result in query_res:
-                single_query_result['vector'] = np.frombuffer(single_query_result['vector'][0], dtype=bfloat16).tolist()
-        if vector_type == DataType.INT8_VECTOR:
-            for single_exp_res in exp_res:
-                single_exp_res['vector'] = single_exp_res['vector'] .tolist()
-            for single_query_result in query_res:
-                single_query_result['vector'] = np.frombuffer(single_query_result['vector'][0], dtype=np.int8).tolist()
+        exp_limit = check_items.get("exp_limit", None)
+        count = check_items.get("count(*)", None)
+        if count is not None:
+            assert count == query_res[0].get("count(*)", None)
+            return True
+        if exp_limit is None and exp_res is None:
+            raise Exception(f"No expected values would be checked in the check task")
+        if exp_limit is not None:
+            assert len(query_res) == exp_limit
+        # pk_name = check_items.get("pk_name", ct.default_primary_field_name)
+        # if with_vec:
         if exp_res is not None:
+            if with_vec is True:
+                vector_type = check_items.get('vector_type', 'FLOAT_VECTOR')
+                vector_field = check_items.get('vector_field', 'vector')
+                if vector_type == DataType.FLOAT16_VECTOR:
+                    # for single_exp_res in exp_res:
+                    #     single_exp_res[vector_field] = single_exp_res[vector_field].tolist()
+                    for single_query_result in query_res:
+                        single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.float16).tolist()
+                if vector_type == DataType.BFLOAT16_VECTOR:
+                    # for single_exp_res in exp_res:
+                    #     single_exp_res[vector_field] = single_exp_res[vector_field].tolist()
+                    for single_query_result in query_res:
+                        single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=bfloat16).tolist()
+                if vector_type == DataType.INT8_VECTOR:
+                    # for single_exp_res in exp_res:
+                    #     if single_exp_res[vector_field].__class__ is not list:
+                    #         single_exp_res[vector_field] = single_exp_res[vector_field].tolist()
+                    for single_query_result in query_res:
+                        single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.int8).tolist()
             if isinstance(query_res, list):
-                assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=pk_name,
-                                              with_vec=with_vec)
+                # assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=pk_name, with_vec=with_vec)
+                # return True
+                assert pc.compare_lists_ignore_order(a=query_res, b=exp_res)
                 return True
             else:
                 log.error(f"Query result {query_res} is not list")
                 return False
+
         log.warning(f'Expected query result is {exp_res}')
 
     @staticmethod

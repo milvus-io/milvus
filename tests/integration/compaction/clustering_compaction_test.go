@@ -46,12 +46,15 @@ type ClusteringCompactionSuite struct {
 }
 
 func (s *ClusteringCompactionSuite) SetupSuite() {
-	paramtable.Init()
-
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskScheduleInterval.Key, "100")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
+	// 2000 rows for each segment, about 1MB.
+	s.WithMilvusConfig(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(500*1024))
+	s.WithMilvusConfig(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key, strconv.Itoa(8))
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.Key, "1.0")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1.0")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TaskScheduleInterval.Key, "100")
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
@@ -67,35 +70,11 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 
 	collectionName := "TestClusteringCompaction" + funcutil.GenRandomStr()
 
-	// 2000 rows for each segment, about 1MB.
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key, strconv.Itoa(1))
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key)
-
-	paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(500*1024))
-	defer paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key)
-
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key, strconv.Itoa(8))
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key)
-
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, strconv.Itoa(102400))
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
-
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key)
-
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxSize.Key)
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.Key, "1.0")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSizeRatio.Key)
-
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1.0")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
-
 	schema := ConstructScalarClusteringSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -108,7 +87,9 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
 	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
+	showCollectionsResp, err := c.MilvusClient.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+		CollectionNames: []string{collectionName},
+	})
 	s.NoError(err)
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
@@ -116,7 +97,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	clusteringColumn := integration.NewInt64SameFieldData("clustering", rowNum, 100)
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{clusteringColumn, fVecColumn},
@@ -127,7 +108,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -140,19 +121,24 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
 
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().DataCoordCfg.SegmentMaxSize.Key: "1",
+	})
+	defer revertGuard()
+
 	indexType := integration.IndexFaissIvfFlat
 	metricType := metric.L2
 	vecType := schemapb.DataType_FloatVector
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      fVecColumn.FieldName,
 		IndexName:      "_default",
@@ -167,7 +153,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -182,12 +168,12 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 		CollectionID:    showCollectionsResp.CollectionIds[0],
 		MajorCompaction: true,
 	}
-	compactResp, err := c.Proxy.ManualCompaction(ctx, compactReq)
+	compactResp, err := c.MilvusClient.ManualCompaction(ctx, compactReq)
 	s.NoError(err)
 	log.Info("compact", zap.Any("compactResp", compactResp))
 
 	compacted := func() bool {
-		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+		resp, err := c.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
 			CompactionID: compactResp.GetCompactionID(),
 		})
 		if err != nil {
@@ -198,7 +184,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	for !compacted() {
 		time.Sleep(3 * time.Second)
 	}
-	desCollResp, err := c.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	desCollResp, err := c.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		CollectionName: collectionName,
 		CollectionID:   0,
 		TimeStamp:      0,
@@ -206,7 +192,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.NoError(err)
 	s.Equal(desCollResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-	flushedSegmentsResp, err := c.MixCoord.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
+	flushedSegmentsResp, err := c.MixCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
 		CollectionID: desCollResp.GetCollectionID(),
 		PartitionID:  -1,
 	})
@@ -218,7 +204,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.Contains([]int{15, 16}, len(flushedSegmentsResp.GetSegments()))
 	log.Info("get flushed segments done", zap.Int64s("segments", flushedSegmentsResp.GetSegments()))
 	totalRows := int64(0)
-	segsInfoResp, err := c.MixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	segsInfoResp, err := c.MixCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		SegmentIDs: flushedSegmentsResp.GetSegments(),
 	})
 	s.NoError(err)
@@ -242,14 +228,14 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		fVecColumn.FieldName, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
 
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 
 	checkWaitGroup := sync.WaitGroup{}
 
 	checkQuerySegmentInfo := func() bool {
-		querySegmentInfo, err := c.Proxy.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
+		querySegmentInfo, err := c.MilvusClient.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -382,7 +368,5 @@ func ConstructVectorClusteringSchema(collection string, dim int, autoID bool, fi
 }
 
 func TestClusteringCompaction(t *testing.T) {
-	g := integration.WithoutStreamingService()
-	defer g()
 	suite.Run(t, new(ClusteringCompactionSuite))
 }

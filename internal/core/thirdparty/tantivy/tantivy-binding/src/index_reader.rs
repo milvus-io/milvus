@@ -1,11 +1,14 @@
-use std::ffi::{c_void, CStr};
+use std::ffi::c_void;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use libc::c_char;
 use tantivy::fastfield::FastValue;
-use tantivy::query::{ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
+use tantivy::query::{
+    BooleanQuery, ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
+};
 use tantivy::schema::{Field, IndexRecordOption};
+use tantivy::tokenizer::{NgramTokenizer, TokenStream, Tokenizer};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
@@ -13,7 +16,7 @@ use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
 use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
 use crate::milvus_id_collector::MilvusIdCollector;
-use crate::util::make_bounds;
+use crate::util::{c_ptr_to_str, make_bounds};
 use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
@@ -24,6 +27,10 @@ macro_rules! terms_query {
         TermSetQuery::new(terms)
     }};
 }
+
+// Threshold for batch-in query. Less than this threshold, we use term_query one by one and use
+// TermSetQuery when larger than this threshold. This value is based on some experiments.
+const BATCH_THRESHOLD: usize = 10000;
 
 #[allow(dead_code)]
 pub(crate) struct IndexReaderWrapper {
@@ -150,34 +157,75 @@ impl IndexReaderWrapper {
             .map_err(TantivyBindingError::TantivyError)
     }
 
-    pub fn terms_query_bool(&self, terms: &[bool], bitset: *mut c_void) -> Result<()> {
-        let q = terms_query!(self.field, terms, |field, val| Term::from_field_bool(
-            field, val
-        ));
+    #[inline]
+    fn single_term_query<F>(&self, term_builder: F, bitset: *mut c_void) -> Result<()>
+    where
+        F: FnOnce(Field) -> Term,
+    {
+        let q = TermQuery::new(term_builder(self.field), IndexRecordOption::Basic);
         self.search(&q, bitset)
+    }
+
+    #[inline]
+    fn batch_terms_query<T, F>(
+        &self,
+        terms: &[T],
+        term_builder: F,
+        bitset: *mut c_void,
+    ) -> Result<()>
+    where
+        T: Copy,
+        F: Fn(Field, T) -> Term,
+    {
+        if terms.len() < BATCH_THRESHOLD {
+            return terms.iter().try_for_each(|term| {
+                self.single_term_query(|field| term_builder(field, *term), bitset)
+            });
+        }
+
+        let term_vec: Vec<_> = terms
+            .iter()
+            .map(|&term| term_builder(self.field, term))
+            .collect();
+        let q = TermSetQuery::new(term_vec);
+        self.search(&q, bitset)
+    }
+
+    pub fn terms_query_bool(&self, terms: &[bool], bitset: *mut c_void) -> Result<()> {
+        self.batch_terms_query(terms, Term::from_field_bool, bitset)
     }
 
     pub fn terms_query_i64(&self, terms: &[i64], bitset: *mut c_void) -> Result<()> {
-        let q = terms_query!(self.field, terms, |field, val| Term::from_field_i64(
-            field, val
-        ));
-        self.search(&q, bitset)
+        self.batch_terms_query(terms, Term::from_field_i64, bitset)
     }
 
     pub fn terms_query_f64(&self, terms: &[f64], bitset: *mut c_void) -> Result<()> {
-        let q = terms_query!(self.field, terms, |field, val| Term::from_field_f64(
-            field, val
-        ));
+        self.batch_terms_query(terms, Term::from_field_f64, bitset)
+    }
+
+    #[inline]
+    fn term_query_keyword(&self, term: &str, bitset: *mut c_void) -> Result<()> {
+        let q = TermQuery::new(
+            Term::from_field_text(self.field, term),
+            IndexRecordOption::Basic,
+        );
         self.search(&q, bitset)
     }
 
     pub fn terms_query_keyword(&self, terms: &[*const c_char], bitset: *mut c_void) -> Result<()> {
         let mut term_strs = Vec::with_capacity(terms.len());
+        if terms.len() < BATCH_THRESHOLD {
+            return terms
+                .iter()
+                .try_for_each(|term| self.term_query_keyword(c_ptr_to_str(*term)?, bitset));
+        }
+
         for term in terms {
-            let term_str = unsafe { CStr::from_ptr(*term) }.to_str()?;
+            let term_str = c_ptr_to_str(*term)?;
             term_strs.push(Term::from_field_text(self.field, term_str));
         }
         let q = TermSetQuery::new(term_strs);
+
         self.search(&q, bitset)
     }
 
@@ -493,6 +541,41 @@ impl IndexReaderWrapper {
         let escaped = regex::escape(prefix);
         let pattern = format!("{}(.|\n)*", escaped);
         self.json_regex_query(json_path, &pattern, bitset)
+    }
+
+    // **Note**: literal length must be larger or equal to min_gram.
+    pub fn inner_match_ngram(
+        &self,
+        literal: &str,
+        min_gram: usize,
+        max_gram: usize,
+        bitset: *mut c_void,
+    ) -> Result<()> {
+        // literal length should be larger or equal to min_gram.
+        assert!(
+            literal.chars().count() >= min_gram,
+            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
+            literal,
+            min_gram
+        );
+
+        if literal.chars().count() <= max_gram {
+            return self.term_query_keyword(literal, bitset);
+        }
+
+        let mut terms = vec![];
+        // So, str length is larger than 'max_gram' parse 'str' by 'max_gram'-gram and search all of them with boolean intersection
+        // nivers
+        let mut term_queries: Vec<Box<dyn Query>> = vec![];
+        let mut tokenizer = NgramTokenizer::new(max_gram, max_gram, false).unwrap();
+        let mut token_stream = tokenizer.token_stream(literal);
+        token_stream.process(&mut |token| {
+            let term = Term::from_field_text(self.field, &token.text);
+            term_queries.push(Box::new(TermQuery::new(term, IndexRecordOption::Basic)));
+            terms.push(token.text.clone());
+        });
+        let query = BooleanQuery::intersection(term_queries);
+        self.search(&query, bitset)
     }
 }
 

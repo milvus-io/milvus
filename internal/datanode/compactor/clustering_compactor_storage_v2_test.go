@@ -28,14 +28,15 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
@@ -50,15 +51,12 @@ type ClusteringCompactionTaskStorageV2Suite struct {
 
 func (s *ClusteringCompactionTaskStorageV2Suite) SetupTest() {
 	s.setupTest()
-	paramtable.Get().Save("common.storageType", "local")
 	paramtable.Get().Save("common.storage.enableV2", "true")
-	initcore.InitStorageV2FileSystem(paramtable.Get())
-	refreshPlanParams(s.plan)
+	s.task.compactionParams = compaction.GenParams()
 }
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
-	paramtable.Get().Reset("common.storageType")
 	paramtable.Get().Reset("common.storage.enableV2")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "insert_log")
 	os.RemoveAll(paramtable.Get().LocalStorageCfg.Path.GetValue() + "delta_log")
@@ -144,7 +142,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 
 func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2ToV1Format() {
 	paramtable.Get().Save("common.storage.enableV2", "false")
-	refreshPlanParams(s.plan)
+	s.task.compactionParams = compaction.GenParams()
 
 	var segmentID int64 = 1001
 
@@ -222,7 +220,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestCompactionWithBM25Function(
 	// writer will automatically flush after 1024 rows.
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key, "45000")
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
-	refreshPlanParams(s.plan)
+	s.task.compactionParams = compaction.GenParams()
 	s.prepareCompactionWithBM25FunctionTask()
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -245,7 +243,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormalByMem
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1")
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key)
-	refreshPlanParams(s.plan)
+	s.task.compactionParams = compaction.GenParams()
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)
@@ -281,7 +279,10 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", CollectionID)
 	deleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(100)}, []uint64{tsoutil.ComposeTSByTime(getMilvusBirthday().Add(time.Second), 0)})
 	pack := new(syncmgr.SyncPack).WithCollectionID(CollectionID).WithPartitionID(PartitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, segmentID, genCollectionSchema())).WithDeleteData(deleteData)
-	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0)
+	bw := syncmgr.NewBulkPackWriterV2(mc, genCollectionSchema(), cm, s.mockAlloc, packed.DefaultWriteBufferSize, 0, &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    rootPath,
+	})
 	return bw.Write(context.Background(), pack)
 }
 

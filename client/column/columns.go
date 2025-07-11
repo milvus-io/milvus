@@ -98,6 +98,7 @@ func parseScalarData[T any, COL Column, NCOL Column](
 	}
 	data = data[start:end]
 	if len(validData) > 0 {
+		validData = validData[start:end]
 		ncol, err := nullableCreator(name, data, validData, WithSparseNullableMode[T](true))
 		return ncol, err
 	}

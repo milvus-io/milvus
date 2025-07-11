@@ -18,13 +18,10 @@ package syncmgr
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -32,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -47,10 +44,13 @@ type BulkPackWriterV2 struct {
 	schema              *schemapb.CollectionSchema
 	bufferSize          int64
 	multiPartUploadSize int64
+
+	storageConfig *indexpb.StorageConfig
 }
 
 func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.CollectionSchema, chunkManager storage.ChunkManager,
-	allocator allocator.Interface, bufferSize, multiPartUploadSize int64, writeRetryOpts ...retry.Option,
+	allocator allocator.Interface, bufferSize, multiPartUploadSize int64,
+	storageConfig *indexpb.StorageConfig, writeRetryOpts ...retry.Option,
 ) *BulkPackWriterV2 {
 	return &BulkPackWriterV2{
 		BulkPackWriter: &BulkPackWriter{
@@ -63,6 +63,7 @@ func NewBulkPackWriterV2(metaCache metacache.MetaCache, schema *schemapb.Collect
 		schema:              schema,
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,
+		storageConfig:       storageConfig,
 	}
 }
 
@@ -102,14 +103,21 @@ func (bw *BulkPackWriterV2) Write(ctx context.Context, pack *SyncPack) (
 	return
 }
 
+// getRootPath returns the rootPath current task shall use.
+// when storageConfig is set, use the rootPath in it.
+// otherwise, use chunkManager.RootPath() instead.
+func (bw *BulkPackWriterV2) getRootPath() string {
+	if bw.storageConfig != nil {
+		return bw.storageConfig.RootPath
+	}
+	return bw.chunkManager.RootPath()
+}
+
 func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
-	columnGroups, err := bw.splitInsertData(pack.insertData, packed.ColumnGroupSizeThreshold)
-	if err != nil {
-		return nil, err
-	}
+	columnGroups := storagecommon.SplitBySchema(bw.schema.GetFields())
 
 	rec, err := bw.serializeBinlog(ctx, pack)
 	if err != nil {
@@ -119,7 +127,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	logs := make(map[int64]*datapb.FieldBinlog)
 	paths := make([]string, 0)
 	for _, columnGroup := range columnGroups {
-		path := metautil.BuildInsertLogPath(bw.chunkManager.RootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
+		path := metautil.BuildInsertLogPath(bw.getRootPath(), pack.collectionID, pack.partitionID, pack.segmentID, columnGroup.GroupID, bw.nextID())
 		paths = append(paths, path)
 	}
 	tsArray := rec.Column(common.TimeStampField).(*array.Int64)
@@ -138,7 +146,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, nil)
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -165,45 +173,6 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 		return nil, err
 	}
 	return logs, nil
-}
-
-// split by row average size
-func (bw *BulkPackWriterV2) splitInsertData(insertData []*storage.InsertData, splitThresHold int64) ([]storagecommon.ColumnGroup, error) {
-	groups := make([]storagecommon.ColumnGroup, 0)
-	shortColumnGroup := storagecommon.ColumnGroup{Columns: make([]int, 0), GroupID: storagecommon.DefaultShortColumnGroupID}
-	memorySizes := make(map[storage.FieldID]int64, len(insertData[0].Data))
-	rowNums := make(map[storage.FieldID]int64, len(insertData[0].Data))
-	for _, data := range insertData {
-		for fieldID, fieldData := range data.Data {
-			if _, ok := memorySizes[fieldID]; !ok {
-				memorySizes[fieldID] = 0
-				rowNums[fieldID] = 0
-			}
-			memorySizes[fieldID] += int64(fieldData.GetMemorySize())
-			rowNums[fieldID] += int64(fieldData.RowNum())
-		}
-	}
-	uniqueRows := lo.Uniq(lo.Values(rowNums))
-	if len(uniqueRows) != 1 || uniqueRows[0] == 0 {
-		return nil, errors.New("row num is not equal for each field")
-	}
-	for i, field := range bw.schema.GetFields() {
-		if _, ok := memorySizes[field.FieldID]; !ok {
-			return nil, fmt.Errorf("field %d not found in insert data", field.FieldID)
-		}
-		// Check if the field is a vector type
-		if storage.IsVectorDataType(field.DataType) || field.DataType == schemapb.DataType_Text {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else if rowNums[field.FieldID] != 0 && memorySizes[field.FieldID]/rowNums[field.FieldID] >= splitThresHold {
-			groups = append(groups, storagecommon.ColumnGroup{Columns: []int{i}, GroupID: field.GetFieldID()})
-		} else {
-			shortColumnGroup.Columns = append(shortColumnGroup.Columns, i)
-		}
-	}
-	if len(shortColumnGroup.Columns) > 0 {
-		groups = append([]storagecommon.ColumnGroup{shortColumnGroup}, groups...)
-	}
-	return groups, nil
 }
 
 func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack) (storage.Record, error) {

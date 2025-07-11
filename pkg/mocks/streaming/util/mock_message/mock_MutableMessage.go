@@ -762,6 +762,53 @@ func (_c *MockMutableMessage_WithLastConfirmedUseMessageID_Call) RunAndReturn(ru
 	return _c
 }
 
+// WithOldVersion provides a mock function with no fields
+func (_m *MockMutableMessage) WithOldVersion() message.MutableMessage {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithOldVersion")
+	}
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func() message.MutableMessage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithOldVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithOldVersion'
+type MockMutableMessage_WithOldVersion_Call struct {
+	*mock.Call
+}
+
+// WithOldVersion is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) WithOldVersion() *MockMutableMessage_WithOldVersion_Call {
+	return &MockMutableMessage_WithOldVersion_Call{Call: _e.mock.On("WithOldVersion")}
+}
+
+func (_c *MockMutableMessage_WithOldVersion_Call) Run(run func()) *MockMutableMessage_WithOldVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithOldVersion_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithOldVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithOldVersion_Call) RunAndReturn(run func() message.MutableMessage) *MockMutableMessage_WithOldVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // WithTimeTick provides a mock function with given fields: tt
 func (_m *MockMutableMessage) WithTimeTick(tt uint64) message.MutableMessage {
 	ret := _m.Called(tt)

@@ -18,8 +18,6 @@ package importv2
 
 import (
 	"context"
-	"fmt"
-	"math/rand"
 	"os"
 	"sync"
 	"time"
@@ -60,16 +58,13 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
-
-	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
-	s.NoError(err)
 
 	wg := &sync.WaitGroup{}
 	importReqs := make([]*internalpb.ImportRequest, fileNum)
@@ -78,8 +73,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 		i := i
 		go func() {
 			defer wg.Done()
-			rowBasedFile := fmt.Sprintf("%s/test_%d_%d.json", c.ChunkManager.RootPath(), i, rand.Int())
-			GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
+			rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 			files := []*internalpb.ImportFile{
 				{
 					Paths: []string{
@@ -106,7 +100,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 		i := i
 		go func() {
 			defer wg.Done()
-			importResp, err := c.Proxy.ImportV2(ctx, importReqs[i])
+			importResp, err := c.ProxyClient.ImportV2(ctx, importReqs[i])
 			s.NoError(err)
 			s.Equal(int32(0), importResp.GetStatus().GetCode())
 			log.Info("Import result", zap.Any("importResp", importResp))
@@ -116,7 +110,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	}
 	wg.Wait()
 
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -128,7 +122,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      "embeddings",
 		IndexName:      "_default",
@@ -139,7 +133,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	s.WaitForIndexBuilt(ctx, collectionName, "embeddings")
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
 	s.NoError(err)
@@ -157,7 +151,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		"embeddings", s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
 	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Eventually
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
+	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
@@ -167,7 +161,7 @@ func (s *BulkInsertSuite) runTestAutoID() {
 	if s.pkType == schemapb.DataType_VarChar {
 		expr = `id >= "0"`
 	}
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 		CollectionName:   collectionName,
 		Expr:             expr,
 		OutputFields:     []string{"id"},
@@ -184,8 +178,10 @@ func (s *BulkInsertSuite) runTestAutoID() {
 
 func (s *BulkInsertSuite) TestAutoID() {
 	// make buffer size small to trigger multiple sync
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ImportInsertBufferSize.Key, "0.000001")
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.ImportInsertBufferSize.Key)
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().DataNodeCfg.ImportBaseBufferSize.Key: "0.000001",
+	})
+	defer revertGuard()
 
 	s.pkType = schemapb.DataType_Int64
 	s.runTestAutoID()

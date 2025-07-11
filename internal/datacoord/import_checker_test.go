@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -78,14 +77,21 @@ func (s *ImportCheckerSuite) SetupTest() {
 	s.NoError(err)
 	s.importMeta = importMeta
 
-	sjm := NewMockStatsJobManager(s.T())
+	ci := NewMockCompactionInspector(s.T())
 	l0CompactionTrigger := NewMockTriggerManager(s.T())
 	compactionChan := make(chan struct{}, 1)
 	close(compactionChan)
 	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, sjm, l0CompactionTrigger).(*importChecker)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*collectionInfo, error) {
+		return &collectionInfo{
+			ID: collID,
+		}, nil
+	}).Maybe()
+
+	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, l0CompactionTrigger).(*importChecker)
 	s.checker = checker
 
 	job := &importJob{
@@ -220,6 +226,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	targetSegmentIDs := make([]int64, 0)
 	for _, t := range importTasks {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -227,41 +234,45 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 				State:         commonpb.SegmentState_Flushed,
 				IsImporting:   true,
 				InsertChannel: "ch0",
+				NumOfRows:     1000,
 			},
 		}
 		err := s.checker.meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
+		targetSegmentID := rand.Int63()
 		err = s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{rand.Int63()}))
+			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{targetSegmentID}))
 		s.NoError(err)
+		targetSegmentIDs = append(targetSegmentIDs, targetSegmentID)
 		err = s.checker.meta.UpdateChannelCheckpoint(context.TODO(), segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
 		s.NoError(err)
 	}
 	s.checker.checkImportingJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check stats job
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
-	sjm := s.checker.si.(*MockStatsJobManager)
-	sjm.EXPECT().SubmitStatsTask(mock.Anything, mock.Anything, mock.Anything, false).Return(nil)
-	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
-		State: indexpb.JobState_JobStateNone,
-	})
-	s.checker.checkStatsJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
-	sjm = NewMockStatsJobManager(s.T())
-	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
-		State: indexpb.JobState_JobStateInProgress,
-	})
-	s.checker.si = sjm
-	s.checker.checkStatsJob(job)
-	s.Equal(internalpb.ImportJobState_Stats, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
-	sjm = NewMockStatsJobManager(s.T())
-	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
-		State: indexpb.JobState_JobStateFinished,
-	})
-	s.checker.si = sjm
-	s.checker.checkStatsJob(job)
+	cim := s.checker.ci.(*MockCompactionInspector)
+	cim.EXPECT().enqueueCompaction(mock.Anything).Return(nil)
+
+	s.checker.checkSortingJob(job)
+	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
+
+	for _, segmentID := range targetSegmentIDs {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				State:         commonpb.SegmentState_Flushed,
+				IsImporting:   true,
+				InsertChannel: "ch0",
+				IsSorted:      true,
+			},
+		}
+		err := s.checker.meta.AddSegment(context.Background(), segment)
+		s.NoError(err)
+	}
+
+	s.checker.checkSortingJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check IndexBuilding job
@@ -374,11 +385,11 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
-		JobID:           s.jobID,
-		TaskID:          1,
-		State:           datapb.ImportTaskStateV2_Pending,
-		SegmentIDs:      []int64{2},
-		StatsSegmentIDs: []int64{3},
+		JobID:            s.jobID,
+		TaskID:           1,
+		State:            datapb.ImportTaskStateV2_Pending,
+		SegmentIDs:       []int64{2},
+		SortedSegmentIDs: []int64{3},
 	}
 	it := &importTask{
 		tr: timerecord.NewTimeRecorder("import task"),
@@ -387,20 +398,15 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 	err := s.importMeta.AddTask(context.TODO(), it)
 	s.NoError(err)
 
-	sjm := NewMockStatsJobManager(s.T())
-	sjm.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
-	s.checker.si = sjm
 	s.checker.checkFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	tasks := s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
-	s.Equal(0, len(tasks))
-	sjm.ExpectedCalls = nil
-	sjm.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
+	s.Equal(1, len(tasks))
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 	s.checker.checkFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	tasks = s.importMeta.GetTaskBy(context.TODO(), WithJob(s.jobID), WithStates(datapb.ImportTaskStateV2_Failed))
-	s.Equal(0, len(tasks))
+	s.Equal(1, len(tasks))
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
@@ -416,11 +422,11 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
-		JobID:           s.jobID,
-		TaskID:          1,
-		State:           datapb.ImportTaskStateV2_Failed,
-		SegmentIDs:      []int64{2},
-		StatsSegmentIDs: []int64{3},
+		JobID:            s.jobID,
+		TaskID:           1,
+		State:            datapb.ImportTaskStateV2_Failed,
+		SegmentIDs:       []int64{2},
+		SortedSegmentIDs: []int64{3},
 	}
 
 	task := &importTask{
@@ -580,14 +586,15 @@ func TestImportCheckerCompaction(t *testing.T) {
 	importMeta, err := NewImportMeta(context.TODO(), catalog, alloc, meta)
 	assert.NoError(t, err)
 
-	sjm := NewMockStatsJobManager(t)
+	cim := NewMockCompactionInspector(t)
+	handler := NewNMockHandler(t)
 	l0CompactionTrigger := NewMockTriggerManager(t)
 	compactionChan := make(chan struct{}, 1)
 	close(compactionChan)
 	l0CompactionTrigger.EXPECT().GetPauseCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 	l0CompactionTrigger.EXPECT().GetResumeCompactionChan(mock.Anything, mock.Anything).Return(compactionChan).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, sjm, l0CompactionTrigger).(*importChecker)
+	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, l0CompactionTrigger).(*importChecker)
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
@@ -718,12 +725,13 @@ func TestImportCheckerCompaction(t *testing.T) {
 	log.Info("job importing")
 
 	// check importing
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
 	importTasks := importMeta.GetTaskBy(context.TODO(), WithJob(job.GetJobID()), WithType(ImportTaskType))
+	targetSegmentIDs := make([]int64, 0)
 	for _, it := range importTasks {
 		segment := &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
@@ -735,23 +743,35 @@ func TestImportCheckerCompaction(t *testing.T) {
 		}
 		err := checker.meta.AddSegment(context.Background(), segment)
 		assert.NoError(t, err)
+		targetSegmentID := rand.Int63()
 		err = importMeta.UpdateTask(context.TODO(), it.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{rand.Int63()}))
+			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{targetSegmentID}))
 		assert.NoError(t, err)
+		targetSegmentIDs = append(targetSegmentIDs, targetSegmentID)
 		err = checker.meta.UpdateChannelCheckpoint(context.TODO(), segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
 		assert.NoError(t, err)
 	}
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Stats
+		return job.GetState() == internalpb.ImportJobState_Sorting
 	}, 2*time.Second, 100*time.Millisecond)
 	log.Info("job stats")
 
 	// check stats
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
-	sjm.EXPECT().GetStatsTask(mock.Anything, mock.Anything).Return(&indexpb.StatsTask{
-		State: indexpb.JobState_JobStateFinished,
-	}).Once()
+	for _, targetSegmentID := range targetSegmentIDs {
+		segment := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            targetSegmentID,
+				State:         commonpb.SegmentState_Flushed,
+				IsImporting:   true,
+				InsertChannel: "ch0",
+				IsSorted:      true,
+			},
+		}
+		err := checker.meta.AddSegment(context.Background(), segment)
+		assert.NoError(t, err)
+	}
 	assert.Eventually(t, func() bool {
 		job := importMeta.GetJob(context.TODO(), jobID)
 		return job.GetState() == internalpb.ImportJobState_IndexBuilding

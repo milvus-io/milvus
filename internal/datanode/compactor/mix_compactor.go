@@ -73,16 +73,18 @@ func NewMixCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	plan *datapb.CompactionPlan,
+	compactionParams compaction.Params,
 ) *mixCompactionTask {
 	ctx1, cancel := context.WithCancel(ctx)
 	return &mixCompactionTask{
-		ctx:         ctx1,
-		cancel:      cancel,
-		binlogIO:    binlogIO,
-		plan:        plan,
-		tr:          timerecord.NewTimeRecorder("mergeSplit compaction"),
-		currentTime: time.Now(),
-		done:        make(chan struct{}, 1),
+		ctx:              ctx1,
+		cancel:           cancel,
+		binlogIO:         binlogIO,
+		plan:             plan,
+		tr:               timerecord.NewTimeRecorder("mergeSplit compaction"),
+		currentTime:      time.Now(),
+		done:             make(chan struct{}, 1),
+		compactionParams: compactionParams,
 	}
 }
 
@@ -90,12 +92,6 @@ func NewMixCompactionTask(
 func (t *mixCompactionTask) preCompact() error {
 	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
 		return t.ctx.Err()
-	}
-
-	var err error
-	t.compactionParams, err = compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
-	if err != nil {
-		return err
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) < 1 {
@@ -151,7 +147,7 @@ func (t *mixCompactionTask) mergeSplit(
 	segIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedSegmentIDs().GetBegin(), t.plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(t.plan.GetPreAllocatedLogIDs().GetBegin(), t.plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096)
+	mWriter, err := NewMultiSegmentWriter(ctx, t.binlogIO, compAlloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.maxRows, t.partitionID, t.collectionID, t.GetChannelName(), 4096, storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		return nil, err
 	}
@@ -217,15 +213,12 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-
 	reader, err := storage.NewBinlogRecordReader(ctx,
 		seg.GetFieldBinlogs(),
 		t.plan.GetSchema(),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithVersion(seg.GetStorageVersion()),
-		storage.WithBucketName(bucketName),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
 		log.Warn("compact wrong, failed to new insert binlogs reader", zap.Error(err))
@@ -286,10 +279,20 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 				rb.Append(r, sliceStart, r.Len())
 			}
 			if rb.GetRowNum() > 0 {
-				mWriter.Write(rb.Build())
+				err := func() error {
+					rec := rb.Build()
+					defer rec.Release()
+					return mWriter.Write(rec)
+				}()
+				if err != nil {
+					return 0, 0, err
+				}
 			}
 		} else {
-			mWriter.Write(r)
+			err := mWriter.Write(r)
+			if err != nil {
+				return 0, 0, err
+			}
 		}
 	}
 
@@ -324,7 +327,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 
 	log.Info("compact start")
 	// Decompress compaction binlogs first
-	if err := binlog.DecompressCompactionBinlogs(t.plan.SegmentBinlogs); err != nil {
+	if err := binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), t.plan.SegmentBinlogs); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, err
 	}
@@ -358,9 +361,10 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	var res []*datapb.CompactionSegment
 	var err error
 	if sortMergeAppicable {
+		// TODO: the implementation of mergeSortMultipleSegments is not correct, also see issue: https://github.com/milvus-io/milvus/issues/43034
 		log.Info("compact by merge sort")
 		res, err = mergeSortMultipleSegments(ctxTimeout, t.plan, t.collectionID, t.partitionID, t.maxRows, t.binlogIO,
-			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl())
+			t.plan.GetSegmentBinlogs(), t.tr, t.currentTime, t.plan.GetCollectionTtl(), t.compactionParams)
 		if err != nil {
 			log.Warn("compact wrong, fail to merge sort segments", zap.Error(err))
 			return nil, err
@@ -373,7 +377,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		}
 	}
 
-	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)))
+	log.Info("compact done", zap.Duration("compact elapse", time.Since(compactStart)), zap.Any("res", res))
 
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))

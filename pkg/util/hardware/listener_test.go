@@ -13,14 +13,19 @@ func TestListener(t *testing.T) {
 	called := atomic.NewInt32(0)
 	l := &SystemMetricsListener{
 		Cooldown: 100 * time.Millisecond,
-		Condition: func(stats SystemMetrics) bool {
+		Context:  false,
+		Condition: func(stats SystemMetrics, listener *SystemMetricsListener) bool {
 			assert.NotZero(t, stats.UsedMemoryBytes)
 			assert.NotZero(t, stats.TotalMemoryBytes)
 			assert.NotZero(t, stats.UsedRatio())
 			assert.NotEmpty(t, stats.String())
+			assert.False(t, listener.Context.(bool))
+			listener.Context = true
 			return true
 		},
-		Callback: func(sm SystemMetrics) {
+		Callback: func(sm SystemMetrics, listener *SystemMetricsListener) {
+			ctx := listener.Context.(bool)
+			assert.True(t, ctx)
 			assert.NotZero(t, sm.UsedMemoryBytes)
 			assert.NotZero(t, sm.TotalMemoryBytes)
 			assert.NotZero(t, sm.UsedRatio())
@@ -37,6 +42,7 @@ func TestListener(t *testing.T) {
 
 	l2 := &SystemMetricsListener{
 		Cooldown:  100 * time.Millisecond,
+		Context:   false,
 		Condition: l.Condition,
 		Callback:  l.Callback,
 	}

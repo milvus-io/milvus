@@ -527,3 +527,21 @@ pub extern "C" fn tantivy_json_prefix_query(
     let prefix = cstr_to_str!(prefix);
     unsafe { (*real).json_prefix_query(json_path, prefix, bitset).into() }
 }
+
+#[no_mangle]
+pub extern "C" fn tantivy_inner_match_ngram(
+    ptr: *mut c_void,
+    literal: *const c_char,
+    min_gram: usize,
+    max_gram: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let literal = cstr_to_str!(literal);
+
+    unsafe {
+        (*real)
+            .inner_match_ngram(literal, min_gram, max_gram, bitset)
+            .into()
+    }
+}

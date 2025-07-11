@@ -72,6 +72,23 @@ class TestPartitionKeyParams(TestcaseBase):
         for i in range(nq):
             assert res1[i].ids == res2[i].ids == res3[i].ids
 
+        # search with 'or' to verify no partition key optimization local with or binary expr
+        query_res1 = collection_w.query(
+            expr=f'{string_field.name} == "{string_prefix}5" || {int64_field.name} in [2,4,6]',
+            output_fields=['count(*)'])[0]
+        query_res2 = collection_w.query(
+            expr=f'{string_field.name} in ["{string_prefix}2","{string_prefix}4", "{string_prefix}6"] || {int64_field.name}==5',
+            output_fields=['count(*)'])[0]
+        query_res3 = collection_w.query(
+            expr=f'{int64_field.name}==5 or {string_field.name} in ["{string_prefix}2","{string_prefix}4", "{string_prefix}6"]',
+            output_fields=['count(*)'])[0]
+        query_res4 = collection_w.query(
+            expr=f'{int64_field.name} in [2,4,6] || {string_field.name} == "{string_prefix}5"',
+            output_fields=['count(*)'])[0]
+        # assert the results persist
+        assert query_res1[0].get('count(*)') == query_res2[0].get('count(*)') \
+               == query_res3[0].get('count(*)') == query_res4[0].get('count(*)') == 40
+
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("par_key_field", [ct.default_int64_field_name, ct.default_string_field_name])
     @pytest.mark.parametrize("index_on_par_key_field", [True, False])

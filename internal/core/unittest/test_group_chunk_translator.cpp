@@ -28,6 +28,7 @@
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "test_utils/DataGen.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "mmap/ChunkedColumnGroup.h"
 
 #include <memory>
 #include <string>
@@ -106,41 +107,61 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
 
     row_group_meta_list.push_back(
         fr->file_metadata()->GetRowGroupMetadataVector());
+    auto status = fr->Close();
+    AssertInfo(
+        status.ok(),
+        "failed to close file reader when get row group metadata from file: " +
+            paths_[0] + " with error: " + status.ToString());
 
-    GroupChunkTranslator translator(segment_id_,
-                                    field_metas,
-                                    column_group_info,
-                                    paths_,
-                                    use_mmap,
-                                    row_group_meta_list,
-                                    schema_->get_field_ids().size(),
-                                    milvus::proto::common::LoadPriority::LOW);
+    auto translator = std::make_unique<GroupChunkTranslator>(segment_id_,
+                                                             field_metas,
+                                                             column_group_info,
+                                                             paths_,
+                                                             use_mmap,
+                                                             row_group_meta_list,
+                                                             schema_->get_field_ids().size(),
+                                                             milvus::proto::common::LoadPriority::LOW);
 
     // num cells
-    EXPECT_EQ(translator.num_cells(), row_group_meta_list[0].size());
+    EXPECT_EQ(translator->num_cells(), row_group_meta_list[0].size());
 
     // cell id of
-    for (size_t i = 0; i < translator.num_cells(); ++i) {
-        EXPECT_EQ(translator.cell_id_of(i), i);
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
+        EXPECT_EQ(translator->cell_id_of(i), i);
     }
 
     // key
-    EXPECT_EQ(translator.key(), "seg_0_cg_0");
+    EXPECT_EQ(translator->key(), "seg_0_cg_0");
 
     // estimated byte size
-    for (size_t i = 0; i < translator.num_cells(); ++i) {
+    for (size_t i = 0; i < translator->num_cells(); ++i) {
         auto [file_idx, row_group_idx] =
-            translator.get_file_and_row_group_index(i);
+            translator->get_file_and_row_group_index(i);
         auto& row_group_meta = row_group_meta_list[file_idx].Get(row_group_idx);
-        auto usage = translator.estimated_byte_size_of_cell(i);
+        auto usage = translator->estimated_byte_size_of_cell(i);
         EXPECT_EQ(usage.memory_bytes,
                   static_cast<int64_t>(row_group_meta.memory_size()));
     }
 
     // getting cells
     std::vector<cachinglayer::cid_t> cids = {0, 1};
-    auto cells = translator.get_cells(cids);
+    auto cells = translator->get_cells(cids);
     EXPECT_EQ(cells.size(), cids.size());
+
+    // Test DataByteSize from meta
+    auto meta = static_cast<GroupCTMeta*>(translator->meta());
+    size_t expected_total_size = 0;
+    for (const auto& chunk_size : meta->chunk_memory_size_) {
+        expected_total_size += chunk_size;
+    }
+    EXPECT_GT(expected_total_size, 0);
+    auto num_cells = translator->num_cells();
+
+    auto chunked_column_group =
+        std::make_shared<ChunkedColumnGroup>(std::move(translator));
+
+    EXPECT_EQ(meta->chunk_memory_size_.size(), num_cells);
+    EXPECT_EQ(expected_total_size, chunked_column_group->memory_size());
 
     // Verify mmap directory and files if in mmap mode
     if (use_mmap) {

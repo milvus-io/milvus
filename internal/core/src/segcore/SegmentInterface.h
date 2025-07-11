@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -40,6 +41,7 @@
 #include "index/JsonKeyStatsInvertedIndex.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/InsertRecord.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -150,6 +152,9 @@ class SegmentInterface {
                     const int64_t* offsets,
                     int64_t count) const = 0;
 
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const = 0;
+
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
 
@@ -192,7 +197,7 @@ class SegmentInternalInterface : public SegmentInterface {
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
-                res.emplace_back(str_view);
+                res.emplace_back(Json(str_view));
             }
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
@@ -360,6 +365,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const override;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const override;
 
  public:
     virtual void
@@ -539,6 +547,9 @@ class SegmentInternalInterface : public SegmentInterface {
     search_pk(const PkType& pk, Timestamp timestamp) const = 0;
 
  protected:
+    // mutex protecting rw options on schema_
+    std::shared_mutex sch_mutex_;
+
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>

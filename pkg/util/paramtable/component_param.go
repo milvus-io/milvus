@@ -242,6 +242,10 @@ type commonConfig struct {
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
 
+	DiskWriteMode         ParamItem `refreshable:"true"`
+	DiskWriteBufferSizeKb ParamItem `refreshable:"true"`
+	DiskWriteNumThreads   ParamItem `refreshable:"true"`
+
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
@@ -648,6 +652,40 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+
+	p.DiskWriteMode = ParamItem{
+		Key:          "common.diskWriteMode",
+		Version:      "2.6.0",
+		DefaultValue: "buffered",
+		Doc: `This parameter controls the write mode of the local disk, which is used to write temporary data downloaded from remote storage.
+Currently, only QueryNode uses 'common.diskWrite*' parameters. Support for other components will be added in the future.
+The options include 'direct' and 'buffered'. The default value is 'buffered'.`,
+		Export: true,
+	}
+	p.DiskWriteMode.Init(base.mgr)
+
+	p.DiskWriteBufferSizeKb = ParamItem{
+		Key:          "common.diskWriteBufferSizeKb",
+		Version:      "2.6.0",
+		DefaultValue: "64",
+		Doc: `Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.`,
+		Export: true,
+	}
+	p.DiskWriteBufferSizeKb.Init(base.mgr)
+
+	p.DiskWriteNumThreads = ParamItem{
+		Key:          "common.diskWriteNumThreads",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Doc: `This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
+It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
+For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
+The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
+In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.`,
+		Export: true,
+	}
+	p.DiskWriteNumThreads.Init(base.mgr)
 
 	p.BuildIndexThreadPoolRatio = ParamItem{
 		Key:          "common.buildIndexThreadPoolRatio",
@@ -1106,6 +1144,7 @@ type traceConfig struct {
 	OtlpEndpoint       ParamItem `refreshable:"false"`
 	OtlpMethod         ParamItem `refreshable:"false"`
 	OtlpSecure         ParamItem `refreshable:"false"`
+	OtlpHeaders        ParamItem `refreshable:"false"`
 	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
 
@@ -1163,6 +1202,15 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
+
+	t.OtlpHeaders = ParamItem{
+		Key:          "trace.otlp.headers",
+		Version:      "2.4.0",
+		DefaultValue: "",
+		Doc:          "otlp header that encoded in base64",
+		Export:       true,
+	}
+	t.OtlpHeaders.Init(base.mgr)
 
 	t.InitTimeoutSeconds = ParamItem{
 		Key:          "trace.initTimeoutSeconds",
@@ -1959,10 +2007,11 @@ please adjust in embedded Milvus: false`,
 	p.MaxResultEntries = ParamItem{
 		Key:          "proxy.maxResultEntries",
 		Version:      "2.6.0",
-		DefaultValue: strconv.Itoa(1000000),
+		DefaultValue: "-1",
 		Doc: `maximum number of result entries, typically Nq * TopK * GroupSize. 
 It costs additional memory and time to process a large number of result entries. 
-If the number of result entries exceeds this limit, the search will be rejected.`,
+If the number of result entries exceeds this limit, the search will be rejected.
+Disabled if the value is less or equal to 0.`,
 		Export: true,
 	}
 	p.MaxResultEntries.Init(base.mgr)
@@ -3194,7 +3243,7 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Key:          "queryNode.segcore.interimIndex.refineWithQuant",
 		Version:      "2.5.6",
 		DefaultValue: "true",
-		Doc:          `whether to use refineQuantType to refine for fatser but loss a little precision`,
+		Doc:          `whether to use refineQuantType to refine for faster but loss a little precision`,
 		Export:       true,
 	}
 	p.InterimIndexRefineWithQuant.Init(base.mgr)
@@ -3931,7 +3980,7 @@ type dataCoordConfig struct {
 
 	CompactionRPCTimeout             ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks       ParamItem `refreshable:"true"`
-	CompactionWorkerParalleTasks     ParamItem `refreshable:"true"`
+	CompactionWorkerParallelTasks    ParamItem `refreshable:"true"`
 	MinSegmentToMerge                ParamItem `refreshable:"true"`
 	SegmentSmallProportion           ParamItem `refreshable:"true"`
 	SegmentCompactableProportion     ParamItem `refreshable:"true"`
@@ -3981,13 +4030,14 @@ type dataCoordConfig struct {
 	LevelZeroCompactionTriggerDeltalogMaxNum ParamItem `refreshable:"true"`
 
 	// Garbage Collection
-	EnableGarbageCollection ParamItem `refreshable:"false"`
-	GCInterval              ParamItem `refreshable:"false"`
-	GCMissingTolerance      ParamItem `refreshable:"false"`
-	GCDropTolerance         ParamItem `refreshable:"false"`
-	GCRemoveConcurrent      ParamItem `refreshable:"false"`
-	GCScanIntervalInHour    ParamItem `refreshable:"false"`
-	EnableActiveStandby     ParamItem `refreshable:"false"`
+	EnableGarbageCollection     ParamItem `refreshable:"false"`
+	GCInterval                  ParamItem `refreshable:"false"`
+	GCMissingTolerance          ParamItem `refreshable:"false"`
+	GCDropTolerance             ParamItem `refreshable:"false"`
+	GCRemoveConcurrent          ParamItem `refreshable:"false"`
+	GCScanIntervalInHour        ParamItem `refreshable:"false"`
+	GCSlowDownCPUUsageThreshold ParamItem `refreshable:"false"`
+	EnableActiveStandby         ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode    ParamItem `refreshable:"false"`
 	IndexNodeAddress     ParamItem `refreshable:"false"`
@@ -4014,6 +4064,8 @@ type dataCoordConfig struct {
 	MaxImportJobNum                 ParamItem `refreshable:"true"`
 	WaitForIndex                    ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
+	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
+	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
@@ -4024,12 +4076,11 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
-	EnableStatsTask                   ParamItem `refreshable:"true"`
+	EnableSortCompaction              ParamItem `refreshable:"true"`
 	TaskCheckInterval                 ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount             ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount        ParamItem `refreshable:"true"`
 	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
 	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
-	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
@@ -4103,7 +4154,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Key:          "dataCoord.segment.diskSegmentMaxSize",
 		Version:      "2.0.0",
 		DefaultValue: "2048",
-		Doc:          "Maximun size of a segment in MB for collection which has Disk index",
+		Doc:          "Maximum size of a segment in MB for collection which has Disk index",
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
@@ -4368,7 +4419,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 			}
 			return strconv.FormatInt(ms, 10)
 		},
-		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms",
+		Doc: "The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms",
 	}
 	p.CompactionScheduleInterval.Init(base.mgr)
 
@@ -4463,7 +4514,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.LevelZeroCompactionTriggerMinSize = ParamItem{
 		Key:          "dataCoord.compaction.levelzero.forceTrigger.minSize",
 		Version:      "2.4.0",
-		Doc:          "The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
+		Doc:          "The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
 		DefaultValue: "8388608",
 		Export:       true,
 	}
@@ -4665,6 +4716,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.GCScanIntervalInHour.Init(base.mgr)
 
+	p.GCSlowDownCPUUsageThreshold = ParamItem{
+		Key:          "dataCoord.gc.slowDownCPUUsageThreshold",
+		Version:      "2.6.0",
+		DefaultValue: "0.6",
+		Doc:          "The CPU usage threshold at which the garbage collection will be slowed down",
+		Export:       true,
+	}
+	p.GCSlowDownCPUUsageThreshold.Init(base.mgr)
+
 	// Do not set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
@@ -4687,9 +4747,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCRemoveConcurrent = ParamItem{
 		Key:          "dataCoord.gc.removeConcurrent",
 		Version:      "2.3.4",
-		DefaultValue: "32",
-		Doc:          "number of concurrent goroutines to remove dropped s3 objects",
-		Export:       true,
+		DefaultValue: "0",
+		Formatter: func(value string) string {
+			num, err := strconv.Atoi(value)
+			if err != nil || num == 0 {
+				return strconv.Itoa(hardware.GetCPUNum())
+			}
+			return value
+		},
+		Doc:    "number of concurrent goroutines to remove dropped s3 objects",
+		Export: false,
 	}
 	p.GCRemoveConcurrent.Init(base.mgr)
 
@@ -4821,7 +4888,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.segmentFlushInterval",
 		Version:      "2.4.6",
 		DefaultValue: "2",
-		Doc:          "the minimal interval duration(unit: Seconds) between flusing operation on same segment",
+		Doc:          "the minimal interval duration(unit: Seconds) between flushing operation on same segment",
 		Export:       true,
 	}
 	p.SegmentFlushInterval.Init(base.mgr)
@@ -4851,7 +4918,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Version: "2.4.0",
 		Doc: "To prevent generating of small segments, we will re-group imported files. " +
 			"This parameter represents the sum of file sizes in each group (each ImportTask).",
-		DefaultValue: "6144",
+		DefaultValue: "16384",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
@@ -4924,6 +4991,30 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Doc:          `The expansion factor for pre-allocating IDs during import.`,
 	}
 	p.ImportPreAllocIDExpansionFactor.Init(base.mgr)
+
+	p.ImportFileNumPerSlot = ParamItem{
+		Key:          "dataCoord.import.fileNumPerSlot",
+		Version:      "2.5.15",
+		Doc:          "The files number per slot for pre-import/import task.",
+		DefaultValue: "1",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportFileNumPerSlot.Init(base.mgr)
+
+	p.ImportMemoryLimitPerSlot = ParamItem{
+		Key:          "dataCoord.import.memoryLimitPerSlot",
+		Version:      "2.5.15",
+		Doc:          "The memory limit (in MB) of buffer size per slot for pre-import/import task.",
+		DefaultValue: "160",
+		PanicIfEmpty: false,
+		Export:       true,
+		Formatter: func(value string) string {
+			bufferSize := getAsFloat(value)
+			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
+		},
+	}
+	p.ImportMemoryLimitPerSlot.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
@@ -5015,16 +5106,17 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
 
-	p.EnableStatsTask = ParamItem{
-		Key:          "dataCoord.statsTask.enable",
+	p.EnableSortCompaction = ParamItem{
+		Key:          "dataCoord.sortCompaction.enable",
 		Version:      "2.5.0",
-		Doc:          "enable stats task",
+		Doc:          "enable sort compaction",
+		FallbackKeys: []string{"dataCoord.statsTask.enable"},
 		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
 		Forbidden:    true,
 	}
-	p.EnableStatsTask.Init(base.mgr)
+	p.EnableSortCompaction.Init(base.mgr)
 
 	p.TaskCheckInterval = ParamItem{
 		Key:          "dataCoord.taskCheckInterval",
@@ -5036,15 +5128,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.TaskCheckInterval.Init(base.mgr)
 
-	p.StatsTaskTriggerCount = ParamItem{
-		Key:          "dataCoord.statsTaskTriggerCount",
+	p.SortCompactionTriggerCount = ParamItem{
+		Key:          "dataCoord.sortCompactionTriggerCount",
 		Version:      "2.5.5",
+		FallbackKeys: []string{"dataCoord.statsTaskTriggerCount"},
 		Doc:          "stats task count per trigger",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
-	p.StatsTaskTriggerCount.Init(base.mgr)
+	p.SortCompactionTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerCount = ParamItem{
 		Key:          "dataCoord.jsonStatsTriggerCount",
@@ -5076,15 +5169,6 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
 
-	p.StatsTaskTriggerCount = ParamItem{
-		Key:          "dataCoord.statsTaskTriggerCount",
-		Version:      "2.5.5",
-		Doc:          "stats task count per trigger",
-		DefaultValue: "100",
-		PanicIfEmpty: false,
-		Export:       false,
-	}
-	p.StatsTaskTriggerCount.Init(base.mgr)
 	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
 		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
 		Version:      "2.5.5",
@@ -5093,24 +5177,15 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
-
-	p.EnabledJSONKeyStatsInSort = ParamItem{
-		Key:          "dataCoord.enabledJSONKeyStatsInSort",
-		Version:      "2.5.5",
-		DefaultValue: "false",
-		Doc:          "Indicates whether to enable JSON key stats task with sort",
-		Export:       true,
-	}
-	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
-	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
-	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
-	MaxParallelSyncTaskNum  ParamItem `refreshable:"false"`
-	MaxParallelSyncMgrTasks ParamItem `refreshable:"true"`
+	FlowGraphMaxQueueLength           ParamItem `refreshable:"false"`
+	FlowGraphMaxParallelism           ParamItem `refreshable:"false"`
+	MaxParallelSyncTaskNum            ParamItem `refreshable:"false"`
+	MaxParallelSyncMgrTasksPerCPUCore ParamItem `refreshable:"true"`
 
 	// skip mode
 	FlowGraphSkipModeEnable   ParamItem `refreshable:"true"`
@@ -5154,11 +5229,12 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ImportInsertBufferSize     ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
-	MaxTaskSlotNum             ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
+	ImportBaseBufferSize        ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
+	MaxTaskSlotNum              ParamItem `refreshable:"true"`
+	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5244,22 +5320,22 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
 
-	p.MaxParallelSyncMgrTasks = ParamItem{
-		Key:          "dataNode.dataSync.maxParallelSyncMgrTasks",
+	p.MaxParallelSyncMgrTasksPerCPUCore = ParamItem{
+		Key:          "dataNode.dataSync.maxParallelSyncMgrTasksPerCPUCore",
 		Version:      "2.3.4",
-		DefaultValue: "64",
-		Doc:          "The max concurrent sync task number of datanode sync mgr globally",
+		DefaultValue: "16",
+		Doc:          "The max concurrent sync task number of datanode sync mgr per CPU core",
 		Formatter: func(v string) string {
 			concurrency := getAsInt(v)
 			if concurrency < 1 {
-				log.Warn("positive parallel task number, reset to default 64", zap.String("value", v))
-				return "64" // MaxParallelSyncMgrTasks must >= 1
+				log.Warn("positive parallel task number, reset to default 16", zap.String("value", v))
+				return "16" // MaxParallelSyncMgrTasksPerCPUCore must >= 1
 			}
 			return strconv.FormatInt(int64(concurrency), 10)
 		},
 		Export: true,
 	}
-	p.MaxParallelSyncMgrTasks.Init(base.mgr)
+	p.MaxParallelSyncMgrTasksPerCPUCore.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",
@@ -5444,15 +5520,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
-	p.MaxConcurrentImportTaskNum = ParamItem{
-		Key:          "dataNode.import.maxConcurrentTaskNum",
+	p.ImportConcurrencyPerCPUCore = ParamItem{
+		Key:          "dataNode.import.concurrencyPerCPUCore",
 		Version:      "2.4.0",
-		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
-		DefaultValue: "16",
+		Doc:          "The execution concurrency unit for import/pre-import tasks per CPU core.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+	p.ImportConcurrencyPerCPUCore.Init(base.mgr)
 
 	p.MaxImportFileSizeInGB = ParamItem{
 		Key:          "dataNode.import.maxImportFileSizeInGB",
@@ -5464,11 +5540,11 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxImportFileSizeInGB.Init(base.mgr)
 
-	p.ImportInsertBufferSize = ParamItem{
+	p.ImportBaseBufferSize = ParamItem{
 		Key:          "dataNode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
-		Doc:          "The insert buffer size (in MB) during import.",
-		DefaultValue: "64",
+		Doc:          "The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.",
+		DefaultValue: "16",
 		Formatter: func(v string) string {
 			bufferSize := getAsFloat(v)
 			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))
@@ -5476,7 +5552,7 @@ if this parameter <= 0, will set it as 10`,
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.ImportInsertBufferSize.Init(base.mgr)
+	p.ImportBaseBufferSize.Init(base.mgr)
 
 	p.ImportDeleteBufferSize = ParamItem{
 		Key:          "dataNode.import.readDeleteBufferSizeInMB",
@@ -5502,6 +5578,24 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.MaxTaskSlotNum.Init(base.mgr)
 
+	p.ImportMemoryLimitPercentage = ParamItem{
+		Key:          "dataNode.import.memoryLimitPercentage",
+		Version:      "2.5.15",
+		Doc:          "The percentage of memory limit for import/pre-import tasks.",
+		DefaultValue: "20",
+		PanicIfEmpty: false,
+		Export:       true,
+		Formatter: func(v string) string {
+			percentage := getAsFloat(v)
+			if percentage <= 0 || percentage > 100 {
+				log.Warn("invalid import memory limit percentage, using default 20%")
+				return "20"
+			}
+			return fmt.Sprintf("%f", percentage)
+		},
+	}
+	p.ImportMemoryLimitPercentage.Init(base.mgr)
+
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
@@ -5524,8 +5618,9 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.compaction.useMergeSort",
 		Version:      "2.5.0",
 		Doc:          "Whether to enable mergeSort mode when performing mixCompaction.",
-		DefaultValue: "false",
-		Export:       true,
+		DefaultValue: "true",
+		// Enable by default start from 2.6.0
+		Export: true,
 	}
 	p.UseMergeSort.Init(base.mgr)
 
@@ -5910,14 +6005,14 @@ More samples, more frequent truncate, more memory usage.`,
 	p.WALTruncateRetentionInterval = ParamItem{
 		Key:     "streaming.walTruncate.retentionInterval",
 		Version: "2.6.0",
-		Doc: `The retention interval of wal truncate, 26h by default.
+		Doc: `The retention interval of wal truncate, 72h by default.
 If the sampled checkpoint is older than this interval, it will be used to truncate wal checkpoint.
 Greater the interval, more wal storage usage, more redundant data in wal.
 Because current query path doesn't promise the read operation not happen before the truncate point,
 retention interval should be greater than the dataCoord.segment.maxLife to avoid the message lost at query path.
 If the wal is pulsar, the pulsar should close the subscription expiration to avoid the message lost.
 because the wal truncate operation is implemented by pulsar consumer.`,
-		DefaultValue: "26h",
+		DefaultValue: "72h",
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)

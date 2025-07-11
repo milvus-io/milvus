@@ -82,12 +82,10 @@ func newStatsInspector(ctx context.Context,
 }
 
 func (si *statsInspector) Start() {
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
-		si.reloadFromMeta()
-		si.loopWg.Add(2)
-		go si.triggerStatsTaskLoop()
-		go si.cleanupStatsTasksLoop()
-	}
+	si.reloadFromMeta()
+	si.loopWg.Add(2)
+	go si.triggerStatsTaskLoop()
+	go si.cleanupStatsTasksLoop()
 }
 
 func (si *statsInspector) Stop() {
@@ -112,7 +110,6 @@ func (si *statsInspector) reloadFromMeta() {
 			proto.Clone(st).(*indexpb.StatsTask),
 			taskSlot,
 			si.mt,
-			si.compactionInspector,
 			si.handler,
 			si.allocator,
 			si.ievm,
@@ -135,58 +132,10 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 			log.Warn("DataCoord context done, exit checkStatsTaskLoop...")
 			return
 		case <-ticker.C:
-			si.triggerSortStatsTask()
 			si.triggerTextStatsTask()
 			si.triggerBM25StatsTask()
 			lastJSONStatsLastTrigger, maxJSONStatsTaskCount = si.triggerJsonKeyIndexStatsTask(lastJSONStatsLastTrigger, maxJSONStatsTaskCount)
-
-		case segID := <-getStatsTaskChSingleton():
-			log.Info("receive new segment to trigger stats task", zap.Int64("segmentID", segID))
-			segment := si.mt.GetSegment(si.ctx, segID)
-			if segment == nil {
-				log.Warn("segment is not exist, no need to do stats task", zap.Int64("segmentID", segID))
-				continue
-			}
-			si.createSortStatsTaskForSegment(segment)
 		}
-	}
-}
-
-func (si *statsInspector) triggerSortStatsTask() {
-	invisibleSegments := si.mt.SelectSegments(si.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlushed(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() &&
-			!seg.GetIsImporting() && seg.GetIsInvisible()
-	}))
-
-	for _, seg := range invisibleSegments {
-		si.createSortStatsTaskForSegment(seg)
-	}
-
-	visibleSegments := si.mt.SelectSegments(si.ctx, SegmentFilterFunc(func(seg *SegmentInfo) bool {
-		return isFlushed(seg) && seg.GetLevel() != datapb.SegmentLevel_L0 && !seg.GetIsSorted() &&
-			!seg.GetIsImporting() && !seg.GetIsInvisible()
-	}))
-
-	for _, segment := range visibleSegments {
-		// TODO @xiaocai2333: add trigger count limit
-		// if jm.scheduler.pendingTasks.TaskCount() > Params.DataCoordCfg.StatsTaskTriggerCount.GetAsInt() {
-		// 	break
-		// }
-		si.createSortStatsTaskForSegment(segment)
-	}
-}
-
-func (si *statsInspector) createSortStatsTaskForSegment(segment *SegmentInfo) {
-	targetSegmentID, err := si.allocator.AllocID(si.ctx)
-	if err != nil {
-		log.Warn("allocID for segment stats task failed",
-			zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-		return
-	}
-	if err := si.SubmitStatsTask(segment.GetID(), targetSegmentID, indexpb.StatsSubJob_Sort, true); err != nil {
-		log.Warn("create stats task with sort for segment failed, wait for retry",
-			zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-		return
 	}
 }
 
@@ -195,8 +144,8 @@ func (si *statsInspector) enableBM25() bool {
 }
 
 func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted()) {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
+		!segment.GetIsSorted() {
 		return false
 	}
 
@@ -212,12 +161,15 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 }
 
 func needDoJsonKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID) bool {
-	if !(isFlush(segment) && segment.GetLevel() != datapb.SegmentLevel_L0 &&
-		segment.GetIsSorted()) {
+	if !isFlush(segment) || segment.GetLevel() == datapb.SegmentLevel_L0 ||
+		!segment.GetIsSorted() {
 		return false
 	}
 
 	for _, fieldID := range fieldIDs {
+		if segment.GetJsonKeyStats() == nil {
+			return true
+		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
 			return true
 		}
@@ -381,7 +333,7 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 		}
 		return err
 	}
-	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.compactionInspector, si.handler, si.allocator, si.ievm))
+	si.scheduler.Enqueue(newStatsTask(proto.Clone(t).(*indexpb.StatsTask), taskSlot, si.mt, si.handler, si.allocator, si.ievm))
 	log.Ctx(si.ctx).Info("submit stats task success", zap.Int64("taskID", taskID),
 		zap.String("subJobType", subJobType.String()),
 		zap.Int64("collectionID", originSegment.GetCollectionID()),

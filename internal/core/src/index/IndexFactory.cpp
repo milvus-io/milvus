@@ -28,6 +28,7 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 #include "index/JsonInvertedIndex.h"
+#include "index/NgramInvertedIndex.h"
 #include "knowhere/utils.h"
 
 #include "index/VectorDiskIndex.h"
@@ -66,12 +67,27 @@ IndexFactory::CreatePrimitiveScalarIndex(
     return CreateScalarIndexSort<T>(file_manager_context);
 }
 
-// template <>
-// inline ScalarIndexPtr<bool>
-// IndexFactory::CreateScalarIndex(const IndexType& index_type) {
-//    return CreateBoolIndex();
-//}
-//
+IndexBasePtr
+IndexFactory::CreateNgramIndex(
+    DataType data_type,
+    const NgramParams& params,
+    const storage::FileManagerContext& file_manager_context) {
+    switch (data_type) {
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            return std::make_unique<NgramInvertedIndex>(file_manager_context,
+                                                        params);
+
+        case DataType::JSON:
+            PanicInfo(
+                NotImplemented,
+                fmt::format("building ngram index in json is not implemented"));
+        default:
+            PanicInfo(DataTypeInvalid,
+                      fmt::format("invalid data type to build ngram index: {}",
+                                  data_type));
+    }
+}
 
 template <>
 ScalarIndexPtr<std::string>
@@ -345,9 +361,15 @@ IndexFactory::CreatePrimitiveScalarIndex(
 
             // create string index
         case DataType::STRING:
-        case DataType::VARCHAR:
+        case DataType::VARCHAR: {
+            auto& ngram_params = create_index_info.ngram_params;
+            if (ngram_params.has_value()) {
+                return CreateNgramIndex(
+                    data_type, ngram_params.value(), file_manager_context);
+            }
             return CreatePrimitiveScalarIndex<std::string>(
                 create_index_info, file_manager_context);
+        }
         default:
             PanicInfo(
                 DataTypeInvalid,

@@ -67,8 +67,6 @@ type CompactionMeta interface {
 	CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 	CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
-	CheckSegmentsStating(ctx context.Context, segmentID []UniqueID) (bool, bool)
-	SetSegmentStating(segmentID UniqueID, stating bool)
 
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
@@ -1487,31 +1485,6 @@ func (m *meta) SetLastWrittenTime(segmentID UniqueID) {
 	m.segments.SetLastWrittenTime(segmentID)
 }
 
-func (m *meta) CheckSegmentsStating(ctx context.Context, segmentIDs []UniqueID) (exist bool, hasStating bool) {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-	exist = true
-	for _, segmentID := range segmentIDs {
-		seg := m.segments.GetSegment(segmentID)
-		if seg != nil {
-			if seg.isStating {
-				hasStating = true
-			}
-		} else {
-			exist = false
-			break
-		}
-	}
-	return exist, hasStating
-}
-
-func (m *meta) SetSegmentStating(segmentID UniqueID, stating bool) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-
-	m.segments.SetIsStating(segmentID, stating)
-}
-
 // SetSegmentCompacting sets compaction state for segment
 func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segMu.Lock()
@@ -1622,7 +1595,8 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 				return info.GetDmlPosition()
 			})),
 			// visible after stats and index
-			IsInvisible: true,
+			IsInvisible:    true,
+			StorageVersion: seg.GetStorageVersion(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1653,7 +1627,10 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	return compactToSegInfos, metricMutation, nil
 }
 
-func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+func (m *meta) completeMixCompactionMutation(
+	t *datapb.CompactionTask,
+	result *datapb.CompactionPlanResult,
+) ([]*SegmentInfo, *segMetricMutation, error) {
 	log := log.Ctx(context.TODO()).With(zap.Int64("planID", t.GetPlanID()),
 		zap.String("type", t.GetType().String()),
 		zap.Int64("collectionID", t.CollectionID),
@@ -1682,6 +1659,14 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
+	resultInvisible := false
+	if t.GetType() == datapb.CompactionType_SortCompaction {
+		resultInvisible = compactFromSegInfos[0].GetIsInvisible()
+		if !compactFromSegInfos[0].GetCreatedByCompaction() {
+			resultInvisible = false
+		}
+	}
+
 	compactToSegments := make([]*SegmentInfo, 0)
 	for _, compactToSegment := range result.GetSegments() {
 		compactToSegmentInfo := NewSegmentInfo(
@@ -1697,6 +1682,7 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				Statslogs:     compactToSegment.GetField2StatslogPaths(),
 				Deltalogs:     compactToSegment.GetDeltalogs(),
 				Bm25Statslogs: compactToSegment.GetBm25Logs(),
+				TextStatsLogs: compactToSegment.GetTextStatsLogs(),
 
 				CreatedByCompaction: true,
 				CompactionFrom:      compactFromSegIDs,
@@ -1709,7 +1695,8 @@ func (m *meta) completeMixCompactionMutation(t *datapb.CompactionTask, result *d
 				DmlPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetDmlPosition()
 				})),
-				IsSorted: compactToSegment.GetIsSorted(),
+				IsSorted:    compactToSegment.GetIsSorted(),
+				IsInvisible: resultInvisible,
 			})
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
@@ -1767,7 +1754,7 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 		return m.completeMixCompactionMutation(t, result)
 	case datapb.CompactionType_ClusteringCompaction:
 		return m.completeClusterCompactionMutation(t, result)

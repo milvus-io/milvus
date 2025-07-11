@@ -49,7 +49,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
                                       int64_t segment_id,
-                                      bool TEST_skip_index_for_retrieve = false,
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
     void
@@ -117,6 +116,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
         return iter->second.get();
     }
+
+    bool
+    HasNgramIndex(FieldId field_id) const override {
+        std::shared_lock lck(mutex_);
+        return ngram_indexings_.find(field_id) != ngram_indexings_.end();
+    }
+
+    PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const override;
 
     // TODO(tiered storage 1): should return a PinWrapper
     void
@@ -405,9 +413,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool enable_mmap,
         bool is_proxy_column);
 
-    void
-    init_narrow_column_field_ids(const LoadFieldDataInfo& field_data_info);
-
  private:
     // InsertRecord needs to pin pk column.
     friend class storagev1translator::InsertRecordTranslator;
@@ -427,6 +432,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;
 
+    // ngram field index
+    std::unordered_map<FieldId, index::CacheIndexBasePtr> ngram_indexings_;
+
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
     // vector field index
@@ -439,9 +447,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord<true> deleted_record_;
 
     LoadFieldDataInfo field_data_info_;
-
-    // for storage v2
-    std::vector<FieldId> narrow_column_field_ids_;
 
     SchemaPtr schema_;
     int64_t id_;
@@ -456,10 +461,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 
     SegmentStats stats_{};
-
-    // for sparse vector unit test only! Once a type of sparse index that
-    // doesn't has raw data is added, this should be removed.
-    bool TEST_skip_index_for_retrieve_ = false;
 
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
@@ -476,14 +477,8 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false,
     bool is_sorted_by_pk = false) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
-        schema,
-        index_meta,
-        segcore_config,
-        segment_id,
-        TEST_skip_index_for_retrieve,
-        is_sorted_by_pk);
+        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 }  // namespace milvus::segcore

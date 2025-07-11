@@ -26,6 +26,7 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
+#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -103,6 +104,12 @@ class SegmentSealed : public SegmentInternalInterface {
         FieldId field_id,
         std::unique_ptr<index::JsonKeyStatsInvertedIndex> index) = 0;
 
+    virtual bool
+    HasNgramIndex(FieldId field_id) const = 0;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndex(FieldId field_id) const override = 0;
+
     SegmentType
     type() const override {
         return SegmentType::Sealed;
@@ -133,8 +140,9 @@ class SegmentSealed : public SegmentInternalInterface {
                 if (any_type) {
                     return true;
                 }
-                return milvus::index::json::IsDataTypeSupported(
-                    index.cast_type, data_type, is_json_contain);
+                return index.nested_path == path &&
+                       milvus::index::json::IsDataTypeSupported(
+                           index.cast_type, data_type, is_json_contain);
             });
         return it != json_indices.end();
     }

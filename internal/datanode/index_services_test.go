@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -32,9 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -131,18 +128,9 @@ func (s *IndexServiceSuite) SetupTest() {
 		GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
 	}
 
-	var (
-		factory = dependency.NewMockFactory(s.T())
-		ctx     = context.TODO()
-	)
+	ctx := context.TODO()
 
-	factory.EXPECT().Init(mock.Anything).Return()
-
-	s.node = NewDataNode(ctx, factory)
-
-	dc := mocks.NewMockMixCoordClient(s.T())
-	dc.EXPECT().ReportDataNodeTtMsgs(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	s.node.mixCoord = dc
+	s.node = NewDataNode(ctx)
 
 	err = s.node.Init()
 	s.NoError(err)

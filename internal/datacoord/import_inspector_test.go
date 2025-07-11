@@ -205,13 +205,13 @@ func (s *ImportInspectorSuite) TestProcessFailed() {
 	s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
-		JobID:           0,
-		TaskID:          1,
-		CollectionID:    s.collectionID,
-		NodeID:          6,
-		SegmentIDs:      []int64{2, 3},
-		StatsSegmentIDs: []int64{4, 5},
-		State:           datapb.ImportTaskStateV2_Failed,
+		JobID:            0,
+		TaskID:           1,
+		CollectionID:     s.collectionID,
+		NodeID:           6,
+		SegmentIDs:       []int64{2, 3},
+		SortedSegmentIDs: []int64{4, 5},
+		State:            datapb.ImportTaskStateV2_Failed,
 	}
 
 	var task ImportTask = &importTask{

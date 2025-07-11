@@ -17,11 +17,11 @@ package rbac
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"strings"
-	"testing"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -29,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/tests/integration"
 )
 
 const (
@@ -39,19 +37,6 @@ const (
 	collectionName = "test_load_collection"
 )
 
-type RBACBackupTestSuite struct {
-	integration.MiniClusterSuite
-}
-
-func (s *RBACBackupTestSuite) SetupSuite() {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
-	paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "true")
-
-	s.Require().NoError(s.SetupEmbedEtcd())
-}
-
 func GetContext(ctx context.Context, originValue string) context.Context {
 	authKey := strings.ToLower(util.HeaderAuthorize)
 	authValue := crypto.Base64Encode(originValue)
@@ -59,14 +44,14 @@ func GetContext(ctx context.Context, originValue string) context.Context {
 		authKey: authValue,
 	}
 	md := metadata.New(contextMap)
-	return metadata.NewIncomingContext(ctx, md)
+	return metadata.NewOutgoingContext(ctx, md)
 }
 
-func (s *RBACBackupTestSuite) TestBackup() {
-	ctx := GetContext(context.Background(), "root:123456")
+func (s *RBACBasicTestSuite) TestBackup() {
+	ctx := GetContext(context.Background(), defaultAuth)
 
 	createRole := func(name string) {
-		resp, err := s.Cluster.Proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{
+		resp, err := s.Cluster.MilvusClient.CreateRole(ctx, &milvuspb.CreateRoleRequest{
 			Entity: &milvuspb.RoleEntity{Name: name},
 		})
 		s.NoError(err)
@@ -74,7 +59,7 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	}
 
 	operatePrivilege := func(role, privilege, objectName, dbName string, operateType milvuspb.OperatePrivilegeType) {
-		resp, err := s.Cluster.Proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+		resp, err := s.Cluster.MilvusClient.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
 			Type: operateType,
 			Entity: &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: role},
@@ -93,22 +78,22 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	}
 
 	// test empty rbac content
-	emptyBackupRBACResp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	emptyBackupRBACResp, err := s.Cluster.MilvusClient.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(emptyBackupRBACResp.GetStatus()))
 	s.Equal("", emptyBackupRBACResp.GetRBACMeta().String())
 
 	// generate some rbac content
 	// create role test_role
-	roleName := "test_role"
+	roleName := fmt.Sprintf("test_role_%d", rand.Int31n(1000000))
 	createRole(roleName)
 
 	// grant collection level search privilege to role test_role
 	operatePrivilege(roleName, "Search", util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Grant)
 
 	// create privilege group test_group
-	groupName := "test_group"
-	createPrivGroupResp, err := s.Cluster.Proxy.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
+	groupName := fmt.Sprintf("test_group_%d", rand.Int31n(1000000))
+	createPrivGroupResp, err := s.Cluster.MilvusClient.CreatePrivilegeGroup(ctx, &milvuspb.CreatePrivilegeGroupRequest{
 		GroupName: groupName,
 	})
 	s.NoError(err)
@@ -120,7 +105,7 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	}
 
 	// add query and insert privilege to group test_group
-	addPrivsToGroupResp, err := s.Cluster.Proxy.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
+	addPrivsToGroupResp, err := s.Cluster.MilvusClient.OperatePrivilegeGroup(ctx, &milvuspb.OperatePrivilegeGroupRequest{
 		GroupName:  groupName,
 		Privileges: []*milvuspb.PrivilegeEntity{{Name: "Query"}, {Name: "Insert"}},
 		Type:       milvuspb.OperatePrivilegeGroupType_AddPrivilegesToGroup,
@@ -133,13 +118,13 @@ func (s *RBACBackupTestSuite) TestBackup() {
 
 	userName := "test_user"
 	passwd := "test_passwd"
-	createCredResp, err := s.Cluster.Proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
+	createCredResp, err := s.Cluster.MilvusClient.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{
 		Username: userName,
 		Password: crypto.Base64Encode(passwd),
 	})
 	s.NoError(err)
 	s.True(merr.Ok(createCredResp))
-	operateUserRoleResp, err := s.Cluster.Proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{
+	operateUserRoleResp, err := s.Cluster.MilvusClient.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{
 		Username: userName,
 		RoleName: roleName,
 	})
@@ -147,7 +132,7 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.True(merr.Ok(operateUserRoleResp))
 
 	// test back up rbac, grants should contain
-	backupRBACResp, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	backupRBACResp, err := s.Cluster.MilvusClient.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(backupRBACResp.GetStatus()))
 	s.Equal(2, len(backupRBACResp.GetRBACMeta().Grants))
@@ -159,12 +144,12 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	s.Equal(groupName, backupRBACResp.GetRBACMeta().PrivilegeGroups[0].GroupName)
 	s.Equal(2, len(backupRBACResp.GetRBACMeta().PrivilegeGroups[0].Privileges))
 
-	restoreRBACResp, err := s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{})
+	restoreRBACResp, err := s.Cluster.MilvusClient.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(restoreRBACResp))
 
 	// test restore, expect to failed due to role/user already exist
-	restoreRBACResp, err = s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+	restoreRBACResp, err = s.Cluster.MilvusClient.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
 		RBACMeta: backupRBACResp.GetRBACMeta(),
 	})
 	s.NoError(err)
@@ -177,35 +162,35 @@ func (s *RBACBackupTestSuite) TestBackup() {
 	operatePrivilege(roleName, groupName, util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)
 
 	// drop privilege group test_group
-	dropPrivGroupResp, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropPrivGroupResp, err := s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: groupName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropPrivGroupResp))
 
 	// drop role test_role
-	dropRoleResp, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	dropRoleResp, err := s.Cluster.MilvusClient.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName: roleName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropRoleResp))
 
 	// delete credential
-	delCredResp, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
+	delCredResp, err := s.Cluster.MilvusClient.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
 		Username: userName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(delCredResp))
 
 	// restore rbac
-	restoreRBACResp, err = s.Cluster.Proxy.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
+	restoreRBACResp, err = s.Cluster.MilvusClient.RestoreRBAC(ctx, &milvuspb.RestoreRBACMetaRequest{
 		RBACMeta: backupRBACResp.GetRBACMeta(),
 	})
 	s.NoError(err)
 	s.True(merr.Ok(restoreRBACResp))
 
 	// check the restored rbac, should be same as the original one
-	backupRBACResp2, err := s.Cluster.Proxy.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
+	backupRBACResp2, err := s.Cluster.MilvusClient.BackupRBAC(ctx, &milvuspb.BackupRBACMetaRequest{})
 	s.NoError(err)
 	s.True(merr.Ok(backupRBACResp2.GetStatus()))
 	s.Equal(backupRBACResp2.GetRBACMeta().String(), backupRBACResp.GetRBACMeta().String())
@@ -215,25 +200,21 @@ func (s *RBACBackupTestSuite) TestBackup() {
 
 	operatePrivilege(roleName, groupName, util.AnyWord, util.DefaultDBName, milvuspb.OperatePrivilegeType_Revoke)
 
-	dropPrivGroupResp2, err := s.Cluster.Proxy.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
+	dropPrivGroupResp2, err := s.Cluster.MilvusClient.DropPrivilegeGroup(ctx, &milvuspb.DropPrivilegeGroupRequest{
 		GroupName: groupName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropPrivGroupResp2))
 
-	dropRoleResp2, err := s.Cluster.Proxy.DropRole(ctx, &milvuspb.DropRoleRequest{
+	dropRoleResp2, err := s.Cluster.MilvusClient.DropRole(ctx, &milvuspb.DropRoleRequest{
 		RoleName: roleName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(dropRoleResp2))
 
-	delCredResp2, err := s.Cluster.Proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
+	delCredResp2, err := s.Cluster.MilvusClient.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{
 		Username: userName,
 	})
 	s.NoError(err)
 	s.True(merr.Ok(delCredResp2))
-}
-
-func TestRBACBackup(t *testing.T) {
-	suite.Run(t, new(RBACBackupTestSuite))
 }

@@ -18,12 +18,13 @@ package compaction
 
 import (
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 type Params struct {
-	EnableStorageV2           bool                   `json:"enable_storage_v2,omitempty"`
+	StorageVersion            int64                  `json:"storage_version,omitempty"`
 	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
 	UseMergeSort              bool                   `json:"use_merge_sort,omitempty"`
 	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
@@ -33,8 +34,12 @@ type Params struct {
 }
 
 func GenParams() Params {
+	storageVersion := storage.StorageV1
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	return Params{
-		EnableStorageV2:           paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool(),
+		StorageVersion:            storageVersion,
 		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
 		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),

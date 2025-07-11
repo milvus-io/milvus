@@ -40,6 +40,7 @@ const (
 	TriggerTypeSegmentSizeViewChange
 	TriggerTypeClustering
 	TriggerTypeSingle
+	TriggerTypeSort
 )
 
 func (t CompactionTriggerType) String() string {
@@ -275,6 +276,14 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 					m.notify(ctx, triggerType, views)
 				}
 			}
+		case segID := <-getStatsTaskChSingleton():
+			log.Info("receive new segment to trigger sort compaction", zap.Int64("segmentID", segID))
+			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
+			if view == nil {
+				log.Warn("segment no need to do sort compaction", zap.Int64("segmentID", segID))
+				continue
+			}
+			m.notify(ctx, TriggerTypeSort, []CompactionView{view})
 		}
 	}
 }
@@ -317,7 +326,9 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 			case TriggerTypeClustering:
 				m.SubmitClusteringViewToScheduler(ctx, outView)
 			case TriggerTypeSingle:
-				m.SubmitSingleViewToScheduler(ctx, outView)
+				m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_MixCompaction)
+			case TriggerTypeSort:
+				m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_SortCompaction)
 			}
 		}
 	}
@@ -442,7 +453,7 @@ func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context,
 						},
 					},
 				},
-			}, job, m.allocator, m.meta, m.importMeta)
+			}, job, m.allocator, m.meta, m.importMeta, paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt())
 			if err != nil {
 				log.Warn("new import tasks failed", zap.Error(err))
 				return err
@@ -528,7 +539,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	)
 }
 
-func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView) {
+func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, compactionType datapb.CompactionType) {
 	log := log.Ctx(ctx).With(zap.String("view", view.String()))
 	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
@@ -557,7 +568,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
-		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
+		Type:               compactionType, // todo: use SingleCompaction
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,

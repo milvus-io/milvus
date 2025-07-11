@@ -30,9 +30,10 @@ type SealSuite struct {
 }
 
 func (s *SealSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.00000001")
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.0000001")
+	s.WithMilvusConfig(paramtable.Get().DataNodeCfg.SyncPeriod.Key, "5")
 	s.MiniClusterSuite.SetupSuite()
-
-	paramtable.Init()
 }
 
 func (s *SealSuite) TearDownSuite() {
@@ -40,7 +41,5 @@ func (s *SealSuite) TearDownSuite() {
 }
 
 func TestSealPolicies(t *testing.T) {
-	g := integration.WithoutStreamingService()
-	defer g()
 	suite.Run(t, new(SealSuite))
 }

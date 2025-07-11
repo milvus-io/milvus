@@ -113,6 +113,13 @@ RustResult tantivy_create_json_key_stats_writer(const char *field_name,
                                                 uintptr_t overall_memory_budget_in_bytes,
                                                 bool in_ram);
 
+RustResult tantivy_create_ngram_writer(const char *field_name,
+                                       const char *path,
+                                       uintptr_t min_gram,
+                                       uintptr_t max_gram,
+                                       uintptr_t num_threads,
+                                       uintptr_t overall_memory_budget_in_bytes);
+
 RustResult tantivy_load_index(const char *path, bool load_in_mmap, SetBitsetFn set_bitset);
 
 void tantivy_free_index_reader(void *ptr);
@@ -270,6 +277,12 @@ RustResult tantivy_json_regex_query(void *ptr,
 RustResult tantivy_json_prefix_query(void *ptr,
                                      const char *json_path,
                                      const char *prefix,
+                                     void *bitset);
+
+RustResult tantivy_inner_match_ngram(void *ptr,
+                                     const char *literal,
+                                     uintptr_t min_gram,
+                                     uintptr_t max_gram,
                                      void *bitset);
 
 RustResult tantivy_match_query(void *ptr, const char *query, void *bitset);

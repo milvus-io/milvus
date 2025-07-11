@@ -98,6 +98,10 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 }
 
 func (pr *PackedReader) ReadNext() (arrow.Record, error) {
+	if pr.currentBatch != nil {
+		pr.currentBatch.Release()
+		pr.currentBatch = nil
+	}
 	var cArr C.CArrowArray
 	var cSchema C.CArrowSchema
 	status := C.ReadNext(pr.cPackedReader, &cArr, &cSchema)
@@ -120,6 +124,7 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert ArrowArray to Record: %w", err)
 	}
+	pr.currentBatch = recordBatch
 
 	// Return the RecordBatch as an arrow.Record
 	return recordBatch, nil
@@ -128,6 +133,9 @@ func (pr *PackedReader) ReadNext() (arrow.Record, error) {
 func (pr *PackedReader) Close() error {
 	if pr.cPackedReader == nil {
 		return nil
+	}
+	if pr.currentBatch != nil {
+		pr.currentBatch.Release()
 	}
 	status := C.CloseReader(pr.cPackedReader)
 	if err := ConsumeCStatusIntoError(&status); err != nil {

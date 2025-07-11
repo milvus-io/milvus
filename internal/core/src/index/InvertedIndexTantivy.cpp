@@ -206,7 +206,6 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
     };
 
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
-        folly::SharedMutex::WriteHolder lock(mutex_);
         null_offset_.resize((size_t)size / sizeof(size_t));
         memcpy(null_offset_.data(), data, (size_t)size);
     };
@@ -290,12 +289,22 @@ const TargetBitmap
 InvertedIndexTantivy<T>::IsNull() {
     int64_t count = Count();
     TargetBitmap bitset(count);
-    folly::SharedMutex::ReadHolder lock(mutex_);
-    auto end =
-        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-        bitset.set(*iter);
+
+    auto fill_bitset = [this, count, &bitset]() {
+        auto end =
+            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+            bitset.set(*iter);
+        }
+    };
+
+    if (is_growing_) {
+        folly::SharedMutex::ReadHolder lock(mutex_);
+        fill_bitset();
+    } else {
+        fill_bitset();
     }
+
     return bitset;
 }
 
@@ -304,12 +313,22 @@ const TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
     int64_t count = Count();
     TargetBitmap bitset(count, true);
-    folly::SharedMutex::ReadHolder lock(mutex_);
-    auto end =
-        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-        bitset.reset(*iter);
+
+    auto fill_bitset = [this, count, &bitset]() {
+        auto end =
+            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+            bitset.reset(*iter);
+        }
+    };
+
+    if (is_growing_) {
+        folly::SharedMutex::ReadHolder lock(mutex_);
+        fill_bitset();
+    } else {
+        fill_bitset();
     }
+
     return bitset;
 }
 
@@ -343,12 +362,21 @@ InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
 
-    folly::SharedMutex::ReadHolder lock(mutex_);
-    auto end =
-        std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
-    for (auto iter = null_offset_.begin(); iter != end; ++iter) {
-        bitset.reset(*iter);
+    auto fill_bitset = [this, count, &bitset]() {
+        auto end =
+            std::lower_bound(null_offset_.begin(), null_offset_.end(), count);
+        for (auto iter = null_offset_.begin(); iter != end; ++iter) {
+            bitset.reset(*iter);
+        }
+    };
+
+    if (is_growing_) {
+        folly::SharedMutex::ReadHolder lock(mutex_);
+        fill_bitset();
+    } else {
+        fill_bitset();
     }
+
     return bitset;
 }
 
@@ -517,7 +545,6 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         for (const auto& data : field_datas) {
             total += data->get_null_count();
         }
-        folly::SharedMutex::WriteHolder lock(mutex_);
         null_offset_.reserve(total);
     }
     switch (schema_.data_type()) {
@@ -539,7 +566,6 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                         auto n = data->get_num_rows();
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                folly::SharedMutex::WriteHolder lock(mutex_);
                                 null_offset_.push_back(offset);
                             }
                             wrapper_->add_array_data<T>(
@@ -562,7 +588,6 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
                     if (schema_.nullable()) {
                         for (int i = 0; i < n; i++) {
                             if (!data->is_valid(i)) {
-                                folly::SharedMutex::WriteHolder lock(mutex_);
                                 null_offset_.push_back(i);
                             }
                             wrapper_
@@ -610,7 +635,6 @@ InvertedIndexTantivy<T>::build_index_for_array(
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                folly::SharedMutex::WriteHolder lock(mutex_);
                 null_offset_.push_back(offset);
             }
             auto length = data->is_valid(i) ? array_column[i].length() : 0;
@@ -641,7 +665,6 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
             if (schema_.nullable() && !data->is_valid(i)) {
-                folly::SharedMutex::WriteHolder lock(mutex_);
                 null_offset_.push_back(offset);
             } else {
                 Assert(IsStringDataType(array_column[i].get_element_type()));

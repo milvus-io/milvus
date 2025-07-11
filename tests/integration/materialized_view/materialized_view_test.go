@@ -43,9 +43,10 @@ type MaterializedViewTestSuite struct {
 	partitionKeyFieldDataType schemapb.DataType
 }
 
-// func (s *MaterializedViewTestSuite) SetupTest() {
-// 	s.T().Log("Setup in mv")
-// }
+func (s *MaterializedViewTestSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().CommonCfg.EnableMaterializedView.Key, "true")
+	s.MiniClusterSuite.SetupSuite()
+}
 
 func (s *MaterializedViewTestSuite) run() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -73,7 +74,7 @@ func (s *MaterializedViewTestSuite) run() {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
-	createCollectionStatus, err := c.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+	createCollectionStatus, err := c.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Schema:         marshaledSchema,
@@ -94,7 +95,7 @@ func (s *MaterializedViewTestSuite) run() {
 		s.FailNow("unsupported partition key field data type")
 	}
 	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		FieldsData:     []*schemapb.FieldData{pkFieldData, vecFieldData, partitionKeyFieldData},
@@ -104,7 +105,7 @@ func (s *MaterializedViewTestSuite) run() {
 	s.NoError(err)
 	s.True(merr.Ok(insertResult.GetStatus()))
 
-	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
@@ -117,7 +118,7 @@ func (s *MaterializedViewTestSuite) run() {
 	s.True(has)
 
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	segments, err := c.MetaWatcher.ShowSegments()
+	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
@@ -125,7 +126,7 @@ func (s *MaterializedViewTestSuite) run() {
 	}
 
 	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
@@ -136,7 +137,7 @@ func (s *MaterializedViewTestSuite) run() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -164,13 +165,13 @@ func (s *MaterializedViewTestSuite) run() {
 		searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 			integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
 
-		searchResult, err := c.Proxy.Search(ctx, searchReq)
+		searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 		s.NoError(err)
 		s.NoError(merr.Error(searchResult.GetStatus()))
 		s.Equal(topk, len(searchResult.GetResults().GetScores()))
 	}
 
-	status, err := s.Cluster.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+	status, err := s.Cluster.MilvusClient.DropCollection(ctx, &milvuspb.DropCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -203,8 +204,5 @@ func (s *MaterializedViewTestSuite) TestMvVarChar() {
 }
 
 func TestMaterializedViewEnabled(t *testing.T) {
-	paramtable.Init()
-	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
-	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
 	suite.Run(t, new(MaterializedViewTestSuite))
 }
