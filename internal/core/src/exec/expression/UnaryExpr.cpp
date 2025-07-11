@@ -1484,8 +1484,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (expr_->op_type_ == proto::plan::OpType::InnerMatch &&
-               !has_offset_input_ && CanUseNgramIndex(field_id_)) {
+    } else if (CanExecNgramMatch(expr_->op_type_)) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
@@ -1933,6 +1932,15 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
     return res;
 };
 
+bool
+PhyUnaryRangeFilterExpr::CanExecNgramMatch(proto::plan::OpType op_type) {
+    return (op_type == proto::plan::OpType::InnerMatch ||
+            op_type == proto::plan::OpType::Match ||
+            op_type == proto::plan::OpType::PrefixMatch ||
+            op_type == proto::plan::OpType::PostfixMatch) &&
+           !has_offset_input_ && CanUseNgramIndex(field_id_);
+}
+
 std::optional<VectorPtr>
 PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     if (!arg_inited_) {
@@ -1951,7 +1959,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
-        auto res_opt = index->InnerMatchQuery(literal, this);
+        auto res_opt = index->ExecuteQuery(literal, expr_->op_type_, this);
         if (!res_opt.has_value()) {
             return std::nullopt;
         }

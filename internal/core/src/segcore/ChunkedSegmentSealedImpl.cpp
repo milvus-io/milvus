@@ -185,12 +185,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     if (auto it = info.index_params.find(index::INDEX_TYPE);
         it != info.index_params.end() &&
         it->second == index::NGRAM_INDEX_TYPE) {
-        ngram_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-    } else {
-        scalar_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        ngram_fields_.insert(field_id);
     }
+    scalar_indexings_[field_id] =
+        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -633,8 +631,8 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    auto iter = ngram_indexings_.find(field_id);
-    if (iter == ngram_indexings_.end()) {
+    auto iter = scalar_indexings_.find(field_id);
+    if (iter == scalar_indexings_.end()) {
         return PinWrapper<index::NgramInvertedIndex*>(nullptr);
     }
     auto slot = iter->second.get();
@@ -987,6 +985,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       binlog_index_bitset_(schema->size()),
+      ngram_fields_(schema->size()),
       scalar_indexings_(schema->size()),
       insert_record_(*schema, MAX_ROW_COUNT),
       schema_(schema),
@@ -1146,6 +1145,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         index_has_raw_data_.clear();
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
+        ngram_fields_.clear();
         scalar_indexings_.clear();
         vector_indexings_.clear();
         insert_record_.clear();

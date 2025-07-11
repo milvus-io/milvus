@@ -109,7 +109,7 @@ mod tests {
         let reader = writer.create_reader(set_bitset).unwrap();
         let mut res: Vec<u32> = vec![];
         reader
-            .inner_match_ngram("ic", 2, 3, &mut res as *mut _ as *mut c_void)
+            .ngram_match_query("ic", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res, vec![2, 4, 5]);
     }
@@ -138,19 +138,19 @@ mod tests {
         let reader = writer.create_reader(set_bitset).unwrap();
         let mut res: Vec<u32> = vec![];
         reader
-            .inner_match_ngram("测试", 2, 3, &mut res as *mut _ as *mut c_void)
+            .ngram_match_query("测试", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res, vec![0, 1, 2, 4]);
 
         let mut res: Vec<u32> = vec![];
         reader
-            .inner_match_ngram("m测试", 2, 3, &mut res as *mut _ as *mut c_void)
+            .ngram_match_query("m测试", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res, vec![0, 2]);
 
         let mut res: Vec<u32> = vec![];
         reader
-            .inner_match_ngram("需要被测试", 2, 3, &mut res as *mut _ as *mut c_void)
+            .ngram_match_query("需要被测试", 2, 3, &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res, vec![4]);
     }

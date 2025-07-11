@@ -189,7 +189,7 @@ RustResult tantivy_term_query_keyword(void *ptr, const char *term, void *bitset)
 
 RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
 
-RustResult tantivy_inner_match_ngram(void *ptr,
+RustResult tantivy_ngram_match_query(void *ptr,
                                      const char *literal,
                                      uintptr_t min_gram,
                                      uintptr_t max_gram,
