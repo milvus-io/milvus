@@ -118,7 +118,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 
 	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(subSearchResultData[0].GetGroupByFieldValue().GetType(), true, int(limit))
 	if err != nil {
-		return ret, err
+		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
 	}
 	// reducing nq * topk results
 	for nqIdx := int64(0); nqIdx < nq; nqIdx++ {
@@ -222,9 +222,10 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		totalResCount += subSearchNqOffset[i][nq-1]
 		subSearchGroupByValIterator[i] = typeutil.GetDataIterator(subSearchResultData[i].GetGroupByFieldValue())
 	}
+
 	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(subSearchResultData[0].GetGroupByFieldValue().GetType(), true, int(limit))
 	if err != nil {
-		return ret, err
+		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
 	}
 
 	var realTopK int64 = -1

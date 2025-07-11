@@ -1458,7 +1458,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if field.ValidData != nil {
+	if field.GetValidData() != nil {
 		// unpack valid data
 		idxs := make([]int, len(field.ValidData))
 		validCnt := 0

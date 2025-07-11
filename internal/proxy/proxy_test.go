@@ -277,6 +277,17 @@ func TestProxy(t *testing.T) {
 	params := paramtable.Get()
 	testutil.ResetEnvironment()
 
+	wal := mock_streaming.NewMockWALAccesser(t)
+	b := mock_streaming.NewMockBroadcast(t)
+	wal.EXPECT().Broadcast().Return(b).Maybe()
+	b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
+	local := mock_streaming.NewMockLocal(t)
+	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
+	wal.EXPECT().Local().Return(local).Maybe()
+	streaming.SetWALForTest(wal)
+	defer streaming.RecoverWALForTest()
+
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
 	params.DataCoordGrpcServerCfg.IP = "localhost"

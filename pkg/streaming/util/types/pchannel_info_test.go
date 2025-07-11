@@ -10,6 +10,8 @@ import (
 
 func TestPChannelInfo(t *testing.T) {
 	info := PChannelInfo{Name: "pchannel", Term: 1, AccessMode: AccessModeRO}
+	assert.False(t, info.ChannelID().IsZero())
+	assert.True(t, ChannelID{}.IsZero())
 	pbInfo := NewProtoFromPChannelInfo(info)
 
 	info2 := NewPChannelInfoFromProto(pbInfo)

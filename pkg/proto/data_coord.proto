@@ -860,6 +860,7 @@ message ImportRequest {
   repeated ImportRequestSegment request_segments = 12;
   index.StorageConfig storage_config = 13;
   int64 task_slot = 14;
+  int64 storage_version = 15;
 }
 
 message QueryPreImportRequest {

@@ -61,6 +61,29 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResult() {
 	}
 }
 
+func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithEmtpyGroupData() {
+	nq := int64(1)
+	topk := int64(1)
+	emptyData := &schemapb.SearchResultData{
+		NumQueries:       nq,
+		TopK:             topk,
+		FieldsData:       make([]*schemapb.FieldData, 0),
+		Scores:           make([]float32, 0),
+		Ids:              &schemapb.IDs{},
+		Topks:            make([]int64, 0),
+		OutputFields:     make([]string, 0),
+		AllSearchCount:   0,
+		Distances:        make([]float32, 0),
+		Recalls:          make([]float32, 0),
+		PrimaryFieldName: "",
+	}
+	results, err := reduceSearchResultDataWithGroupBy(context.Background(), []*schemapb.SearchResultData{emptyData},
+		nq, topk, "L2", schemapb.DataType_Int64, 0, 1)
+	struts.Error(err)
+	struts.ErrorContains(err, "failed to construct group by field data builder")
+	struts.Nil(results.Results.GetGroupByFieldValue())
+}
+
 func TestSearchReduceUtilTestSuite(t *testing.T) {
 	suite.Run(t, new(SearchReduceUtilTestSuite))
 }

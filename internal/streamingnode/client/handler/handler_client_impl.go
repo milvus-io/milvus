@@ -65,6 +65,16 @@ func (hc *handlerClientImpl) GetLatestMVCCTimestampIfLocal(ctx context.Context, 
 	return w.GetLatestMVCCTimestamp(ctx, vchannel)
 }
 
+// GetWALMetricsIfLocal gets the metrics of the local wal.
+func (hc *handlerClientImpl) GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer hc.lifetime.Done()
+
+	return registry.GetLocalWALMetrics()
+}
+
 // CreateProducer creates a producer.
 func (hc *handlerClientImpl) CreateProducer(ctx context.Context, opts *ProducerOptions) (Producer, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {

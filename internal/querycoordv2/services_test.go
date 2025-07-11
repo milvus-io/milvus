@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -380,6 +381,58 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	resp, err := server.LoadCollection(ctx, req)
 	suite.NoError(err)
 	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
+}
+
+func (suite *ServiceSuite) TestLoadCollectionWithUserSpecifiedReplicaMode() {
+	mockey.PatchConvey("TestLoadCollectionWithUserSpecifiedReplicaMode", suite.T(), func() {
+		ctx := context.Background()
+		server := suite.server
+		collectionID := suite.collections[0]
+
+		// Mock broker methods using mockey
+		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
+		suite.expectGetRecoverInfo(collectionID)
+
+		// Test when user specifies replica number - should set IsUserSpecifiedReplicaMode to true
+		req := &querypb.LoadCollectionRequest{
+			CollectionID:  collectionID,
+			ReplicaNumber: 2, // User specified replica number
+		}
+		resp, err := server.LoadCollection(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Verify that IsUserSpecifiedReplicaMode is set to true
+		collection := suite.meta.GetCollection(ctx, collectionID)
+		suite.NotNil(collection)
+		suite.True(collection.UserSpecifiedReplicaMode)
+	})
+}
+
+func (suite *ServiceSuite) TestLoadCollectionWithoutUserSpecifiedReplicaMode() {
+	mockey.PatchConvey("TestLoadCollectionWithoutUserSpecifiedReplicaMode", suite.T(), func() {
+		ctx := context.Background()
+		server := suite.server
+		collectionID := suite.collections[0]
+
+		// Mock broker methods using mockey
+		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
+		suite.expectGetRecoverInfo(collectionID)
+
+		// Test when user doesn't specify replica number - should not set IsUserSpecifiedReplicaMode
+		req := &querypb.LoadCollectionRequest{
+			CollectionID:  collectionID,
+			ReplicaNumber: 0, // No user specified replica number
+		}
+		resp, err := server.LoadCollection(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Verify that IsUserSpecifiedReplicaMode is not set to true
+		collection := suite.meta.GetCollection(ctx, collectionID)
+		suite.NotNil(collection)
+		suite.False(collection.UserSpecifiedReplicaMode)
+	})
 }
 
 func (suite *ServiceSuite) TestResourceGroup() {
@@ -956,6 +1009,62 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 	}
+}
+
+func (suite *ServiceSuite) TestLoadPartitionsWithUserSpecifiedReplicaMode() {
+	mockey.PatchConvey("TestLoadPartitionsWithUserSpecifiedReplicaMode", suite.T(), func() {
+		ctx := context.Background()
+		server := suite.server
+		collectionID := suite.collections[0]
+		partitionIDs := suite.partitions[collectionID]
+
+		// Mock broker methods using mockey
+		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
+		suite.expectGetRecoverInfo(collectionID)
+
+		// Test when user specifies replica number - should set IsUserSpecifiedReplicaMode to true
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID:  collectionID,
+			PartitionIDs:  partitionIDs,
+			ReplicaNumber: 3, // User specified replica number
+		}
+		resp, err := server.LoadPartitions(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Verify that IsUserSpecifiedReplicaMode is set to true
+		collection := suite.meta.GetCollection(ctx, collectionID)
+		suite.NotNil(collection)
+		suite.True(collection.UserSpecifiedReplicaMode)
+	})
+}
+
+func (suite *ServiceSuite) TestLoadPartitionsWithoutUserSpecifiedReplicaMode() {
+	mockey.PatchConvey("TestLoadPartitionsWithoutUserSpecifiedReplicaMode", suite.T(), func() {
+		ctx := context.Background()
+		server := suite.server
+		collectionID := suite.collections[0]
+		partitionIDs := suite.partitions[collectionID]
+
+		// Mock broker methods using mockey
+		mockey.Mock(mockey.GetMethod(suite.broker, "DescribeCollection")).Return(nil, nil).Build()
+		suite.expectGetRecoverInfo(collectionID)
+
+		// Test when user doesn't specify replica number - should not set IsUserSpecifiedReplicaMode
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID:  collectionID,
+			PartitionIDs:  partitionIDs,
+			ReplicaNumber: 0, // No user specified replica number
+		}
+		resp, err := server.LoadPartitions(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// Verify that IsUserSpecifiedReplicaMode is not set to true
+		collection := suite.meta.GetCollection(ctx, collectionID)
+		suite.NotNil(collection)
+		suite.False(collection.UserSpecifiedReplicaMode)
+	})
 }
 
 func (suite *ServiceSuite) TestReleaseCollection() {
@@ -1798,6 +1907,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()
@@ -1822,6 +1932,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetObserver,
 				suite.collectionObserver,
 				suite.nodeMgr,
+				false,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()

@@ -20,6 +20,10 @@ type mockWALManager struct {
 	t *testing.T
 }
 
+func (m *mockWALManager) Metrics() (*types.StreamingNodeMetrics, error) {
+	return &types.StreamingNodeMetrics{}, nil
+}
+
 func (m *mockWALManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
 	l := mock_wal.NewMockWAL(m.t)
 	l.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.AppendResult{}, nil)

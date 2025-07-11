@@ -56,6 +56,51 @@ func (_c *MockRecoveryStorage_Close_Call) RunAndReturn(run func()) *MockRecovery
 	return _c
 }
 
+// Metrics provides a mock function with no fields
+func (_m *MockRecoveryStorage) Metrics() recovery.RecoveryMetrics {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Metrics")
+	}
+
+	var r0 recovery.RecoveryMetrics
+	if rf, ok := ret.Get(0).(func() recovery.RecoveryMetrics); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(recovery.RecoveryMetrics)
+	}
+
+	return r0
+}
+
+// MockRecoveryStorage_Metrics_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Metrics'
+type MockRecoveryStorage_Metrics_Call struct {
+	*mock.Call
+}
+
+// Metrics is a helper method to define mock.On call
+func (_e *MockRecoveryStorage_Expecter) Metrics() *MockRecoveryStorage_Metrics_Call {
+	return &MockRecoveryStorage_Metrics_Call{Call: _e.mock.On("Metrics")}
+}
+
+func (_c *MockRecoveryStorage_Metrics_Call) Run(run func()) *MockRecoveryStorage_Metrics_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockRecoveryStorage_Metrics_Call) Return(_a0 recovery.RecoveryMetrics) *MockRecoveryStorage_Metrics_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRecoveryStorage_Metrics_Call) RunAndReturn(run func() recovery.RecoveryMetrics) *MockRecoveryStorage_Metrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ObserveMessage provides a mock function with given fields: ctx, msg
 func (_m *MockRecoveryStorage) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	ret := _m.Called(ctx, msg)

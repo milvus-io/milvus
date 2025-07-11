@@ -11,6 +11,54 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 )
 
+func TestDeplicatedMessageOnMsgPackHandler(t *testing.T) {
+	messageID := rmq.NewRmqID(1)
+	tt := uint64(100)
+	msg := message.CreateTestInsertMessage(
+		t,
+		1,
+		1000,
+		tt,
+		messageID,
+	)
+	msg2 := message.CreateTestInsertMessage(
+		t,
+		1,
+		1000,
+		101,
+		messageID,
+	)
+	immutableMsg := msg.WithOldVersion().IntoImmutableMessage(messageID)
+
+	upstream := make(chan message.ImmutableMessage, 3)
+	upstream <- immutableMsg
+	upstream <- immutableMsg
+	upstream <- msg2.IntoImmutableMessage(messageID)
+
+	h := NewMsgPackAdaptorHandler()
+	done := make(chan struct{})
+	go func() {
+		for msg := range h.Chan() {
+			assert.Len(t, msg.Msgs, 1)
+		}
+		close(done)
+	}()
+	var resp message.HandleResult
+	for i := 0; i < 10; i++ {
+		var upstream2 <-chan message.ImmutableMessage
+		if len(upstream) > 0 {
+			upstream2 = upstream
+		}
+		resp = h.Handle(message.HandleParam{
+			Ctx:      context.Background(),
+			Upstream: upstream2,
+			Message:  resp.Incoming,
+		})
+	}
+	h.Close()
+	<-done
+}
+
 func TestMsgPackAdaptorHandler(t *testing.T) {
 	messageID := rmq.NewRmqID(1)
 	tt := uint64(100)
@@ -51,6 +99,13 @@ func TestMsgPackAdaptorHandler(t *testing.T) {
 	assert.NoError(t, resp.Error)
 	assert.Nil(t, resp.Incoming)
 	assert.True(t, resp.MessageHandled)
+
+	resp = h.Handle(message.HandleParam{
+		Ctx: ctx,
+	})
+	assert.NoError(t, resp.Error)
+	assert.Nil(t, resp.Incoming)
+	assert.False(t, resp.MessageHandled)
 	h.Close()
 
 	<-done

@@ -946,6 +946,60 @@ func TestImportTask_MarshalJSON(t *testing.T) {
 	assert.Equal(t, task.GetCompleteTime(), importTask.CompleteTime)
 }
 
+func TestLogResultSegmentsInfo(t *testing.T) {
+	// Create mock catalog and broker
+	mockCatalog := mocks.NewDataCoordCatalog(t)
+	meta := &meta{
+		segments: NewSegmentsInfo(),
+		catalog:  mockCatalog,
+	}
+
+	// Create test segments
+	segments := []*SegmentInfo{
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            1,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: "ch1",
+				NumOfRows:     100,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            2,
+				CollectionID:  1,
+				PartitionID:   1,
+				InsertChannel: "ch1",
+				NumOfRows:     200,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            3,
+				CollectionID:  1,
+				PartitionID:   2,
+				InsertChannel: "ch2",
+				NumOfRows:     300,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+	}
+
+	// Add segments to meta
+	for _, segment := range segments {
+		meta.segments.SetSegment(segment.ID, segment)
+	}
+
+	jobID := int64(2)
+	segmentIDs := []int64{1, 2, 3}
+
+	// Call the function
+	LogResultSegmentsInfo(jobID, meta, segmentIDs)
+}
+
 // TestImportUtil_ValidateBinlogImportRequest tests the validation of binlog import request
 func TestImportUtil_ValidateBinlogImportRequest(t *testing.T) {
 	ctx := context.Background()

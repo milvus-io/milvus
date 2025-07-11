@@ -166,8 +166,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		t.plan.GetSchema(),
 		alloc,
 		t.compactionParams.BinLogMaxSize,
-		t.compactionParams.StorageConfig.GetBucketName(),
-		t.compactionParams.StorageConfig.GetRootPath(),
 		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return t.binlogIO.Upload(ctx, kvs)
@@ -209,7 +207,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	rr, err := storage.NewBinlogRecordReader(ctx, t.insertLogs, t.plan.Schema,
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
-		storage.WithBucketName(t.compactionParams.StorageConfig.BucketName),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {

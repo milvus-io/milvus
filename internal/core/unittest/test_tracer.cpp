@@ -1,4 +1,3 @@
-
 // Copyright (C) 2019-2020 Zilliz. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
@@ -133,4 +132,177 @@ TEST(Tracer, GetTraceID) {
     CloseRootSpan();
     trace_id = GetTraceID();
     ASSERT_TRUE(trace_id.empty());
+}
+
+TEST(Tracer, ParseHeaders) {
+    // Test empty headers
+    auto headers_map = parseHeaders("");
+    ASSERT_TRUE(headers_map.empty());
+    
+    // Test simple JSON headers
+    std::string json_headers = R"({"Authorization": "Bearer token123", "Content-Type": "application/json"})";
+    headers_map = parseHeaders(json_headers);
+    ASSERT_EQ(headers_map.size(), 2);
+    ASSERT_EQ(headers_map["Authorization"], "Bearer token123");
+    ASSERT_EQ(headers_map["Content-Type"], "application/json");
+    
+    // Test JSON with whitespace
+    std::string json_headers_with_spaces = R"({ "key1" : "value1" , "key2" : "value2" })";
+    headers_map = parseHeaders(json_headers_with_spaces);
+    ASSERT_EQ(headers_map.size(), 2);
+    ASSERT_EQ(headers_map["key1"], "value1");
+    ASSERT_EQ(headers_map["key2"], "value2");
+    
+    // Test invalid JSON
+    std::string invalid_json = "invalid json string";
+    headers_map = parseHeaders(invalid_json);
+    ASSERT_TRUE(headers_map.empty());
+    
+    // Test empty JSON object
+    std::string empty_json = "{}";
+    headers_map = parseHeaders(empty_json);
+    ASSERT_TRUE(headers_map.empty());
+}
+
+TEST(Tracer, OTLPHttpExporter) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "otlp";
+    config->otlpMethod = "http";
+    config->otlpEndpoint = "http://localhost:4318/v1/traces";
+    config->otlpHeaders = R"({"Authorization": "Bearer test-token", "Content-Type": "application/json"})";
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_otlp_http");
+    ASSERT_TRUE(span->IsRecording());
+    
+    // Test with empty headers
+    config->otlpHeaders = "";
+    initTelemetry(*config);
+    span = StartSpan("test_otlp_http_empty_headers");
+    ASSERT_TRUE(span->IsRecording());
+    
+    // Test with invalid JSON headers
+    config->otlpHeaders = "invalid json";
+    initTelemetry(*config);
+    span = StartSpan("test_otlp_http_invalid_headers");
+    ASSERT_TRUE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPGrpcExporter) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "otlp";
+    config->otlpMethod = "grpc";
+    config->otlpEndpoint = "localhost:4317";
+    config->otlpHeaders = R"({"Authorization": "Bearer grpc-token"})";
+    config->oltpSecure = false;
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_otlp_grpc");
+    ASSERT_TRUE(span->IsRecording());
+    
+    // Test with secure connection
+    config->oltpSecure = true;
+    initTelemetry(*config);
+    span = StartSpan("test_otlp_grpc_secure");
+    ASSERT_TRUE(span->IsRecording());
+    
+    // Test with empty headers
+    config->otlpHeaders = "";
+    config->oltpSecure = false;
+    initTelemetry(*config);
+    span = StartSpan("test_otlp_grpc_empty_headers");
+    ASSERT_TRUE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPLegacyConfiguration) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "otlp";
+    config->otlpMethod = "";  // legacy configuration
+    config->otlpEndpoint = "localhost:4317";
+    config->otlpHeaders = R"({"legacy": "header"})";
+    config->oltpSecure = false;
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_otlp_legacy");
+    ASSERT_TRUE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPInvalidMethod) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "otlp";
+    config->otlpMethod = "invalid_method";
+    config->otlpEndpoint = "localhost:4317";
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_otlp_invalid");
+    // Should fall back to noop provider when export creation fails
+    ASSERT_FALSE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPComplexHeaders) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "otlp";
+    config->otlpMethod = "http";
+    config->otlpEndpoint = "http://localhost:4318/v1/traces";
+    config->otlpHeaders = R"({
+        "Authorization": "Bearer complex-token-123",
+        "X-Custom-Header": "custom-value",
+        "User-Agent": "Milvus-Tracer/1.0",
+        "Accept": "application/json"
+    })";
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_otlp_complex_headers");
+    ASSERT_TRUE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPEmptyExporter) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "";  // empty exporter
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_empty_exporter");
+    // Should fall back to noop provider
+    ASSERT_FALSE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPInvalidExporter) {
+    auto config = std::make_shared<TraceConfig>();
+    config->exporter = "invalid_exporter";
+    config->nodeID = 1;
+    
+    initTelemetry(*config);
+    auto span = StartSpan("test_invalid_exporter");
+    // Should fall back to noop provider
+    ASSERT_FALSE(span->IsRecording());
+}
+
+TEST(Tracer, OTLPHeadersParsingEdgeCases) {
+    // Test with whitespace in JSON
+    std::string json_with_spaces = R"({ "key1" : "value1" , "key2" : "value2" })";
+    auto headers_map = parseHeaders(json_with_spaces);
+    ASSERT_EQ(headers_map.size(), 2);
+    ASSERT_EQ(headers_map["key1"], "value1");
+    ASSERT_EQ(headers_map["key2"], "value2");
+    
+    // Test with nested JSON (should fail gracefully)
+    std::string nested_json = R"({"key": {"nested": "value"}})";
+    headers_map = parseHeaders(nested_json);
+    ASSERT_TRUE(headers_map.empty());
+    
+    // Test with array JSON (should fail gracefully)
+    std::string array_json = R"(["header1", "header2"])";
+    headers_map = parseHeaders(array_json);
+    ASSERT_TRUE(headers_map.empty());
+    
+    // Test with null JSON
+    std::string null_json = "null";
+    headers_map = parseHeaders(null_json);
+    ASSERT_TRUE(headers_map.empty());
 }

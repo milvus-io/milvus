@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
@@ -50,7 +51,7 @@ func TestImportNewReader(t *testing.T) {
 	}
 
 	checkFunc := func(name string, req *internalpb.ImportFile, options []*commonpb.KeyValuePair) {
-		_, err := NewReader(ctx, cm, schema, req, options, 1024)
+		_, err := NewReader(ctx, cm, schema, req, options, 1024, &indexpb.StorageConfig{})
 		assert.Error(t, err)
 		assert.True(t, strings.Contains(err.Error(), name))
 	}

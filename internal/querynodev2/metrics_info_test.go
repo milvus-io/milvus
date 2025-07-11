@@ -18,17 +18,22 @@ package querynodev2
 
 import (
 	"testing"
+	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -128,4 +133,37 @@ func TestGetSegmentJSON(t *testing.T) {
 	assert.Equal(t, "Growing", segments[0].State)
 	assert.Equal(t, "default", segments[0].ResourceGroup)
 	assert.Equal(t, int64(100), segments[0].LoadedInsertRowCount)
+}
+
+func TestStreamingQuotaMetrics(t *testing.T) {
+	paramtable.Init()
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	local := mock_streaming.NewMockLocal(t)
+	now := time.Now()
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{
+		WALMetrics: map[types.ChannelID]types.WALMetrics{
+			{Name: "ch1"}: types.RWWALMetrics{
+				ChannelInfo: types.PChannelInfo{
+					Name: "ch1",
+				},
+				MVCCTimeTick:     tsoutil.ComposeTSByTime(now, 0),
+				RecoveryTimeTick: tsoutil.ComposeTSByTime(now.Add(-time.Second), 0),
+			},
+			{Name: "ch2"}: types.ROWALMetrics{},
+		},
+	}, nil)
+	wal.EXPECT().Local().Return(local)
+	streaming.SetWALForTest(wal)
+	defer streaming.RecoverWALForTest()
+
+	m := getStreamingQuotaMetrics()
+	assert.Len(t, m.WALs, 1)
+	assert.Equal(t, "ch1", m.WALs[0].Channel.Name)
+	assert.Equal(t, tsoutil.ComposeTSByTime(now.Add(-time.Second), 0), m.WALs[0].RecoveryTimeTick)
+
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Unset()
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("test"))
+	m = getStreamingQuotaMetrics()
+	assert.Nil(t, m)
 }

@@ -213,14 +213,11 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 	}
 	entityFilter := compaction.NewEntityFilter(delta, t.plan.GetCollectionTtl(), t.currentTime)
 
-	bucketName := t.compactionParams.StorageConfig.GetBucketName()
-
 	reader, err := storage.NewBinlogRecordReader(ctx,
 		seg.GetFieldBinlogs(),
 		t.plan.GetSchema(),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithVersion(seg.GetStorageVersion()),
-		storage.WithBucketName(bucketName),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {

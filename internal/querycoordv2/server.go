@@ -497,6 +497,8 @@ func (s *Server) startQueryCoord() error {
 	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
 
+	// check replica changes after restart
+	s.checkLoadConfigChanges(s.ctx)
 	// watch load config changes
 	s.watchLoadConfigChanges()
 
@@ -841,6 +843,30 @@ func (s *Server) updateBalanceConfig() bool {
 	return false
 }
 
+func (s *Server) checkLoadConfigChanges(ctx context.Context) {
+	// try to check load config changes after restart, and try to update replicas
+	collectionIDs := s.meta.GetAll(ctx)
+	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
+		collection := s.meta.GetCollection(ctx, collectionID)
+		if collection.UserSpecifiedReplicaMode {
+			log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
+			return false
+		}
+		return true
+	})
+	replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
+	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+	log.Info("apply load config changes",
+		zap.Int64s("collectionIDs", collectionIDs),
+		zap.Int32("replicaNum", int32(replicaNum)),
+		zap.Strings("resourceGroups", rgs))
+	s.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+		CollectionIDs:  collectionIDs,
+		ReplicaNumber:  int32(replicaNum),
+		ResourceGroups: rgs,
+	})
+}
+
 func (s *Server) watchLoadConfigChanges() {
 	log := log.Ctx(s.ctx)
 	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) {
@@ -851,6 +877,14 @@ func (s *Server) watchLoadConfigChanges() {
 			log.Warn("no collection loaded, skip to trigger update load config")
 			return
 		}
+		collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
+			collection := s.meta.GetCollection(s.ctx, collectionID)
+			if collection.UserSpecifiedReplicaMode {
+				log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
+				return false
+			}
+			return true
+		})
 
 		replicaNum, err := strconv.ParseInt(e.Value, 10, 64)
 		if err != nil {
@@ -878,6 +912,14 @@ func (s *Server) watchLoadConfigChanges() {
 			log.Warn("no collection loaded, skip to trigger update load config")
 			return
 		}
+		collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
+			collection := s.meta.GetCollection(s.ctx, collectionID)
+			if collection.UserSpecifiedReplicaMode {
+				log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
+				return false
+			}
+			return true
+		})
 
 		if len(e.Value) == 0 {
 			log.Warn("invalid cluster level load config, skip it", zap.String("key", e.Key), zap.String("value", e.Value))

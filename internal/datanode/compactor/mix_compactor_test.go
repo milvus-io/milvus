@@ -327,7 +327,6 @@ func (s *MixCompactionTaskSuite) prepareCompactSortedSegment() {
 				{Binlogs: []*datapb.Binlog{{LogPath: deltaPath}}},
 			},
 		})
-
 	}
 }
 
@@ -468,6 +467,10 @@ func (s *MixCompactionTaskSuite) prepareSplitMergeEntityExpired() {
 
 func (s *MixCompactionTaskSuite) TestSplitMergeEntityExpired() {
 	s.prepareSplitMergeEntityExpired()
+
+	err := s.task.preCompact()
+	s.Require().NoError(err)
+
 	compactionSegments, err := s.task.mergeSplit(s.task.ctx)
 	s.NoError(err)
 	s.Equal(1, len(compactionSegments))
@@ -566,6 +569,9 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpirationLackBinlog() {
 			s.task.partitionID = PartitionID
 			s.task.maxRows = 1000
 
+			err := s.task.preCompact()
+			s.Require().NoError(err)
+
 			res, err := s.task.mergeSplit(s.task.ctx)
 			s.NoError(err)
 			s.EqualValues(test.expectedRes, len(res))
@@ -644,6 +650,9 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 			s.task.collectionID = CollectionID
 			s.task.partitionID = PartitionID
 			s.task.maxRows = 1000
+
+			err := s.task.preCompact()
+			s.NoError(err)
 
 			res, err := s.task.mergeSplit(s.task.ctx)
 			s.NoError(err)

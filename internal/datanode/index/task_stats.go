@@ -163,6 +163,7 @@ func (st *statsTask) PreExecute(ctx context.Context) error {
 		zap.Int64("collectionID", st.req.GetCollectionID()),
 		zap.Int64("partitionID", st.req.GetPartitionID()),
 		zap.Int64("segmentID", st.req.GetSegmentID()),
+		zap.Int64("storageVersion", st.req.GetStorageVersion()),
 		zap.Int64("preExecuteRecordSpan(ms)", preExecuteRecordSpan.Milliseconds()),
 		zap.Any("storageConfig", st.req.StorageConfig),
 	)
@@ -184,8 +185,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 		st.req.GetSchema(),
 		alloc,
 		st.req.GetBinlogMaxSize(),
-		st.req.GetStorageConfig().GetBucketName(),
-		st.req.GetStorageConfig().GetRootPath(),
 		numRows,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return st.binlogIO.Upload(ctx, kvs)
@@ -236,7 +235,6 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	rr, err := storage.NewBinlogRecordReader(ctx, st.req.InsertLogs, st.req.Schema,
 		storage.WithVersion(st.req.StorageVersion),
 		storage.WithDownloader(st.binlogIO.Download),
-		storage.WithBucketName(st.req.StorageConfig.BucketName),
 		storage.WithStorageConfig(st.req.GetStorageConfig()),
 	)
 	if err != nil {

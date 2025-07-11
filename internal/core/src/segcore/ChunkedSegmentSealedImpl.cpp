@@ -357,10 +357,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
-        auto field_data_info = FieldDataInfo(field_id.get(),
-                                             num_rows,
-                                             load_info.mmap_dir_path,
-                                             schema_->ShouldLoadField(field_id));
+        auto field_data_info =
+            FieldDataInfo(field_id.get(),
+                          num_rows,
+                          load_info.mmap_dir_path,
+                          schema_->ShouldLoadField(field_id));
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
