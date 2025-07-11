@@ -32,6 +32,13 @@ class DList {
           low_watermark_(low_watermark),
           high_watermark_(high_watermark),
           eviction_config_(eviction_config) {
+        AssertInfo(low_watermark.AllGEZero(),
+                   "[MCL] low watermark must be greater than or equal to 0");
+        AssertInfo((high_watermark - low_watermark).AllGEZero(),
+                   "[MCL] high watermark must be greater than low watermark");
+        AssertInfo((max_memory - high_watermark).AllGEZero(),
+                   "[MCL] max memory must be greater than high watermark");
+
         eviction_thread_ = std::thread(&DList::evictionLoop, this);
     }
 
@@ -84,6 +91,12 @@ class DList {
     void
     removeItem(ListNode* list_node, ResourceUsage size);
 
+    void
+    addLoadingResource(const ResourceUsage& size);
+
+    void
+    removeLoadingResource(const ResourceUsage& size);
+
     const EvictionConfig&
     eviction_config() const {
         return eviction_config_;
@@ -99,7 +112,8 @@ class DList {
     // If we cannot achieve the goal, but we can evict min_eviction, we will still perform eviction.
     // If we cannot even evict min_eviction, nothing will be evicted and false will be returned.
     // Must be called under the lock of list_mtx_.
-    bool
+    // Returns the logical amount of resources that are evicted. 0 means no eviction happened.
+    ResourceUsage
     tryEvict(const ResourceUsage& expected_eviction,
              const ResourceUsage& min_eviction);
 
@@ -117,6 +131,16 @@ class DList {
     std::string
     usageInfo(const ResourceUsage& actively_pinned) const;
 
+    // Physical memory protection methods
+    // Returns the amount of memory that needs to be evicted to satisfy physical memory limit
+    // Returns 0 if no eviction needed, positive value if eviction needed.
+    int64_t
+    checkPhysicalMemoryLimit(const ResourceUsage& size) const;
+
+    // not thread safe, use for debug only
+    std::string
+    chainString() const;
+
     // head_ is the most recently used item, tail_ is the least recently used item.
     // tail_ -> next -> ... -> head_
     // tail_ <- prev <- ... <- head_
@@ -127,6 +151,8 @@ class DList {
     mutable std::mutex list_mtx_;
     // access to used_memory_ and max_memory_ must be done under the lock of list_mtx_
     std::atomic<ResourceUsage> used_memory_{};
+    // Track estimated resources currently being loaded
+    std::atomic<ResourceUsage> loading_memory_{};
     ResourceUsage low_watermark_;
     ResourceUsage high_watermark_;
     ResourceUsage max_memory_;

@@ -156,14 +156,15 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         });
     }
 
-    // Manually evicts the cell if it is not pinned.
-    // Returns true if the cell ends up in a state other than LOADED.
+    // Manually evicts the cell if it is LOADED and not pinned.
+    // Returns true if the eviction happened.
     bool
     ManualEvict(cid_t cid) {
         return cells_[cid].manual_evict();
     }
 
-    // Returns true if any cell is evicted.
+    // Manually evicts all cells that are LOADED and not pinned.
+    // Returns true if eviction happened on any cell.
     bool
     ManualEvictAll() {
         bool evicted = false;
@@ -182,7 +183,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     ResourceUsage
     size_of_cell(cid_t cid) const {
-        return translator_->estimated_byte_size_of_cell(cid);
+        return cells_[cid].size();
     }
 
     Meta*
@@ -210,26 +211,28 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         futures.reserve(reserve_size);
         need_load_cids.reserve(reserve_size);
         auto [cid, end] = cid_iterator();
+        auto resource_needed = ResourceUsage{0, 0};
         while (!end) {
             auto [need_load, future] = cells_[cid].pin();
             futures.push_back(std::move(future));
             if (need_load) {
                 need_load_cids.insert(cid);
+                resource_needed += cells_[cid].size();
             }
             std::tie(cid, end) = cid_iterator();
         }
         auto load_future = folly::makeSemiFuture();
         if (!need_load_cids.empty()) {
-            load_future = RunLoad(std::move(need_load_cids));
+            load_future = RunLoad(std::move(need_load_cids), resource_needed);
         }
         return std::move(load_future)
             .deferValue(
                 [this, futures = std::move(futures)](auto&&) mutable
-                -> folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>> {
+                    -> folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>> {
                     return folly::collect(futures).deferValue(
                         [this](std::vector<internal::ListNode::NodePin>&&
                                    pins) mutable
-                        -> std::shared_ptr<CellAccessor<CellT>> {
+                            -> std::shared_ptr<CellAccessor<CellT>> {
                             return std::make_shared<CellAccessor<CellT>>(
                                 this->shared_from_this(), std::move(pins));
                         });
@@ -242,44 +245,75 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     }
 
     folly::SemiFuture<folly::Unit>
-    RunLoad(std::unordered_set<cid_t>&& cids) {
-        return folly::makeSemiFuture().deferValue(
-            [this,
-             cids = std::move(cids)](auto&&) -> folly::SemiFuture<folly::Unit> {
-                try {
-                    auto start = std::chrono::high_resolution_clock::now();
-                    std::vector<cid_t> cids_vec(cids.begin(), cids.end());
-                    auto results = translator_->get_cells(cids_vec);
-                    auto latency =
-                        std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::high_resolution_clock::now() - start);
-                    for (auto& result : results) {
-                        cells_[result.first].set_cell(
-                            std::move(result.second),
-                            cids.count(result.first) > 0);
-                        internal::cache_load_latency(
-                            translator_->meta()->storage_type)
-                            .Observe(latency.count());
-                    }
-                    internal::cache_cell_loaded_count(
-                        translator_->meta()->storage_type)
-                        .Increment(results.size());
-                    internal::cache_load_count_success(
-                        translator_->meta()->storage_type)
-                        .Increment(results.size());
-                } catch (...) {
-                    auto exception = std::current_exception();
-                    auto ew = folly::exception_wrapper(exception);
-                    internal::cache_load_count_fail(
-                        translator_->meta()->storage_type)
-                        .Increment(cids.size());
-                    for (auto cid : cids) {
-                        cells_[cid].set_error(ew);
-                    }
-                    return folly::makeSemiFuture<folly::Unit>(ew);
+    RunLoad(std::unordered_set<cid_t>&& cids, ResourceUsage resource_needed) {
+        return folly::makeSemiFuture().deferValue([this,
+                                                   cids = std::move(cids),
+                                                   resource_needed](auto&&)
+                                                      -> folly::SemiFuture<
+                                                          folly::Unit> {
+            bool reserve_resource_failure = false;
+            try {
+                auto start = std::chrono::high_resolution_clock::now();
+                std::vector<cid_t> cids_vec(cids.begin(), cids.end());
+
+                if (dlist_ && !dlist_->reserveMemory(resource_needed)) {
+                    auto error_msg = fmt::format(
+                        "[MCL] CacheSlot failed to reserve memory for cells: "
+                        "key={}, cell_ids=[{}], total resource_needed={}",
+                        translator_->key(),
+                        fmt::join(cids_vec, ","),
+                        resource_needed.ToString());
+                    LOG_ERROR(error_msg);
+                    reserve_resource_failure = true;
+                    throw std::runtime_error(error_msg);
                 }
-                return folly::Unit();
-            });
+
+                std::vector<std::string> cell_details;
+                cell_details.reserve(cids_vec.size());
+                for (cid_t cid : cids_vec) {
+                    cell_details.push_back(fmt::format(
+                        "cid:{}:size:{}", cid, cells_[cid].size().ToString()));
+                }
+                LOG_INFO(
+                    "[MCL] CacheSlot loading cells: key={}, cell_ids=[{}], "
+                    "cell_details=[{}]",
+                    translator_->key(),
+                    fmt::join(cids_vec, ","),
+                    fmt::join(cell_details, ","));
+                auto results = translator_->get_cells(cids_vec);
+                auto latency =
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::high_resolution_clock::now() - start);
+                for (auto& result : results) {
+                    cells_[result.first].set_cell(std::move(result.second),
+                                                  cids.count(result.first) > 0);
+                    internal::cache_load_latency(
+                        translator_->meta()->storage_type)
+                        .Observe(latency.count());
+                }
+                internal::cache_cell_loaded_count(
+                    translator_->meta()->storage_type)
+                    .Increment(results.size());
+                internal::cache_load_count_success(
+                    translator_->meta()->storage_type)
+                    .Increment(results.size());
+            } catch (...) {
+                auto exception = std::current_exception();
+                auto ew = folly::exception_wrapper(exception);
+                internal::cache_load_count_fail(
+                    translator_->meta()->storage_type)
+                    .Increment(cids.size());
+                for (auto cid : cids) {
+                    cells_[cid].set_error(ew);
+                }
+                // If the resource reservation failed, we don't need to release the memory.
+                if (dlist_ && !reserve_resource_failure) {
+                    dlist_->releaseMemory(resource_needed);
+                }
+                return folly::makeSemiFuture<folly::Unit>(ew);
+            }
+            return folly::Unit();
+        });
     }
 
     struct CacheCell : internal::ListNode {
@@ -290,7 +324,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         }
         ~CacheCell() {
             if (state_ == State::LOADING) {
-                LOG_ERROR("CacheSlot Cell {} destroyed while loading", key());
+                LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading",
+                          key());
             }
         }
 

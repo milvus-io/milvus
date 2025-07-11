@@ -68,17 +68,17 @@ ListNode::~ListNode() {
 bool
 ListNode::manual_evict() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
-    if (state_ == State::ERROR || state_ == State::LOADING) {
-        LOG_ERROR("manual_evict() called on a {} cell",
+    if (state_ == State::LOADING) {
+        LOG_ERROR("[MCL] manual_evict() called on a {} cell",
                   state_to_string(state_));
-        return true;
+        return false;
     }
     if (state_ == State::NOT_LOADED) {
-        return true;
+        return false;
     }
     if (pin_count_.load() > 0) {
         LOG_ERROR(
-            "manual_evict() called on a LOADED and pinned cell, aborting "
+            "[MCL] manual_evict() called on a LOADED and pinned cell, aborting "
             "eviction.");
         return false;
     }
@@ -90,8 +90,8 @@ ListNode::manual_evict() {
     return true;
 }
 
-ResourceUsage&
-ListNode::size() {
+const ResourceUsage&
+ListNode::size() const {
     return size_;
 }
 
@@ -102,10 +102,6 @@ ListNode::pin() {
         AssertInfo(state_ != State::NOT_LOADED,
                    "Programming error: read_op called on a {} cell",
                    state_to_string(state_));
-        if (state_ == State::ERROR) {
-            return std::make_pair(false,
-                                  folly::makeSemiFuture<NodePin>(error_));
-        }
         // pin the cell now so that we can avoid taking the lock again in deferValue.
         auto p = NodePin(this);
         if (state_ == State::LOADED) {
@@ -134,15 +130,6 @@ ListNode::pin() {
     internal::cache_op_result_count_miss(size_.storage_type()).Increment();
     load_promise_ = std::make_unique<folly::SharedPromise<folly::Unit>>();
     state_ = State::LOADING;
-    if (dlist_ && !dlist_->reserveMemory(size())) {
-        // if another thread sees LOADING status, the memory reservation has succeeded.
-        state_ = State::ERROR;
-        error_ = folly::make_exception_wrapper<std::runtime_error>(fmt::format(
-            "Failed to load {} due to insufficient resource", key()));
-        load_promise_->setException(error_);
-        load_promise_ = nullptr;
-        return std::make_pair(false, folly::makeSemiFuture<NodePin>(error_));
-    }
 
     // pin the cell now so that we can avoid taking the lock again in deferValue.
     auto p = NodePin(this);
@@ -155,22 +142,20 @@ ListNode::pin() {
 void
 ListNode::set_error(folly::exception_wrapper error) {
     std::unique_lock<std::shared_mutex> lock(mtx_);
-    AssertInfo(state_ != State::NOT_LOADED && state_ != State::ERROR,
+    AssertInfo(state_ != State::NOT_LOADED,
                "Programming error: set_error() called on a {} cell",
                state_to_string(state_));
-    // load failed, release the memory reservation.
-    if (dlist_) {
-        dlist_->releaseMemory(size());
-    }
     // may be successfully loaded by another thread as a bonus, they will update used memory.
     if (state_ == State::LOADED) {
         return;
     }
-    // else: state_ is LOADING
-    state_ = State::ERROR;
-    load_promise_->setException(error);
-    load_promise_ = nullptr;
-    error_ = std::move(error);
+    // else: state_ is LOADING, reset to NOT_LOADED
+    state_ = State::NOT_LOADED;
+    // Notify waiting threads about the error
+    if (load_promise_) {
+        load_promise_->setException(error);
+        load_promise_ = nullptr;
+    }
 }
 
 std::string
@@ -182,8 +167,6 @@ ListNode::state_to_string(State state) {
             return "LOADING";
         case State::LOADED:
             return "LOADED";
-        case State::ERROR:
-            return "ERROR";
     }
     throw std::invalid_argument("Invalid state");
 }
@@ -191,14 +174,6 @@ ListNode::state_to_string(State state) {
 void
 ListNode::unpin() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
-    AssertInfo(
-        state_ == State::LOADED || state_ == State::ERROR,
-        "Programming error: unpin() called on a {} cell, current pin_count {}",
-        state_to_string(state_),
-        pin_count_.load());
-    if (state_ == State::ERROR) {
-        return;
-    }
     if (pin_count_.fetch_sub(1) == 1) {
         touch(false);
     }
@@ -227,12 +202,21 @@ ListNode::clear_data() {
                       2 * dlist_->eviction_config().cache_touch_window;
     }
     unload();
+    LOG_TRACE(
+        "[MCL] ListNode evicted: key={}, size={}", key(), size_.ToString());
     state_ = State::NOT_LOADED;
 }
 
 void
 ListNode::unload() {
     // Default implementation does nothing
+}
+
+void
+ListNode::remove_self_from_loading_resource() {
+    if (dlist_) {
+        dlist_->removeLoadingResource(size_);
+    }
 }
 
 }  // namespace milvus::cachinglayer::internal
