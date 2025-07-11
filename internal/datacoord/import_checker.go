@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -275,8 +276,11 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
-	allDiskIndex := c.meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
-	groups := RegroupImportFiles(job, lacks, allDiskIndex)
+	segmentMaxSize := getExpectedSegmentSize(c.meta, job.GetCollectionID(), job.GetSchema())
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
+	}
+	groups := RegroupImportFiles(job, lacks, int(segmentMaxSize))
 	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))
