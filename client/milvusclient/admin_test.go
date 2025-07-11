@@ -70,8 +70,8 @@ func (s *AdminSuite) TestGetPersistentSegmentInfo() {
 	s.Run("success", func() {
 		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 		segments := []*entity.Segment{
-			{ID: rand.Int63(), CollectionID: rand.Int63(), ParititionID: rand.Int63(), NumRows: rand.Int63(), State: commonpb.SegmentState_Flushed},
-			{ID: rand.Int63(), CollectionID: rand.Int63(), ParititionID: rand.Int63(), NumRows: rand.Int63(), State: commonpb.SegmentState_Flushed},
+			{ID: rand.Int63(), CollectionID: rand.Int63(), PartitionID: rand.Int63(), NumRows: rand.Int63(), State: commonpb.SegmentState_Flushed},
+			{ID: rand.Int63(), CollectionID: rand.Int63(), PartitionID: rand.Int63(), NumRows: rand.Int63(), State: commonpb.SegmentState_Flushed},
 		}
 
 		s.mock.EXPECT().GetPersistentSegmentInfo(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gpsi *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
@@ -81,7 +81,7 @@ func (s *AdminSuite) TestGetPersistentSegmentInfo() {
 					return &milvuspb.PersistentSegmentInfo{
 						SegmentID:    segment.ID,
 						CollectionID: segment.CollectionID,
-						PartitionID:  segment.ParititionID,
+						PartitionID:  segment.PartitionID,
 						NumRows:      segment.NumRows,
 						State:        segment.State,
 					}
