@@ -19,7 +19,6 @@ package task
 import (
 	"context"
 	"math/rand"
-	"strings"
 	"testing"
 	"time"
 
@@ -92,11 +91,6 @@ type TaskSuite struct {
 
 func (suite *TaskSuite) SetupSuite() {
 	paramtable.Init()
-	addressList, err := suite.SetupEtcd()
-	suite.Require().NoError(err)
-	params := paramtable.Get()
-	params.Save(params.EtcdCfg.Endpoints.Key, strings.Join(addressList, ","))
-
 	suite.collection = 1000
 	suite.replica = meta.NewReplica(&querypb.Replica{
 		CollectionID:  suite.collection,
@@ -144,7 +138,6 @@ func (suite *TaskSuite) SetupSuite() {
 }
 
 func (suite *TaskSuite) TearDownSuite() {
-	suite.TearDownEmbedEtcd()
 	paramtable.Get().Reset(paramtable.Get().EtcdCfg.Endpoints.Key)
 }
 

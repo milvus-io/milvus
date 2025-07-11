@@ -684,7 +684,6 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		log.Debug("execute count on segments...",
 			zap.Int64s("sealedIDs", sealedIDs),
 			zap.Int64s("growingIDs", growingIDs),
-			zap.Int64("targetVersion", sd.distribution.queryView.version),
 		)
 	}
 
