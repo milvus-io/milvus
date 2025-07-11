@@ -1,14 +1,6 @@
 use index_writer_v5::TantivyDocumentV5;
 use index_writer_v7::TantivyDocumentV7;
 use libc::c_char;
-use log::info;
-use tantivy::schema::{
-    Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
-    FAST, INDEXED, STRING,
-};
-use tantivy::{
-    doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
-};
 
 use crate::data_type::TantivyDataType;
 

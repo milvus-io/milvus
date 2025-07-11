@@ -274,10 +274,13 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
+    auto now = std::chrono::high_resolution_clock::now();
     TargetBitmap bitset(Count());
-    for (size_t i = 0; i < n; ++i) {
-        wrapper_->term_query(values[i], &bitset);
-    }
+    wrapper_->terms_query(values, n, &bitset);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - now);
+    LOG_INFO("debug=== In terms_query time: {}ms", duration.count());
     return bitset;
 }
 
@@ -334,11 +337,9 @@ const TargetBitmap
 InvertedIndexTantivy<T>::InApplyFilter(
     size_t n, const T* values, const std::function<bool(size_t)>& filter) {
     TargetBitmap bitset(Count());
-    for (size_t i = 0; i < n; ++i) {
-        wrapper_->term_query(values[i], &bitset);
-        // todo(SpadeA): could push-down the filter to tantivy query
-        apply_hits_with_filter(bitset, filter);
-    }
+    wrapper_->terms_query(values, n, &bitset);
+    // todo(SpadeA): could push-down the filter to tantivy query
+    apply_hits_with_filter(bitset, filter);
     return bitset;
 }
 
@@ -346,12 +347,10 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::InApplyCallback(
     size_t n, const T* values, const std::function<void(size_t)>& callback) {
-    for (size_t i = 0; i < n; ++i) {
-        TargetBitmap bitset(Count());
-        wrapper_->term_query(values[i], &bitset);
-        // todo(SpadeA): could push-down the callback to tantivy query
-        apply_hits_with_callback(bitset, callback);
-    }
+    TargetBitmap bitset(Count());
+    wrapper_->terms_query(values, n, &bitset);
+    // todo(SpadeA): could push-down the callback to tantivy query
+    apply_hits_with_callback(bitset, callback);
 }
 
 template <typename T>
@@ -359,9 +358,7 @@ const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     int64_t count = Count();
     TargetBitmap bitset(count);
-    for (size_t i = 0; i < n; ++i) {
-        wrapper_->term_query(values[i], &bitset);
-    }
+    wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
 

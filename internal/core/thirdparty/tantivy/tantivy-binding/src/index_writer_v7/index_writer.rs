@@ -1,5 +1,4 @@
 use core::slice;
-use std::ffi::CStr;
 use std::sync::Arc;
 
 use futures::executor::block_on;
@@ -19,6 +18,7 @@ use crate::error::{Result, TantivyBindingError};
 use crate::index_reader::IndexReaderWrapper;
 use crate::index_reader_c::SetBitsetFn;
 use crate::index_writer::TantivyValue;
+use crate::util::c_ptr_to_str;
 
 const BATCH_SIZE: usize = 4096;
 
@@ -177,8 +177,8 @@ impl IndexWriterWrapperImpl {
     pub fn add_array_keywords(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
         let mut document = TantivyDocument::default();
         for element in datas {
-            let data = unsafe { CStr::from_ptr(*element) };
-            document.add_field_value(self.field, data.to_str()?);
+            let data = c_ptr_to_str(*element)?;
+            document.add_field_value(self.field, data);
         }
 
         self.add_document(document, offset)
@@ -195,8 +195,8 @@ impl IndexWriterWrapperImpl {
     pub fn add_array_json(&mut self, datas: &[*const c_char], offset: u32) -> Result<()> {
         let mut document = TantivyDocument::default();
         for element in datas {
-            let data = unsafe { CStr::from_ptr(*element) };
-            let j = serde_json::from_str::<serde_json::Value>(data.to_str()?)?;
+            let data = c_ptr_to_str(*element)?;
+            let j = serde_json::from_str::<serde_json::Value>(data)?;
             j.add_to_document(self.field.field_id(), &mut document);
         }
 
@@ -212,8 +212,7 @@ impl IndexWriterWrapperImpl {
         let mut batch = Vec::with_capacity(BATCH_SIZE);
         let id_field = self.id_field.unwrap();
         for i in 0..keys.len() {
-            let key = unsafe { CStr::from_ptr(keys[i]) }
-                .to_str()
+            let key = c_ptr_to_str(keys[i])
                 .map_err(|e| TantivyBindingError::InternalError(e.to_string()))?;
 
             let offsets = unsafe { convert_to_rust_slice!(json_offsets[i], json_offsets_len[i]) };
