@@ -28,6 +28,16 @@
 namespace milvus {
 namespace exec {
 
+inline bool
+IsCompareOp(proto::plan::OpType op) {
+    return op == proto::plan::OpType::Equal ||
+           op == proto::plan::OpType::NotEqual ||
+           op == proto::plan::OpType::GreaterEqual ||
+           op == proto::plan::OpType::GreaterThan ||
+           op == proto::plan::OpType::LessEqual ||
+           op == proto::plan::OpType::LessThan;
+}
+
 static ColumnVectorPtr
 GetColumnVector(const VectorPtr& result) {
     ColumnVectorPtr res;
