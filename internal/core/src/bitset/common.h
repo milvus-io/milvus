@@ -157,5 +157,19 @@ struct ArithCompareOperator {
     }
 };
 
+// This is related for a special handling of A/B vs C comparison.
+//   A multiplication operation is used instead of a division,
+//   and it is needed to invert signs and change comparison operators
+//   in case if the denominator is negative.
+template <CompareOpType CmpOp>
+struct CompareOpDivFlip {
+    static constexpr CompareOpType op =
+        (CmpOp == CompareOpType::LE)   ? CompareOpType::GE
+        : (CmpOp == CompareOpType::LT) ? CompareOpType::GT
+        : (CmpOp == CompareOpType::GE) ? CompareOpType::LE
+        : (CmpOp == CompareOpType::GT) ? CompareOpType::LT
+                                       : CmpOp;
+};
+
 }  // namespace bitset
 }  // namespace milvus
