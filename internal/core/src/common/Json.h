@@ -91,6 +91,13 @@ class Json {
     }
 
     // WARN: this is used for fast non-copy construction,
+    // MUST make sure there at least SIMDJSON_PADDING bytes allocated
+    // after the string_view.
+    explicit Json(const std::string_view& data)
+        : Json(data.data(), data.size()) {
+    }
+
+    // WARN: this is used for fast non-copy construction,
     // MUST make sure that the data points to a memory that
     // with size at least len + SIMDJSON_PADDING
     Json(const char* data, size_t len)
