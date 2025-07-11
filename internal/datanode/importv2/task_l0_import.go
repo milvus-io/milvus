@@ -99,7 +99,12 @@ func (t *L0ImportTask) GetSchema() *schemapb.CollectionSchema {
 }
 
 func (t *L0ImportTask) GetSlots() int64 {
-	return 1
+	return t.req.GetTaskSlot()
+}
+
+// L0 import task buffer size is fixed
+func (t *L0ImportTask) GetBufferSize() int64 {
+	return paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
 }
 
 func (t *L0ImportTask) Cancel() {
@@ -127,9 +132,10 @@ func (t *L0ImportTask) Clone() Task {
 }
 
 func (t *L0ImportTask) Execute() []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
+	bufferSize := int(t.GetBufferSize())
 	log.Info("start to import l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
+		zap.Int64("taskSlot", t.GetSlots()),
 		zap.Any("schema", t.GetSchema()))...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
@@ -230,7 +236,8 @@ func (t *L0ImportTask) syncDelete(delData []*storage.DeleteData) ([]*conc.Future
 			return nil, nil, err
 		}
 		syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
-			segmentID, partitionID, t.GetCollectionID(), channel, nil, data, nil)
+			segmentID, partitionID, t.GetCollectionID(), channel, nil, data,
+			nil, t.req.GetStorageVersion(), t.req.GetStorageConfig())
 		if err != nil {
 			return nil, nil, err
 		}

@@ -106,7 +106,7 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 		case collectionID := <-i.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
 			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!Params.DataCoordCfg.EnableStatsTask.GetAsBool() || info.GetIsSorted())
+				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted())
 			}))
 			for _, segment := range segments {
 				if err := i.createIndexesForSegment(ctx, segment); err != nil {
@@ -144,7 +144,7 @@ func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentI
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() && !segment.GetIsSorted() {
+	if enableSortCompaction() && !segment.GetIsSorted() {
 		log.Ctx(ctx).Debug("segment is not sorted by pk, skip create indexes", zap.Int64("segmentID", segment.GetID()))
 		return nil
 	}

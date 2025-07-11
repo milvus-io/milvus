@@ -1,5 +1,4 @@
 import pytest
-
 from base.client_v2_base import TestMilvusClientV2Base
 from utils.util_log import test_log as log
 from common import common_func as cf
@@ -333,6 +332,133 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
                  ct.err_msg: "the sample factor should be between 0 and 1 and not too close to 0 or 1"}
         self.query(client, collection_name, filter=expr,
                    check_task=CheckTasks.err_res, check_items=error)
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_query_json_modulo_operator(self):
+        """
+        target: test query with modulo operator on JSON field values
+        method: create collection with JSON field, insert data with numeric values, test modulo filters
+        expected: modulo operations should work correctly and return all matching results
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection with JSON field
+        schema, _ = self.create_schema(client, enable_dynamic_field=False)
+        schema.add_field(default_primary_key_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("json_field", DataType.JSON, nullable=True)
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        self.create_collection(client, collection_name, schema=schema, index_params=index_params, consistency_level="Strong")
+        
+        # 2. insert 3000 rows with various numeric values
+        nb = 3000
+        rng = np.random.default_rng(seed=19530)
+        
+        # Store original data for verification
+        rows = []
+        all_numbers = []
+        all_nested_numbers = []
+        
+        for i in range(nb):
+            # Generate diverse numeric values
+            if i % 5 == 0:
+                # Some large numbers
+                numeric_value = random.randint(100000, 999999)
+            elif i % 3 == 0:
+                # Some medium numbers
+                numeric_value = random.randint(1000, 9999)
+            else:
+                # Regular sequential numbers
+                numeric_value = i
+            
+            nested_value = i * 7 + (i % 13)  # Different pattern for nested
+            
+            all_numbers.append(numeric_value)
+            all_nested_numbers.append(nested_value)
+            
+            rows.append({
+                default_primary_key_field_name: i,
+                default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                "json_field": {
+                    "number": numeric_value,
+                    "index": i,
+                    "data": {"nested_number": nested_value}
+                }
+            })
+        
+        self.insert(client, collection_name, rows)
+        
+        # 3. Test modulo operations with different modulo values and remainders
+        test_cases = [
+            (10, list(range(10))),  # mod 10 - all remainders 0-9
+            (2, [0, 1]),  # mod 2 - even/odd
+            (3, [0, 1, 2]),  # mod 3
+            (7, list(range(7))),  # mod 7 - all remainders 0-6
+            (13, [0, 5, 12]),  # mod 13 - selected remainders
+        ]
+        
+        for modulo, remainders in test_cases:
+            log.info(f"\nTesting modulo {modulo}")
+            
+            for remainder in remainders:
+                # Calculate expected results from original data
+                expected_ids = [i for i, num in enumerate(all_numbers) if num % modulo == remainder]
+                expected_count = len(expected_ids)
+                
+                # Query and get results
+                filter_expr = f'json_field["number"] % {modulo} == {remainder}'
+                res, _ = self.query(client, collection_name, filter=filter_expr, 
+                                    output_fields=["json_field", default_primary_key_field_name])
+                
+                # Extract actual IDs from results
+                actual_ids = sorted([item[default_primary_key_field_name] for item in res])
+                expected_ids_sorted = sorted(expected_ids)
+                
+                log.info(f"Modulo {modulo} remainder {remainder}: expected {expected_count}, got {len(res)} results")
+                
+                # Verify we got exactly the expected results
+                assert len(res) == expected_count, \
+                    f"Expected {expected_count} results for % {modulo} == {remainder}, got {len(res)}"
+                assert actual_ids == expected_ids_sorted, \
+                    f"Result IDs don't match expected IDs for % {modulo} == {remainder}"
+                
+                # Also verify each result is correct
+                for item in res:
+                    actual_remainder = item["json_field"]["number"] % modulo
+                    assert actual_remainder == remainder, \
+                        f"Number {item['json_field']['number']} % {modulo} = {actual_remainder}, expected {remainder}"
+                
+                # Test nested field
+                expected_nested_ids = [i for i, num in enumerate(all_nested_numbers) if num % modulo == remainder]
+                nested_filter = f'json_field["data"]["nested_number"] % {modulo} == {remainder}'
+                nested_res, _ = self.query(client, collection_name, filter=nested_filter,
+                                          output_fields=["json_field", default_primary_key_field_name])
+                
+                actual_nested_ids = sorted([item[default_primary_key_field_name] for item in nested_res])
+                expected_nested_ids_sorted = sorted(expected_nested_ids)
+                
+                assert len(nested_res) == len(expected_nested_ids), \
+                    f"Expected {len(expected_nested_ids)} nested results for % {modulo} == {remainder}, got {len(nested_res)}"
+                assert actual_nested_ids == expected_nested_ids_sorted, \
+                    f"Nested result IDs don't match expected IDs for % {modulo} == {remainder}"
+        
+        
+        # Test combining modulo with other conditions
+        combined_expr = 'json_field["number"] % 2 == 0 && json_field["index"] < 100'
+        expected_combined = [i for i in range(min(100, nb)) if all_numbers[i] % 2 == 0]
+        res_combined, _ = self.query(client, collection_name, filter=combined_expr,
+                                    output_fields=["json_field", default_primary_key_field_name])
+        actual_combined_ids = sorted([item[default_primary_key_field_name] for item in res_combined])
+        
+        assert len(res_combined) == len(expected_combined), \
+            f"Expected {len(expected_combined)} results for combined filter, got {len(res_combined)}"
+        assert actual_combined_ids == sorted(expected_combined), \
+            "Results for combined filter don't match expected"
+        
+        log.info(f"All modulo tests passed! Combined filter returned {len(res_combined)} results")
+        
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientGetInvalid(TestMilvusClientV2Base):
@@ -557,7 +683,7 @@ class TestMilvusClientQueryJsonPathIndex(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    # @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "json"", "bool"])
     @pytest.fixture(scope="function", params=["DOUBLE"])
     def supported_json_cast_type(self, request):
         yield request.param

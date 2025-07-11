@@ -90,6 +90,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            InsertRecordProto* insert_record_proto) {
     AssertInfo(insert_record_proto->num_rows() == num_rows,
                "Entities_raw count not equal to insert size");
+    // protect schema being changed during insert
+    // schema change cannot happends during insertion,
+    // otherwise, there might be some data not following new schema
+    std::shared_lock lck(sch_mutex_);
+
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
     int64_t field_offset = 0;
@@ -101,6 +106,12 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         field_id_to_offset.emplace(field_id, field_offset++);
         // may be added field, add the null if has existed data
         if (exist_rows > 0 && !insert_record_.is_data_exist(field_id)) {
+            LOG_WARN(
+                "heterogeneous insert data found for segment {}, field id {}, "
+                "data type {}",
+                id_,
+                field_id.get(),
+                field.type());
             schema_->AddField(FieldName(field.field_name()),
                               field_id,
                               DataType(field.type()),
@@ -124,6 +135,13 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
         if (field_id_to_offset.count(field_id) > 0) {
             continue;
         }
+        LOG_INFO(
+            "schema newer than insert data found for segment {}, attach empty "
+            "field data"
+            "not exist field {}, data type {}",
+            id_,
+            field_id.get(),
+            field_meta.get_data_type());
         auto data = bulk_subscript_not_exist_field(field_meta, num_rows);
         insert_record_proto->add_fields_data()->CopyFrom(*data);
         field_id_to_offset.emplace(field_id, field_offset++);
@@ -496,11 +514,14 @@ SegmentGrowingImpl::load_column_group_data_internal(
                         if (field.second.get_id().get() != field_id) {
                             continue;
                         }
+                        auto data_type = field.second.get_data_type();
                         auto field_data = storage::CreateFieldData(
-                            field.second.get_data_type(),
+                            data_type,
                             field.second.is_nullable(),
-                            field.second.is_vector() ? field.second.get_dim()
-                                                     : 0,
+                            IsVectorDataType(data_type) &&
+                                    !IsSparseFloatVectorDataType(data_type)
+                                ? field.second.get_dim()
+                                : 1,
                             batch_num_rows);
                         field_data->FillFieldData(table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
@@ -1167,7 +1188,7 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
             ErrorCode::TextIndexNotFound,
             fmt::format("text index not found for field {}", field_id.get()));
     }
-    iter->second->AddTexts(n, texts, texts_valid_data, offset_begin);
+    iter->second->AddTextsGrowing(n, texts, texts_valid_data, offset_begin);
 }
 
 void
@@ -1235,13 +1256,19 @@ SegmentGrowingImpl::BulkGetJsonData(
 void
 SegmentGrowingImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
+        LOG_INFO(
+            "lazy check schema segment {} found newer schema version, current "
+            "schema version {}, new schema version {}",
+            id_,
+            schema_->get_schema_version(),
+            sch->get_schema_version());
         Reopen(sch);
     }
 }
 
 void
 SegmentGrowingImpl::Reopen(SchemaPtr sch) {
-    std::unique_lock lck(mutex_);
+    std::unique_lock lck(sch_mutex_);
 
     auto absent_fields = sch->AbsentFields(*schema_);
 
@@ -1270,6 +1297,10 @@ SegmentGrowingImpl::FinishLoad() {
 void
 SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
+    LOG_INFO("start fill empty field {} (data type {}) for growing segment {}",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
     // append meta only needed when schema is old
     // loading old segment with new schema will have meta appended
     if (!insert_record_.is_data_exist(field_id)) {
@@ -1285,9 +1316,10 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta) {
     insert_record_.get_data_base(field_id)->set_data_raw(
         0, total_row_num, data.get(), field_meta);
 
-    LOG_INFO("Growing segment {} fill empty field {} done",
-             this->get_segment_id(),
-             field_meta.get_id().get());
+    LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
 }
 
 }  // namespace milvus::segcore

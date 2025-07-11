@@ -27,6 +27,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
@@ -51,12 +53,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v2/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
-	MilvusWorkDirEnvKey    = "MILVUS_WORK_DIR"
 	MilvusClusterComponent = "cluster-manager"
 )
 
@@ -153,7 +155,6 @@ func NewMilvusProcess(opts ...Option) *MilvusProcess {
 		notifier: syncutil.NewAsyncTaskNotifier[error](),
 		graceful: lifetime.NewSafeChan(),
 		client:   syncutil.NewFuture[io.Closer](),
-		workDir:  os.Getenv(MilvusWorkDirEnvKey),
 	}
 
 	for _, opt := range opts {
@@ -452,14 +453,28 @@ func (mp *MilvusProcess) GetAddress(ctx context.Context) (string, error) {
 }
 
 func (mp *MilvusProcess) getGrpcClient(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+	if mp.getConfigValueFromEnv(paramtable.Get().InternalTLSCfg.InternalTLSEnabled.Key) == "true" {
+		caPemPath := mp.getConfigValueFromEnv(paramtable.Get().InternalTLSCfg.InternalTLSCaPemPath.Key)
+		sni := mp.getConfigValueFromEnv(paramtable.Get().InternalTLSCfg.InternalTLSSNI.Key)
+		creds, err := credentials.NewClientTLSFromFile(caPemPath, sni)
+		if err != nil {
+			panic(fmt.Errorf("failed to create client tls from file: %w", err))
+		}
+		mp.Logger().Info("create grpc client with tls")
+		return DailGRPClient(ctx, addr, mp.rootPath, mp.nodeID, grpc.WithTransportCredentials(creds))
+	}
 	return DailGRPClient(ctx, addr, mp.rootPath, mp.nodeID)
 }
 
+// getConfigValueFromEnv gets the value of the environment variable from the process.
+func (mp *MilvusProcess) getConfigValueFromEnv(key string) string {
+	envKey := strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
+	return mp.env[envKey]
+}
+
 // DailGRPClient dials a grpc client with the given address, root path and node id.
-func DailGRPClient(ctx context.Context, addr string, rootPath string, nodeID int64) (*grpc.ClientConn, error) {
-	return grpc.DialContext(
-		ctx,
-		addr,
+func DailGRPClient(ctx context.Context, addr string, rootPath string, nodeID int64, extraOpts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 		grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(
@@ -488,6 +503,12 @@ func DailGRPClient(ctx context.Context, addr string, rootPath string, nodeID int
 		grpc.FailOnNonTempDialError(true),
 		grpc.WithReturnConnectionError(),
 		grpc.WithDisableRetry(),
+	}
+	opts = append(opts, extraOpts...)
+	return grpc.DialContext(
+		ctx,
+		addr,
+		opts...,
 	)
 }
 

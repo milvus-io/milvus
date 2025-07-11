@@ -33,6 +33,8 @@
 #include "storage/Util.h"
 #include "query/Utils.h"
 
+#include "storage/FileWriter.h"
+
 namespace milvus {
 namespace index {
 
@@ -457,41 +459,36 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
     std::filesystem::create_directories(
         std::filesystem::path(file_name).parent_path());
 
-    auto file = File::Open(file_name, O_RDWR | O_CREAT | O_TRUNC);
     auto file_offset = 0;
     std::map<T, std::pair<int32_t, int32_t>> bitmaps;
+    {
+        auto file_writer = storage::FileWriter(file_name);
+        for (size_t i = 0; i < index_length; ++i) {
+            T key = ParseKey(&data_ptr);
 
-    for (size_t i = 0; i < index_length; ++i) {
-        T key = ParseKey(&data_ptr);
+            roaring::Roaring value;
+            value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+            for (const auto& v : value) {
+                valid_bitset_.set(v);
+            }
 
-        roaring::Roaring value;
-        value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
-        for (const auto& v : value) {
-            valid_bitset_.set(v);
+            // convert roaring vaule to frozen mode
+            int32_t frozen_size = value.getFrozenSizeInBytes();
+            auto aligned_size =
+                ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            std::vector<uint8_t> buf(aligned_size, 0);
+            value.writeFrozen(reinterpret_cast<char*>(buf.data()));
+
+            file_writer.Write(buf.data(), aligned_size);
+            bitmaps[key] = {file_offset, frozen_size};
+
+            file_offset += aligned_size;
+            data_ptr += value.getSizeInBytes();
         }
-
-        // convert roaring vaule to frozen mode
-        int32_t frozen_size = value.getFrozenSizeInBytes();
-        auto aligned_size =
-            ((frozen_size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
-        std::vector<uint8_t> buf(aligned_size, 0);
-        value.writeFrozen(reinterpret_cast<char*>(buf.data()));
-
-        auto written = file.Write(buf.data(), aligned_size);
-        if (written != aligned_size) {
-            file.Close();
-            remove(file_name.c_str());
-            PanicInfo(
-                ErrorCode::UnistdError,
-                fmt::format("write data to fd error: {}", strerror(errno)));
-        }
-        bitmaps[key] = {file_offset, frozen_size};
-
-        file_offset += aligned_size;
-        data_ptr += value.getSizeInBytes();
+        file_writer.Finish();
     }
 
-    file.Seek(0, SEEK_SET);
+    auto file = File::Open(file_name, O_RDONLY);
     mmap_data_ = static_cast<char*>(
         mmap(NULL, file_offset, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
     if (mmap_data_ == MAP_FAILED) {

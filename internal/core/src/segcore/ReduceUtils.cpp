@@ -25,12 +25,12 @@ AssembleGroupByValues(
     const std::vector<GroupByValueType>& group_by_vals,
     milvus::query::Plan* plan) {
     auto group_by_field_id = plan->plan_node_->search_info_.group_by_field_id_;
-    if (group_by_field_id.has_value() && group_by_vals.size() > 0) {
-        auto group_by_values_field =
-            std::make_unique<milvus::proto::schema::ScalarField>();
+    if (group_by_field_id.has_value()) {
         auto valid_data =
             std::make_unique<google::protobuf::RepeatedField<bool>>();
         valid_data->Resize(group_by_vals.size(), true);
+        auto group_by_values_field =
+            std::make_unique<milvus::proto::schema::ScalarField>();
         auto group_by_field =
             plan->schema_->operator[](group_by_field_id.value());
         auto group_by_data_type = group_by_field.get_data_type();
@@ -134,7 +134,6 @@ AssembleGroupByValues(
         group_by_field_value->mutable_valid_data()->MergeFrom(*valid_data);
         group_by_field_value->mutable_scalars()->MergeFrom(
             *group_by_values_field.get());
-        return;
     }
 }
 

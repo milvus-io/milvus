@@ -74,6 +74,16 @@ func (stm *statsTaskMeta) reloadFromKV() error {
 		return err
 	}
 	for _, t := range statsTasks {
+		// sort stats task no need to reload
+		if t.GetSubJobType() == indexpb.StatsSubJob_Sort {
+			if err := stm.catalog.DropStatsTask(stm.ctx, t.GetTaskID()); err != nil {
+				log.Warn("drop stats task failed",
+					zap.Int64("taskID", t.GetTaskID()),
+					zap.Int64("segmentID", t.GetSegmentID()),
+					zap.Error(err))
+			}
+			continue
+		}
 		stm.tasks.Insert(t.GetTaskID(), t)
 
 		secondaryKey := createSecondaryIndexKey(t.GetSegmentID(), t.GetSubJobType().String())
@@ -153,7 +163,7 @@ func (stm *statsTaskMeta) DropStatsTask(ctx context.Context, taskID int64) error
 	if err := stm.catalog.DropStatsTask(ctx, taskID); err != nil {
 		log.Warn("drop stats task failed",
 			zap.Int64("taskID", taskID),
-			zap.Int64("segmentID", taskID),
+			zap.Int64("segmentID", t.GetSegmentID()),
 			zap.Error(err))
 		return err
 	}

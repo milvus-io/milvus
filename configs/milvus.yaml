@@ -316,7 +316,8 @@ proxy:
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
-  maxResultEntries: 1000000
+  # Disabled if the value is less or equal to 0.
+  maxResultEntries: -1
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -446,7 +447,7 @@ queryNode:
       subDim: 4 # interim index sub dim, recommend to (subDim % vector dim == 0)
       refineRatio: 4.5 # interim index parameters, should set to be >= 1.0
       refineQuantType: NONE # Data representation of SCANN_DVR index, options: 'NONE', 'FLOAT16', 'BFLOAT16' and 'UINT8'
-      refineWithQuant: true # whether to use refineQuantType to refine for fatser but loss a little precision
+      refineWithQuant: true # whether to use refineQuantType to refine for faster but loss a little precision
       denseVectorIndexType: IVF_FLAT_CC # Dense vector intermin index type
       memExpansionRate: 1.15 # extra memory needed by building interim index
       buildParallelRate: 0.5 # the ratio of building interim index parallel matched with cpu num
@@ -576,7 +577,7 @@ dataCoord:
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
-    diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
+    diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     sealProportion: 0.12 # The minimum proportion to datacoord.segment.maxSize to seal a segment. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     sealProportionJitter: 0.1 # segment seal proportion jitter ratio, default value 0.1(10%), if seal proportion is 12%, with jitter=0.1, the actuall applied ratio will be 10.8~12%
     assignmentExpiration: 2000 # Expiration time of the segment assignment, unit: ms
@@ -615,7 +616,7 @@ dataCoord:
   # if param forceRebuildSegmentIndex is not enabled, the newly created vector index will be aligned with the newer one of index engine's version and targetVecIndexVersion.
   # if param targetVecIndexVersion is not set, the default value is -1, which means no target vec index version, then the vector index will be aligned with index engine's version 
   targetVecIndexVersion: -1
-  segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flusing operation on same segment
+  segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   # Switch value to control if to enable segment compaction.
   # Compaction merges small-size segments into a large segment, and clears the entities deleted beyond the rentention duration of Time Travel.
   enableCompaction: true
@@ -634,13 +635,13 @@ dataCoord:
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 86400 # Compaction task will be cleaned after finish longer than this time(in seconds)
     gcInterval: 1800 # The time interval in seconds for compaction gc
-    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be ajusted upwards to 100ms
+    scheduleInterval: 500 # The time interval in milliseconds for scheduling compaction tasks. If the configuration setting is below 100ms, it will be adjusted upwards to 100ms
     mix:
       triggerInterval: 60 # The time interval in seconds to trigger mix compaction
     levelzero:
       triggerInterval: 10 # The time interval in seconds for trigger L0 compaction
       forceTrigger:
-        minSize: 8388608 # The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB
+        minSize: 8388608 # The minimum size in bytes to force trigger a LevelZero Compaction, default as 8MB
         maxSize: 67108864 # The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB
         deltalogMinNum: 10 # The minimum number of deltalog files to force trigger a LevelZero Compaction
         deltalogMaxNum: 30 # The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30
@@ -677,8 +678,8 @@ dataCoord:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
     missingTolerance: 86400 # The retention duration of the unrecorded binary log (binlog) files. Setting a reasonably large value for this parameter avoids erroneously deleting the newly created binlog files that lack metadata. Unit: second.
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
-    removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
+    slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
@@ -686,13 +687,15 @@ dataCoord:
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
-    maxSizeInMBPerImportTask: 6144 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
+    maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
+    fileNumPerSlot: 1 # The files number per slot for pre-import/import task.
+    memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65536 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -703,7 +706,6 @@ dataCoord:
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
-  enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
   jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
@@ -718,7 +720,7 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncMgrTasks: 64 # The max concurrent sync task number of datanode sync mgr globally
+    maxParallelSyncMgrTasksPerCPUCore: 16 # The max concurrent sync task number of datanode sync mgr per CPU core
     skipMode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
@@ -750,11 +752,12 @@ dataNode:
     maxChannelCheckpointsPerPRC: 128 # The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.
     channelCheckpointUpdateTickInSeconds: 10 # The frequency, in seconds, at which the channel checkpoint updater executes updates.
   import:
-    maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
-    readBufferSizeInMB: 64 # The insert buffer size (in MB) during import.
+    readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
     maxTaskSlotNum: 16 # The maximum number of slots occupied by each import/pre-import task.
+    memoryLimitPercentage: 20 # The percentage of memory limit for import/pre-import tasks.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -897,6 +900,19 @@ common:
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
   simdType: auto
+  # This parameter controls the write mode of the local disk, which is used to write temporary data downloaded from remote storage.
+  # Currently, only QueryNode uses 'common.diskWrite*' parameters. Support for other components will be added in the future.
+  # The options include 'direct' and 'buffered'. The default value is 'buffered'.
+  diskWriteMode: buffered
+  # Disk write buffer size in KB, only used when disk write mode is 'direct', default is 64KB.
+  # Current valid range is [4, 65536]. If the value is not aligned to 4KB, it will be rounded up to the nearest multiple of 4KB.
+  diskWriteBufferSizeKb: 64
+  # This parameter controls the number of writer threads used for disk write operations. The valid range is [0, hardware_concurrency].
+  # It is designed to limit the maximum concurrency of disk write operations to reduce the impact on disk read performance.
+  # For example, if you want to limit the maximum concurrency of disk write operations to 1, you can set this parameter to 1.
+  # The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
+  # In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.
+  diskWriteNumThreads: 0
   security:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,
@@ -1121,7 +1137,7 @@ quotaAndLimits:
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
     forceDeny: false
     ttProtection:
-      enabled: false
+      enabled: true
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
@@ -1181,6 +1197,7 @@ trace:
     endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
     method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
+    headers:  # otlp header that encoded in base64
   initTimeoutSeconds: 10 # segcore initialization timeout in seconds, preventing otlp grpc hangs forever
 
 #when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.

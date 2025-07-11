@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -44,6 +45,7 @@ func RecoverRecoveryStorage(
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("state", recoveryStorageStateWorking)))
@@ -91,6 +93,21 @@ type recoveryStorageImpl struct {
 	truncator              *samplingTruncator
 	metrics                *recoveryMetrics
 	pendingPersistSnapshot *RecoverySnapshot
+}
+
+// Metrics gets the metrics of the wal.
+func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// TODO: flusher will be merged into recovery storage, so this is a temporary solution.
+	recoveryTimeTick := r.checkpoint.TimeTick
+	if r.flusherCheckpoint != nil {
+		recoveryTimeTick = r.flusherCheckpoint.TimeTick
+	}
+	return RecoveryMetrics{
+		RecoveryTimeTick: recoveryTimeTick,
+	}
 }
 
 // UpdateFlusherCheckpoint updates the checkpoint of flusher.
@@ -365,6 +382,11 @@ func (r *recoveryStorageImpl) handleCreatePartition(msg message.ImmutableCreateP
 
 // handleDropPartition handles the drop partition message.
 func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropPartitionMessageV1) {
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		// TODO: drop partition should never happen after the drop collection message.
+		// But now we don't have strong promise on it.
+		return
+	}
 	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
 	// flush all existing segments.
 	r.flushAllSegmentOfPartition(msg, msg.Header().CollectionId, msg.Header().PartitionId)

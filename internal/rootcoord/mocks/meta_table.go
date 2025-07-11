@@ -1939,6 +1939,54 @@ func (_c *IMetaTable_ListAllAvailCollections_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// ListAllAvailPartitions provides a mock function with given fields: ctx
+func (_m *IMetaTable) ListAllAvailPartitions(ctx context.Context) map[int64]map[int64][]int64 {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListAllAvailPartitions")
+	}
+
+	var r0 map[int64]map[int64][]int64
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64]map[int64][]int64); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]map[int64][]int64)
+		}
+	}
+
+	return r0
+}
+
+// IMetaTable_ListAllAvailPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAllAvailPartitions'
+type IMetaTable_ListAllAvailPartitions_Call struct {
+	*mock.Call
+}
+
+// ListAllAvailPartitions is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) ListAllAvailPartitions(ctx interface{}) *IMetaTable_ListAllAvailPartitions_Call {
+	return &IMetaTable_ListAllAvailPartitions_Call{Call: _e.mock.On("ListAllAvailPartitions", ctx)}
+}
+
+func (_c *IMetaTable_ListAllAvailPartitions_Call) Run(run func(ctx context.Context)) *IMetaTable_ListAllAvailPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ListAllAvailPartitions_Call) Return(_a0 map[int64]map[int64][]int64) *IMetaTable_ListAllAvailPartitions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_ListAllAvailPartitions_Call) RunAndReturn(run func(context.Context) map[int64]map[int64][]int64) *IMetaTable_ListAllAvailPartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListCollectionPhysicalChannels provides a mock function with given fields: ctx
 func (_m *IMetaTable) ListCollectionPhysicalChannels(ctx context.Context) map[int64][]string {
 	ret := _m.Called(ctx)

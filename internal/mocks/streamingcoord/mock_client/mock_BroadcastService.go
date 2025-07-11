@@ -130,38 +130,6 @@ func (_c *MockBroadcastService_Broadcast_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// Close provides a mock function with no fields
-func (_m *MockBroadcastService) Close() {
-	_m.Called()
-}
-
-// MockBroadcastService_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
-type MockBroadcastService_Close_Call struct {
-	*mock.Call
-}
-
-// Close is a helper method to define mock.On call
-func (_e *MockBroadcastService_Expecter) Close() *MockBroadcastService_Close_Call {
-	return &MockBroadcastService_Close_Call{Call: _e.mock.On("Close")}
-}
-
-func (_c *MockBroadcastService_Close_Call) Run(run func()) *MockBroadcastService_Close_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockBroadcastService_Close_Call) Return() *MockBroadcastService_Close_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockBroadcastService_Close_Call) RunAndReturn(run func()) *MockBroadcastService_Close_Call {
-	_c.Run(run)
-	return _c
-}
-
 // NewMockBroadcastService creates a new instance of MockBroadcastService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockBroadcastService(t interface {

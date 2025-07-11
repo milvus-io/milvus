@@ -13,6 +13,7 @@
 #include <memory>
 #include "common/FieldMeta.h"
 #include "common/protobuf_utils.h"
+#include "monitor/scope_metric.h"
 #include "pb/schema.pb.h"
 #include "common/EasyAssert.h"
 #include "tokenizer.h"
@@ -21,6 +22,8 @@ using Map = std::map<std::string, std::string>;
 
 CStatus
 create_tokenizer(const char* params, CTokenizer* tokenizer) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
         *tokenizer = impl.release();
@@ -32,6 +35,8 @@ create_tokenizer(const char* params, CTokenizer* tokenizer) {
 
 CStatus
 clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(*tokenizer);
         *rst = impl->Clone().release();
@@ -43,18 +48,24 @@ clone_tokenizer(CTokenizer* tokenizer, CTokenizer* rst) {
 
 void
 free_tokenizer(CTokenizer tokenizer) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
     delete impl;
 }
 
 CTokenStream
 create_token_stream(CTokenizer tokenizer, const char* text, uint32_t text_len) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto impl = reinterpret_cast<milvus::tantivy::Tokenizer*>(tokenizer);
     return impl->CreateTokenStream(std::string(text, text_len)).release();
 }
 
 CStatus
 validate_tokenizer(const char* params) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto impl = std::make_unique<milvus::tantivy::Tokenizer>(params);
         return milvus::SuccessCStatus();
@@ -65,6 +76,8 @@ validate_tokenizer(const char* params) {
 
 CStatus
 validate_text_schema(const uint8_t* field_schema, uint64_t length) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto schema = std::make_unique<milvus::proto::schema::FieldSchema>();
         AssertInfo(schema->ParseFromArray(field_schema, length),

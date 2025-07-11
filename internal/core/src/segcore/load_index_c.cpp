@@ -34,15 +34,20 @@
 #include "cachinglayer/Manager.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "segcore/storagev1translator/V1SealedIndexTranslator.h"
+#include "monitor/scope_metric.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
+    SCOPE_CGO_CALL_METRIC();
+
     return knowhere::UseDiskLoad(index_type, index_engine_version) ||
            strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
 }
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             std::make_unique<milvus::segcore::LoadIndexInfo>();
@@ -62,6 +67,8 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
 
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     delete info;
 }
@@ -70,6 +77,8 @@ CStatus
 AppendIndexParam(CLoadIndexInfo c_load_index_info,
                  const char* c_index_key,
                  const char* c_index_value) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -98,6 +107,8 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 enum CDataType field_type,
                 bool enable_mmap,
                 const char* mmap_dir_path) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -123,6 +134,8 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
 
 CStatus
 appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -183,6 +196,8 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
 CStatus
 appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -231,6 +246,8 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
 LoadResourceRequest
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -260,6 +277,8 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
 
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -290,6 +309,8 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
 CStatus
 AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
@@ -432,6 +453,8 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
 
 CStatus
 AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -455,6 +478,8 @@ AppendIndexInfo(CLoadIndexInfo c_load_index_info,
                 int64_t index_id,
                 int64_t build_id,
                 int64_t version) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -477,6 +502,8 @@ AppendIndexInfo(CLoadIndexInfo c_load_index_info,
 CStatus
 AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
                                    int32_t index_engine_version) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -496,6 +523,8 @@ AppendIndexEngineVersionToLoadInfo(CLoadIndexInfo c_load_index_info,
 
 CStatus
 CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
@@ -526,6 +555,8 @@ void
 AppendStorageInfo(CLoadIndexInfo c_load_index_info,
                   const char* uri,
                   int64_t version) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     load_index_info->uri = uri;
     load_index_info->index_store_version = version;
@@ -535,6 +566,8 @@ CStatus
 FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
                     const uint8_t* serialized_load_index_info,
                     const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto info_proto = std::make_unique<milvus::proto::cgo::LoadIndexInfo>();
         info_proto->ParseFromArray(serialized_load_index_info, len);

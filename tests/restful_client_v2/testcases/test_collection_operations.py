@@ -1556,6 +1556,438 @@ class TestCollectionProperties(TestBase):
                         assert p['value'] == "100"
 
 
+class TestCollectionAddField(TestBase):
+    """Test collection add field operations"""
+    
+    @pytest.mark.parametrize("field_params,test_data_generator,expected_validations", [
+        # Test case 1: Int64 nullable field
+        (
+            {
+                "fieldName": "new_int_field",
+                "dataType": "Int64",
+                "nullable": True,
+                "elementTypeParams": {}
+            },
+            lambda i: i * 10,  # Generate int values
+            {
+                "field_type": "Int64",
+                "nullable": True,
+                "has_default": False,
+                "data_validator": lambda item, i: item["new_int_field"] == i * 10
+            }
+        ),
+        # Test case 2: VarChar field with max_length
+        (
+            {
+                "fieldName": "new_varchar_field",
+                "dataType": "VarChar",
+                "nullable": True,
+                "elementTypeParams": {"max_length": "256"}
+            },
+            lambda i: f"description_{i}",  # Generate string values
+            {
+                "field_type": "VarChar",
+                "nullable": True,
+                "has_default": False,
+                "max_length": "256",
+                "data_validator": lambda item, i: item["new_varchar_field"] == f"description_{i}"
+            }
+        ),
+        # Test case 3: Int64 field with default value
+        (
+            {
+                "fieldName": "new_field_with_default",
+                "dataType": "Int64",
+                "nullable": True,
+                "defaultValue": 42,
+                "elementTypeParams": {}
+            },
+            lambda i: i * 100,  # Generate int values when explicitly provided
+            {
+                "field_type": "Int64",
+                "nullable": True,
+                "has_default": True,
+                "default_value": 42,
+                "data_validator": lambda item, i: item["new_field_with_default"] == i * 100
+            }
+        ),
+        # Test case 4: Array field
+        (
+            {
+                "fieldName": "new_array_field",
+                "dataType": "Array",
+                "elementDataType": "Int64",
+                "nullable": True,
+                "elementTypeParams": {"max_capacity": "1024"}
+            },
+            lambda i: [i * 10, i * 20, i * 30],  # Generate array values
+            {
+                "field_type": "Array",
+                "nullable": True,
+                "has_default": False,
+                "element_type": "Int64",
+                "data_validator": lambda item, i: item["new_array_field"] == [i * 10, i * 20, i * 30]
+            }
+        )
+    ])
+    def test_add_field_parametrized(self, field_params, test_data_generator, expected_validations):
+        """
+        target: test add various types of fields
+        method: create collection, insert data, add field, insert and query again
+        expected: add field success and data operations work before and after
+        """
+        name = gen_collection_name()
+        dim = 128
+        nb = 3000  # Number of records to insert in each batch
+        client = self.collection_client
+        vector_client = self.vector_client
+        field_name = field_params["fieldName"]
+        
+        # Create collection first
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "book_intro", "indexName": "book_intro_index", "metricType": "L2"}
+            ]
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        
+        # Wait for collection to be loaded
+        client.wait_load_completed(collection_name=name)
+        
+        # Insert data before adding field
+        insert_data_before = []
+        for i in range(nb):
+            insert_data_before.append({
+                "book_id": i,
+                "book_intro": gen_vector(dim=dim)
+            })
+        
+        insert_payload = {
+            "collectionName": name,
+            "data": insert_data_before
+        }
+        rsp = vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+        
+        # Query data before adding field
+        query_payload = {
+            "collectionName": name,
+            "expr": "book_id >= 0",
+            "outputFields": ["book_id"],
+            "limit": nb
+        }
+        rsp = vector_client.vector_query(query_payload)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == nb
+        
+        # Search data before adding field
+        search_payload = {
+            "collectionName": name,
+            "data": [gen_vector(dim=dim)],
+            "annsField": "book_intro",
+            "limit": 100
+        }
+        rsp = vector_client.vector_search(search_payload)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) > 0
+        
+        # Add field
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] == 0
+        
+        # Verify field was added
+        rsp = client.collection_describe(name)
+        assert rsp['code'] == 0
+        field_names = [field["name"] for field in rsp['data']['fields']]
+        assert field_name in field_names
+        
+        # Check the field properties
+        for field in rsp['data']['fields']:
+            if field['name'] == field_name:
+                assert field['type'] == expected_validations["field_type"]
+                assert field['nullable'] == expected_validations["nullable"]
+                
+                # Check specific field type properties
+                if expected_validations.get("max_length"):
+                    for param in field.get('params', []):
+                        if param['key'] == 'max_length':
+                            assert param['value'] == expected_validations["max_length"]
+                
+                if expected_validations.get("element_type"):
+                    assert field.get('elementType') == expected_validations["element_type"]
+                
+                if expected_validations.get("has_default") and expected_validations["has_default"]:
+                    assert field.get('defaultValue') is not None
+        
+        # Insert data after adding field
+        insert_data_after = []
+        for i in range(nb, nb * 2):
+            data_item = {
+                "book_id": i,
+                "book_intro": gen_vector(dim=dim)
+            }
+            
+            # For default value test, sometimes omit the field to test default behavior
+            if expected_validations.get("has_default") and expected_validations["has_default"] and i < nb + nb // 2:
+                # Don't add the field for first half of records to test default value
+                pass
+            else:
+                # Add the field with generated test data
+                data_item[field_name] = test_data_generator(i)
+            
+            insert_data_after.append(data_item)
+        
+        insert_payload = {
+            "collectionName": name,
+            "data": insert_data_after
+        }
+        rsp = vector_client.vector_insert(insert_payload)
+        assert rsp['code'] == 0
+        
+        # Query data after adding field
+        query_payload = {
+            "collectionName": name,
+            "expr": f"book_id >= {nb}",
+            "outputFields": ["book_id", field_name],
+            "limit": nb
+        }
+        rsp = vector_client.vector_query(query_payload)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) == nb
+        
+        # Validate field data for records that have explicit values
+        for item in rsp['data']:
+            assert field_name in item
+            book_id = item["book_id"]
+            # Only validate explicit values (not default values)
+            if not (expected_validations.get("has_default") and expected_validations["has_default"] and book_id < nb + nb // 2):
+                if expected_validations.get("data_validator"):
+                    expected_validations["data_validator"](item, book_id)
+        
+        # Search data after adding field
+        search_payload = {
+            "collectionName": name,
+            "data": [gen_vector(dim=dim)],
+            "annsField": "book_intro",
+            "limit": 100,
+            "outputFields": ["book_id", field_name]
+        }
+        rsp = vector_client.vector_search(search_payload)
+        assert rsp['code'] == 0
+        assert len(rsp['data']) > 0
+
+
+@pytest.mark.L1
+class TestCollectionAddFieldNegative(TestBase):
+    """Test collection add field negative cases"""
+
+    def test_add_field_missing_data_type(self):
+        """
+        target: test add field with missing dataType
+        method: create collection, add field without dataType parameter
+        expected: add field failed with proper error message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        
+        # Create collection first
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        
+        # Try to add field without dataType
+        field_params = {
+            "fieldName": "new_field",
+            "nullable": True,
+            "elementTypeParams": {}
+        }
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] != 0
+        assert "dataType" in rsp.get('message', '').lower() or "required" in rsp.get('message', '').lower()
+
+    def test_add_field_invalid_default_value_type(self):
+        """
+        target: test add field with invalid defaultValue type
+        method: create collection, add Int64 field with string defaultValue
+        expected: add field failed with proper error message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        
+        # Create collection first
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        
+        # Try to add Int64 field with string defaultValue
+        field_params = {
+            "fieldName": "new_field",
+            "dataType": "Int64",
+            "nullable": True,
+            "defaultValue": "aaa",  # Invalid type for Int64
+            "elementTypeParams": {}
+        }
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] != 0
+        assert "defaultValue" in rsp.get('message', '') or "invalid" in rsp.get('message', '').lower()
+
+    def test_add_field_invalid_data_type(self):
+        """
+        target: test add field with invalid dataType
+        method: create collection, add field with invalid dataType
+        expected: add field failed with proper error message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        
+        # Create collection first
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        
+        # Try to add field with invalid dataType
+        field_params = {
+            "fieldName": "new_field",
+            "dataType": "LONGLONGLONGLONGTEXT",  # Invalid dataType
+            "nullable": True,
+            "elementTypeParams": {}
+        }
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] != 0
+        assert "invalid" in rsp.get('message', '').lower() or "data type" in rsp.get('message', '').lower()
+
+    def test_add_field_array_missing_element_data_type(self):
+        """
+        target: test add Array field without elementDataType
+        method: create collection, add Array field without elementDataType
+        expected: add field failed with proper error message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        
+        # Create collection first
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        
+        # Try to add Array field without elementDataType
+        field_params = {
+            "fieldName": "new_array_field",
+            "dataType": "Array",
+            "nullable": True,
+            "elementTypeParams": {}
+        }
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] != 0
+        assert "element" in rsp.get('message', '').lower() or "invalid" in rsp.get('message', '').lower()
+
+    def test_add_field_array_invalid_element_data_type(self):
+        """
+        target: test add Array field with invalid elementDataType
+        method: create collection, add Array field with invalid elementDataType
+        expected: add field failed with proper error message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        
+        # Create collection first
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            }
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 0
+        
+        # Try to add Array field with invalid elementDataType
+        field_params = {
+            "fieldName": "new_array_field",
+            "dataType": "Array",
+            "elementDataType": "MYBLOB",  # Invalid elementDataType
+            "nullable": True,
+            "elementTypeParams": {}
+        }
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] != 0
+        assert "element" in rsp.get('message', '').lower() or "invalid" in rsp.get('message', '').lower()
+
+    def test_add_field_to_nonexistent_collection(self):
+        """
+        target: test add field to non-existent collection
+        method: add field to a collection that doesn't exist
+        expected: add field failed with proper error message
+        """
+        name = "nonexistent_collection"
+        client = self.collection_client
+        
+        # Try to add field to non-existent collection
+        field_params = {
+            "fieldName": "new_field",
+            "dataType": "Int64",
+            "nullable": True,
+            "elementTypeParams": {}
+        }
+        rsp = client.add_field(name, field_params)
+        logger.info(f"add field response: {rsp}")
+        assert rsp['code'] != 0
+        assert "collection" in rsp.get('message', '').lower() or "not found" in rsp.get('message', '').lower()
+
+
 @pytest.mark.L0
 class TestCollectionMaintenance(TestBase):
     """Test collection maintenance operations"""

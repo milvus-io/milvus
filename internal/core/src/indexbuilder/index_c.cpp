@@ -37,6 +37,7 @@
 #include "index/Meta.h"
 #include "index/JsonKeyStatsInvertedIndex.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "monitor/scope_metric.h"
 
 using namespace milvus;
 CStatus
@@ -44,6 +45,8 @@ CreateIndexV0(enum CDataType dtype,
               const char* serialized_type_params,
               const char* serialized_index_params,
               CIndex* res_index) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(res_index, "failed to create index, passed index was null");
@@ -183,6 +186,8 @@ CStatus
 CreateIndex(CIndex* res_index,
             const uint8_t* serialized_build_index_info,
             const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto build_index_info =
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
@@ -235,9 +240,10 @@ CreateIndex(CIndex* res_index,
             index_non_encoding};
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -265,6 +271,8 @@ CStatus
 BuildJsonKeyIndex(ProtoLayoutInterface result,
                   const uint8_t* serialized_build_index_info,
                   const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto build_index_info =
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
@@ -313,7 +321,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
@@ -347,6 +355,8 @@ CStatus
 BuildTextIndex(ProtoLayoutInterface result,
                const uint8_t* serialized_build_index_info,
                const uint64_t len) {
+    SCOPE_CGO_CALL_METRIC();
+
     try {
         auto build_index_info =
             std::make_unique<milvus::proto::indexcgo::BuildIndexInfo>();
@@ -384,7 +394,7 @@ BuildTextIndex(ProtoLayoutInterface result,
         auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         auto scalar_index_engine_version =
             build_index_info->current_scalar_index_version();
@@ -426,6 +436,8 @@ BuildTextIndex(ProtoLayoutInterface result,
 
 CStatus
 DeleteIndex(CIndex index) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(index, "failed to delete index, passed index was null");
@@ -445,6 +457,8 @@ CStatus
 BuildFloatVecIndex(CIndex index,
                    int64_t float_value_num,
                    const float* vectors) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(index,
@@ -470,6 +484,8 @@ CStatus
 BuildFloat16VecIndex(CIndex index,
                      int64_t float16_value_num,
                      const uint8_t* vectors) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(
@@ -496,6 +512,8 @@ CStatus
 BuildBFloat16VecIndex(CIndex index,
                       int64_t bfloat16_value_num,
                       const uint8_t* vectors) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(
@@ -520,6 +538,8 @@ BuildBFloat16VecIndex(CIndex index,
 
 CStatus
 BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(
@@ -547,6 +567,8 @@ BuildSparseFloatVecIndex(CIndex index,
                          int64_t row_num,
                          int64_t dim,
                          const uint8_t* vectors) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(
@@ -570,6 +592,8 @@ BuildSparseFloatVecIndex(CIndex index,
 
 CStatus
 BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(index,
@@ -598,6 +622,8 @@ BuildInt8VecIndex(CIndex index, int64_t int8_value_num, const int8_t* vectors) {
 // TODO: optimize here if necessary.
 CStatus
 BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(c_index,
@@ -620,6 +646,8 @@ BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
 
 CStatus
 SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(
@@ -641,6 +669,8 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
 
 CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(
@@ -661,6 +691,8 @@ LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
 
 CStatus
 CleanLocalData(CIndex index) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(index,
@@ -681,6 +713,8 @@ CleanLocalData(CIndex index) {
 
 CStatus
 SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto status = CStatus();
     try {
         AssertInfo(

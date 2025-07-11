@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -33,6 +34,10 @@ import (
 	"github.com/milvus-io/milvus/tests/integration/cluster/process"
 )
 
+const (
+	MilvusWorkDirEnvKey = "MILVUS_WORK_DIR"
+)
+
 type (
 	MiniClusterV3Option func(*MiniClusterV3)
 	ClusterOperationOpt func(*clusterOperationOpt)
@@ -53,6 +58,12 @@ func WithoutWaitForReady() ClusterOperationOpt {
 func WithRootPath(rootPath string) MiniClusterV3Option {
 	return func(c *MiniClusterV3) {
 		c.rootPath = rootPath
+	}
+}
+
+func WithWorkDir(workDir string) MiniClusterV3Option {
+	return func(c *MiniClusterV3) {
+		c.workDir = workDir
 	}
 }
 
@@ -77,6 +88,7 @@ func NewMiniClusterV3(
 		ctx:                   ctx,
 		mu:                    sync.Mutex{},
 		nodeID:                0,
+		workDir:               os.Getenv(MilvusWorkDirEnvKey),
 		configRefreshInterval: 100 * time.Millisecond,
 		extraEnv:              make(map[string]string),
 		mixcoord:              make(map[int64]*process.MixcoordProcess),
@@ -109,6 +121,7 @@ type MiniClusterV3 struct {
 	defaultStreamingNode *process.StreamingNodeProcess
 
 	nodeID        int64
+	workDir       string
 	mixcoord      map[int64]*process.MixcoordProcess
 	proxy         map[int64]*process.ProxyProcess
 	datanode      map[int64]*process.DataNodeProcess
@@ -129,6 +142,9 @@ type MiniClusterV3 struct {
 }
 
 func (c *MiniClusterV3) init() {
+	if c.workDir == "" {
+		panic("work dir is not set")
+	}
 	if c.rootPath == "" {
 		c.rootPath = fmt.Sprintf("integration-%s", uuid.New())
 	}
@@ -646,6 +662,7 @@ func (c *MiniClusterV3) getOptions() []process.Option {
 		env[k] = v
 	}
 	return []process.Option{
+		process.WithWorkDir(c.workDir),
 		process.WithServerID(c.nodeID),
 		process.WithRootPath(c.rootPath),
 		process.WithETCDClient(c.EtcdCli),

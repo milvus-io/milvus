@@ -165,6 +165,7 @@ message CreateStatsRequest {
   string insert_channel = 5;
   int64 segmentID = 6;
   repeated data.FieldBinlog insert_logs = 7;
+  // deprecated, after sort stats moved, its not used.
   repeated data.FieldBinlog delta_logs = 8;
   index.StorageConfig storage_config = 9;
   schema.CollectionSchema schema = 10;
@@ -173,14 +174,18 @@ message CreateStatsRequest {
   int64 startLogID = 13;
   int64 endLogID = 14;
   int64 num_rows = 15;
+  // deprecated, after sort stats moved, its not used.
   int64 collection_ttl = 16;
+  // deprecated, after sort stats moved, its not used.
   uint64 current_ts = 17;
   int64 task_version = 18;
+  // deprecated, after sort stats moved, its not used.
   uint64 binlogMaxSize = 19;
   bool enable_json_key_stats = 20;
   int64 json_key_stats_tantivy_memory = 21;
   int64 json_key_stats_data_format = 22;
-  bool enable_json_key_stats_in_sort = 23;
+  // deprecated, the sort logic has been moved into the compaction process.
+  bool enable_json_key_stats_in_sort = 23; 
   int64 task_slot = 24;
   int64 storage_version = 25;
   int32 current_scalar_index_version = 26;

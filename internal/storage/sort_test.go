@@ -80,11 +80,11 @@ func TestSort(t *testing.T) {
 
 func TestMergeSort(t *testing.T) {
 	getReaders := func() []RecordReader {
-		blobs, err := generateTestDataWithSeed(10, 3)
+		blobs, err := generateTestDataWithSeed(1000, 5000)
 		assert.NoError(t, err)
 		reader10, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
-		blobs, err = generateTestDataWithSeed(20, 3)
+		blobs, err = generateTestDataWithSeed(4000, 5000)
 		assert.NoError(t, err)
 		reader20, err := newCompositeBinlogRecordReader(generateTestSchema(), MakeBlobsReader(blobs))
 		assert.NoError(t, err)
@@ -114,7 +114,7 @@ func TestMergeSort(t *testing.T) {
 			return true
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, 6, gotNumRows)
+		assert.Equal(t, 10000, gotNumRows)
 		err = rw.Close()
 		assert.NoError(t, err)
 	})
@@ -122,10 +122,12 @@ func TestMergeSort(t *testing.T) {
 	t.Run("merge sort with predicate", func(t *testing.T) {
 		gotNumRows, err := MergeSort(batchSize, generateTestSchema(), getReaders(), rw, func(r Record, ri, i int) bool {
 			pk := r.Column(common.RowIDField).(*array.Int64).Value(i)
-			return pk >= 20
+			// cover a single record (1024 rows) that is deleted, or the last data in the record is deleted
+			// index 1023 is deleted. records (1024-2048) and (5000-6023) are all deleted
+			return pk < 2000 || (pk >= 3050 && pk < 5000) || pk >= 7000
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, 3, gotNumRows)
+		assert.Equal(t, 5950, gotNumRows)
 		err = rw.Close()
 		assert.NoError(t, err)
 	})

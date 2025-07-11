@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -93,6 +94,8 @@ const (
 	MetricsRequestParamsInQC = "qc"
 	MetricsRequestParamsInDN = "dn"
 	MetricsRequestParamsInQN = "qn"
+
+	MetricRequestProcessInRoleKey = "ProcessRole"
 )
 
 var (
@@ -100,6 +103,9 @@ var (
 	RequestParamsInQC = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInQC}
 	RequestParamsInDN = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInDN}
 	RequestParamsInQN = &commonpb.KeyValuePair{Key: MetricRequestParamINKey, Value: MetricsRequestParamsInQN}
+
+	RequestProcessInDCRole = &commonpb.KeyValuePair{Key: MetricRequestProcessInRoleKey, Value: typeutil.DataCoordRole}
+	RequestProcessInQCRole = &commonpb.KeyValuePair{Key: MetricRequestProcessInRoleKey, Value: typeutil.QueryCoordRole}
 )
 
 type MetricsRequestAction func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error)
@@ -174,6 +180,15 @@ func ParseMetricRequestType(jsonRet gjson.Result) (string, error) {
 	}
 
 	return "", fmt.Errorf("%s or %s not found in request", MetricTypeKey, MetricRequestTypeKey)
+}
+
+func ParseMetricProcessInRole(jsonRet gjson.Result) (string, error) {
+	v := jsonRet.Get(MetricRequestProcessInRoleKey)
+	if v.Exists() {
+		return v.String(), nil
+	}
+
+	return "", fmt.Errorf("%s not found in request", MetricRequestProcessInRoleKey)
 }
 
 func GetCollectionIDFromRequest(jsonReq gjson.Result) int64 {
