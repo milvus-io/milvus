@@ -58,10 +58,16 @@ const (
 	DefaultMaxAttempts                = 10
 	DefaultInitialBackoff     float64 = 0.2
 	DefaultMaxBackoff         float64 = 10
-	DefaultCompressionEnabled bool    = false
+	DefaultCompressionEnabled bool    = true
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
+)
+
+const (
+	None = ""
+	Zstd = "zstd"
+	Gzip = "gzip"
 )
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -218,6 +224,7 @@ type GrpcClientConfig struct {
 	grpcConfig
 
 	CompressionEnabled ParamItem `refreshable:"false"`
+	CompressionAlgo    ParamItem `refreshable:"false"`
 
 	ClientMaxSendSize ParamItem `refreshable:"false"`
 	ClientMaxRecvSize ParamItem `refreshable:"false"`
@@ -439,6 +446,14 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.CompressionEnabled.Init(base.mgr)
 
+	p.CompressionAlgo = ParamItem{
+		Key:          "grpc.client.compressionAlgo",
+		Version:      "2.5.0",
+		DefaultValue: Zstd,
+		Export:       true,
+	}
+	p.CompressionAlgo.Init(base.mgr)
+
 	p.MinResetInterval = ParamItem{
 		Key:          "grpc.client.minResetInterval",
 		DefaultValue: "1000",
@@ -504,7 +519,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 func (p *GrpcClientConfig) GetDialOptionsFromConfig() []grpc.DialOption {
 	compress := ""
 	if p.CompressionEnabled.GetAsBool() {
-		compress = "zstd"
+		compress = p.CompressionAlgo.GetValue()
 	}
 	return []grpc.DialOption{
 		grpc.WithDefaultCallOptions(
