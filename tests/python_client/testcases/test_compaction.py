@@ -937,7 +937,6 @@ class TestCompactionOperation(TestcaseBase):
         # target --sort--> querySegment
         # assert segments_info[0].segmentID == target
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_threshold_auto_merge(self):
         """
