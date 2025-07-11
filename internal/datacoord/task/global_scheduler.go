@@ -51,7 +51,7 @@ type globalTaskScheduler struct {
 	wg     sync.WaitGroup
 
 	mu           *lock.KeyLock[int64]
-	pendingTasks FIFOQueue
+	pendingTasks PriorityQueue
 	runningTasks *typeutil.ConcurrentMap[int64, Task]
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
@@ -324,7 +324,7 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		cancel:       cancel,
 		wg:           sync.WaitGroup{},
 		mu:           lock.NewKeyLock[int64](),
-		pendingTasks: NewFIFOQueue(),
+		pendingTasks: NewPriorityQueuePolicy(),
 		runningTasks: typeutil.NewConcurrentMap[int64, Task](),
 		execPool:     execPool,
 		checkPool:    checkPool,
