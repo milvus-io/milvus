@@ -436,14 +436,15 @@ func generateCurrentLayout(view *channel.PChannelView, allNodesStatus map[int64]
 			)
 		}
 	}
-	allNodesInfo := make(map[int64]types.StreamingNodeInfo, len(allNodesStatus))
+	allNodesInfo := make(map[int64]types.StreamingNodeStatus, len(allNodesStatus))
 	for serverID, nodeStatus := range allNodesStatus {
 		// filter out the unhealthy nodes.
 		if nodeStatus.IsHealthy() {
-			allNodesInfo[serverID] = nodeStatus.StreamingNodeInfo
+			allNodesInfo[serverID] = *nodeStatus
 		}
 	}
 	return CurrentLayout{
+		Config:             newCommonBalancePolicyConfig(),
 		Channels:           channels,
 		Stats:              view.Stats,
 		AllNodesInfo:       allNodesInfo,

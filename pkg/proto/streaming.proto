@@ -60,6 +60,7 @@ message PChannelMeta {
     PChannelMetaState state = 3;  // state of the channel.
     repeated PChannelAssignmentLog histories =
         4;  // keep the meta info assignment log that used to be assigned to.
+    uint64 last_assign_timestamp_seconds = 5; // The last assigned timestamp in seconds.
 }
 
 // StreamingVersion is the version of the streaming service.
@@ -486,12 +487,28 @@ message StreamingNodeManagerRemoveResponse {}
 
 message StreamingNodeManagerCollectStatusRequest {}
 
-message StreamingNodeBalanceAttributes {
-    // TODO: traffic of pchannel or other things.
+message StreamingNodeMetrics {
+    repeated StreamingNodeWALMetrics wals = 1;
+}
+
+message StreamingNodeWALMetrics {
+    PChannelInfo info = 1;
+    oneof metrics {
+        StreamingNodeRWWALMetrics rw = 2;
+        StreamingNodeROWALMetrics ro = 3;
+    };
+}
+
+message StreamingNodeRWWALMetrics {
+    uint64 mvcc_time_tick = 1; // The mvcc time tick of the pchannel.
+    uint64 recovery_time_tick = 2; // The recovery time tick of the pchannel.
+}
+
+message StreamingNodeROWALMetrics {
 }
 
 message StreamingNodeManagerCollectStatusResponse {
-    StreamingNodeBalanceAttributes balance_attributes = 1;
+    StreamingNodeMetrics metrics = 1;
 }
 
 ///

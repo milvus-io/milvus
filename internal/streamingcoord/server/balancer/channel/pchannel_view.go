@@ -2,6 +2,7 @@ package channel
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
@@ -21,7 +22,9 @@ func newPChannelView(metas map[ChannelID]*PChannelMeta) *PChannelView {
 			panic(fmt.Sprintf("duplicate rw channel: %s", id.String()))
 		}
 		view.Channels[id] = meta
-		view.Stats[id] = StaticPChannelStatsManager.MustGet().GetPChannelStats(id).View()
+		stat := StaticPChannelStatsManager.MustGet().GetPChannelStats(id).View()
+		stat.LastAssignTimestamp = meta.LastAssignTimestamp()
+		view.Stats[id] = stat
 	}
 	return view
 }
@@ -34,5 +37,6 @@ type PChannelView struct {
 
 // PChannelStatsView is the view of the pchannel stats.
 type PChannelStatsView struct {
-	VChannels map[string]int64
+	LastAssignTimestamp time.Time
+	VChannels           map[string]int64
 }
