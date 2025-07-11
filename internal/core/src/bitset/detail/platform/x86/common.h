@@ -64,7 +64,7 @@ struct ComparePredicate<T, CompareOpType::GE> {
 template <typename T>
 struct ComparePredicate<T, CompareOpType::NE> {
     static inline constexpr int value =
-        std::is_floating_point_v<T> ? _CMP_NEQ_OQ : _MM_CMPINT_NE;
+        std::is_floating_point_v<T> ? _CMP_NEQ_UQ : _MM_CMPINT_NE;
 };
 
 }  // namespace x86
