@@ -87,6 +87,9 @@ InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     if (wrapper_) {
         wrapper_->free();
     }
+    if (path_.empty()) {
+        return;
+    }
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     auto prefix = path_;
