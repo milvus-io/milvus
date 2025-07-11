@@ -5732,12 +5732,15 @@ type streamingConfig struct {
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
 
 	// balancer Policy
-	WALBalancerPolicyName                           ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairPChannelWeight     ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairVChannelWeight     ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairAntiAffinityWeight ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairRebalanceTolerance ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairRebalanceMaxStep   ParamItem `refreshable:"true"`
+	WALBalancerPolicyName                               ParamItem `refreshable:"true"`
+	WALBalancerPolicyAllowRebalance                     ParamItem `refreshable:"true"`
+	WALBalancerPolicyMinRebalanceIntervalThreshold      ParamItem `refreshable:"true"`
+	WALBalancerPolicyAllowRebalanceRecoveryLagThreshold ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairPChannelWeight         ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairVChannelWeight         ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairAntiAffinityWeight     ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
@@ -5823,6 +5826,35 @@ If the operation exceeds this timeout, it will be canceled.`,
 		Export:       true,
 	}
 	p.WALBalancerPolicyName.Init(base.mgr)
+
+	p.WALBalancerPolicyAllowRebalance = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.allowRebalance",
+		Version: "2.6.0",
+		Doc: `Whether to allow rebalance, true by default.
+If the rebalance is not allowed, only the lost wal recovery will be executed, the rebalance (move a pchannel from one node to another node) will be skipped.`,
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.WALBalancerPolicyAllowRebalance.Init(base.mgr)
+
+	p.WALBalancerPolicyMinRebalanceIntervalThreshold = ParamItem{
+		Key:          "streaming.walBalancer.balancePolicy.minRebalanceIntervalThreshold",
+		Version:      "2.6.0",
+		Doc:          `The max interval of rebalance for each wal, 5m by default.`,
+		DefaultValue: "5m",
+		Export:       true,
+	}
+	p.WALBalancerPolicyMinRebalanceIntervalThreshold.Init(base.mgr)
+
+	p.WALBalancerPolicyAllowRebalanceRecoveryLagThreshold = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.allowRebalanceRecoveryLagThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of recovery lag for rebalance, 1s by default.
+If the recovery lag is greater than this threshold, the rebalance of current pchannel is not allowed.`,
+		DefaultValue: "1s",
+		Export:       true,
+	}
+	p.WALBalancerPolicyAllowRebalanceRecoveryLagThreshold.Init(base.mgr)
 
 	p.WALBalancerPolicyVChannelFairPChannelWeight = ParamItem{
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.pchannelWeight",
