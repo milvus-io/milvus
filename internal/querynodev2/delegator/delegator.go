@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -583,6 +584,22 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	log.Debug("Delegator Query done")
+	if log.Core().Enabled(zap.DebugLevel) {
+		sealedIDs := lo.FlatMap(sealed, func(item SnapshotItem, _ int) []int64 {
+			return lo.Map(item.Segments, func(segment SegmentEntry, _ int) int64 {
+				return segment.SegmentID
+			})
+		})
+		slices.Sort(sealedIDs)
+		growingIDs := lo.Map(growing, func(item SegmentEntry, _ int) int64 {
+			return item.SegmentID
+		})
+		slices.Sort(growingIDs)
+		log.Debug("execute count on segments...",
+			zap.Int64s("sealedIDs", sealedIDs),
+			zap.Int64s("growingIDs", growingIDs),
+		)
+	}
 
 	return results, nil
 }
