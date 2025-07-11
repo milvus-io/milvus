@@ -543,8 +543,9 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[stri
 		updateList = append(updateList, removal)
 	}
 
-	// multi save execute map; if succeeds, update ts in the update list
-	err = ss.MetaKv.MultiSave(ctx, execute)
+	err = etcd.SaveByBatchWithLimit(execute, util.MaxEtcdTxnNum, func(partialKvs map[string]string) error {
+		return ss.MetaKv.MultiSave(ctx, partialKvs)
+	})
 	if err == nil {
 		for _, key := range updateList {
 			ss.lastestTS[key] = ts
