@@ -17,78 +17,118 @@
 package task
 
 import (
+	"container/heap"
 	"sync"
 )
 
-type FIFOQueue interface {
+// PriorityQueue is the policy of scheduler.
+type PriorityQueue interface {
 	Push(task Task)
+	// Pop get the task next ready to run.
 	Pop() Task
 	Get(taskID int64) Task
 	Remove(taskID int64)
 	TaskIDs() []int64
 }
 
-type fifoQueue struct {
-	lock    sync.RWMutex
-	tasks   map[int64]Task
-	taskIDs []int64
+var (
+	_ PriorityQueue = &priorityQueuePolicy{}
+)
+
+// priorityQueuePolicy implements a priority queue that sorts tasks by taskID (smaller taskID has higher priority)
+type priorityQueuePolicy struct {
+	lock  sync.RWMutex
+	tasks map[int64]Task
+	heap  *taskHeap
 }
 
-func NewFIFOQueue() FIFOQueue {
-	return &fifoQueue{
-		lock:    sync.RWMutex{},
-		tasks:   make(map[int64]Task, 0),
-		taskIDs: make([]int64, 0),
+// taskHeap implements a min-heap for Task objects, sorted by taskID
+type taskHeap []Task
+
+func (h taskHeap) Len() int           { return len(h) }
+func (h taskHeap) Less(i, j int) bool { return h[i].GetTaskID() < h[j].GetTaskID() }
+func (h taskHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *taskHeap) Push(x interface{}) {
+	*h = append(*h, x.(Task))
+}
+
+func (h *taskHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[0 : n-1]
+	return item
+}
+
+// NewPriorityQueuePolicy creates a new priority queue policy
+func NewPriorityQueuePolicy() *priorityQueuePolicy {
+	h := &taskHeap{}
+	heap.Init(h)
+	return &priorityQueuePolicy{
+		tasks: make(map[int64]Task),
+		heap:  h,
+		lock:  sync.RWMutex{},
 	}
 }
 
-func (f *fifoQueue) Push(t Task) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-	if _, ok := f.tasks[t.GetTaskID()]; !ok {
-		f.tasks[t.GetTaskID()] = t
-		f.taskIDs = append(f.taskIDs, t.GetTaskID())
+func (pqp *priorityQueuePolicy) Push(task Task) {
+	pqp.lock.Lock()
+	defer pqp.lock.Unlock()
+
+	taskID := task.GetTaskID()
+	if _, exists := pqp.tasks[taskID]; !exists {
+		pqp.tasks[taskID] = task
+		heap.Push(pqp.heap, task)
 	}
 }
 
-func (f *fifoQueue) Pop() Task {
-	f.lock.Lock()
-	defer f.lock.Unlock()
-	if len(f.taskIDs) == 0 {
+func (pqp *priorityQueuePolicy) Pop() Task {
+	pqp.lock.Lock()
+	defer pqp.lock.Unlock()
+
+	if pqp.heap.Len() == 0 {
 		return nil
 	}
-	taskID := f.taskIDs[0]
-	f.taskIDs = f.taskIDs[1:]
-	task := f.tasks[taskID]
-	delete(f.tasks, taskID)
+
+	task := heap.Pop(pqp.heap).(Task)
+	delete(pqp.tasks, task.GetTaskID())
 	return task
 }
 
-func (f *fifoQueue) Get(taskID int64) Task {
-	f.lock.RLock()
-	defer f.lock.RUnlock()
-	return f.tasks[taskID]
+func (pqp *priorityQueuePolicy) Get(taskID int64) Task {
+	pqp.lock.RLock()
+	defer pqp.lock.RUnlock()
+
+	return pqp.tasks[taskID]
 }
 
-func (f *fifoQueue) Remove(taskID int64) {
-	f.lock.Lock()
-	defer f.lock.Unlock()
+func (pqp *priorityQueuePolicy) TaskIDs() []int64 {
+	pqp.lock.RLock()
+	defer pqp.lock.RUnlock()
 
-	index := -1
-	for i := range f.taskIDs {
-		if f.taskIDs[i] == taskID {
-			index = i
+	taskIDs := make([]int64, 0, len(pqp.tasks))
+	for _, t := range *pqp.heap {
+		taskIDs = append(taskIDs, t.GetTaskID())
+	}
+	return taskIDs
+}
+
+func (pqp *priorityQueuePolicy) Remove(taskID int64) {
+	pqp.lock.Lock()
+	defer pqp.lock.Unlock()
+
+	if _, exists := pqp.tasks[taskID]; !exists {
+		return
+	}
+
+	delete(pqp.tasks, taskID)
+
+	// Find and remove from heap
+	for i, task := range *pqp.heap {
+		if task.GetTaskID() == taskID {
+			heap.Remove(pqp.heap, i)
 			break
 		}
 	}
-	if index != -1 {
-		f.taskIDs = append(f.taskIDs[:index], f.taskIDs[index+1:]...)
-		delete(f.tasks, taskID)
-	}
-}
-
-func (f *fifoQueue) TaskIDs() []int64 {
-	f.lock.RLock()
-	defer f.lock.RUnlock()
-	return f.taskIDs
 }
