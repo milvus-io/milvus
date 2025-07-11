@@ -91,6 +91,18 @@ func WithSegmentID(segmentID int64) SegmentDistFilter {
 	})
 }
 
+func WithLevel(level datapb.SegmentLevel) SegmentDistFilter {
+	return SegmentDistFilterFunc(func(s *Segment) bool {
+		return s.GetLevel() == level
+	})
+}
+
+func WithoutLevel(level datapb.SegmentLevel) SegmentDistFilter {
+	return SegmentDistFilterFunc(func(s *Segment) bool {
+		return s.GetLevel() != level
+	})
+}
+
 type CollectionSegDistFilter int64
 
 func (f CollectionSegDistFilter) Match(s *Segment) bool {
