@@ -81,7 +81,7 @@ func newTaskScheduler(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		meta:                      metaTable,
-		pendingTasks:              newFairQueuePolicy(),
+		pendingTasks:              newPriorityQueuePolicy(),
 		runningTasks:              typeutil.NewConcurrentMap[UniqueID, Task](),
 		notifyChan:                make(chan struct{}, 1),
 		taskLock:                  lock.NewKeyLock[int64](),
