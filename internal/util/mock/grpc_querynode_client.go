@@ -145,3 +145,7 @@ func (m *GrpcQueryNodeClient) RunAnalyzer(ctx context.Context, in *querypb.RunAn
 func (m *GrpcQueryNodeClient) Close() error {
 	return m.Err
 }
+
+func (m *GrpcQueryNodeClient) DropIndex(ctx context.Context, in *querypb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

@@ -504,6 +504,26 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	return s.csegment.HasRawData(fieldID)
 }
 
+func (s *LocalSegment) DropIndex(ctx context.Context, fieldID int64) error {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.Unpin()
+
+	err := s.csegment.DropIndex(ctx, fieldID)
+	if err != nil {
+		return err
+	}
+
+	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
+		if value.IndexInfo.FieldID == fieldID {
+			s.fieldIndexes.Remove(key)
+		}
+		return true
+	})
+	return nil
+}
+
 func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	var result []*IndexedFieldInfo
 	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
@@ -772,7 +792,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, warmupPolicy ...string) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -805,6 +825,10 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}},
 		RowCount:       rowCount,
 		StorageVersion: s.LoadInfo().GetStorageVersion(),
+	}
+
+	if len(warmupPolicy) > 0 {
+		req.WarmupPolicy = warmupPolicy[0]
 	}
 
 	GetLoadPool().Submit(func() (any, error) {
