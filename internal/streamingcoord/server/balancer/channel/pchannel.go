@@ -1,6 +1,8 @@
 package channel
 
 import (
+	"time"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -91,6 +93,11 @@ func (c *PChannelMeta) IsAssigned() bool {
 	return c.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
 }
 
+// LastAssignTimestamp returns the last assigned timestamp.
+func (c *PChannelMeta) LastAssignTimestamp() time.Time {
+	return time.Unix(int64(c.inner.LastAssignTimestampSeconds), 0)
+}
+
 // State returns the state of the channel.
 func (c *PChannelMeta) State() streamingpb.PChannelMetaState {
 	return c.inner.State
@@ -140,6 +147,7 @@ func (m *mutablePChannel) AssignToServerDone() {
 	if m.inner.State == streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNING {
 		m.inner.Histories = make([]*streamingpb.PChannelAssignmentLog, 0)
 		m.inner.State = streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED
+		m.inner.LastAssignTimestampSeconds = uint64(time.Now().Unix())
 	}
 }
 

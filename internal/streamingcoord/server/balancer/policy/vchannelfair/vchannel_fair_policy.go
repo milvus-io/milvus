@@ -70,14 +70,24 @@ func (p *policy) Balance(currentLayout balancer.CurrentLayout) (layout balancer.
 		}
 	}
 
-	// 3. Unassign some most unbalanced channel and reassign it, try to make the layout more balanced
 	snapshot := expectedLayout.AssignmentSnapshot()
+	if !currentLayout.Config.AllowRebalance {
+		return balancer.ExpectedLayout{
+			ChannelAssignment: snapshot.Assignments,
+		}, nil
+	}
+
+	// The following code is the operation for the auto balance
+	// 3. Unassign some most unbalanced channel and reassign it, try to make the layout more balanced
 	reassignChannelIDs := make([]types.ChannelID, 0, p.cfg.RebalanceMaxStep)
 	for i := 0; i < p.cfg.RebalanceMaxStep; i++ {
 		if len(expectedLayout.Assignments) == 0 {
 			break
 		}
 		channelID := expectedLayout.FindTheLeastUnbalanceScoreIncrementChannel()
+		if channelID.IsZero() {
+			break
+		}
 		expectedLayout.Unassign(channelID)
 		reassignChannelIDs = append(reassignChannelIDs, channelID)
 	}

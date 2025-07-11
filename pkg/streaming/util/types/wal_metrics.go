@@ -3,6 +3,7 @@ package types
 import (
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
@@ -43,4 +44,54 @@ func (ROWALMetrics) isWALMetrics() {}
 // StreamingNodeMetrics represents the metrics of the streaming node.
 type StreamingNodeMetrics struct {
 	WALMetrics map[ChannelID]WALMetrics
+}
+
+func NewStreamingNodeBalanceAttrsFromProto(m *streamingpb.StreamingNodeMetrics) StreamingNodeMetrics {
+	channels := make(map[ChannelID]WALMetrics)
+	for _, l := range m.GetWals() {
+		switch balanceAttr := l.Metrics.(type) {
+		case *streamingpb.StreamingNodeWALMetrics_Ro:
+			channels[ChannelID{Name: l.Info.Name}] = ROWALMetrics{
+				ChannelInfo: NewPChannelInfoFromProto(l.Info),
+			}
+		case *streamingpb.StreamingNodeWALMetrics_Rw:
+			channels[ChannelID{Name: l.Info.Name}] = RWWALMetrics{
+				ChannelInfo:      NewPChannelInfoFromProto(l.Info),
+				MVCCTimeTick:     balanceAttr.Rw.MvccTimeTick,
+				RecoveryTimeTick: balanceAttr.Rw.RecoveryTimeTick,
+			}
+		}
+	}
+	return StreamingNodeMetrics{
+		WALMetrics: channels,
+	}
+}
+
+// NewProtoFrom
+func NewProtoFromStreamingNodeMetrics(info StreamingNodeMetrics) *streamingpb.StreamingNodeMetrics {
+	wals := make([]*streamingpb.StreamingNodeWALMetrics, 0, len(info.WALMetrics))
+	for _, metrics := range info.WALMetrics {
+		switch metrics := metrics.(type) {
+		case RWWALMetrics:
+			wals = append(wals, &streamingpb.StreamingNodeWALMetrics{
+				Info: NewProtoFromPChannelInfo(metrics.ChannelInfo),
+				Metrics: &streamingpb.StreamingNodeWALMetrics_Rw{
+					Rw: &streamingpb.StreamingNodeRWWALMetrics{
+						MvccTimeTick:     metrics.MVCCTimeTick,
+						RecoveryTimeTick: metrics.RecoveryTimeTick,
+					},
+				},
+			})
+		case ROWALMetrics:
+			wals = append(wals, &streamingpb.StreamingNodeWALMetrics{
+				Info: NewProtoFromPChannelInfo(metrics.ChannelInfo),
+				Metrics: &streamingpb.StreamingNodeWALMetrics_Ro{
+					Ro: &streamingpb.StreamingNodeROWALMetrics{},
+				},
+			})
+		}
+	}
+	return &streamingpb.StreamingNodeMetrics{
+		Wals: wals,
+	}
 }
