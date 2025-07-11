@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	tikvkv "github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -397,6 +398,7 @@ func (s *Server) initGRPCServer() {
 			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
 		)),
 		grpc.StatsHandler(tracer.GetDynamicOtelGrpcServerStatsHandler()),
+		utils.EnableInternalTLS("StreamingNode"),
 	)
 	streamingpb.RegisterStreamingNodeStateServiceServer(s.grpcServer, s.componentState)
 }
