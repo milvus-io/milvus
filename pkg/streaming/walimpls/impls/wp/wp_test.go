@@ -49,14 +49,11 @@ func TestWAL(t *testing.T) {
 	}
 	wpBackendTypeKey := paramtable.Get().WoodpeckerCfg.StorageType.Key
 	wpBackendRootPathKey := paramtable.Get().WoodpeckerCfg.RootPath.Key
-	logLevelKey := paramtable.Get().LogCfg.Level.Key
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := paramtable.Get().Save(wpBackendTypeKey, tc.storageType)
 			assert.NoError(t, err)
 			err = paramtable.Get().Save(wpBackendRootPathKey, tc.rootPath)
-			assert.NoError(t, err)
-			err = paramtable.Get().Save(logLevelKey, "debug")
 			assert.NoError(t, err)
 			walimpls.NewWALImplsTestFramework(t, 100, &builderImpl{}).Run()
 			stopEmbedLogStoreErr := woodpecker.StopEmbedLogStore()

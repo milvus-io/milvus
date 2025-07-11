@@ -39,7 +39,7 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		},
 	)
 	if r.Err != nil {
-		if werr.ErrWriterLockLost.Is(r.Err) {
+		if werr.ErrLogWriterLockLost.Is(r.Err) {
 			w.Log().RatedWarn(1, "wp writer fenced", zap.Error(r.Err))
 			return nil, errors.Mark(r.Err, walimpls.ErrFenced)
 		}
