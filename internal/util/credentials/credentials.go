@@ -34,7 +34,7 @@ const (
 // The current version only supports plain text, and cipher text will be supported later.
 type Credentials struct {
 	// key formats:
-	// {credentialName}.api_key
+	// {credentialName}.apikey
 	// {credentialName}.access_key_id
 	// {credentialName}.secret_access_key
 	// {credentialName}.credential_json
