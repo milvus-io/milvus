@@ -2888,9 +2888,64 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 // Upsert upsert records into collection.
 func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Uint32("NumRows", request.NumRows),
+	)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert")
 	defer sp.End()
 
+	tr := timerecord.NewTimeRecorder("Upsert")
+	var result *milvuspb.MutationResult
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		log.Warn("failed to get collection id", zap.Error(err))
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		log.Warn("failed to get collection schema", zap.Error(err))
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// check if the collection is loaded
+	_, collectionNotLoadErr := globalMetaCache.GetShardLeaderList(ctx, request.GetDbName(), request.GetCollectionName(), collectionID, true)
+	// check if insert msg is lack of field data
+	lackOfFieldErr := LackOfFieldsDataBySchema(schema.CollectionSchema, request.GetFieldsData(), false, true)
+	if collectionNotLoadErr != nil && lackOfFieldErr != nil {
+		log.Warn("collection is not loaded", zap.Error(collectionNotLoadErr))
+
+		return &milvuspb.MutationResult{
+			Status: merr.Status(merr.WrapErrCollectionLoaded(schema.CollectionSchema.Name, "partial update is not supported when collection is not loaded")),
+		}, nil
+	}
+	partialUpdate := collectionNotLoadErr == nil && lackOfFieldErr != nil
+
+	result, err = node.tryUpsert(ctx, request, partialUpdate)
+	if err != nil {
+		return nil, err
+	}
+
+	nodeID := paramtable.GetStringNodeID()
+	dbName := request.DbName
+	collectionName := request.CollectionName
+	metrics.ProxyMutationLatency.
+		WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return result, nil
+}
+
+func (node *Proxy) tryUpsert(ctx context.Context, request *milvuspb.UpsertRequest, partialUpdate bool) (*milvuspb.MutationResult, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -2900,13 +2955,12 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	)
 	log.Debug("Start processing upsert request in Proxy")
 
+	method := "Upsert"
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.MutationResult{
 			Status: merr.Status(err),
 		}, nil
 	}
-	method := "Upsert"
-	tr := timerecord.NewTimeRecorder(method)
 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
@@ -2939,6 +2993,9 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		chMgr:           node.chMgr,
 		chTicker:        node.chTicker,
 		schemaTimestamp: request.SchemaTimestamp,
+		mixCoord:        node.mixCoord,
+		node:            node,
+		partialUpdate:   partialUpdate,
 	}
 	var enqueuedTask task = it
 	if streamingutil.IsStreamingServiceEnabled() {
@@ -3030,12 +3087,8 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
 		Add(float64(successCnt))
-	metrics.ProxyMutationLatency.
-		WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
 	log.Debug("Finish processing upsert request in Proxy")
+
 	return it.result, nil
 }
 
