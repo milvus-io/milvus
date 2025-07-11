@@ -138,21 +138,11 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 }
 
 func GetSegmentMaxSize(job ImportJob, meta *meta) int {
-	allDiskIndex := meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
+	if importutilv2.IsL0Import(job.GetOptions()) {
+		return paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
+	}
 
-	var segmentMaxSize int
-	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		segmentMaxSize = paramtable.Get().DataCoordCfg.DiskSegmentMaxSize.GetAsInt() * 1024 * 1024
-	} else {
-		// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-		segmentMaxSize = paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
-	}
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	if isL0Import {
-		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
-	}
-	return segmentMaxSize
+	return int(getExpectedSegmentSize(meta, job.GetCollectionID(), job.GetSchema()))
 }
 
 func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, meta *meta, segmentMaxSize int64) ([]int64, error) {
@@ -880,7 +870,7 @@ func createSortCompactionTask(ctx context.Context,
 		return nil, err
 	}
 
-	expectedSize := getExpectedSegmentSize(meta, collection)
+	expectedSize := getExpectedSegmentSize(meta, collection.ID, collection.Schema)
 	task := &datapb.CompactionTask{
 		PlanID:             startID + 1,
 		TriggerID:          startID,
