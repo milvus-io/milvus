@@ -19,6 +19,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -156,7 +157,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 	case2.req.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows)
 	case2.upsertMsg.InsertMsg.FieldsData = case2.req.FieldsData
 	err = case2.upsertMsg.InsertMsg.CheckAligned()
-	assert.NoError(t, err)
+	assert.NoError(t, nil, err)
 
 	// less int8 data
 	case2.req.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows/2)
@@ -531,5 +532,458 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 		err := ut.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
+	})
+}
+
+func TestUpsertTask_QueryPreExecute(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+
+	// Create test schema
+	primaryFieldSchema := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "id",
+		IsPrimaryKey: true,
+		DataType:     schemapb.DataType_Int64,
+		AutoID:       false,
+	}
+
+	vectorFieldSchema := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vector",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "128"},
+		},
+	}
+
+	collectionSchema := &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		Fields: []*schemapb.FieldSchema{primaryFieldSchema, vectorFieldSchema},
+	}
+
+	schema := newSchemaInfo(collectionSchema)
+
+	// Test data
+	primaryKeyData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "id",
+		FieldId:   100,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{},
+					},
+				},
+			},
+		},
+	}
+
+	vectorData := &schemapb.FieldData{
+		Type:      schemapb.DataType_FloatVector,
+		FieldName: "vector",
+		FieldId:   101,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 128,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: make([]float32, 0),
+					},
+				},
+			},
+		},
+	}
+
+	mockey.PatchConvey("TestUpsertTask_QueryPreExecute", t, func() {
+		t.Run("success with no existing data - pure insert", func(t *testing.T) {
+			// Mock globalMetaCache.GetShardLeaderList using mockey with correct signature
+			mockGetShardLeaderList := mockey.Mock((*MetaCache).GetShardLeaderList).To(func(
+				cache *MetaCache, ctx context.Context, database, collectionName string, collectionID int64, withCache bool,
+			) ([]string, error) {
+				return []string{}, nil
+			}).Build()
+			defer mockGetShardLeaderList.UnPatch()
+
+			// Create upsert task
+			task := &upsertTask{
+				ctx:          ctx,
+				collectionID: 1,
+				schema:       schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_collection",
+					DbName:         "default",
+					FieldsData:     []*schemapb.FieldData{primaryKeyData},
+					NumRows:        0,
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							FieldsData: []*schemapb.FieldData{primaryKeyData},
+						},
+					},
+				},
+			}
+
+			// Execute test - this should pass because primary key data is empty (no existing records)
+			err := task.queryPreExecute(ctx)
+			assert.NoError(t, err)
+			assert.NotNil(t, task.deletePKs)
+			assert.Equal(t, []*schemapb.FieldData{primaryKeyData}, task.insertFieldData)
+		})
+
+		t.Run("error - collection not loaded", func(t *testing.T) {
+			// Mock globalMetaCache.GetShardLeaderList to return error for collection not loaded
+			mockGetShardLeaderList := mockey.Mock((*MetaCache).GetShardLeaderList).To(func(
+				cache *MetaCache, ctx context.Context, database, collectionName string, collectionID int64, withCache bool,
+			) ([]string, error) {
+				return nil, errors.New("collection not loaded")
+			}).Build()
+			defer mockGetShardLeaderList.UnPatch()
+
+			// Mock retrieveByPKs to trigger the GetShardLeaderList call
+			mockRetrieveByPKs := mockey.Mock(retrieveByPKs).To(func(
+				ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string,
+			) (*milvuspb.QueryResults, error) {
+				// This will internally call GetShardLeaderList which returns our mocked error
+				return nil, errors.New("collection not loaded")
+			}).Build()
+			defer mockRetrieveByPKs.UnPatch()
+
+			// Create primary key data with actual data to trigger retrieve call
+			primaryKeyDataWithData := &schemapb.FieldData{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "id",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1}, // Non-empty data to trigger retrieve
+							},
+						},
+					},
+				},
+			}
+
+			// Create upsert task
+			task := &upsertTask{
+				ctx:          ctx,
+				collectionID: 1,
+				schema:       schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_collection",
+					DbName:         "default",
+					FieldsData:     []*schemapb.FieldData{primaryKeyDataWithData},
+					NumRows:        1,
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							FieldsData: []*schemapb.FieldData{primaryKeyDataWithData},
+						},
+					},
+				},
+			}
+
+			// Execute test
+			err := task.queryPreExecute(ctx)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "collection not loaded")
+		})
+
+		t.Run("error - no primary key field in schema", func(t *testing.T) {
+			// Create schema without primary key
+			noPKSchema := &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  101,
+						Name:     "vector",
+						DataType: schemapb.DataType_FloatVector,
+					},
+				},
+			}
+
+			schemaInfo := newSchemaInfo(noPKSchema)
+
+			// Create upsert task
+			task := &upsertTask{
+				ctx:          ctx,
+				collectionID: 1,
+				schema:       schemaInfo,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_collection",
+					DbName:         "default",
+					FieldsData:     []*schemapb.FieldData{primaryKeyData},
+					NumRows:        0,
+				},
+			}
+
+			// Execute test
+			err := task.queryPreExecute(ctx)
+			assert.Error(t, err)
+		})
+
+		t.Run("error - primary key field not found in request", func(t *testing.T) {
+			// Create upsert task without primary key field data
+			task := &upsertTask{
+				ctx:          ctx,
+				collectionID: 1,
+				schema:       schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_collection",
+					DbName:         "default",
+					FieldsData:     []*schemapb.FieldData{vectorData}, // Missing primary key
+					NumRows:        0,
+				},
+			}
+
+			// Execute test
+			err := task.queryPreExecute(ctx)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "must assign pk when upsert")
+		})
+
+		t.Run("success with existing data - update scenario", func(t *testing.T) {
+			// Create primary key data with existing data
+			existingPrimaryKeyData := &schemapb.FieldData{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "id",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{1, 2},
+							},
+						},
+					},
+				},
+			}
+
+			// Mock successful query result with existing data
+			existingVectorData := &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "vector",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: make([]float32, 256), // 2 records * 128 dim
+							},
+						},
+					},
+				},
+			}
+
+			mockQueryResults := &milvuspb.QueryResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				FieldsData: []*schemapb.FieldData{existingPrimaryKeyData, existingVectorData},
+			}
+
+			// Mock retrieveByPKs to return existing data
+			mockRetrieveByPKs := mockey.Mock(retrieveByPKs).To(func(
+				ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string,
+			) (*milvuspb.QueryResults, error) {
+				return mockQueryResults, nil
+			}).Build()
+			defer mockRetrieveByPKs.UnPatch()
+
+			// Create upsert task with existing data
+			task := &upsertTask{
+				ctx:          ctx,
+				collectionID: 1,
+				schema:       schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_collection",
+					DbName:         "default",
+					FieldsData:     []*schemapb.FieldData{existingPrimaryKeyData, existingVectorData},
+					NumRows:        2,
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							FieldsData: []*schemapb.FieldData{existingPrimaryKeyData, existingVectorData},
+						},
+					},
+				},
+			}
+
+			// Execute test
+			err := task.queryPreExecute(ctx)
+			assert.NoError(t, err)
+			assert.NotNil(t, task.deletePKs)
+			assert.NotNil(t, task.insertFieldData)
+		})
+
+		t.Run("mixed scenario - 200 records with 100 existing and 100 new", func(t *testing.T) {
+			// Create primary key data with 200 records (IDs 1-200)
+			allPrimaryKeyIDs := make([]int64, 200)
+			for i := 0; i < 200; i++ {
+				allPrimaryKeyIDs[i] = int64(i + 1)
+			}
+
+			allPrimaryKeyData := &schemapb.FieldData{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "id",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: allPrimaryKeyIDs,
+							},
+						},
+					},
+				},
+			}
+
+			// Create vector data for all 200 records
+			allVectorData := &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "vector",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: make([]float32, 200*128), // 200 records * 128 dim
+							},
+						},
+					},
+				},
+			}
+
+			// Mock query results: only return first 100 records as "existing"
+			existingPrimaryKeyIDs := make([]int64, 100)
+			for i := 0; i < 100; i++ {
+				existingPrimaryKeyIDs[i] = int64(i + 1)
+			}
+
+			existingPrimaryKeyData := &schemapb.FieldData{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "id",
+				FieldId:   100,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: existingPrimaryKeyIDs,
+							},
+						},
+					},
+				},
+			}
+
+			existingVectorData := &schemapb.FieldData{
+				Type:      schemapb.DataType_FloatVector,
+				FieldName: "vector",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: 128,
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: make([]float32, 100*128), // 100 existing records * 128 dim
+							},
+						},
+					},
+				},
+			}
+
+			// Mock retrieveByPKs to return only the first 100 records (existing ones)
+			mockQueryResults := &milvuspb.QueryResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				FieldsData: []*schemapb.FieldData{existingPrimaryKeyData, existingVectorData},
+			}
+
+			mockRetrieveByPKs := mockey.Mock(retrieveByPKs).To(func(
+				ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string,
+			) (*milvuspb.QueryResults, error) {
+				// Simulate that only first 100 records exist in the system
+				return mockQueryResults, nil
+			}).Build()
+			defer mockRetrieveByPKs.UnPatch()
+
+			// Create upsert task with all 200 records
+			task := &upsertTask{
+				ctx:          ctx,
+				collectionID: 1,
+				schema:       schema,
+				req: &milvuspb.UpsertRequest{
+					CollectionName: "test_collection",
+					DbName:         "default",
+					FieldsData:     []*schemapb.FieldData{allPrimaryKeyData, allVectorData},
+					NumRows:        200,
+				},
+				upsertMsg: &msgstream.UpsertMsg{
+					InsertMsg: &msgstream.InsertMsg{
+						InsertRequest: &msgpb.InsertRequest{
+							FieldsData: []*schemapb.FieldData{allPrimaryKeyData, allVectorData},
+						},
+					},
+				},
+			}
+
+			// Execute test
+			err := task.queryPreExecute(ctx)
+			assert.NoError(t, err)
+
+			// Verify results
+			assert.NotNil(t, task.deletePKs, "deletePKs should not be nil")
+			assert.NotNil(t, task.insertFieldData, "insertFieldData should not be nil")
+
+			// Verify deletePKs contains exactly the 100 existing primary keys
+			if task.deletePKs != nil {
+				switch pkData := task.deletePKs.GetIdField().(type) {
+				case *schemapb.IDs_IntId:
+					assert.Equal(t, 100, len(pkData.IntId.Data), "deletePKs should contain 100 existing primary keys")
+					// Verify the IDs are 1-100 (the existing ones)
+					for i, id := range pkData.IntId.Data {
+						assert.Equal(t, int64(i+1), id, "deletePKs should contain primary key %d", i+1)
+					}
+				default:
+					t.Errorf("Expected IntId type for deletePKs, got %T", pkData)
+				}
+			}
+
+			// Verify insertFieldData contains all 200 records
+			assert.Equal(t, 2, len(task.insertFieldData), "insertFieldData should contain 2 fields (primary key + vector)")
+
+			// Find primary key field in insertFieldData
+			var insertPKField *schemapb.FieldData
+			for _, field := range task.insertFieldData {
+				if field.FieldName == "id" {
+					insertPKField = field
+					break
+				}
+			}
+			assert.NotNil(t, insertPKField, "insertFieldData should contain primary key field")
+
+			if insertPKField != nil {
+				pkScalars := insertPKField.GetScalars()
+				assert.NotNil(t, pkScalars, "primary key field should have scalars")
+				if pkScalars != nil {
+					longData := pkScalars.GetLongData()
+					assert.NotNil(t, longData, "primary key field should have long data")
+					if longData != nil {
+						assert.Equal(t, 200, len(longData.Data), "insertFieldData should contain all 200 primary keys")
+						// Verify all IDs 1-200 are present
+						for i, id := range longData.Data {
+							assert.Equal(t, int64(i+1), id, "insertFieldData should contain primary key %d", i+1)
+						}
+					}
+				}
+			}
+		})
 	})
 }
