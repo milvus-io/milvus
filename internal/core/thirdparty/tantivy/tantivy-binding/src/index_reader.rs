@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use libc::c_char;
 use tantivy::fastfield::FastValue;
-use tantivy::query::{BooleanQuery, ExistsQuery, Occur, Query, RangeQuery, RegexQuery, TermQuery};
+use tantivy::query::{ExistsQuery, Query, RangeQuery, RegexQuery, TermQuery, TermSetQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
@@ -20,18 +20,8 @@ use crate::error::{Result, TantivyBindingError};
 
 macro_rules! terms_query {
     ($field:expr, $terms:expr, $builder:expr $(,)?) => {{
-        let term_queries: Vec<(Occur, Box<dyn Query>)> = ($terms)
-            .into_iter()
-            .map(|t| {
-                let term_query: Box<dyn Query> = Box::new(TermQuery::new(
-                    $builder($field, *t),
-                    IndexRecordOption::Basic,
-                ));
-                (Occur::Should, term_query)
-            })
-            .collect();
-
-        BooleanQuery::new(term_queries)
+        let terms: Vec<Term> = ($terms).into_iter().map(|t| $builder($field, *t)).collect();
+        TermSetQuery::new(terms)
     }};
 }
 
@@ -182,16 +172,12 @@ impl IndexReaderWrapper {
     }
 
     pub fn terms_query_keyword(&self, terms: &[*const c_char], bitset: *mut c_void) -> Result<()> {
-        let mut term_quries = Vec::with_capacity(terms.len());
+        let mut term_strs = Vec::with_capacity(terms.len());
         for term in terms {
             let term_str = unsafe { CStr::from_ptr(*term) }.to_str()?;
-            let term_query: Box<dyn Query> = Box::new(TermQuery::new(
-                Term::from_field_text(self.field, term_str),
-                IndexRecordOption::Basic,
-            ));
-            term_quries.push((Occur::Should, term_query));
+            term_strs.push(Term::from_field_text(self.field, term_str));
         }
-        let q = BooleanQuery::new(term_quries);
+        let q = TermSetQuery::new(term_strs);
         self.search(&q, bitset)
     }
 

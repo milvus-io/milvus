@@ -279,8 +279,9 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
     TargetBitmap bitset(Count());
     wrapper_->terms_query(values, n, &bitset);
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - now);
-    LOG_INFO("In terms_query time: {}ms", duration.count());
+    auto duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(end - now);
+    LOG_INFO("debug=== In terms_query time: {}ms", duration.count());
     return bitset;
 }
 
