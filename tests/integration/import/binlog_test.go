@@ -49,7 +49,7 @@ type SourceCollectionInfo struct {
 	collectionID int64
 	partitionID  int64
 	l0SegmentIDs []int64
-	l1SegmentIDs []int64
+	SegmentIDs   []int64
 	insertedIDs  *schemapb.IDs
 }
 
@@ -176,7 +176,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L0
 	})
-	l1Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1
 	})
 	// check l0 segments
@@ -242,7 +242,7 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		l0SegmentIDs: lo.Map(l0Segments, func(segment *datapb.SegmentInfo, _ int) int64 {
 			return segment.GetID()
 		}),
-		l1SegmentIDs: lo.Map(l1Segments, func(segment *datapb.SegmentInfo, _ int) int64 {
+		SegmentIDs: lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) int64 {
 			return segment.GetID()
 		}),
 		insertedIDs: totalInsertedIDs,
@@ -256,13 +256,13 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 	collectionID := sourceCollectionInfo.collectionID
 	partitionID := sourceCollectionInfo.partitionID
 	l0SegmentIDs := sourceCollectionInfo.l0SegmentIDs
-	l1SegmentIDs := sourceCollectionInfo.l1SegmentIDs
+	segmentIDs := sourceCollectionInfo.SegmentIDs
 	insertedIDs := sourceCollectionInfo.insertedIDs
 
 	log.Info("prepare source collection done",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
-		zap.Int64s("l1 segments", l1SegmentIDs),
+		zap.Int64s("segments", segmentIDs),
 		zap.Int64s("l0 segments", l0SegmentIDs))
 
 	c := s.Cluster
@@ -307,7 +307,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 
 	// binlog import
 	files := make([]*internalpb.ImportFile, 0)
-	for _, segmentID := range l1SegmentIDs {
+	for _, segmentID := range segmentIDs {
 		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
 			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
 	}
