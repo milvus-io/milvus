@@ -246,7 +246,7 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			res += 2
 		case schemapb.DataType_Int32, schemapb.DataType_Float:
 			res += 4
-		case schemapb.DataType_Int64, schemapb.DataType_Double:
+		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
 		case schemapb.DataType_VarChar, schemapb.DataType_Text:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
@@ -885,6 +885,18 @@ func AppendFieldData(dst, src []*schemapb.FieldData, idx int64) (appendSize int6
 				}
 				/* #nosec G103 */
 				appendSize += int64(unsafe.Sizeof(srcScalar.JsonData.Data[idx]))
+			case *schemapb.ScalarField_TimestamptzData:
+				if dstScalar.GetTimestamptzData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: []int64{srcScalar.TimestamptzData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetTimestamptzData().Data = append(dstScalar.GetTimestamptzData().Data, srcScalar.TimestamptzData.Data[idx])
+				}
+				/* #nosec G103 */
+				appendSize += int64(unsafe.Sizeof(srcScalar.TimestamptzData.Data[idx]))
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
