@@ -95,6 +95,7 @@ class Chunk {
     FixedVector<bool>
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
 };
+
 // for fixed size data, includes fixed size array
 class FixedWidthChunk : public Chunk {
  public:

@@ -47,7 +47,8 @@ class MockTranslator : public Translator<TestCell> {
         : uid_to_cid_map_(std::move(uid_to_cid_map)),
           key_(key),
           meta_(
-              storage_type, CacheWarmupPolicy::CacheWarmupPolicy_Disable, true),
+              storage_type, CellIdMappingMode::CUSTOMIZED,
+              CacheWarmupPolicy::CacheWarmupPolicy_Disable, true),
           num_unique_cids_(cell_sizes.size()),
           for_concurrent_test_(for_concurrent_test) {
         cid_set_.reserve(cell_sizes.size());

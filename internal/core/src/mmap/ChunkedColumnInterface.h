@@ -93,6 +93,10 @@ class ChunkedColumnInterface {
     virtual std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const = 0;
 
+    virtual std::pair<std::vector<milvus::cachinglayer::cid_t>,
+                      std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const = 0;
+
     virtual PinWrapper<Chunk*>
     GetChunk(int64_t chunk_id) const = 0;
 
@@ -108,6 +112,15 @@ class ChunkedColumnInterface {
     BulkValueAt(std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) = 0;
+
+    virtual void
+    BulkPrimitiveValueAt(void* dst, const int64_t* offsets, int64_t count) = 0;
+
+    virtual void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) = 0;
 
     // fn: (std::string_view value, size_t offset, bool is_valid) -> void
     // If offsets is nullptr, this function will iterate over all rows.
@@ -149,6 +162,14 @@ class ChunkedColumnInterface {
     }
 
     static bool
+    IsPrimitiveDataType(DataType data_type) {
+        return data_type == DataType::INT8 || data_type == DataType::INT16 ||
+               data_type == DataType::INT32 || data_type == DataType::INT64 ||
+               data_type == DataType::FLOAT || data_type == DataType::DOUBLE ||
+               data_type == DataType::BOOL;
+    }
+
+    static bool
     IsChunkedVariableColumnDataType(DataType data_type) {
         return data_type == DataType::STRING ||
                data_type == DataType::VARCHAR || data_type == DataType::TEXT ||
@@ -175,17 +196,17 @@ class ChunkedColumnInterface {
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     ToChunkIdAndOffset(const int64_t* offsets, int64_t count) const {
         AssertInfo(offsets != nullptr, "Offsets cannot be nullptr");
-        std::vector<milvus::cachinglayer::cid_t> cids;
-        cids.reserve(count);
-        std::vector<int64_t> offsets_in_chunk;
-        offsets_in_chunk.reserve(count);
-
+        auto num_rows = NumRows();
         for (int64_t i = 0; i < count; i++) {
-            auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offsets[i]);
-            cids.push_back(chunk_id);
-            offsets_in_chunk.push_back(offset_in_chunk);
+            if (offsets[i] < 0 || offsets[i] >= num_rows) {
+                PanicInfo(ErrorCode::OutOfRange,
+                          "offsets[{}] {} is out of range, num_rows: {}",
+                          i,
+                          offsets[i],
+                          num_rows);
+            }
         }
-        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+        return GetChunkIDsByOffsets(offsets, count);
     }
 };
 
