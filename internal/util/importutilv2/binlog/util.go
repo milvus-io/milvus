@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -114,13 +115,20 @@ func createFieldBinlogList(insertLogs map[int64][]string) []*datapb.FieldBinlog 
 	return binlogFields
 }
 
-func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
+func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs map[int64][]string) (map[int64][]string, *schemapb.CollectionSchema, error) {
 	// check system fields (ts and rowID)
-	if _, ok := insertLogs[common.RowIDField]; !ok {
-		return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
-	}
-	if _, ok := insertLogs[common.TimeStampField]; !ok {
-		return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
+	if storageVersion == storage.StorageV2 {
+		if _, ok := insertLogs[storagecommon.DefaultShortColumnGroupID]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for system fields")
+		}
+	} else {
+		// storage v1
+		if _, ok := insertLogs[common.RowIDField]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for RowID field")
+		}
+		if _, ok := insertLogs[common.TimeStampField]; !ok {
+			return nil, nil, merr.WrapErrImportFailed("no binlog for Timestamp field")
+		}
 	}
 
 	// check binlog file count, must be equal for all fields
@@ -129,6 +137,18 @@ func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) (m
 			return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("misaligned binlog count, field%d:%d, field%d:%d",
 				fieldID, len(logs), common.RowIDField, len(insertLogs[common.RowIDField])))
 		}
+	}
+
+	if storageVersion == storage.StorageV2 {
+		for _, field := range schema.GetFields() {
+			if typeutil.IsVectorType(field.GetDataType()) {
+				if _, ok := insertLogs[field.GetFieldID()]; !ok {
+					// vector field must be provided
+					return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("no binlog for field:%s", field.GetName()))
+				}
+			}
+		}
+		return insertLogs, schema, nil
 	}
 
 	// Goal: support import binlog files to a different schema collection.
@@ -168,7 +188,6 @@ func verify(schema *schemapb.CollectionSchema, insertLogs map[int64][]string) (m
 			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
 				continue
 			}
-
 			// primary key is required
 			// function output field is also required
 			// the other field must be provided
