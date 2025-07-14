@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -215,14 +216,24 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+	// prefer to load segment by latest and serviceable shard leader
+	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard), meta.WithServiceable())
 	if view == nil {
-		msg := "no shard leader for the segment to execute loading"
-		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-		log.Warn(msg, zap.Error(err))
-		return err
+		// if no serviceable shard leader, try to find the latest shard leader
+		view = ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+		if view == nil {
+			msg := "no shard leader for the segment to execute loading"
+			err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+			log.Warn(msg, zap.Error(err))
+			return err
+		}
 	}
 	log = log.With(zap.Int64("shardLeader", view.ID))
+
+	// NOTE: for balance segment task, expected load and release execution on the same shard leader
+	if GetTaskType(task) == TaskTypeMove {
+		task.SetShardLeaderID(view.ID)
+	}
 
 	startTs := time.Now()
 	log.Info("load segments...")
@@ -255,6 +266,12 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	)
 
 	ctx := task.Context()
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+	}()
 
 	dstNode := action.Node()
 
@@ -293,6 +310,14 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 						log.Warn(msg, zap.Error(err))
 						return
 					}
+				}
+
+				// NOTE: for balance segment task, expected load and release execution on the same shard leader
+				if GetTaskType(task) == TaskTypeMove && task.ShardLeaderID() != view.ID {
+					msg := "shard leader changed, skip release"
+					err = merr.WrapErrServiceInternal(fmt.Sprintf("shard leader changed from %d to %d", task.ShardLeaderID(), view.ID))
+					log.Warn(msg, zap.Error(err))
+					return
 				}
 
 				dstNode = view.ID
