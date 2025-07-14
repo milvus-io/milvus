@@ -23,9 +23,8 @@ namespace milvus::cachinglayer {
 enum class CellIdMappingMode : uint8_t {
     CUSTOMIZED =
         0,  // the cell id should be parsed from the uid by the translator
-    IDENTICAL = 1,        // the cell id is identical to the uid
-    UID_WITH_OFFSET = 2,  // the cell id is the uid + offset
-    ALWAYS_ZERO = 3,      // the cell id is always 0
+    IDENTICAL = 1,    // the cell id is identical to the uid
+    ALWAYS_ZERO = 2,  // the cell id is always 0
 };
 
 struct Meta {

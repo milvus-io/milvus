@@ -104,7 +104,8 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
         auto offset = offsets[i];
         auto vcid = offset >> virt_chunk_order;
         auto scid = vcid_to_cid_arr[vcid];
-        while (scid < num_rows_until_chunk.size() - 1 && offset >= num_rows_until_chunk[scid + 1]) {
+        while (scid < num_rows_until_chunk.size() - 1 &&
+               offset >= num_rows_until_chunk[scid + 1]) {
             scid++;
         }
         auto offset_in_chunk = offset - num_rows_until_chunk[scid];
@@ -292,11 +293,15 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
     GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
         auto& num_rows_until_chunk = GetNumRowsUntilChunk();
-        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(slot_->meta());
+        auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(
+            slot_->meta());
         auto& virt_chunk_order = meta->virt_chunk_order_;
         auto& vcid_to_cid_arr = meta->vcid_to_cid_arr_;
-        return ::milvus::GetChunkIDsByOffsets(
-            offsets, count, num_rows_until_chunk, virt_chunk_order, vcid_to_cid_arr);
+        return ::milvus::GetChunkIDsByOffsets(offsets,
+                                              count,
+                                              num_rows_until_chunk,
+                                              virt_chunk_order,
+                                              vcid_to_cid_arr);
     }
 
     PinWrapper<Chunk*>
@@ -346,16 +351,10 @@ class ChunkedColumn : public ChunkedColumnBase {
         }
     }
 
-    template <typename T>
+    template <typename S, typename T>
     void
     BulkPrimitiveValueAtImpl(void* dst, const int64_t* offsets, int64_t count) {
-        static_assert(std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> ||
-                          std::is_same_v<T, int32_t> ||
-                          std::is_same_v<T, int64_t> ||
-                          std::is_same_v<T, float> ||
-                          std::is_same_v<T, double> || std::is_same_v<T, bool>,
-                      "BulkPrimitiveValueAtImpl only supports int8_t, int16_t, "
-                      "int32_t, int64_t, float, double, bool types");
+        static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = SemiInlineGet(slot_->PinCells(cids));
         auto typed_dst = static_cast<T*>(dst);
@@ -363,7 +362,7 @@ class ChunkedColumn : public ChunkedColumnBase {
             auto chunk = ca->get_cell_of(cids[i]);
             auto value = chunk->ValueAt(offsets_in_chunk[i]);
             typed_dst[i] =
-                *static_cast<const T*>(static_cast<const void*>(value));
+                *static_cast<const S*>(static_cast<const void*>(value));
         }
     }
 
@@ -373,31 +372,31 @@ class ChunkedColumn : public ChunkedColumnBase {
                          int64_t count) override {
         switch (data_type_) {
             case DataType::INT8: {
-                BulkPrimitiveValueAtImpl<int8_t>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<int8_t, int32_t>(dst, offsets, count);
                 break;
             }
             case DataType::INT16: {
-                BulkPrimitiveValueAtImpl<int16_t>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<int16_t, int32_t>(dst, offsets, count);
                 break;
             }
             case DataType::INT32: {
-                BulkPrimitiveValueAtImpl<int32_t>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<int32_t, int32_t>(dst, offsets, count);
                 break;
             }
             case DataType::INT64: {
-                BulkPrimitiveValueAtImpl<int64_t>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<int64_t, int64_t>(dst, offsets, count);
                 break;
             }
             case DataType::FLOAT: {
-                BulkPrimitiveValueAtImpl<float>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<float, float>(dst, offsets, count);
                 break;
             }
             case DataType::DOUBLE: {
-                BulkPrimitiveValueAtImpl<double>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<double, double>(dst, offsets, count);
                 break;
             }
             case DataType::BOOL: {
-                BulkPrimitiveValueAtImpl<bool>(dst, offsets, count);
+                BulkPrimitiveValueAtImpl<bool, bool>(dst, offsets, count);
                 break;
             }
             default: {

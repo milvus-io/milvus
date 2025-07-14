@@ -1056,20 +1056,10 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
                                               T* dst) {
-    static_assert(IsScalar<T>);
-    if (std::is_same_v<S, T>) {
-        // use field->data_type_ to determine the type of dst
-        field->BulkPrimitiveValueAt(
-            static_cast<void*>(dst), seg_offsets, count);
-    } else {
-        // int8_t and int16_t will be converted to int32_t, so use self-defined function to copy the value
-        field->BulkValueAt(
-            [dst](const char* value, size_t dst_idx) {
-                dst[dst_idx] = *static_cast<const S*>(static_cast<const void*>(value));
-            },
-            seg_offsets,
-            count);
-    }
+    static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
+    // use field->data_type_ to determine the type of dst
+    field->BulkPrimitiveValueAt(
+        static_cast<void*>(dst), seg_offsets, count);
 }
 
 // for dense vector
@@ -1297,73 +1287,73 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
 
         case DataType::BOOL: {
-            bulk_subscript_impl<bool>(column.get(),
-                                      seg_offsets,
-                                      count,
-                                      ret->mutable_scalars()
-                                          ->mutable_bool_data()
-                                          ->mutable_data()
-                                          ->mutable_data());
+            bulk_subscript_impl<bool, bool>(column.get(),
+                                            seg_offsets,
+                                            count,
+                                            ret->mutable_scalars()
+                                                ->mutable_bool_data()
+                                                ->mutable_data()
+                                                ->mutable_data());
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(column.get(),
-                                        seg_offsets,
-                                        count,
-                                        ret->mutable_scalars()
-                                            ->mutable_int_data()
-                                            ->mutable_data()
-                                            ->mutable_data());
+            bulk_subscript_impl<int8_t, int32_t>(column.get(),
+                                                 seg_offsets,
+                                                 count,
+                                                 ret->mutable_scalars()
+                                                     ->mutable_int_data()
+                                                     ->mutable_data()
+                                                     ->mutable_data());
             break;
         }
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_int_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int16_t, int32_t>(column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_int_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_int_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int32_t, int32_t>(column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_int_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_long_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int64_t, int64_t>(column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_long_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(column.get(),
-                                       seg_offsets,
-                                       count,
-                                       ret->mutable_scalars()
-                                           ->mutable_float_data()
-                                           ->mutable_data()
-                                           ->mutable_data());
+            bulk_subscript_impl<float, float>(column.get(),
+                                              seg_offsets,
+                                              count,
+                                              ret->mutable_scalars()
+                                                  ->mutable_float_data()
+                                                  ->mutable_data()
+                                                  ->mutable_data());
             break;
         }
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(column.get(),
-                                        seg_offsets,
-                                        count,
-                                        ret->mutable_scalars()
-                                            ->mutable_double_data()
-                                            ->mutable_data()
-                                            ->mutable_data());
+            bulk_subscript_impl<double, double>(column.get(),
+                                                seg_offsets,
+                                                count,
+                                                ret->mutable_scalars()
+                                                    ->mutable_double_data()
+                                                    ->mutable_data()
+                                                    ->mutable_data());
             break;
         }
         case DataType::VECTOR_FLOAT: {
