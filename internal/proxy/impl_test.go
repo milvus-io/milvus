@@ -1204,6 +1204,92 @@ func TestProxyDescribeDatabase(t *testing.T) {
 	})
 }
 
+func TestProxyDescribeCollection(t *testing.T) {
+	paramtable.Init()
+	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+	ctx := context.Background()
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	queryCoord := mocks.NewMockQueryCoordClient(t)
+	rootCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+		return req.DbName == "test_1" && req.CollectionName == "test_collection"
+	})).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil).Maybe()
+	rootCoord.On("ShowPartitions", mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:               merr.Success(),
+		PartitionNames:       []string{"default"},
+		CreatedTimestamps:    []uint64{1},
+		CreatedUtcTimestamps: []uint64{1},
+		PartitionIDs:         []int64{1},
+	}, nil).Maybe()
+	rootCoord.On("ShowLoadCollections", mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+	rootCoord.On("DescribeCollection", mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+	queryCoord.On("ShowCollections", mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: merr.Success(),
+	}, nil).Maybe()
+
+	var err error
+	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord, nil)
+	assert.NoError(t, err)
+
+	t.Run("not healthy", func(t *testing.T) {
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("collection not exists", func(t *testing.T) {
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			DbName:         "test_1",
+			CollectionName: "test_not_exists",
+		})
+		assert.NoError(t, err)
+		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=test_1][collection=test_not_exists]")
+		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("collection id not exists", func(t *testing.T) {
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			DbName:       "test_1",
+			CollectionID: 1000,
+		})
+		assert.NoError(t, err)
+		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=test_1][collection=]")
+		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("db not exists", func(t *testing.T) {
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			DbName:         "db_not_exists",
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.Contains(t, resp.GetStatus().GetReason(), "can't find collection[database=db_not_exists][collection=test_collection]")
+		assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("describe collection ok", func(t *testing.T) {
+		resp, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			DbName:         "test_1",
+			CollectionName: "test_collection",
+		})
+		assert.NoError(t, err)
+		assert.Empty(t, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
 func TestProxy_AllocTimestamp(t *testing.T) {
 	t.Run("proxy unhealthy", func(t *testing.T) {
 		node := &Proxy{}
