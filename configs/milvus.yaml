@@ -960,7 +960,6 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    scheme: s3
     enablev2: false
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.

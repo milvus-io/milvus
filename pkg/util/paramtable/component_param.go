@@ -271,7 +271,6 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
-	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
@@ -849,14 +848,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
-
-	p.StorageScheme = ParamItem{
-		Key:          "common.storage.scheme",
-		Version:      "2.3.4",
-		DefaultValue: "s3",
-		Export:       true,
-	}
-	p.StorageScheme.Init(base.mgr)
 
 	p.StoragePathPrefix = ParamItem{
 		Key:          "common.storage.pathPrefix",
