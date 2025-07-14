@@ -100,13 +100,8 @@ func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// TODO: flusher will be merged into recovery storage, so this is a temporary solution.
-	recoveryTimeTick := r.checkpoint.TimeTick
-	if r.flusherCheckpoint != nil {
-		recoveryTimeTick = r.flusherCheckpoint.TimeTick
-	}
 	return RecoveryMetrics{
-		RecoveryTimeTick: recoveryTimeTick,
+		RecoveryTimeTick: r.checkpoint.TimeTick,
 	}
 }
 
@@ -117,7 +112,7 @@ func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint)
 	defer r.mu.Unlock()
 	if r.flusherCheckpoint == nil || r.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
 		r.flusherCheckpoint = checkpoint
-		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()))
+		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
 		return
 	}
 	r.Logger().Warn("update illegal checkpoint of flusher", zap.String("current", r.flusherCheckpoint.MessageID.String()), zap.String("target", checkpoint.MessageID.String()))
