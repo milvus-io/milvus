@@ -35,9 +35,10 @@ import (
 )
 
 type reader struct {
-	ctx    context.Context
-	cm     storage.ChunkManager
-	schema *schemapb.CollectionSchema
+	ctx            context.Context
+	cm             storage.ChunkManager
+	schema         *schemapb.CollectionSchema
+	storageVersion int64
 
 	fileSize   *atomic.Int64
 	deleteData map[any]typeutil.Timestamp // pk2ts
@@ -50,10 +51,11 @@ type reader struct {
 func NewReader(ctx context.Context,
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	storageVersion int64,
 	paths []string,
 	tsStart,
 	tsEnd uint64,
-	storageConfig *indexpb.StorageConfig,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -66,10 +68,11 @@ func NewReader(ctx context.Context,
 		schema = typeutil.AppendSystemFields(schema)
 	}
 	r := &reader{
-		ctx:      ctx,
-		cm:       cm,
-		schema:   schema,
-		fileSize: atomic.NewInt64(0),
+		ctx:            ctx,
+		cm:             cm,
+		schema:         schema,
+		storageVersion: storageVersion,
+		fileSize:       atomic.NewInt64(0),
 	}
 	err := r.init(paths, tsStart, tsEnd, storageConfig)
 	if err != nil {
@@ -96,7 +99,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		return err
 	}
 
-	validInsertLogs, cloneschema, err := verify(r.schema, insertLogs)
+	validInsertLogs, cloneschema, err := verify(r.schema, r.storageVersion, insertLogs)
 	if err != nil {
 		return err
 	}
@@ -107,9 +110,8 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	validIDs := lo.Keys(r.insertLogs)
 	log.Info("create binlog reader for these fields", zap.Any("validIDs", validIDs))
 
-	storageVersion := storage.GuessStorageVersion(binlogs, r.schema)
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema,
-		storage.WithVersion(storageVersion),
+		storage.WithVersion(r.storageVersion),
 		storage.WithBufferSize(32*1024*1024),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.cm.MultiRead(ctx, paths)
