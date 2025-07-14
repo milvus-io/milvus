@@ -21,13 +21,6 @@ use crate::vec_collector::VecCollector;
 
 use crate::error::{Result, TantivyBindingError};
 
-macro_rules! terms_query {
-    ($field:expr, $terms:expr, $builder:expr $(,)?) => {{
-        let terms: Vec<Term> = ($terms).into_iter().map(|t| $builder($field, *t)).collect();
-        TermSetQuery::new(terms)
-    }};
-}
-
 // Threshold for batch-in query. Less than this threshold, we use term_query one by one and use
 // TermSetQuery when larger than this threshold. This value is based on some experiments.
 const BATCH_THRESHOLD: usize = 10000;
@@ -166,6 +159,8 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
+    // Due to overhead, `TermSetQuery` is not efficient for small number of terms. So we execute term query one by one
+    // when the terms number is less than `BATCH_THRESHOLD`.
     #[inline]
     fn batch_terms_query<T, F>(
         &self,
@@ -581,7 +576,10 @@ impl IndexReaderWrapper {
 
 #[cfg(test)]
 mod test {
-    use std::{ffi::c_void, sync::Arc};
+    use std::{
+        ffi::{c_void, CString},
+        sync::Arc,
+    };
 
     use tantivy::{
         doc,
@@ -658,5 +656,51 @@ mod test {
         index_reader_wrapper.reload().unwrap();
         let count = index_reader_wrapper.count().unwrap();
         assert_eq!(count, 20000);
+    }
+
+    #[test]
+    fn test_batch_terms_query() {
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("content", TEXT_WITH_DOC_ID);
+        schema_builder.enable_user_specified_doc_id();
+        let schema = schema_builder.build();
+        let content = schema.get_field("content").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+
+        for i in 0..30_000 {
+            index_writer
+                .add_document_with_doc_id(i, doc!(content => format!("key{:010}", i)))
+                .unwrap();
+        }
+        index_writer.commit().unwrap();
+
+        let reader_wrapper = IndexReaderWrapper::from_index(Arc::new(index), set_bitset).unwrap();
+        let arrays = (0..1000)
+            .map(|i| CString::new(format!("key{:010}", i)).unwrap())
+            .collect::<Vec<_>>();
+        let arrays: Vec<*const libc::c_char> =
+            arrays.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
+
+        let mut res: Vec<u32> = vec![];
+        reader_wrapper
+            .terms_query_keyword(&arrays, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 1000);
+        for i in 0..1000 {
+            assert_eq!(res[i], i as u32);
+        }
+
+        let arrays = (0..20000)
+            .map(|i| CString::new(format!("key{:010}", i)).unwrap())
+            .collect::<Vec<_>>();
+        let arrays: Vec<*const libc::c_char> =
+            arrays.iter().map(|s| s.as_ptr()).collect::<Vec<_>>();
+        let mut res: Vec<u32> = vec![];
+        reader_wrapper
+            .terms_query_keyword(&arrays, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res.len(), 20000);
     }
 }
