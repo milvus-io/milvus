@@ -1929,8 +1929,36 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                       op_type);
         }
     };
-    auto res = ProcessTextMatchIndex(func, query);
-    return res;
+
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    if (cached_match_res_ == nullptr) {
+        auto index = segment_->GetTextIndex(field_id_);
+        auto res = std::move(func(index, query));
+        auto valid_res = index->IsNotNull();
+        cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
+        cached_index_chunk_valid_res_ = std::move(valid_res);
+        if (cached_match_res_->size() < active_count_) {
+            // some entities are not visible in inverted index.
+            // only happend on growing segment.
+            TargetBitmap tail(active_count_ - cached_match_res_->size());
+            cached_match_res_->append(tail);
+            cached_index_chunk_valid_res_.append(tail);
+        }
+    }
+
+    TargetBitmap result;
+    TargetBitmap valid_result;
+    result.append(*cached_match_res_, current_data_global_pos_, real_batch_size);
+    valid_result.append(cached_index_chunk_valid_res_,
+                        current_data_global_pos_,
+                        real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          std::move(valid_result));
 };
 
 std::optional<VectorPtr>
@@ -1941,9 +1969,10 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     auto literal = value_arg_.GetValue<std::string>();
-
-    TargetBitmap result;
-    TargetBitmap valid_result;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return std::nullopt;
+    }
 
     if (cached_ngram_match_res_ == nullptr) {
         auto pinned_index = segment_->GetNgramIndex(field_id_);
@@ -1961,19 +1990,16 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         cached_index_chunk_valid_res_ = std::move(valid_res);
     }
 
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    TargetBitmap result;
+    TargetBitmap valid_result;
     result.append(
-        *cached_ngram_match_res_, current_data_chunk_pos_, real_batch_size);
+        *cached_ngram_match_res_, current_data_global_pos_, real_batch_size);
     valid_result.append(cached_index_chunk_valid_res_,
-                        current_data_chunk_pos_,
+                        current_data_global_pos_,
                         real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
-
-    return std::optional<VectorPtr>(std::make_shared<ColumnVector>(
-        std::move(result), std::move(valid_result)));
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          std::move(valid_result));
 }
 
 }  // namespace exec
