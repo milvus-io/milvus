@@ -521,6 +521,7 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 			ctx: ctx,
 			req: &milvuspb.UpsertRequest{
 				CollectionName: "col-0",
+				NumRows:        10,
 			},
 			schemaTimestamp: 99,
 		}

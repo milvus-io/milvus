@@ -369,8 +369,21 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
+	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(it.schema.CollectionSchema)...)
+	log.Info("upsert task insertPreExecute", zap.Any("bm25Fields", bm25Fields), zap.Any("partialUpdate", it.partialUpdate), zap.Any("schema", it.schema.CollectionSchema))
 	// Calculate embedding fields
 	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+		if it.partialUpdate {
+			// remove the old bm25 fields
+			ret := make([]*schemapb.FieldData, 0)
+			for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
+				if bm25Fields.Contain(fieldData.GetFieldName()) {
+					continue
+				}
+				ret = append(ret, fieldData)
+			}
+			it.upsertMsg.InsertMsg.FieldsData = ret
+		}
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
 		defer sp.End()
 		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
@@ -525,11 +538,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	collectionName := it.req.CollectionName
 	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 
-	// check if num_rows is valid
-	if it.req.NumRows <= 0 {
-		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
-	}
-
 	it.result = &milvuspb.MutationResult{
 		Status: merr.Success(),
 		IDs: &schemapb.IDs{
@@ -554,13 +562,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionID = collID
-
-	// check partition exists
-	_, err = globalMetaCache.GetPartitionID(ctx, it.req.GetDbName(), collectionName, it.req.GetPartitionName())
-	if err != nil {
-		log.Warn("fail to get partition id", zap.Error(err))
-		return err
-	}
 
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
@@ -641,6 +642,11 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				PartitionName:  it.req.PartitionName,
 			},
 		},
+	}
+
+	// check if num_rows is valid
+	if it.req.NumRows <= 0 {
+		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
 	}
 
 	if it.partialUpdate {

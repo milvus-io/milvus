@@ -417,7 +417,7 @@ func TestUpsertNotExistCollectionPartition(t *testing.T) {
 	// create default collection with autoID true
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithPartition("aaa"))
+	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName))
 	common.CheckErr(t, errUpsert, false, "num_rows should be greater than 0")
 
 	// upsert not exist partition

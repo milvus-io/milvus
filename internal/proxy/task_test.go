@@ -2417,17 +2417,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		err = node.initRateCollector()
 		assert.NoError(t, err)
 		node.mixCoord = mixc
-		qn := mocks.NewMockQueryNodeClient(t)
-		qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
-			Status: merr.Success(),
-		}, nil)
-		lb := NewMockLBPolicy(t)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
-		}).Return(nil)
-		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything)
-		node.lbPolicy = lb
-
 		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
@@ -3869,16 +3858,6 @@ func TestPartitionKey(t *testing.T) {
 		err = node.initRateCollector()
 		assert.NoError(t, err)
 		node.mixCoord = qc
-		qn := mocks.NewMockQueryNodeClient(t)
-		qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
-			Status: merr.Success(),
-		}, nil)
-		lb := NewMockLBPolicy(t)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
-		}).Return(nil)
-		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything)
-		node.lbPolicy = lb
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,
@@ -4132,16 +4111,6 @@ func TestDefaultPartition(t *testing.T) {
 		err = node.initRateCollector()
 		assert.NoError(t, err)
 		node.mixCoord = qc
-		qn := mocks.NewMockQueryNodeClient(t)
-		qn.EXPECT().Query(mock.Anything, mock.Anything).Return(&internalpb.RetrieveResults{
-			Status: merr.Success(),
-		}, nil)
-		lb := NewMockLBPolicy(t)
-		lb.EXPECT().Execute(mock.Anything, mock.Anything).Run(func(ctx context.Context, workload CollectionWorkLoad) {
-			_ = workload.exec(ctx, 0, qn, "")
-		}).Return(nil)
-		lb.EXPECT().UpdateCostMetrics(mock.Anything, mock.Anything)
-		node.lbPolicy = lb
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,

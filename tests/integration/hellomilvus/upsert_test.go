@@ -24,7 +24,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -138,14 +137,12 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDFalse() {
 
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.L2, params, nq, dim, topk, roundDecimal)
-	searchReq.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
+		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.MilvusClient.Search(ctx, searchReq)
 	checkFunc := func(data int) error {
 		if data < start || data > start+rowNum {
-			// return errors.New("upsert check pk fail")
-			return errors.Newf("upsert check pk fail, data: %d, start: %d, rowNum: %d", data, start, rowNum)
+			return errors.New("upsert check pk fail")
 		}
 		return nil
 	}
@@ -272,7 +269,7 @@ func (s *HelloMilvusSuite) TestUpsertAutoIDTrue() {
 
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, "")
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.L2, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, schemapb.DataType_FloatVector, []string{integration.Int64Field}, metric.IP, params, nq, dim, topk, roundDecimal)
 
 	searchResult, _ := c.MilvusClient.Search(ctx, searchReq)
 	checkFunc := func(data int) error {

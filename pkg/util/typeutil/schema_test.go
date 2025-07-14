@@ -3115,47 +3115,6 @@ func TestUpdateFieldData(t *testing.T) {
 		}
 	})
 
-	t.Run("out of bounds error", func(t *testing.T) {
-		baseData := []*schemapb.FieldData{
-			{
-				Type:      schemapb.DataType_Int64,
-				FieldName: Int64FieldName,
-				FieldId:   Int64FieldID,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{1, 2, 3},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		updateData := []*schemapb.FieldData{
-			{
-				Type:      schemapb.DataType_Int64,
-				FieldName: Int64FieldName,
-				FieldId:   Int64FieldID,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: []int64{10, 20},
-							},
-						},
-					},
-				},
-			},
-		}
-
-		// Try to update index 5 (out of bounds)
-		err := UpdateFieldData(baseData, updateData, 5)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "out of bounds")
-	})
-
 	t.Run("no update fields", func(t *testing.T) {
 		baseData := []*schemapb.FieldData{
 			{

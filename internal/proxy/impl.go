@@ -2856,6 +2856,14 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		}, nil
 	}
 
+	// check if num_rows is valid
+	if request.NumRows <= 0 {
+		err := merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(request.NumRows), "num_rows should be greater than 0")
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
 	// check if the collection is loaded
 	_, collectionNotLoadErr := globalMetaCache.GetShardLeaderList(ctx, request.GetDbName(), request.GetCollectionName(), collectionID, true)
 	// check if insert msg is lack of field data
@@ -2864,7 +2872,8 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		log.Warn("collection is not loaded", zap.Error(collectionNotLoadErr))
 
 		return &milvuspb.MutationResult{
-			Status: merr.Status(merr.WrapErrCollectionLoaded(schema.CollectionSchema.Name, "partial update is not supported when collection is not loaded")),
+			Status: merr.Status(merr.WrapErrCollectionLoaded(schema.CollectionSchema.Name,
+				"partial update is not supported when collection is not loaded", lackOfFieldErr.Error())),
 		}, nil
 	}
 	partialUpdate := collectionNotLoadErr == nil && lackOfFieldErr != nil
