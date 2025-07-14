@@ -48,7 +48,7 @@ class TestMilvusClientV2AliasInvalid(TestMilvusClientV2Base):
         
         # 2. create alias with invalid name
         error = {ct.err_code: 1100, ct.err_msg: "Invalid collection alias"}
-        if alias_name is None or alias_name.strip() == "":
+        if alias_name is None or alias_name == "":
             error = {ct.err_code: 1100, ct.err_msg: "collection alias should not be empty"}
         self.create_alias(client, collection_name, alias_name,
                           check_task=CheckTasks.err_res, check_items=error)
