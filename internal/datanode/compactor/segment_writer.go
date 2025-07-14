@@ -157,7 +157,6 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	w.currentSegmentID = newSegmentID
 
 	chunkSize := w.binLogMaxSize
-	rootPath := w.params.StorageConfig.GetRootPath()
 
 	w.rwOption = append(w.rwOption,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
@@ -165,10 +164,8 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 		}),
 		storage.WithVersion(w.storageVersion),
 	)
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := w.params.StorageConfig.GetBucketName()
 	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
-		w.schema, w.allocator.logIDAlloc, chunkSize, bucketName, rootPath, w.maxRows, w.rwOption...,
+		w.schema, w.allocator.logIDAlloc, chunkSize, w.maxRows, w.rwOption...,
 	)
 	if err != nil {
 		return err

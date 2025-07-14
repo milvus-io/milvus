@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -56,15 +57,18 @@ func NewSyncTask(ctx context.Context,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
+	storageVersion int64,
+	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{
-			ID:            segmentID,
-			State:         commonpb.SegmentState_Importing,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: vchannel,
+			ID:             segmentID,
+			State:          commonpb.SegmentState_Importing,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  vchannel,
+			StorageVersion: storageVersion,
 		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
@@ -95,7 +99,8 @@ func NewSyncTask(ctx context.Context,
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.Schema()). // TODO specify import schema if needed
-		WithSyncPack(syncPack)
+		WithSyncPack(syncPack).
+		WithStorageConfig(storageConfig)
 	return task, nil
 }
 

@@ -145,7 +145,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	req := t.req
 
 	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), bufferSize)
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), bufferSize, t.req.GetStorageConfig())
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -263,7 +263,8 @@ func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []sy
 				}
 			}
 			syncTask, err := NewSyncTask(t.ctx, t.allocator, t.metaCaches, t.req.GetTs(),
-				segmentID, partitionID, t.GetCollectionID(), channel, data, nil, bm25Stats)
+				segmentID, partitionID, t.GetCollectionID(), channel, data, nil,
+				bm25Stats, t.req.GetStorageVersion(), t.req.GetStorageConfig())
 			if err != nil {
 				return nil, nil, err
 			}

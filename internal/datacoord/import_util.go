@@ -170,6 +170,11 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		segmentLevel = datapb.SegmentLevel_L0
 	}
 
+	storageVersion := storage.StorageV1
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
+
 	// alloc new segments
 	segments := make([]int64, 0)
 	addSegment := func(vchannel string, partitionID int64, size int64) error {
@@ -177,7 +182,8 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		defer cancel()
 		for size > 0 {
 			segmentInfo, err := AllocImportSegment(ctx, alloc, meta,
-				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, job.GetDataTs(), segmentLevel)
+				task.GetJobID(), task.GetTaskID(), task.GetCollectionID(),
+				partitionID, vchannel, job.GetDataTs(), segmentLevel, storageVersion)
 			if err != nil {
 				return err
 			}
@@ -224,6 +230,7 @@ func AllocImportSegment(ctx context.Context,
 	channelName string,
 	dataTimestamp uint64,
 	level datapb.SegmentLevel,
+	storageVersion int64,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	id, err := alloc.AllocID(ctx)
@@ -256,6 +263,7 @@ func AllocImportSegment(ctx context.Context,
 		LastExpireTime: math.MaxUint64,
 		StartPosition:  position,
 		DmlPosition:    position,
+		StorageVersion: storageVersion,
 	}
 	segmentInfo.IsImporting = true
 	segment := NewSegmentInfo(segmentInfo)
@@ -279,6 +287,7 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		func(fileStats *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStats.GetImportFile()
 		})
+
 	return &datapb.PreImportRequest{
 		JobID:         task.GetJobID(),
 		TaskID:        task.GetTaskID(),
@@ -288,8 +297,8 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) *datapb.PreImportR
 		Schema:        job.GetSchema(),
 		ImportFiles:   importFiles,
 		Options:       job.GetOptions(),
-		StorageConfig: createStorageConfig(),
 		TaskSlot:      task.GetTaskSlot(),
+		StorageConfig: createStorageConfig(),
 	}
 }
 
@@ -343,6 +352,11 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
+
+	storageVersion := storage.StorageV1
+	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = storage.StorageV2
+	}
 	return &datapb.ImportRequest{
 		JobID:           task.GetJobID(),
 		TaskID:          task.GetTaskID(),
@@ -357,6 +371,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
+		StorageVersion:  storageVersion,
 	}, nil
 }
 
@@ -671,6 +686,51 @@ func ListBinlogsAndGroupBySegment(ctx context.Context,
 		}
 	}
 	return segmentImportFiles, nil
+}
+
+func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
+	type (
+		segments    = []*SegmentInfo
+		segmentInfo struct {
+			ID   int64
+			Rows int64
+			Size int64
+		}
+	)
+	segmentsByChannelAndPartition := make(map[string]map[int64]segments) // channel => [partition => segments]
+	for _, segmentInfo := range meta.GetSegmentInfos(segmentIDs) {
+		channel := segmentInfo.GetInsertChannel()
+		partition := segmentInfo.GetPartitionID()
+		if _, ok := segmentsByChannelAndPartition[channel]; !ok {
+			segmentsByChannelAndPartition[channel] = make(map[int64]segments)
+		}
+		segmentsByChannelAndPartition[channel][partition] = append(segmentsByChannelAndPartition[channel][partition], segmentInfo)
+	}
+	var (
+		totalRows int64
+		totalSize int64
+	)
+	for channel, partitionSegments := range segmentsByChannelAndPartition {
+		for partitionID, segments := range partitionSegments {
+			infos := lo.Map(segments, func(segment *SegmentInfo, _ int) *segmentInfo {
+				rows := segment.GetNumOfRows()
+				size := segment.getSegmentSize()
+				totalRows += rows
+				totalSize += size
+				return &segmentInfo{
+					ID:   segment.GetID(),
+					Rows: rows,
+					Size: size,
+				}
+			})
+			log.Info("import segments info", zap.Int64("jobID", jobID),
+				zap.String("channel", channel), zap.Int64("partitionID", partitionID),
+				zap.Int("segmentsNum", len(segments)), zap.Any("segmentsInfo", infos),
+			)
+		}
+	}
+	log.Info("import result info", zap.Int64("jobID", jobID),
+		zap.Int64("totalRows", totalRows), zap.Int64("totalSize", totalSize))
 }
 
 // ValidateBinlogImportRequest validates the binlog import request.

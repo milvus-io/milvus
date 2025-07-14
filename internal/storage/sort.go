@@ -237,10 +237,12 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		})
 	}
 
+	endPositions := make([]int, len(recs))
 	var enqueueAll func(ri int) error
 	enqueueAll = func(ri int) error {
 		r := recs[ri]
 		hasValid := false
+		endPosition := 0
 		for j := 0; j < r.Len(); j++ {
 			if predicate(r, ri, j) {
 				pq.Enqueue(&index{
@@ -249,6 +251,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 				})
 				numRows++
 				hasValid = true
+				endPosition = j
 			}
 		}
 		if !hasValid {
@@ -261,6 +264,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			}
 			return enqueueAll(ri)
 		}
+		endPositions[ri] = endPosition
 		return nil
 	}
 
@@ -294,8 +298,8 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			}
 		}
 
-		// If poped idx reaches end of segment, invalidate cache and advance to next record
-		if idx.i == recs[idx.ri].Len()-1 {
+		// If the popped idx reaches the last valid data of the segment, invalidate the cache and advance to the next record
+		if idx.i == endPositions[idx.ri] {
 			err := advanceRecord(idx.ri)
 			if err == io.EOF {
 				continue
