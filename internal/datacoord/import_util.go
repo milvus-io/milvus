@@ -641,3 +641,48 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	}
 	return segmentImportFiles, nil
 }
+
+func LogResultSegmentsInfo(jobID int64, meta *meta, segmentIDs []int64) {
+	type (
+		segments    = []*SegmentInfo
+		segmentInfo struct {
+			ID   int64
+			Rows int64
+			Size int64
+		}
+	)
+	segmentsByChannelAndPartition := make(map[string]map[int64]segments) // channel => [partition => segments]
+	for _, segmentInfo := range meta.GetSegmentInfos(segmentIDs) {
+		channel := segmentInfo.GetInsertChannel()
+		partition := segmentInfo.GetPartitionID()
+		if _, ok := segmentsByChannelAndPartition[channel]; !ok {
+			segmentsByChannelAndPartition[channel] = make(map[int64]segments)
+		}
+		segmentsByChannelAndPartition[channel][partition] = append(segmentsByChannelAndPartition[channel][partition], segmentInfo)
+	}
+	var (
+		totalRows int64
+		totalSize int64
+	)
+	for channel, partitionSegments := range segmentsByChannelAndPartition {
+		for partitionID, segments := range partitionSegments {
+			infos := lo.Map(segments, func(segment *SegmentInfo, _ int) *segmentInfo {
+				rows := segment.GetNumOfRows()
+				size := segment.getSegmentSize()
+				totalRows += rows
+				totalSize += size
+				return &segmentInfo{
+					ID:   segment.GetID(),
+					Rows: rows,
+					Size: size,
+				}
+			})
+			log.Info("import segments info", zap.Int64("jobID", jobID),
+				zap.String("channel", channel), zap.Int64("partitionID", partitionID),
+				zap.Int("segmentsNum", len(segments)), zap.Any("segmentsInfo", infos),
+			)
+		}
+	}
+	log.Info("import result info", zap.Int64("jobID", jobID),
+		zap.Int64("totalRows", totalRows), zap.Int64("totalSize", totalSize))
+}
