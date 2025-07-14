@@ -506,6 +506,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTextMatch();
 
+    bool
+    CanExecNgramMatch(proto::plan::OpType op_type);
+
     std::optional<VectorPtr>
     ExecNgramMatch();
 
