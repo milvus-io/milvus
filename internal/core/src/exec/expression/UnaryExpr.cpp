@@ -1887,12 +1887,37 @@ PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
     using Index = index::TextMatchIndex;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
     auto query = GetValueFromProto<std::string>(expr_->val_);
-    auto func = [](Index* index, const std::string& query) -> TargetBitmap {
-        return index->MatchQuery(query);
-    };
-    auto res = ProcessTextMatchIndex(func, query);
-    return res;
+    if (cached_match_res_ == nullptr) {
+        auto index = segment_->GetTextIndex(field_id_);
+        auto res = std::move(index->MatchQuery(query));
+        auto valid_res = index->IsNotNull();
+        cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
+        cached_index_chunk_valid_res_ = std::move(valid_res);
+        if (cached_match_res_->size() < active_count_) {
+            // some entities are not visible in inverted index.
+            // only happend on growing segment.
+            TargetBitmap tail(active_count_ - cached_match_res_->size());
+            cached_match_res_->append(tail);
+            cached_index_chunk_valid_res_.append(tail);
+        }
+    }
+
+    TargetBitmap result;
+    TargetBitmap valid_result;
+    result.append(
+        *cached_match_res_, current_data_global_pos_, real_batch_size);
+    valid_result.append(cached_index_chunk_valid_res_,
+                        current_data_global_pos_,
+                        real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          std::move(valid_result));
 };
 
 }  // namespace exec
