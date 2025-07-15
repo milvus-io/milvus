@@ -874,10 +874,33 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
+	schema := &schemapb.CollectionSchema{
+		Fields: make([]*schemapb.FieldSchema, 0),
+	}
+	binlogs := make([]*datapb.FieldBinlog, 0)
+
+	needFieldIDs := typeutil.NewSet[int64]()
+	for _, field := range t.plan.GetSchema().GetFields() {
+		if field.GetIsPrimaryKey() ||
+			field.GetFieldID() == t.clusteringKeyField.GetFieldID() ||
+			field.GetFieldID() == 0 ||
+			field.GetFieldID() == 1 {
+			schema.Fields = append(schema.Fields, field)
+			needFieldIDs.Insert(field.GetFieldID())
+		}
+	}
+
+	for _, fieldBinlog := range segment.GetFieldBinlogs() {
+		// for storageV2, only contains fieldID 0, and it's enough.
+		// all scalar fields are stored in the file with fieldID 0.
+		if needFieldIDs.Contain(fieldBinlog.GetFieldID()) {
+			binlogs = append(binlogs, fieldBinlog)
+		}
+	}
 
 	rr, err := storage.NewBinlogRecordReader(ctx,
-		segment.GetFieldBinlogs(),
-		t.plan.Schema,
+		binlogs,
+		schema,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
@@ -891,7 +914,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(r, v, t.plan.Schema.Fields)
+		return storage.ValueDeserializer(r, v, schema.Fields)
 	})
 	defer pkIter.Close()
 	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(pkIter, expiredFilter)
