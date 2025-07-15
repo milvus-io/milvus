@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -307,6 +309,65 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		return len(resp.Shards) == 2
 	}, 30*time.Second, 1*time.Second)
+}
+
+func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
+	ctx := context.Background()
+
+	// speed up balance trigger
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "500")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key, "500")
+
+	// init collection with 10 channel, each channel has 10 segment, each segment has 2000 row
+	// and load it with 1 replicas on 2 nodes.
+	name := "test_balance_" + funcutil.GenRandomStr()
+	s.initCollection(name, 1, 10, 10, 2000, 500)
+
+	stopSearchCh := make(chan struct{})
+	failCounter := atomic.NewInt64(0)
+
+	// keep query during balance
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stopSearchCh:
+				log.Info("stop search")
+				return
+			default:
+				queryResult, err := s.Cluster.Proxy.Query(ctx, &milvuspb.QueryRequest{
+					DbName:         "",
+					CollectionName: name,
+					Expr:           "",
+					OutputFields:   []string{"count(*)"},
+				})
+
+				if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
+					log.Info("query failed", zap.Error(err))
+					failCounter.Inc()
+				}
+			}
+		}
+	}()
+
+	// then we add 1 query node, expected segment and channel will be move to new query node concurrently
+	qn1 := s.Cluster.AddQueryNode()
+
+	// wait until balance channel finished
+	s.Eventually(func() bool {
+		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		log.Info("resp", zap.Any("channel", len(resp.Channels)), zap.Any("segments", len(resp.Segments)))
+		return len(resp.Channels) == 5
+	}, 30*time.Second, 1*time.Second)
+
+	// expected concurrent balance will execute successfully, shard serviceable won't be broken
+	close(stopSearchCh)
+	wg.Wait()
+	s.Equal(int64(0), failCounter.Load())
 }
 
 func TestBalance(t *testing.T) {

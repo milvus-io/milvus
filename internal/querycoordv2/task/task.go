@@ -325,6 +325,8 @@ type SegmentTask struct {
 	*baseTask
 
 	segmentID typeutil.UniqueID
+	// for balance segment task, expected load and release execution on the same shard leader
+	shardLeaderID int64
 }
 
 // NewSegmentTask creates a SegmentTask with actions,
@@ -359,8 +361,9 @@ func NewSegmentTask(ctx context.Context,
 	base := newBaseTask(ctx, source, collectionID, replica, shard, fmt.Sprintf("SegmentTask-%s-%d", actions[0].Type().String(), segmentID))
 	base.actions = actions
 	return &SegmentTask{
-		baseTask:  base,
-		segmentID: segmentID,
+		baseTask:      base,
+		segmentID:     segmentID,
+		shardLeaderID: -1,
 	}, nil
 }
 
@@ -382,6 +385,14 @@ func (task *SegmentTask) String() string {
 
 func (task *SegmentTask) MarshalJSON() ([]byte, error) {
 	return marshalJSON(task)
+}
+
+func (task *SegmentTask) ShardLeaderID() int64 {
+	return task.shardLeaderID
+}
+
+func (task *SegmentTask) SetShardLeaderID(id int64) {
+	task.shardLeaderID = id
 }
 
 type ChannelTask struct {

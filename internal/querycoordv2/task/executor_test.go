@@ -26,6 +26,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -33,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -303,6 +307,195 @@ func (suite *ExecutorTestSuite) TestReleaseSegmentChannelSpecificLookup() {
 	suite.executor.releaseSegment(task, 0)
 
 	// Verify that channel-specific lookup worked correctly
+	suite.cluster.AssertExpectations(suite.T())
+}
+
+func (suite *ExecutorTestSuite) TestBalanceTaskWithTwoDelegators() {
+	// Setup collection and replica
+	collection := utils.CreateTestCollection(1, 1)
+	suite.meta.CollectionManager.PutCollection(suite.ctx, collection)
+	suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(1, 1))
+
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	suite.meta.ReplicaManager.Put(suite.ctx, replica)
+
+	// Setup nodes
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 1)
+	suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 2)
+
+	// Create balance task with load and release actions
+	loadAction := NewSegmentAction(2, ActionTypeGrow, "test-channel", 100)      // Load on node 2
+	releaseAction := NewSegmentAction(1, ActionTypeReduce, "test-channel", 100) // Release from node 1
+
+	task, err := NewSegmentTask(suite.ctx, time.Second*10, WrapIDSource(0), 1, replica, loadAction, releaseAction)
+	suite.NoError(err)
+
+	// Setup old delegator (node 1) - serviceable
+	oldDelegatorView := utils.CreateTestLeaderView(1, 1, "test-channel", map[int64]int64{100: 1}, map[int64]*meta.Segment{})
+	oldDelegatorView.Version = 1
+	oldDelegatorView.UnServiceableError = nil // serviceable
+	suite.dist.LeaderViewManager.Update(1, oldDelegatorView)
+
+	// Mock broker responses
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestBalanceTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		},
+	}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(100)).Return([]*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), int64(100)).Return(nil, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: 1,
+		},
+	}, nil)
+
+	// Setup target for collection to be loaded
+	channel := &datapb.VchannelInfo{
+		CollectionID: 1,
+		ChannelName:  "test-channel",
+	}
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(suite.ctx, 1)
+
+	// Expect load to be called on latest serviceable delegator (node 1)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, int64(1), mock.Anything).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil).Once()
+
+	// Execute load segment (step 0)
+	suite.executor.loadSegment(task, 0)
+
+	// Setup new delegator (node 2) - serviceable
+	newDelegatorView := utils.CreateTestLeaderView(2, 1, "test-channel", map[int64]int64{100: 2}, map[int64]*meta.Segment{})
+	newDelegatorView.Version = 2
+	newDelegatorView.UnServiceableError = nil // serviceable
+	suite.dist.LeaderViewManager.Update(2, newDelegatorView)
+
+	// Execute release segment (step 1)
+	suite.executor.releaseSegment(task, 1)
+
+	// verify that the task is failed due to shard leader change
+	suite.Error(task.Err())
+}
+
+func (suite *ExecutorTestSuite) TestBalanceTaskFallbackToLatestWhenNoServiceableDelegator() {
+	// Setup collection and replica
+	collection := utils.CreateTestCollection(1, 1)
+	suite.meta.CollectionManager.PutCollection(suite.ctx, collection)
+	suite.meta.CollectionManager.PutPartition(suite.ctx, utils.CreateTestPartition(1, 1))
+
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	suite.meta.ReplicaManager.Put(suite.ctx, replica)
+
+	// Setup nodes
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 1)
+	suite.meta.ResourceManager.HandleNodeUp(suite.ctx, 2)
+
+	// Create load action
+	loadAction := NewSegmentAction(2, ActionTypeGrow, "test-channel", 100)
+	task, err := NewSegmentTask(suite.ctx, time.Second*10, WrapIDSource(0), 1, replica, loadAction)
+	suite.NoError(err)
+
+	// Setup old delegator (node 1) - not serviceable
+	oldDelegatorView := utils.CreateTestLeaderView(1, 1, "test-channel", map[int64]int64{100: 1}, map[int64]*meta.Segment{})
+	oldDelegatorView.UnServiceableError = errors.New("not serviceable")
+	oldDelegatorView.Version = 1
+	suite.dist.LeaderViewManager.Update(1, oldDelegatorView)
+
+	// Setup new delegator (node 2) - not serviceable but latest
+	newDelegatorView := utils.CreateTestLeaderView(2, 1, "test-channel", map[int64]int64{100: 2}, map[int64]*meta.Segment{})
+	newDelegatorView.UnServiceableError = errors.New("not serviceable")
+	newDelegatorView.Version = 2 // latest version
+	suite.dist.LeaderViewManager.Update(2, newDelegatorView)
+
+	// Mock broker responses
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{
+			Name: "TestBalanceTask",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "vec", DataType: schemapb.DataType_FloatVector},
+			},
+		},
+	}, nil)
+	suite.broker.EXPECT().GetSegmentInfo(mock.Anything, int64(100)).Return([]*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+		},
+	}, nil)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), int64(100)).Return(nil, nil)
+	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			CollectionID: 1,
+		},
+	}, nil)
+
+	// Setup target for collection to be loaded
+	channel := &datapb.VchannelInfo{
+		CollectionID: 1,
+		ChannelName:  "test-channel",
+	}
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "test-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(suite.ctx, 1)
+
+	// Expect load to be called on the latest delegator (node 2) as fallback
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, int64(2), mock.Anything).Return(&commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil).Once()
+
+	// Execute load segment
+	suite.executor.loadSegment(task, 0)
+
+	// Verify that the latest delegator was chosen as fallback
 	suite.cluster.AssertExpectations(suite.T())
 }
 
