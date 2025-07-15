@@ -1126,43 +1126,6 @@ class SegmentExpr : public Expr {
         return valid_result;
     }
 
-    template <typename FUNC, typename... ValTypes>
-    VectorPtr
-    ProcessTextMatchIndex(FUNC func, ValTypes... values) {
-        TargetBitmap result;
-        TargetBitmap valid_result;
-
-        if (cached_match_res_ == nullptr) {
-            auto index = segment_->GetTextIndex(field_id_);
-            auto res = std::move(func(index, values...));
-            auto valid_res = index->IsNotNull();
-            cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-            cached_index_chunk_valid_res_ = std::move(valid_res);
-            if (cached_match_res_->size() < active_count_) {
-                // some entities are not visible in inverted index.
-                // only happend on growing segment.
-                TargetBitmap tail(active_count_ - cached_match_res_->size());
-                cached_match_res_->append(tail);
-                cached_index_chunk_valid_res_.append(tail);
-            }
-        }
-
-        // return batch size, not sure if we should use the data position.
-        auto real_batch_size =
-            current_data_chunk_pos_ + batch_size_ > active_count_
-                ? active_count_ - current_data_chunk_pos_
-                : batch_size_;
-        result.append(
-            *cached_match_res_, current_data_chunk_pos_, real_batch_size);
-        valid_result.append(cached_index_chunk_valid_res_,
-                            current_data_chunk_pos_,
-                            real_batch_size);
-        current_data_chunk_pos_ += real_batch_size;
-
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
-    }
-
     template <typename T, typename FUNC, typename... ValTypes>
     void
     ProcessIndexChunksV2(FUNC func, ValTypes... values) {
