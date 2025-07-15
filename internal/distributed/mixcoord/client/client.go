@@ -852,6 +852,17 @@ func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest, opts ...gr
 	})
 }
 
+func (c *Client) FlushAll(ctx context.Context, req *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.FlushAllResponse, error) {
+		return client.FlushAll(ctx, req)
+	})
+}
+
 // AssignSegmentID applies allocations for specified Coolection/Partition and related Channel Name(Virtial Channel)
 //
 // ctx is the context to control request deadline and cancellation

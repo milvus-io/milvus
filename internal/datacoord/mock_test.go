@@ -207,6 +207,10 @@ func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.List
 	}, nil
 }
 
+func (m *mockMixCoord) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	panic("implement me")
+}
+
 func newMockMixCoord() *mockMixCoord {
 	return &mockMixCoord{state: commonpb.StateCode_Healthy}
 }

@@ -2581,6 +2581,65 @@ func (_c *MixCoord_Flush_Call) RunAndReturn(run func(context.Context, *datapb.Fl
 	return _c
 }
 
+// FlushAll provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) FlushAll(_a0 context.Context, _a1 *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FlushAll")
+	}
+
+	var r0 *datapb.FlushAllResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.FlushAllRequest) *datapb.FlushAllResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.FlushAllResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.FlushAllRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_FlushAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FlushAll'
+type MixCoord_FlushAll_Call struct {
+	*mock.Call
+}
+
+// FlushAll is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.FlushAllRequest
+func (_e *MixCoord_Expecter) FlushAll(_a0 interface{}, _a1 interface{}) *MixCoord_FlushAll_Call {
+	return &MixCoord_FlushAll_Call{Call: _e.mock.On("FlushAll", _a0, _a1)}
+}
+
+func (_c *MixCoord_FlushAll_Call) Run(run func(_a0 context.Context, _a1 *datapb.FlushAllRequest)) *MixCoord_FlushAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.FlushAllRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_FlushAll_Call) Return(_a0 *datapb.FlushAllResponse, _a1 error) *MixCoord_FlushAll_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_FlushAll_Call) RunAndReturn(run func(context.Context, *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error)) *MixCoord_FlushAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GcConfirm provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GcConfirm(_a0 context.Context, _a1 *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
 	ret := _m.Called(_a0, _a1)
