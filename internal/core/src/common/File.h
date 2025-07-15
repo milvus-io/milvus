@@ -115,7 +115,8 @@ class File {
     }
 
  private:
-    static inline const char* get_mode_from_flags(int flags) {
+    static inline const char*
+    get_mode_from_flags(int flags) {
         switch (flags) {
             case O_RDONLY: {
                 return "rb";
