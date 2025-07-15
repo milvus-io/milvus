@@ -20,15 +20,15 @@ import (
 	"context"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/client-go/v2/txnkv"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -56,18 +56,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		log.Fatal("failed to start embed etcd server", zap.Error(err))
-	}
-	defer os.RemoveAll(tempDir)
-	defer embedetcdServer.Close()
-
-	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
-
 	paramtable.Init()
-	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
@@ -436,6 +425,72 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 	})
 }
 
+func TestCheckLoadConfigChanges(t *testing.T) {
+	mockey.PatchConvey("TestCheckLoadConfigChanges", t, func() {
+		ctx := context.Background()
+
+		// Create mock server
+		testServer := &Server{}
+		testServer.meta = &meta.Meta{}
+		testServer.ctx = ctx
+
+		// Create mock collection with IsUserSpecifiedReplicaMode = false
+		mockCollection1 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1001,
+				UserSpecifiedReplicaMode: false,
+			},
+		}
+
+		// Create mock collection with IsUserSpecifiedReplicaMode = true
+		mockCollection2 := &meta.Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:             1002,
+				UserSpecifiedReplicaMode: true,
+			},
+		}
+
+		// Mock meta.CollectionManager.GetAll to return collection IDs
+		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
+
+		// Mock meta.CollectionManager.GetCollection to return different collections
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
+			if collectionID == 1001 {
+				return mockCollection1
+			} else if collectionID == 1002 {
+				return mockCollection2
+			}
+			return nil
+		}).Build()
+
+		// Mock paramtable.ParamItem.GetAsUint32() for ClusterLevelLoadReplicaNumber
+		mockey.Mock((*paramtable.ParamItem).GetAsUint32).Return(uint32(2)).Build()
+
+		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
+		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default"}).Build()
+
+		// Mock UpdateLoadConfig to capture the call
+		var updateLoadConfigCalled bool
+		var capturedRequest *querypb.UpdateLoadConfigRequest
+		mockey.Mock((*Server).UpdateLoadConfig).To(func(s *Server, ctx context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
+			updateLoadConfigCalled = true
+			capturedRequest = req
+			return merr.Success(), nil
+		}).Build()
+
+		// Call checkLoadConfigChanges
+		testServer.checkLoadConfigChanges(ctx)
+
+		// Verify UpdateLoadConfig was called
+		assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
+
+		// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
+		assert.Equal(t, []int64{1001}, capturedRequest.CollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
+		assert.Equal(t, int32(2), capturedRequest.ReplicaNumber, "ReplicaNumber should match cluster level config")
+		assert.Equal(t, []string{"default"}, capturedRequest.ResourceGroups, "ResourceGroups should match cluster level config")
+	})
+}
+
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {
 	start := time.Now()
 	for time.Since(start) < timeout {
@@ -601,7 +656,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.meta,
 		suite.server.targetMgr,
 		suite.server.dist,
-		suite.broker,
+		suite.server.broker,
 		suite.server.cluster,
 		suite.server.nodeMgr,
 	)

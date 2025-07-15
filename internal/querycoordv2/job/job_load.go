@@ -47,13 +47,14 @@ type LoadCollectionJob struct {
 	req  *querypb.LoadCollectionRequest
 	undo *UndoList
 
-	dist               *meta.DistributionManager
-	meta               *meta.Meta
-	broker             meta.Broker
-	targetMgr          meta.TargetManagerInterface
-	targetObserver     *observers.TargetObserver
-	collectionObserver *observers.CollectionObserver
-	nodeMgr            *session.NodeManager
+	dist                     *meta.DistributionManager
+	meta                     *meta.Meta
+	broker                   meta.Broker
+	targetMgr                meta.TargetManagerInterface
+	targetObserver           *observers.TargetObserver
+	collectionObserver       *observers.CollectionObserver
+	nodeMgr                  *session.NodeManager
+	userSpecifiedReplicaMode bool
 }
 
 func NewLoadCollectionJob(
@@ -66,18 +67,20 @@ func NewLoadCollectionJob(
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
+	userSpecifiedReplicaMode bool,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
-		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:                req,
-		undo:               NewUndoList(ctx, meta, targetMgr, targetObserver),
-		dist:               dist,
-		meta:               meta,
-		broker:             broker,
-		targetMgr:          targetMgr,
-		targetObserver:     targetObserver,
-		collectionObserver: collectionObserver,
-		nodeMgr:            nodeMgr,
+		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:                      req,
+		undo:                     NewUndoList(ctx, meta, targetMgr, targetObserver),
+		dist:                     dist,
+		meta:                     meta,
+		broker:                   broker,
+		targetMgr:                targetMgr,
+		targetObserver:           targetObserver,
+		collectionObserver:       collectionObserver,
+		nodeMgr:                  nodeMgr,
+		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	}
 }
 
@@ -208,13 +211,14 @@ func (job *LoadCollectionJob) Execute() error {
 	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
-			CollectionID:  req.GetCollectionID(),
-			ReplicaNumber: req.GetReplicaNumber(),
-			Status:        querypb.LoadStatus_Loading,
-			FieldIndexID:  req.GetFieldIndexID(),
-			LoadType:      querypb.LoadType_LoadCollection,
-			LoadFields:    req.GetLoadFields(),
-			DbID:          collectionInfo.GetDbId(),
+			CollectionID:             req.GetCollectionID(),
+			ReplicaNumber:            req.GetReplicaNumber(),
+			Status:                   querypb.LoadStatus_Loading,
+			FieldIndexID:             req.GetFieldIndexID(),
+			LoadType:                 querypb.LoadType_LoadCollection,
+			LoadFields:               req.GetLoadFields(),
+			DbID:                     collectionInfo.GetDbId(),
+			UserSpecifiedReplicaMode: job.userSpecifiedReplicaMode,
 		},
 		CreatedAt: time.Now(),
 		LoadSpan:  sp,
@@ -255,13 +259,14 @@ type LoadPartitionJob struct {
 	req  *querypb.LoadPartitionsRequest
 	undo *UndoList
 
-	dist               *meta.DistributionManager
-	meta               *meta.Meta
-	broker             meta.Broker
-	targetMgr          meta.TargetManagerInterface
-	targetObserver     *observers.TargetObserver
-	collectionObserver *observers.CollectionObserver
-	nodeMgr            *session.NodeManager
+	dist                     *meta.DistributionManager
+	meta                     *meta.Meta
+	broker                   meta.Broker
+	targetMgr                meta.TargetManagerInterface
+	targetObserver           *observers.TargetObserver
+	collectionObserver       *observers.CollectionObserver
+	nodeMgr                  *session.NodeManager
+	userSpecifiedReplicaMode bool
 }
 
 func NewLoadPartitionJob(
@@ -274,18 +279,20 @@ func NewLoadPartitionJob(
 	targetObserver *observers.TargetObserver,
 	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
+	userSpecifiedReplicaMode bool,
 ) *LoadPartitionJob {
 	return &LoadPartitionJob{
-		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:                req,
-		undo:               NewUndoList(ctx, meta, targetMgr, targetObserver),
-		dist:               dist,
-		meta:               meta,
-		broker:             broker,
-		targetMgr:          targetMgr,
-		targetObserver:     targetObserver,
-		collectionObserver: collectionObserver,
-		nodeMgr:            nodeMgr,
+		BaseJob:                  NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:                      req,
+		undo:                     NewUndoList(ctx, meta, targetMgr, targetObserver),
+		dist:                     dist,
+		meta:                     meta,
+		broker:                   broker,
+		targetMgr:                targetMgr,
+		targetObserver:           targetObserver,
+		collectionObserver:       collectionObserver,
+		nodeMgr:                  nodeMgr,
+		userSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	}
 }
 
@@ -411,13 +418,14 @@ func (job *LoadPartitionJob) Execute() error {
 
 		collection := &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:  req.GetCollectionID(),
-				ReplicaNumber: req.GetReplicaNumber(),
-				Status:        querypb.LoadStatus_Loading,
-				FieldIndexID:  req.GetFieldIndexID(),
-				LoadType:      querypb.LoadType_LoadPartition,
-				LoadFields:    req.GetLoadFields(),
-				DbID:          collectionInfo.GetDbId(),
+				CollectionID:             req.GetCollectionID(),
+				ReplicaNumber:            req.GetReplicaNumber(),
+				Status:                   querypb.LoadStatus_Loading,
+				FieldIndexID:             req.GetFieldIndexID(),
+				LoadType:                 querypb.LoadType_LoadPartition,
+				LoadFields:               req.GetLoadFields(),
+				DbID:                     collectionInfo.GetDbId(),
+				UserSpecifiedReplicaMode: job.userSpecifiedReplicaMode,
 			},
 			CreatedAt: time.Now(),
 			LoadSpan:  sp,
@@ -430,6 +438,17 @@ func (job *LoadPartitionJob) Execute() error {
 			return errors.Wrap(err, msg)
 		}
 	} else { // collection exists, put partitions only
+		coll := job.meta.GetCollection(job.ctx, req.GetCollectionID())
+		if job.userSpecifiedReplicaMode && !coll.CollectionLoadInfo.UserSpecifiedReplicaMode {
+			coll.CollectionLoadInfo.UserSpecifiedReplicaMode = job.userSpecifiedReplicaMode
+			err = job.meta.CollectionManager.PutCollection(job.ctx, coll)
+			if err != nil {
+				msg := "failed to store collection"
+				log.Warn(msg, zap.Error(err))
+				return errors.Wrap(err, msg)
+			}
+		}
+
 		err = job.meta.CollectionManager.PutPartition(job.ctx, partitions...)
 		if err != nil {
 			msg := "failed to store partitions"
