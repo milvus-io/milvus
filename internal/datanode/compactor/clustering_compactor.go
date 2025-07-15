@@ -90,8 +90,8 @@ type clusteringCompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
-	memoryLimit            int64
-	readAndWriteBufferSize int64
+	memoryLimit int64
+	bufferSize  int64
 
 	clusterBuffers []*ClusterBuffer
 	// scalar
@@ -238,7 +238,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTime = time.Now()
 	t.memoryLimit = t.getMemoryLimit()
-	t.readAndWriteBufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
+	t.bufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
@@ -337,7 +337,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.readAndWriteBufferSize),
+			storage.WithBufferSize(t.bufferSize),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
@@ -360,7 +360,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.readAndWriteBufferSize),
+			storage.WithBufferSize(t.bufferSize),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
@@ -420,7 +420,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
 			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
 			t.partitionID, t.collectionID, t.plan.Channel, 100,
-			storage.WithBufferSize(t.readAndWriteBufferSize),
+			storage.WithBufferSize(t.bufferSize),
 			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
@@ -606,7 +606,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.readAndWriteBufferSize),
+		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
@@ -882,7 +882,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.readAndWriteBufferSize),
+		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
