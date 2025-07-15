@@ -125,6 +125,7 @@ ChunkTranslator::get_cells(
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             // this relies on the fact that channel is blocked when there is no data to pop
             bool popped = channel->pop(r);
+            LOG_INFO("YX channel poped segment {}  field {} chunk {}", segment_id_, field_id_, cid);
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
