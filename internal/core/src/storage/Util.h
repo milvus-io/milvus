@@ -71,10 +71,13 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
                            DataType data_type);
 
 std::string
-GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
+GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
 
 std::string
-GenIndexPathIdentifier(int64_t build_id, int64_t index_version);
+GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
+
+std::string
+GetIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenTextIndexPathIdentifier(int64_t build_id,
@@ -83,7 +86,7 @@ GenTextIndexPathIdentifier(int64_t build_id,
                            int64_t field_id);
 
 std::string
-GenIndexPathPrefix(ChunkManagerPtr cm, int64_t build_id, int64_t index_version);
+GetTextIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenTextIndexPathPrefix(ChunkManagerPtr cm,
@@ -99,6 +102,9 @@ GenJsonKeyIndexPathIdentifier(int64_t build_id,
                               int64_t partition_id,
                               int64_t segment_id,
                               int64_t field_id);
+
+std::string
+GetJsonKeyIndexPathPrefixWithBuildID(ChunkManagerPtr cm, int64_t build_id);
 
 std::string
 GenJsonKeyIndexPathPrefix(ChunkManagerPtr cm,
