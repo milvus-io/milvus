@@ -2839,6 +2839,8 @@ type queryNodeConfig struct {
 	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
 	TieredDiskHighWatermarkRatio    ParamItem `refreshable:"false"`
 	TieredEvictionEnabled           ParamItem `refreshable:"false"`
+	TieredMemoryEvictionFactor      ParamItem `refreshable:"false"`
+	TieredDiskEvictionFactor        ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	TieredLoadingMemoryFactor       ParamItem `refreshable:"false"`
@@ -3047,6 +3049,30 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		Export: true,
 	}
 	p.TieredEvictionEnabled.Init(base.mgr)
+
+	p.TieredMemoryEvictionFactor = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.memoryEvictionFactor",
+		Version:      "2.6.0",
+		DefaultValue: "0.0",
+		Doc: `The factor of memory eviction. Defaults to 0.0, and available range is [0.0, 1.0].
+This factor determines the amount of evictable memory can be evicted in one segment.
+The reason why not make the factor as 1.0 is to avoid frequent eviction.
+`,
+		Export: true,
+	}
+	p.TieredMemoryEvictionFactor.Init(base.mgr)
+
+	p.TieredDiskEvictionFactor = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.diskEvictionFactor",
+		Version:      "2.6.0",
+		DefaultValue: "0.0",
+		Doc: `The factor of disk eviction. Defaults to 0.0, and available range is [0.0, 1.0].
+This factor determines the amount of evictable disk space can be evicted in one segment.
+The reason why not make the factor as 1.0 is to avoid frequent eviction.
+`,
+		Export: true,
+	}
+	p.TieredDiskEvictionFactor.Init(base.mgr)
 
 	p.TieredMemoryLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
