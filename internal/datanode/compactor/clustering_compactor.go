@@ -90,8 +90,10 @@ type clusteringCompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
-	memoryBufferSize int64
-	clusterBuffers   []*ClusterBuffer
+	memoryLimit            int64
+	readAndWriteBufferSize int64
+
+	clusterBuffers []*ClusterBuffer
 	// scalar
 	keyToBufferFunc func(interface{}) *ClusterBuffer
 	// vector
@@ -235,11 +237,12 @@ func (t *clusteringCompactionTask) init() error {
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTime = time.Now()
-	t.memoryBufferSize = t.getMemoryBufferSize()
+	t.memoryLimit = t.getMemoryLimit()
+	t.readAndWriteBufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
-	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryBufferSize), zap.Int("worker_pool_size", workerPoolSize))
+	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryLimit), zap.Int("worker_pool_size", workerPoolSize))
 	return nil
 }
 
@@ -331,7 +334,11 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize), storage.WithStorageConfig(t.compactionParams.StorageConfig))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.partitionID, t.collectionID, t.plan.Channel, 100,
+			storage.WithBufferSize(t.readAndWriteBufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -350,7 +357,11 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize), storage.WithStorageConfig(t.compactionParams.StorageConfig))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.partitionID, t.collectionID, t.plan.Channel, 100,
+			storage.WithBufferSize(t.readAndWriteBufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -406,7 +417,11 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize), storage.WithStorageConfig(t.compactionParams.StorageConfig))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.partitionID, t.collectionID, t.plan.Channel, 100,
+			storage.WithBufferSize(t.readAndWriteBufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -423,7 +438,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 
 func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context, centroids *clusteringpb.ClusteringCentroidsStats) error {
 	bufferNum := len(centroids.GetCentroids())
-	bufferNumByMemory := int(t.memoryBufferSize / expectedBinlogSize)
+	bufferNumByMemory := int(t.memoryLimit / expectedBinlogSize)
 	if bufferNumByMemory < bufferNum {
 		bufferNum = bufferNumByMemory
 	}
@@ -591,7 +606,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithBufferSize(t.readAndWriteBufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
@@ -674,17 +689,17 @@ func (t *clusteringCompactionTask) getWorkerPoolSize() int {
 	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt()), 1.0))
 }
 
-// getMemoryBufferSize return memoryBufferSize
-func (t *clusteringCompactionTask) getMemoryBufferSize() int64 {
+// getMemoryLimit returns the maximum memory that a clustering compaction task is allowed to use
+func (t *clusteringCompactionTask) getMemoryLimit() int64 {
 	return int64(float64(hardware.GetMemoryCount()) * paramtable.Get().DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferLowWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.3)
+	return int64(float64(t.memoryLimit) * 0.3)
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferHighWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.7)
+	return int64(float64(t.memoryLimit) * 0.7)
 }
 
 func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) error {
@@ -867,7 +882,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.memoryBufferSize),
+		storage.WithBufferSize(t.readAndWriteBufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
@@ -971,7 +986,7 @@ func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64
 
 func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
 	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
-	bufferNumByMemory := t.memoryBufferSize / expectedBinlogSize
+	bufferNumByMemory := t.memoryLimit / expectedBinlogSize
 	log.Info("switchPolicyForScalarPlan", zap.Int64("totalRows", totalRows),
 		zap.Int64("bufferNumBySegmentMaxRows", bufferNumBySegmentMaxRows),
 		zap.Int64("bufferNumByMemory", bufferNumByMemory))
