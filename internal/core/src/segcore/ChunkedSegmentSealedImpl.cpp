@@ -635,12 +635,16 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    auto iter = scalar_indexings_.find(field_id);
-    if (iter == scalar_indexings_.end()) {
-        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-    }
-    auto slot = iter->second.get();
-    lck.unlock();
+    auto slot = scalar_indexings_.withRLock([&](auto& mapping) {
+        auto iter = mapping.find(field_id);
+        if (iter == mapping.end()) {
+            return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+        }
+        auto slot = iter->second.get();
+        lck.unlock();
+
+        return slot;
+    });
 
     auto ca = SemiInlineGet(slot->PinCells({0}));
     auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
