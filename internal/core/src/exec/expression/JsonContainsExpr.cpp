@@ -71,7 +71,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -99,7 +99,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContains<std::string>(context);
                     }
                     default:
-                        PanicInfo(
+                        ThrowInfo(
                             DataTypeInvalid,
                             fmt::format("unsupported data type {}", val_type));
                 }
@@ -123,7 +123,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                             return ExecJsonContainsArray(context);
                         }
                         default:
-                            PanicInfo(DataTypeInvalid,
+                            ThrowInfo(DataTypeInvalid,
                                       "unsupported data type:{}",
                                       val_type);
                     }
@@ -149,7 +149,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContainsAll<std::string>(context);
                     }
                     default:
-                        PanicInfo(
+                        ThrowInfo(
                             DataTypeInvalid,
                             fmt::format("unsupported data type {}", val_type));
                 }
@@ -173,7 +173,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                             return ExecJsonContainsAllArray(context);
                         }
                         default:
-                            PanicInfo(DataTypeInvalid,
+                            ThrowInfo(DataTypeInvalid,
                                       "unsupported data type:{}",
                                       val_type);
                     }
@@ -183,7 +183,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
             }
         }
         default:
-            PanicInfo(ExprInvalid,
+            ThrowInfo(ExprInvalid,
                       "unsupported json contains type {}",
                       proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
     }
@@ -1118,7 +1118,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1302,7 +1302,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1676,7 +1676,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1844,7 +1844,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1914,7 +1914,7 @@ PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
             return ExecArrayContainsForIndexSegmentImpl<std::string>();
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type for "
                                   "ExecArrayContainsForIndexSegmentImpl: {}",
                                   expr_->column_.element_type_));
@@ -1957,7 +1957,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
                     return result;
                 }
                 default:
-                    PanicInfo(
+                    ThrowInfo(
                         ExprInvalid,
                         "unsupported array contains type {}",
                         proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));

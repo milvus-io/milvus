@@ -120,7 +120,7 @@ AssembleGroupByValues(
                 break;
             }
             default: {
-                PanicInfo(
+                ThrowInfo(
                     DataTypeInvalid,
                     fmt::format("unsupported datatype for group_by operations ",
                                 group_by_data_type));

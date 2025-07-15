@@ -64,7 +64,7 @@ valid_str_id(size_t str_id) {
 void
 StringIndexMarisa::Build(const Config& config) {
     if (built_) {
-        PanicInfo(IndexAlreadyBuild, "index has been built");
+        ThrowInfo(IndexAlreadyBuild, "index has been built");
     }
     auto field_datas =
         storage::CacheRawDataAndFillMissing(file_manager_, config);
@@ -119,7 +119,7 @@ StringIndexMarisa::Build(size_t n,
                          const std::string* values,
                          const bool* valid_data) {
     if (built_) {
-        PanicInfo(IndexAlreadyBuild, "index has been built");
+        ThrowInfo(IndexAlreadyBuild, "index has been built");
     }
 
     marisa::Keyset keyset;
@@ -408,7 +408,7 @@ StringIndexMarisa::Range(std::string value, OpType op) {
             break;
         }
         default:
-            PanicInfo(
+            ThrowInfo(
                 OpTypeInvalid,
                 fmt::format("Invalid OperatorType: {}", static_cast<int>(op)));
     }

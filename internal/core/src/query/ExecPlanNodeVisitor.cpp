@@ -105,7 +105,7 @@ ExecPlanNodeVisitor::ExecuteTask(
             BitsetTypeView view(vec->GetRawData(), vec->size());
             bitset_holder.append(view);
         } else {
-            PanicInfo(UnexpectedError, "expr return type not matched");
+            ThrowInfo(UnexpectedError, "expr return type not matched");
         }
     }
     return bitset_holder;

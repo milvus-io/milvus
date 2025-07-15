@@ -111,5 +111,5 @@ TEST(GetArrowDataTypeTest, VECTOR_INT8) {
 TEST(GetArrowDataTypeTest, InvalidDataType) {
     EXPECT_THROW(
         GetArrowDataType(static_cast<DataType>(999)),
-        std::runtime_error);  // Assuming PanicInfo throws a std::runtime_error
+        std::runtime_error);  // Assuming ThrowInfo throws a std::runtime_error
 }

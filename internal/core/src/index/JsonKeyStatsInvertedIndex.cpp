@@ -235,7 +235,7 @@ JsonKeyStatsInvertedIndex::AddJson(
     jsmn_parser parser;
     jsmntok_t* tokens = (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));
     if (!tokens) {
-        PanicInfo(ErrorCode::UnexpectedError, "alloc jsmn token failed");
+        ThrowInfo(ErrorCode::UnexpectedError, "alloc jsmn token failed");
         return;
     }
     int num_tokens = 0;
@@ -252,12 +252,12 @@ JsonKeyStatsInvertedIndex::AddJson(
                 tokens = (jsmntok_t*)realloc(
                     tokens, token_capacity * sizeof(jsmntok_t));
                 if (!tokens) {
-                    PanicInfo(ErrorCode::UnexpectedError, "realloc failed");
+                    ThrowInfo(ErrorCode::UnexpectedError, "realloc failed");
                 }
                 continue;
             } else {
                 free(tokens);
-                PanicInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::UnexpectedError,
                           "Failed to parse Json: {}, error: {}",
                           json,
                           int(r));

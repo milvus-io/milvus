@@ -49,7 +49,7 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {
-        PanicInfo(IndexBuildError,
+        ThrowInfo(IndexBuildError,
                   "build inverted index temp dir:{} not empty",
                   path_);
     }
@@ -397,7 +397,7 @@ InvertedIndexTantivy<T>::Range(T value, OpType op) {
             wrapper_->lower_bound_range_query(value, true, &bitset);
         } break;
         default:
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
     }
 
@@ -613,7 +613,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         }
 
         default:
-            PanicInfo(ErrorCode::NotImplemented,
+            ThrowInfo(ErrorCode::NotImplemented,
                       fmt::format("Inverted index not supported on {}",
                                   schema_.data_type()));
     }

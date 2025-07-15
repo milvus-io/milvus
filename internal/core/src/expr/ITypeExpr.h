@@ -51,7 +51,7 @@ struct ExprInfo {
                 case GenericValue::VAL_NOT_SET:
                     return true;
                 default:
-                    PanicInfo(NotImplemented,
+                    ThrowInfo(NotImplemented,
                               "Not supported GenericValue type");
             }
         }
@@ -78,7 +78,7 @@ struct ExprInfo {
                 case GenericValue::VAL_NOT_SET:
                     break;
                 default:
-                    PanicInfo(NotImplemented,
+                    ThrowInfo(NotImplemented,
                               "Not supported GenericValue type");
             }
             return h;

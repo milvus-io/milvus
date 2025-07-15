@@ -1257,7 +1257,7 @@ GetValueFromProto(const milvus::proto::plan::GenericValue& value_proto) {
     } else if constexpr (std::is_same_v<T, milvus::proto::plan::GenericValue>) {
         return static_cast<T>(value_proto);
     } else {
-        PanicInfo(milvus::ErrorCode::UnexpectedError,
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
                   "unsupported generic value type");
     }
 };
@@ -1338,7 +1338,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                     break;
                 }
                 default: {
-                    PanicInfo(Unsupported, "unsupported range node");
+                    ThrowInfo(Unsupported, "unsupported range node");
                 }
             }
 
@@ -1477,7 +1477,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                         break;
                     }
                     default: {
-                        PanicInfo(Unsupported, "unsupported range node");
+                        ThrowInfo(Unsupported, "unsupported range node");
                     }
                 }
 
@@ -1616,7 +1616,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                         break;
                     }
                     default: {
-                        PanicInfo(Unsupported, "unsupported range node");
+                        ThrowInfo(Unsupported, "unsupported range node");
                     }
                 }
 
@@ -1850,7 +1850,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                     break;
                 }
                 default: {
-                    PanicInfo(Unsupported, "unsupported range node");
+                    ThrowInfo(Unsupported, "unsupported range node");
                 }
             }
 
@@ -3788,7 +3788,7 @@ TEST_P(ExprTest, TestReorder) {
                 return expr3;
             };
             default:
-                PanicInfo(ErrorCode::UnexpectedError, "not implement");
+                ThrowInfo(ErrorCode::UnexpectedError, "not implement");
         }
     };
     BitsetType final;
@@ -4226,7 +4226,7 @@ TEST_P(ExprTest, TestMutiInConvert) {
                     expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
             };
             default:
-                PanicInfo(ErrorCode::UnexpectedError, "not implement");
+                ThrowInfo(ErrorCode::UnexpectedError, "not implement");
         }
     };
 

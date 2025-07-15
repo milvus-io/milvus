@@ -154,11 +154,11 @@ PhyIterativeFilterNode::GetOutput() {
                     valid_bitset.append(valid_view);
                     num_processed_rows_ += col_vec_size;
                 } else {
-                    PanicInfo(ExprInvalid,
+                    ThrowInfo(ExprInvalid,
                               "PhyIterativeFilterNode result should be bitmap");
                 }
             } else {
-                PanicInfo(
+                ThrowInfo(
                     ExprInvalid,
                     "PhyIterativeFilterNode result should be ColumnVector");
             }

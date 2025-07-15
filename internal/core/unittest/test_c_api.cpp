@@ -4428,7 +4428,7 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid, "not supported type");
+                ThrowInfo(DataTypeInvalid, "not supported type");
             }
         }
     }

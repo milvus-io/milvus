@@ -35,7 +35,7 @@ LocalChunkManager::Exist(const std::string& filepath) {
     boost::system::error_code err;
     bool isExist = boost::filesystem::exists(absPath, err);
     if (err && err.value() != boost::system::errc::no_such_file_or_directory) {
-        PanicInfo(FileReadFailed,
+        ThrowInfo(FileReadFailed,
                   fmt::format("local file {} exist interface failed, error: {}",
                               filepath,
                               err.message()));
@@ -48,12 +48,12 @@ LocalChunkManager::Size(const std::string& filepath) {
     boost::filesystem::path absPath(filepath);
 
     if (!Exist(filepath)) {
-        PanicInfo(PathNotExist, "invalid local path:" + absPath.string());
+        ThrowInfo(PathNotExist, "invalid local path:" + absPath.string());
     }
     boost::system::error_code err;
     int64_t size = boost::filesystem::file_size(absPath, err);
     if (err) {
-        PanicInfo(FileReadFailed,
+        ThrowInfo(FileReadFailed,
                   fmt::format("get local file {} size failed, error: {}",
                               filepath,
                               err.message()));
@@ -67,7 +67,7 @@ LocalChunkManager::Remove(const std::string& filepath) {
     boost::system::error_code err;
     boost::filesystem::remove(absPath, err);
     if (err) {
-        PanicInfo(FileWriteFailed,
+        ThrowInfo(FileWriteFailed,
                   fmt::format("remove local file {} failed, error: {}",
                               filepath,
                               err.message()));
@@ -90,7 +90,7 @@ LocalChunkManager::Read(const std::string& filepath,
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << filepath << " failed, "
                 << strerror(errno);
-        PanicInfo(FileOpenFailed, err_msg.str());
+        ThrowInfo(FileOpenFailed, err_msg.str());
     }
 
     infile.seekg(offset, std::ios::beg);
@@ -99,7 +99,7 @@ LocalChunkManager::Read(const std::string& filepath,
             std::stringstream err_msg;
             err_msg << "Error: read local file '" << filepath << " failed, "
                     << strerror(errno);
-            PanicInfo(FileReadFailed, err_msg.str());
+            ThrowInfo(FileReadFailed, err_msg.str());
         }
     }
     return infile.gcount();
@@ -120,13 +120,13 @@ LocalChunkManager::Write(const std::string& absPathStr,
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        PanicInfo(FileOpenFailed, err_msg.str());
+        ThrowInfo(FileOpenFailed, err_msg.str());
     }
     if (!outfile.write(reinterpret_cast<char*>(buf), size)) {
         std::stringstream err_msg;
         err_msg << "Error: write local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        PanicInfo(FileWriteFailed, err_msg.str());
+        ThrowInfo(FileWriteFailed, err_msg.str());
     }
 }
 
@@ -148,7 +148,7 @@ LocalChunkManager::Write(const std::string& absPathStr,
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        PanicInfo(FileOpenFailed, err_msg.str());
+        ThrowInfo(FileOpenFailed, err_msg.str());
     }
 
     outfile.seekp(offset, std::ios::beg);
@@ -156,13 +156,13 @@ LocalChunkManager::Write(const std::string& absPathStr,
         std::stringstream err_msg;
         err_msg << "Error: write local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        PanicInfo(FileWriteFailed, err_msg.str());
+        ThrowInfo(FileWriteFailed, err_msg.str());
     }
 }
 
 std::vector<std::string>
 LocalChunkManager::ListWithPrefix(const std::string& filepath) {
-    PanicInfo(NotImplemented,
+    ThrowInfo(NotImplemented,
               GetName() + "::ListWithPrefix" + " not implement now");
 }
 
@@ -179,7 +179,7 @@ LocalChunkManager::CreateFile(const std::string& filepath) {
         std::stringstream err_msg;
         err_msg << "Error: create new local file '" << absPathStr << " failed, "
                 << strerror(errno);
-        PanicInfo(FileCreateFailed, err_msg.str());
+        ThrowInfo(FileCreateFailed, err_msg.str());
     }
     file.close();
     return true;
@@ -191,7 +191,7 @@ LocalChunkManager::DirExist(const std::string& dir) {
     boost::system::error_code err;
     bool isExist = boost::filesystem::exists(dirPath, err);
     if (err && err.value() != boost::system::errc::no_such_file_or_directory) {
-        PanicInfo(
+        ThrowInfo(
             FileWriteFailed,
             fmt::format("local directory {} exist interface failed, error: {}",
                         dir,
@@ -204,12 +204,12 @@ void
 LocalChunkManager::CreateDir(const std::string& dir) {
     bool isExist = DirExist(dir);
     if (isExist) {
-        PanicInfo(PathAlreadyExist, "dir:" + dir + " already exists");
+        ThrowInfo(PathAlreadyExist, "dir:" + dir + " already exists");
     }
     boost::filesystem::path dirPath(dir);
     auto create_success = boost::filesystem::create_directories(dirPath);
     if (!create_success) {
-        PanicInfo(FileCreateFailed, "create dir:" + dir + " failed");
+        ThrowInfo(FileCreateFailed, "create dir:" + dir + " failed");
     }
 }
 
@@ -225,7 +225,7 @@ LocalChunkManager::RemoveDir(const std::string& dir) {
             paths.push_back(it->path().string());
         }
         std::string files = boost::algorithm::join(paths, ", ");
-        PanicInfo(FileWriteFailed,
+        ThrowInfo(FileWriteFailed,
                   fmt::format(
                       "remove local directory:{} failed, error: {}, files: {}",
                       dir,
@@ -239,7 +239,7 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     bool is_dir = boost::filesystem::is_directory(dirPath);
     if (!is_dir) {
-        PanicInfo(PathNotExist, "dir:" + dir + " not exists");
+        ThrowInfo(PathNotExist, "dir:" + dir + " not exists");
     }
 
     using boost::filesystem::directory_entry;

@@ -123,7 +123,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                     json_path_, value, T(), false, true, true, false, &bitset);
             } break;
             default:
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType: {}", op));
         }
         return bitset;

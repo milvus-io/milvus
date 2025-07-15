@@ -93,7 +93,7 @@ class OffsetOrderedMap : public OffsetMap {
 
     void
     seal() override {
-        PanicInfo(
+        ThrowInfo(
             NotImplemented,
             "OffsetOrderedMap used for growing segment could not be sealed.");
     }
@@ -200,7 +200,7 @@ class OffsetOrderedArray : public OffsetMap {
     void
     insert(const PkType& pk, int64_t offset) override {
         if (is_sealed) {
-            PanicInfo(Unsupported,
+            ThrowInfo(Unsupported,
                       "OffsetOrderedArray could not insert after seal");
         }
         array_.push_back(
@@ -306,7 +306,7 @@ struct InsertRecord {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format("unsupported pk type",
                                               field_meta.get_data_type()));
                     }
@@ -365,7 +365,7 @@ struct InsertRecord {
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported primary key data type",
                                       data_type));
             }
@@ -446,7 +446,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format("unsupported pk type",
                                               field_meta.get_data_type()));
                     }
@@ -482,7 +482,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported primary key data type",
                                           data_type));
                 }
@@ -570,7 +570,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                                                dense_vec_mmap_descriptor);
                 return;
             } else {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported vector type",
                                       field_meta.get_data_type()));
             }
@@ -628,7 +628,7 @@ struct InsertRecord<false> : public InsertRecord<true> {
                 return;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported scalar type",
                                       field_meta.get_data_type()));
             }

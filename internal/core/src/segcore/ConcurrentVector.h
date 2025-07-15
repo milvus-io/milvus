@@ -201,13 +201,13 @@ class ConcurrentVectorImpl : public VectorBase {
     SpanBase
     get_span_base(int64_t chunk_id) const override {
         if constexpr (std::is_same_v<Type, VectorArray>) {
-            PanicInfo(NotImplemented, "unimplemented");
+            ThrowInfo(NotImplemented, "unimplemented");
         } else if constexpr (is_type_entire_row) {
             return chunks_ptr_->get_span(chunk_id);
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
             // only for testing
-            PanicInfo(NotImplemented, "unimplemented");
+            ThrowInfo(NotImplemented, "unimplemented");
         } else {
             auto chunk_data = chunks_ptr_->get_chunk_data(chunk_id);
             auto chunk_size = chunks_ptr_->get_chunk_size(chunk_id);
@@ -275,13 +275,13 @@ class ConcurrentVectorImpl : public VectorBase {
     int64_t
     get_element_size() const override {
         if constexpr (std::is_same_v<Type, VectorArray>) {
-            PanicInfo(NotImplemented, "unimplemented");
+            ThrowInfo(NotImplemented, "unimplemented");
         } else if constexpr (is_type_entire_row) {
             return chunks_ptr_->get_element_size();
         } else if constexpr (std::is_same_v<Type, int64_t> ||  // NOLINT
                              std::is_same_v<Type, int>) {
             // only for testing
-            PanicInfo(NotImplemented, "unimplemented");
+            ThrowInfo(NotImplemented, "unimplemented");
         } else {
             static_assert(
                 std::is_same_v<typename TraitType::embedded_type, Type>);
