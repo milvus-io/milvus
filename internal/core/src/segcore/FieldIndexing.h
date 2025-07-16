@@ -47,12 +47,6 @@ class FieldIndexing {
     operator=(const FieldIndexing&) = delete;
     virtual ~FieldIndexing() = default;
 
-    // Do this in parallel
-    virtual void
-    BuildIndexRange(int64_t ack_beg,
-                    int64_t ack_end,
-                    const VectorBase* vec_base) = 0;
-
     virtual void
     AppendSegmentIndexDense(int64_t reserved_offset,
                             int64_t size,
@@ -110,11 +104,6 @@ template <typename T>
 class ScalarFieldIndexing : public FieldIndexing {
  public:
     using FieldIndexing::FieldIndexing;
-
-    void
-    BuildIndexRange(int64_t ack_beg,
-                    int64_t ack_end,
-                    const VectorBase* vec_base) override;
 
     void
     AppendSegmentIndexDense(int64_t reserved_offset,
@@ -179,11 +168,6 @@ class VectorFieldIndexing : public FieldIndexing {
                                  int64_t segment_max_row_count,
                                  const SegcoreConfig& segcore_config,
                                  const VectorBase* field_raw_data);
-
-    void
-    BuildIndexRange(int64_t ack_beg,
-                    int64_t ack_end,
-                    const VectorBase* vec_base) override;
 
     void
     AppendSegmentIndexDense(int64_t reserved_offset,

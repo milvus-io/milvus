@@ -31,6 +31,9 @@ namespace milvus::index {
 
 template <typename T>
 class ScalarIndexSort : public ScalarIndex<T> {
+    static_assert(std::is_arithmetic_v<T>,
+                  "ScalarIndexSort only supports arithmetic types");
+
  public:
     explicit ScalarIndexSort(
         const storage::FileManagerContext& file_manager_context =
