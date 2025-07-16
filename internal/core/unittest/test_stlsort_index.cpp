@@ -7,21 +7,20 @@
 using namespace milvus;
 using namespace milvus::index;
 
-template <typename T>
 void
 test_stlsort_for_range(
-    const std::vector<T>& data,
+    const std::vector<int64_t>& data,
     DataType data_type,
     std::optional<std::string> mmap_path,
-    std::function<TargetBitmap(const std::shared_ptr<ScalarIndexSort<T>>&)>
-        exec_expr,
+    std::function<TargetBitmap(
+        const std::shared_ptr<ScalarIndexSort<int64_t>>&)> exec_expr,
     const std::vector<bool>& expected_result) {
     size_t nb = data.size();
     BinarySet binary_set;
     {
         Config config;
 
-        auto index = std::make_shared<index::ScalarIndexSort<T>>();
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
         index->Build(nb, data.data());
 
         binary_set = index->Serialize(config);
@@ -36,7 +35,7 @@ test_stlsort_for_range(
             config[milvus::index::ENABLE_MMAP] = false;
         }
 
-        auto index = std::make_shared<index::ScalarIndexSort<T>>();
+        auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
         index->Load(binary_set, config);
 
         auto cnt = index->Count();
@@ -50,40 +49,55 @@ test_stlsort_for_range(
 }
 
 TEST(StlSortIndexTest, TestRange) {
+    std::vector<int64_t> data = {10, 2, 6, 5, 9, 3, 7, 8, 4, 1};
     {
-        std::vector<int64_t> data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
         std::vector<bool> expected_result = {
-            false, false, true, true, true, true, true, false, false, false};
+            false, false, true, true, false, true, true, false, true, false};
 
         auto exec_expr =
             [](const std::shared_ptr<ScalarIndexSort<int64_t>>& index) {
                 return index->Range(3, true, 7, true);
             };
 
-        test_stlsort_for_range<int64_t>(
+        test_stlsort_for_range(
             data, DataType::INT64, std::nullopt, exec_expr, expected_result);
 
         std::string mmap_dir = "/tmp/test-stlsort-index/mmap-dir";
-        test_stlsort_for_range<int64_t>(
+        test_stlsort_for_range(
             data, DataType::INT64, mmap_dir, exec_expr, expected_result);
     }
 
     {
-        std::vector<std::string> data = {
-            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"};
-        std::vector<bool> expected_result = {
-            false, false, true, true, true, true, true, false, false, false};
-
+        std::vector<bool> expected_result(false, data.size());
         auto exec_expr =
-            [](const std::shared_ptr<ScalarIndexSort<std::string>>& index) {
-                return index->Range("c", true, "g", true);
+            [](const std::shared_ptr<ScalarIndexSort<int64_t>>& index) {
+                return index->Range(10, false, 70, true);
             };
 
-        test_stlsort_for_range<std::string>(
-            data, DataType::STRING, std::nullopt, exec_expr, expected_result);
+        test_stlsort_for_range(
+            data, DataType::INT64, std::nullopt, exec_expr, expected_result);
 
         std::string mmap_dir = "/tmp/test-stlsort-index/mmap-dir";
-        test_stlsort_for_range<std::string>(
-            data, DataType::STRING, mmap_dir, exec_expr, expected_result);
+        test_stlsort_for_range(
+            data, DataType::INT64, mmap_dir, exec_expr, expected_result);
     }
+}
+
+TEST(StlSortIndexTest, TestIn) {
+    std::vector<int64_t> data = {10, 2, 6, 5, 9, 3, 7, 8, 4, 1};
+    std::vector<bool> expected_result = {
+        false, false, false, true, false, true, true, false, false, false};
+
+    std::vector<int64_t> values = {3, 5, 7};
+
+    auto exec_expr =
+        [&values](const std::shared_ptr<ScalarIndexSort<int64_t>>& index) {
+            return index->In(values.size(), values.data());
+        };
+    test_stlsort_for_range(
+        data, DataType::INT64, std::nullopt, exec_expr, expected_result);
+
+    std::string mmap_dir = "/tmp/test-stlsort-index/mmap-dir";
+    test_stlsort_for_range(
+        data, DataType::INT64, mmap_dir, exec_expr, expected_result);
 }

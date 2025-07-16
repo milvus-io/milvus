@@ -29,6 +29,14 @@
 #include "storage/FileWriter.h"
 #include "common/File.h"
 
+#if defined(__clang__) || defined(__GNUC__)
+#define ALWAYS_INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define ALWAYS_INLINE __forceinline
+#else
+#define ALWAYS_INLINE inline
+#endif
+
 namespace milvus::index {
 
 template <typename T>
@@ -138,13 +146,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
  public:
     // zero-cost data acess api
-    __attribute__((always_inline)) const IndexStructure<T>&
+    ALWAYS_INLINE const IndexStructure<T>&
     operator[](size_t idx) const {
         assert(idx < size_);
         return data_ptr_[idx];
     }
 
-    __attribute__((always_inline)) const IndexStructure<T>*
+    ALWAYS_INLINE const IndexStructure<T>*
     begin() const {
         return data_ptr_;
     }
@@ -152,12 +160,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     using const_iterator = const IndexStructure<T>*;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    __attribute__((always_inline)) const const_reverse_iterator
+    ALWAYS_INLINE const_reverse_iterator
     rbegin() const {
         return const_reverse_iterator(end());
     }
 
-    __attribute__((always_inline)) const IndexStructure<T>*
+    ALWAYS_INLINE const IndexStructure<T>*
     end() const {
         return end_ptr_;
     }
@@ -184,7 +192,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;
 
-    // for ram. Also used for building index.
+    // for ram and also used for building index.
     std::vector<IndexStructure<T>> data_;
 
     // for mmap
