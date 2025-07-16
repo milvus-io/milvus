@@ -1163,8 +1163,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	fieldBinlogPaths := make([][]string, 0)
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		timestampTo   int64                 = -1
-		timestampFrom int64                 = -1
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
@@ -1183,10 +1181,16 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
+	requiredFields := typeutil.NewSet[int64]()
+	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
 	for idx := 0; idx < binlogNum; idx++ {
 		var ps []string
 		for _, f := range segment.GetFieldBinlogs() {
-			ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
+			// Only download necessary fields during clustering analyze phase
+			// system fields, pk field, clustering key field
+			if requiredFields.Contain(f.GetFieldID()) {
+				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
+			}
 		}
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
@@ -1224,14 +1228,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			// Filtering expired entity
 			if expiredFilter.Filtered(v.PK.GetValue(), uint64(v.Timestamp)) {
 				continue
-			}
-
-			// Update timestampFrom, timestampTo
-			if v.Timestamp < timestampFrom || timestampFrom == -1 {
-				timestampFrom = v.Timestamp
-			}
-			if v.Timestamp > timestampTo || timestampFrom == -1 {
-				timestampTo = v.Timestamp
 			}
 			// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 			row, ok := v.Value.(map[typeutil.UniqueID]interface{})
