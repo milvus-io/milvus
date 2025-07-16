@@ -197,12 +197,14 @@ class ScalarIndexSort : public ScalarIndex<T> {
     TargetBitmap valid_bitset_;
 
     // for ram and also used for building index.
+    // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     std::vector<IndexStructure<T>> data_;
 
     // for mmap
     bool is_mmap_{false};
     int64_t mmap_size_ = 0;
     int64_t data_size_ = 0;
+    // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     char* mmap_data_ = nullptr;
 
     mutable const IndexStructure<T>* data_ptr_ = nullptr;
