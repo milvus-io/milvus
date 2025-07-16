@@ -276,7 +276,6 @@ type PackedBinlogRecordWriter struct {
 	schema              *schemapb.CollectionSchema
 	BlobsWriter         ChunkedBlobsWriter
 	allocator           allocator.Interface
-	chunkSize           uint64
 	maxRowNum           int64
 	arrowSchema         *arrow.Schema
 	bufferSize          int64
@@ -531,7 +530,7 @@ func (pw *PackedBinlogRecordWriter) GetBufferUncompressed() uint64 {
 }
 
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
-	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, chunkSize uint64, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
+	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
@@ -566,7 +565,6 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		arrowSchema:         arrowSchema,
 		BlobsWriter:         blobsWriter,
 		allocator:           allocator,
-		chunkSize:           chunkSize,
 		maxRowNum:           maxRowNum,
 		bufferSize:          bufferSize,
 		multiPartUploadSize: multiPartUploadSize,

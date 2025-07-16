@@ -277,7 +277,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, maxRowNum,
+			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 		)
