@@ -3056,8 +3056,7 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		DefaultValue: "0.0",
 		Doc: `The factor of memory eviction. Defaults to 0.0, and available range is [0.0, 1.0].
 This factor determines the amount of evictable memory can be evicted in one segment.
-The reason why not make the factor as 1.0 is to avoid frequent eviction.
-`,
+The reason why not make the factor as 1.0 is to avoid frequent eviction.`,
 		Export: true,
 	}
 	p.TieredMemoryEvictionFactor.Init(base.mgr)
@@ -3068,8 +3067,7 @@ The reason why not make the factor as 1.0 is to avoid frequent eviction.
 		DefaultValue: "0.0",
 		Doc: `The factor of disk eviction. Defaults to 0.0, and available range is [0.0, 1.0].
 This factor determines the amount of evictable disk space can be evicted in one segment.
-The reason why not make the factor as 1.0 is to avoid frequent eviction.
-`,
+The reason why not make the factor as 1.0 is to avoid frequent eviction.`,
 		Export: true,
 	}
 	p.TieredDiskEvictionFactor.Init(base.mgr)

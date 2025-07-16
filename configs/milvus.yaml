@@ -477,6 +477,14 @@ queryNode:
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
+      # The factor of memory eviction. Defaults to 0.0, and available range is [0.0, 1.0].
+      # This factor determines the amount of evictable memory can be evicted in one segment.
+      # The reason why not make the factor as 1.0 is to avoid frequent eviction.
+      memoryEvictionFactor: 0
+      # The factor of disk eviction. Defaults to 0.0, and available range is [0.0, 1.0].
+      # This factor determines the amount of evictable disk space can be evicted in one segment.
+      # The reason why not make the factor as 1.0 is to avoid frequent eviction.
+      diskEvictionFactor: 0
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
