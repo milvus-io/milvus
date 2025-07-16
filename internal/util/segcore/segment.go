@@ -291,6 +291,14 @@ func (s *cSegmentImpl) FinishLoad() error {
 	return nil
 }
 
+func (s *cSegmentImpl) DropIndex(ctx context.Context, fieldID int64) error {
+	status := C.DropSealedSegmentIndex(s.ptr, C.int64_t(fieldID))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return errors.Wrap(err, "failed to drop index")
+	}
+	return nil
+}
+
 // Release releases the segment.
 func (s *cSegmentImpl) Release() {
 	C.DeleteSegment(s.ptr)

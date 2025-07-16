@@ -1874,10 +1874,12 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    auto has_index =
-        segment_->HasIndex(field_id_,
-                           milvus::Json::pointer(expr_->column_.nested_path_),
-                           val_type);
+    bool has_index = false;
+    auto& schema = segment_->get_schema();
+    auto& field_meta = schema[expr_->column_.field_id_];
+    pinned_index_ =
+        PinIndex(segment_, field_meta, expr_->column_.nested_path_, val_type);
+    has_index = pinned_index_.get() != nullptr;
     switch (val_type) {
         case DataType::STRING:
             use_index_ = has_index &&

@@ -98,6 +98,8 @@ func GetTaskType(task Task) Type {
 		return TaskTypeUpdate
 	case task.Actions()[0].Type() == ActionTypeStatsUpdate:
 		return TaskTypeStatsUpdate
+	case task.Actions()[0].Type() == ActionTypeDropIndex:
+		return TaskTypeDropIndex
 	}
 	return 0
 }
