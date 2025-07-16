@@ -188,7 +188,7 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2GB # Maximum size of a segment, default is 2GB
+      maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
@@ -196,14 +196,14 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
-      maxBytes: 128M # Maximum size of write buffer in bytes.
+      maxBytes: 256M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
-      maxFlushSize: 4M # Maximum size of a fragment in bytes to flush, default is 4M.
+      maxFlushSize: 2M # Maximum size of a fragment in bytes to flush.
       maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
-      maxSize: 8M # The maximum size of the merged files, default is 8M.
+      maxSize: 2M # The maximum size of the merged files.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
