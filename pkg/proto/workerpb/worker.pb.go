@@ -1044,32 +1044,37 @@ type CreateStatsRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	ClusterID                 string                     `protobuf:"bytes,1,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
-	TaskID                    int64                      `protobuf:"varint,2,opt,name=taskID,proto3" json:"taskID,omitempty"`
-	CollectionID              int64                      `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	PartitionID               int64                      `protobuf:"varint,4,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
-	InsertChannel             string                     `protobuf:"bytes,5,opt,name=insert_channel,json=insertChannel,proto3" json:"insert_channel,omitempty"`
-	SegmentID                 int64                      `protobuf:"varint,6,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
-	InsertLogs                []*datapb.FieldBinlog      `protobuf:"bytes,7,rep,name=insert_logs,json=insertLogs,proto3" json:"insert_logs,omitempty"`
-	DeltaLogs                 []*datapb.FieldBinlog      `protobuf:"bytes,8,rep,name=delta_logs,json=deltaLogs,proto3" json:"delta_logs,omitempty"`
-	StorageConfig             *indexpb.StorageConfig     `protobuf:"bytes,9,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
-	Schema                    *schemapb.CollectionSchema `protobuf:"bytes,10,opt,name=schema,proto3" json:"schema,omitempty"`
-	SubJobType                indexpb.StatsSubJob        `protobuf:"varint,11,opt,name=subJobType,proto3,enum=milvus.proto.index.StatsSubJob" json:"subJobType,omitempty"`
-	TargetSegmentID           int64                      `protobuf:"varint,12,opt,name=targetSegmentID,proto3" json:"targetSegmentID,omitempty"`
-	StartLogID                int64                      `protobuf:"varint,13,opt,name=startLogID,proto3" json:"startLogID,omitempty"`
-	EndLogID                  int64                      `protobuf:"varint,14,opt,name=endLogID,proto3" json:"endLogID,omitempty"`
-	NumRows                   int64                      `protobuf:"varint,15,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
-	CollectionTtl             int64                      `protobuf:"varint,16,opt,name=collection_ttl,json=collectionTtl,proto3" json:"collection_ttl,omitempty"`
-	CurrentTs                 uint64                     `protobuf:"varint,17,opt,name=current_ts,json=currentTs,proto3" json:"current_ts,omitempty"`
-	TaskVersion               int64                      `protobuf:"varint,18,opt,name=task_version,json=taskVersion,proto3" json:"task_version,omitempty"`
-	BinlogMaxSize             uint64                     `protobuf:"varint,19,opt,name=binlogMaxSize,proto3" json:"binlogMaxSize,omitempty"`
-	EnableJsonKeyStats        bool                       `protobuf:"varint,20,opt,name=enable_json_key_stats,json=enableJsonKeyStats,proto3" json:"enable_json_key_stats,omitempty"`
-	JsonKeyStatsTantivyMemory int64                      `protobuf:"varint,21,opt,name=json_key_stats_tantivy_memory,json=jsonKeyStatsTantivyMemory,proto3" json:"json_key_stats_tantivy_memory,omitempty"`
-	JsonKeyStatsDataFormat    int64                      `protobuf:"varint,22,opt,name=json_key_stats_data_format,json=jsonKeyStatsDataFormat,proto3" json:"json_key_stats_data_format,omitempty"`
-	EnableJsonKeyStatsInSort  bool                       `protobuf:"varint,23,opt,name=enable_json_key_stats_in_sort,json=enableJsonKeyStatsInSort,proto3" json:"enable_json_key_stats_in_sort,omitempty"`
-	TaskSlot                  int64                      `protobuf:"varint,24,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
-	StorageVersion            int64                      `protobuf:"varint,25,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
-	CurrentScalarIndexVersion int32                      `protobuf:"varint,26,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`
+	ClusterID     string                `protobuf:"bytes,1,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
+	TaskID        int64                 `protobuf:"varint,2,opt,name=taskID,proto3" json:"taskID,omitempty"`
+	CollectionID  int64                 `protobuf:"varint,3,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	PartitionID   int64                 `protobuf:"varint,4,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
+	InsertChannel string                `protobuf:"bytes,5,opt,name=insert_channel,json=insertChannel,proto3" json:"insert_channel,omitempty"`
+	SegmentID     int64                 `protobuf:"varint,6,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	InsertLogs    []*datapb.FieldBinlog `protobuf:"bytes,7,rep,name=insert_logs,json=insertLogs,proto3" json:"insert_logs,omitempty"`
+	// deprecated, after sort stats moved, its not used.
+	DeltaLogs       []*datapb.FieldBinlog      `protobuf:"bytes,8,rep,name=delta_logs,json=deltaLogs,proto3" json:"delta_logs,omitempty"`
+	StorageConfig   *indexpb.StorageConfig     `protobuf:"bytes,9,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
+	Schema          *schemapb.CollectionSchema `protobuf:"bytes,10,opt,name=schema,proto3" json:"schema,omitempty"`
+	SubJobType      indexpb.StatsSubJob        `protobuf:"varint,11,opt,name=subJobType,proto3,enum=milvus.proto.index.StatsSubJob" json:"subJobType,omitempty"`
+	TargetSegmentID int64                      `protobuf:"varint,12,opt,name=targetSegmentID,proto3" json:"targetSegmentID,omitempty"`
+	StartLogID      int64                      `protobuf:"varint,13,opt,name=startLogID,proto3" json:"startLogID,omitempty"`
+	EndLogID        int64                      `protobuf:"varint,14,opt,name=endLogID,proto3" json:"endLogID,omitempty"`
+	NumRows         int64                      `protobuf:"varint,15,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
+	// deprecated, after sort stats moved, its not used.
+	CollectionTtl int64 `protobuf:"varint,16,opt,name=collection_ttl,json=collectionTtl,proto3" json:"collection_ttl,omitempty"`
+	// deprecated, after sort stats moved, its not used.
+	CurrentTs   uint64 `protobuf:"varint,17,opt,name=current_ts,json=currentTs,proto3" json:"current_ts,omitempty"`
+	TaskVersion int64  `protobuf:"varint,18,opt,name=task_version,json=taskVersion,proto3" json:"task_version,omitempty"`
+	// deprecated, after sort stats moved, its not used.
+	BinlogMaxSize             uint64 `protobuf:"varint,19,opt,name=binlogMaxSize,proto3" json:"binlogMaxSize,omitempty"`
+	EnableJsonKeyStats        bool   `protobuf:"varint,20,opt,name=enable_json_key_stats,json=enableJsonKeyStats,proto3" json:"enable_json_key_stats,omitempty"`
+	JsonKeyStatsTantivyMemory int64  `protobuf:"varint,21,opt,name=json_key_stats_tantivy_memory,json=jsonKeyStatsTantivyMemory,proto3" json:"json_key_stats_tantivy_memory,omitempty"`
+	JsonKeyStatsDataFormat    int64  `protobuf:"varint,22,opt,name=json_key_stats_data_format,json=jsonKeyStatsDataFormat,proto3" json:"json_key_stats_data_format,omitempty"`
+	// deprecated, the sort logic has been moved into the compaction process.
+	EnableJsonKeyStatsInSort  bool  `protobuf:"varint,23,opt,name=enable_json_key_stats_in_sort,json=enableJsonKeyStatsInSort,proto3" json:"enable_json_key_stats_in_sort,omitempty"`
+	TaskSlot                  int64 `protobuf:"varint,24,opt,name=task_slot,json=taskSlot,proto3" json:"task_slot,omitempty"`
+	StorageVersion            int64 `protobuf:"varint,25,opt,name=storage_version,json=storageVersion,proto3" json:"storage_version,omitempty"`
+	CurrentScalarIndexVersion int32 `protobuf:"varint,26,opt,name=current_scalar_index_version,json=currentScalarIndexVersion,proto3" json:"current_scalar_index_version,omitempty"`
 }
 
 func (x *CreateStatsRequest) Reset() {

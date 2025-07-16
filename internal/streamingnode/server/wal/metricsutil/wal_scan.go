@@ -161,20 +161,20 @@ func (m *ScannerMetrics) UpdatePendingQueueSize(size int) {
 }
 
 func (m *ScannerMetrics) UpdateTxnBufSize(size int) {
-	diff := size - m.previousTimeTickBufSize
-	m.timeTickBufSize.Add(float64(diff))
-	m.previousTimeTickBufSize = size
-}
-
-func (m *ScannerMetrics) UpdateTimeTickBufSize(size int) {
 	diff := size - m.previousTxnBufSize
 	m.txnBufSize.Add(float64(diff))
 	m.previousTxnBufSize = size
 }
 
+func (m *ScannerMetrics) UpdateTimeTickBufSize(size int) {
+	diff := size - m.previousTimeTickBufSize
+	m.timeTickBufSize.Add(float64(diff))
+	m.previousTimeTickBufSize = size
+}
+
 func (m *ScannerMetrics) Close() {
 	m.UpdatePendingQueueSize(0)
 	m.UpdateTimeTickBufSize(0)
-	m.UpdateTimeTickBufSize(0)
+	m.UpdateTxnBufSize(0)
 	m.scannerTotal.WithLabelValues(m.scannerModel).Dec()
 }

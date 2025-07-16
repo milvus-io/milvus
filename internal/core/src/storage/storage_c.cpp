@@ -118,20 +118,27 @@ InitMmapManager(CMmapConfig c_mmap_config) {
 }
 
 CStatus
-InitFileWriterConfig(const char* mode, uint64_t buffer_size_kb, int nr_threads) {
+InitFileWriterConfig(const char* mode,
+                     uint64_t buffer_size_kb,
+                     int nr_threads) {
     try {
         std::string mode_str(mode);
         if (mode_str == "direct") {
-            milvus::storage::FileWriter::SetMode(milvus::storage::FileWriter::WriteMode::DIRECT);
+            milvus::storage::FileWriter::SetMode(
+                milvus::storage::FileWriter::WriteMode::DIRECT);
             // buffer size checking is done in FileWriter::SetBufferSize,
             // and it will try to find a proper and valid buffer size
-            milvus::storage::FileWriter::SetBufferSize(buffer_size_kb * 1024); // convert to bytes
+            milvus::storage::FileWriter::SetBufferSize(
+                buffer_size_kb * 1024);  // convert to bytes
         } else if (mode_str == "buffered") {
-            milvus::storage::FileWriter::SetMode(milvus::storage::FileWriter::WriteMode::BUFFERED);
+            milvus::storage::FileWriter::SetMode(
+                milvus::storage::FileWriter::WriteMode::BUFFERED);
         } else {
-            return milvus::FailureCStatus(milvus::ConfigInvalid, "Invalid mode");
+            return milvus::FailureCStatus(milvus::ConfigInvalid,
+                                          "Invalid mode");
         }
-        milvus::storage::FileWriteWorkerPool::GetInstance().Configure(nr_threads);
+        milvus::storage::FileWriteWorkerPool::GetInstance().Configure(
+            nr_threads);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

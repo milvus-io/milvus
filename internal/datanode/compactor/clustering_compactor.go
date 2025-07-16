@@ -90,8 +90,10 @@ type clusteringCompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
-	memoryBufferSize int64
-	clusterBuffers   []*ClusterBuffer
+	memoryLimit int64
+	bufferSize  int64
+
+	clusterBuffers []*ClusterBuffer
 	// scalar
 	keyToBufferFunc func(interface{}) *ClusterBuffer
 	// vector
@@ -154,18 +156,20 @@ func NewClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	plan *datapb.CompactionPlan,
+	compactionParams compaction.Params,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &clusteringCompactionTask{
-		ctx:            ctx,
-		cancel:         cancel,
-		binlogIO:       binlogIO,
-		plan:           plan,
-		tr:             timerecord.NewTimeRecorder("clustering_compaction"),
-		done:           make(chan struct{}, 1),
-		clusterBuffers: make([]*ClusterBuffer, 0),
-		flushCount:     atomic.NewInt64(0),
-		writtenRowNum:  atomic.NewInt64(0),
+		ctx:              ctx,
+		cancel:           cancel,
+		binlogIO:         binlogIO,
+		plan:             plan,
+		tr:               timerecord.NewTimeRecorder("clustering_compaction"),
+		done:             make(chan struct{}, 1),
+		clusterBuffers:   make([]*ClusterBuffer, 0),
+		flushCount:       atomic.NewInt64(0),
+		writtenRowNum:    atomic.NewInt64(0),
+		compactionParams: compactionParams,
 	}
 }
 
@@ -197,11 +201,6 @@ func (t *clusteringCompactionTask) GetCollection() int64 {
 func (t *clusteringCompactionTask) init() error {
 	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
 		return merr.WrapErrIllegalCompactionPlan("illegal compaction type")
-	}
-	var err error
-	t.compactionParams, err = compaction.ParseParamsFromJSON(t.plan.GetJsonParams())
-	if err != nil {
-		return err
 	}
 
 	if len(t.plan.GetSegmentBinlogs()) == 0 {
@@ -238,11 +237,12 @@ func (t *clusteringCompactionTask) init() error {
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTime = time.Now()
-	t.memoryBufferSize = t.getMemoryBufferSize()
+	t.memoryLimit = t.getMemoryLimit()
+	t.bufferSize = int64(t.compactionParams.BinLogMaxSize) // Use binlog max size as read and write buffer size
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
-	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryBufferSize), zap.Int("worker_pool_size", workerPoolSize))
+	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryLimit), zap.Int("worker_pool_size", workerPoolSize))
 	return nil
 }
 
@@ -264,7 +264,7 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	defer t.cleanUp(ctx)
 
 	// 1, decompose binlogs as preparation for later mapping
-	if err := binlog.DecompressCompactionBinlogs(t.plan.SegmentBinlogs); err != nil {
+	if err := binlog.DecompressCompactionBinlogsWithRootPath(t.compactionParams.StorageConfig.GetRootPath(), t.plan.SegmentBinlogs); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, err
 	}
@@ -334,7 +334,11 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.partitionID, t.collectionID, t.plan.Channel, 100,
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -353,7 +357,11 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.partitionID, t.collectionID, t.plan.Channel, 100,
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -409,7 +417,11 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 		fieldStats.SetVectorCentroids(centroidValues...)
 
 		alloc := NewCompactionAllocator(t.segIDAlloc, t.logIDAlloc)
-		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc, t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows, t.partitionID, t.collectionID, t.plan.Channel, 100, storage.WithBufferSize(t.memoryBufferSize))
+		writer, err := NewMultiSegmentWriter(ctx, t.binlogIO, alloc,
+			t.plan.GetMaxSize(), t.plan.GetSchema(), t.compactionParams, t.plan.MaxSegmentRows,
+			t.partitionID, t.collectionID, t.plan.Channel, 100,
+			storage.WithBufferSize(t.bufferSize),
+			storage.WithStorageConfig(t.compactionParams.StorageConfig))
 		if err != nil {
 			return err
 		}
@@ -426,7 +438,7 @@ func (t *clusteringCompactionTask) generatedVectorPlan(ctx context.Context, buff
 
 func (t *clusteringCompactionTask) switchPolicyForVectorPlan(ctx context.Context, centroids *clusteringpb.ClusteringCentroidsStats) error {
 	bufferNum := len(centroids.GetCentroids())
-	bufferNumByMemory := int(t.memoryBufferSize / expectedBinlogSize)
+	bufferNumByMemory := int(t.memoryLimit / expectedBinlogSize)
 	if bufferNumByMemory < bufferNum {
 		bufferNum = bufferNumByMemory
 	}
@@ -587,17 +599,15 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return merr.WrapErrIllegalCompactionPlan()
 	}
 
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-
 	rr, err := storage.NewBinlogRecordReader(ctx,
 		segment.GetFieldBinlogs(),
 		t.plan.Schema,
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
-		storage.WithVersion(segment.StorageVersion), storage.WithBufferSize(t.memoryBufferSize),
-		storage.WithBucketName(bucketName),
+		storage.WithVersion(segment.StorageVersion),
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
@@ -679,17 +689,17 @@ func (t *clusteringCompactionTask) getWorkerPoolSize() int {
 	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt()), 1.0))
 }
 
-// getMemoryBufferSize return memoryBufferSize
-func (t *clusteringCompactionTask) getMemoryBufferSize() int64 {
+// getMemoryLimit returns the maximum memory that a clustering compaction task is allowed to use
+func (t *clusteringCompactionTask) getMemoryLimit() int64 {
 	return int64(float64(hardware.GetMemoryCount()) * paramtable.Get().DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferLowWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.3)
+	return int64(float64(t.memoryLimit) * 0.3)
 }
 
 func (t *clusteringCompactionTask) getMemoryBufferHighWatermark() int64 {
-	return int64(float64(t.memoryBufferSize) * 0.7)
+	return int64(float64(t.memoryLimit) * 0.7)
 }
 
 func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) error {
@@ -865,9 +875,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-
 	rr, err := storage.NewBinlogRecordReader(ctx,
 		segment.GetFieldBinlogs(),
 		t.plan.Schema,
@@ -875,8 +882,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion),
-		storage.WithBufferSize(t.memoryBufferSize),
-		storage.WithBucketName(bucketName),
+		storage.WithBufferSize(t.bufferSize),
+		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
@@ -979,7 +986,7 @@ func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64
 
 func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
 	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
-	bufferNumByMemory := t.memoryBufferSize / expectedBinlogSize
+	bufferNumByMemory := t.memoryLimit / expectedBinlogSize
 	log.Info("switchPolicyForScalarPlan", zap.Int64("totalRows", totalRows),
 		zap.Int64("bufferNumBySegmentMaxRows", bufferNumBySegmentMaxRows),
 		zap.Int64("bufferNumByMemory", bufferNumByMemory))

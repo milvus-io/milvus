@@ -1081,10 +1081,34 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     }
 
     std::vector<std::string> remote_chunk_files;
+    int64_t column_group_id;
     if (column_group_files.find(field_id) == column_group_files.end()) {
+        column_group_id = DEFAULT_SHORT_COLUMN_GROUP_ID;
         remote_chunk_files = column_group_files[DEFAULT_SHORT_COLUMN_GROUP_ID];
     } else {
         remote_chunk_files = column_group_files[field_id];
+        column_group_id = field_id;
+    }
+
+    AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
+
+    // find column offset
+    milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
+        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
+    size_t col_offset = -1;
+    for (size_t i = 0; i < field_id_list.size(); ++i) {
+        if (field_id_list.Get(i) == field_id) {
+            col_offset = i;
+            break;
+        }
+    }
+    // field not found, must be newly added field, return empty resultset
+    if (col_offset == -1) {
+        LOG_INFO(
+            "field {} not found in column group {}, return empty result set",
+            field_id,
+            column_group_id);
+        return field_data_list;
     }
 
     AssertInfo(fs != nullptr,
@@ -1103,12 +1127,6 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         std::vector<std::vector<int64_t>> row_group_lists;
         auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
             fs, column_group_file);
-        auto field_id_mapping = reader->file_metadata()->GetFieldIDMapping();
-        auto it = field_id_mapping.find(field_id);
-        AssertInfo(it != field_id_mapping.end(),
-                   "field id {} not found in field id mapping",
-                   field_id);
-        auto column_offset = it->second;
 
         auto row_group_num =
             reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1117,8 +1135,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         row_group_lists.push_back(all_row_groups);
 
         // create a schema with only the field id
-        auto field_schema =
-            reader->schema()->field(column_offset.col_index)->Copy();
+        auto field_schema = reader->schema()->field(col_offset)->Copy();
         auto arrow_schema = arrow::schema({field_schema});
         auto status = reader->Close();
         AssertInfo(
@@ -1144,8 +1161,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
             for (const auto& table : r->arrow_tables) {
                 num_rows += table->num_rows();
-                chunked_arrays.push_back(
-                    table->column(column_offset.col_index));
+                chunked_arrays.push_back(table->column(col_offset));
             }
             auto field_data = storage::CreateFieldData(
                 data_type, field_schema->nullable(), dim, num_rows);

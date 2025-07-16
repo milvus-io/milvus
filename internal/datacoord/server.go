@@ -327,7 +327,7 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.statsInspector, s.compactionTriggerManager)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -664,7 +664,7 @@ func (s *Server) initStatsInspector() {
 }
 
 func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler)
+	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
@@ -938,7 +938,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	// set segment to SegmentState_Flushed
 	var operators []UpdateOperator
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if enableSortCompaction() {
 		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
 	}
 	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
@@ -948,7 +948,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return err
 	}
 
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if enableSortCompaction() {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:

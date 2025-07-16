@@ -45,8 +45,8 @@ class ChunkedColumnInterface {
     // Other Bulk* methods can also support nullptr offsets, but not added at this moment.
     virtual void
     BulkIsValid(std::function<void(bool, size_t)> fn,
-                const int64_t* offsets = nullptr,
-                int64_t count = 0) const = 0;
+                const int64_t* offsets,
+                int64_t count) const = 0;
 
     // Check if the column can contain null values
     virtual bool
@@ -124,8 +124,8 @@ class ChunkedColumnInterface {
 
     virtual void
     BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets = nullptr,
-                  int64_t count = 0) const {
+                  const int64_t* offsets,
+                  int64_t count) const {
         PanicInfo(
             ErrorCode::Unsupported,
             "RawJsonAt only supported for ChunkColumnInterface of Json type");

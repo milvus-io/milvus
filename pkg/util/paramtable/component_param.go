@@ -271,7 +271,6 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
-	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
@@ -850,14 +849,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.EnableStorageV2.Init(base.mgr)
 
-	p.StorageScheme = ParamItem{
-		Key:          "common.storage.scheme",
-		Version:      "2.3.4",
-		DefaultValue: "s3",
-		Export:       true,
-	}
-	p.StorageScheme.Init(base.mgr)
-
 	p.StoragePathPrefix = ParamItem{
 		Key:          "common.storage.pathPrefix",
 		Version:      "2.3.4",
@@ -1144,6 +1135,7 @@ type traceConfig struct {
 	OtlpEndpoint       ParamItem `refreshable:"false"`
 	OtlpMethod         ParamItem `refreshable:"false"`
 	OtlpSecure         ParamItem `refreshable:"false"`
+	OtlpHeaders        ParamItem `refreshable:"false"`
 	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
 
@@ -1201,6 +1193,15 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
+
+	t.OtlpHeaders = ParamItem{
+		Key:          "trace.otlp.headers",
+		Version:      "2.4.0",
+		DefaultValue: "",
+		Doc:          "otlp header that encoded in base64",
+		Export:       true,
+	}
+	t.OtlpHeaders.Init(base.mgr)
 
 	t.InitTimeoutSeconds = ParamItem{
 		Key:          "trace.initTimeoutSeconds",
@@ -1573,6 +1574,7 @@ type proxyConfig struct {
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 	MaxTextLength                ParamItem `refreshable:"false"`
 	MaxResultEntries             ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider  ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2006,6 +2008,13 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.MaxResultEntries.Init(base.mgr)
 
+	p.EnableCachedServiceProvider = ParamItem{
+		Key:          "proxy.enableCachedServiceProvider",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "enable cached service provider",
+	}
+	p.EnableCachedServiceProvider.Init(base.mgr)
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -4066,12 +4075,11 @@ type dataCoordConfig struct {
 	StatsTaskSlotUsage            ParamItem `refreshable:"true"`
 	AnalyzeTaskSlotUsage          ParamItem `refreshable:"true"`
 
-	EnableStatsTask                   ParamItem `refreshable:"true"`
+	EnableSortCompaction              ParamItem `refreshable:"true"`
 	TaskCheckInterval                 ParamItem `refreshable:"true"`
-	StatsTaskTriggerCount             ParamItem `refreshable:"true"`
+	SortCompactionTriggerCount        ParamItem `refreshable:"true"`
 	JSONStatsTriggerCount             ParamItem `refreshable:"true"`
 	JSONStatsTriggerInterval          ParamItem `refreshable:"true"`
-	EnabledJSONKeyStatsInSort         ParamItem `refreshable:"true"`
 	JSONKeyStatsMemoryBudgetInTantivy ParamItem `refreshable:"false"`
 
 	RequestTimeoutSeconds ParamItem `refreshable:"true"`
@@ -5097,16 +5105,17 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.AnalyzeTaskSlotUsage.Init(base.mgr)
 
-	p.EnableStatsTask = ParamItem{
-		Key:          "dataCoord.statsTask.enable",
+	p.EnableSortCompaction = ParamItem{
+		Key:          "dataCoord.sortCompaction.enable",
 		Version:      "2.5.0",
-		Doc:          "enable stats task",
+		Doc:          "enable sort compaction",
+		FallbackKeys: []string{"dataCoord.statsTask.enable"},
 		DefaultValue: "true",
 		PanicIfEmpty: false,
 		Export:       false,
 		Forbidden:    true,
 	}
-	p.EnableStatsTask.Init(base.mgr)
+	p.EnableSortCompaction.Init(base.mgr)
 
 	p.TaskCheckInterval = ParamItem{
 		Key:          "dataCoord.taskCheckInterval",
@@ -5118,15 +5127,16 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.TaskCheckInterval.Init(base.mgr)
 
-	p.StatsTaskTriggerCount = ParamItem{
-		Key:          "dataCoord.statsTaskTriggerCount",
+	p.SortCompactionTriggerCount = ParamItem{
+		Key:          "dataCoord.sortCompactionTriggerCount",
 		Version:      "2.5.5",
+		FallbackKeys: []string{"dataCoord.statsTaskTriggerCount"},
 		Doc:          "stats task count per trigger",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
 		Export:       false,
 	}
-	p.StatsTaskTriggerCount.Init(base.mgr)
+	p.SortCompactionTriggerCount.Init(base.mgr)
 
 	p.JSONStatsTriggerCount = ParamItem{
 		Key:          "dataCoord.jsonStatsTriggerCount",
@@ -5158,15 +5168,6 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 	}
 	p.RequestTimeoutSeconds.Init(base.mgr)
 
-	p.StatsTaskTriggerCount = ParamItem{
-		Key:          "dataCoord.statsTaskTriggerCount",
-		Version:      "2.5.5",
-		Doc:          "stats task count per trigger",
-		DefaultValue: "100",
-		PanicIfEmpty: false,
-		Export:       false,
-	}
-	p.StatsTaskTriggerCount.Init(base.mgr)
 	p.JSONKeyStatsMemoryBudgetInTantivy = ParamItem{
 		Key:          "dataCoord.jsonKeyStatsMemoryBudgetInTantivy",
 		Version:      "2.5.5",
@@ -5175,15 +5176,6 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Export:       true,
 	}
 	p.JSONKeyStatsMemoryBudgetInTantivy.Init(base.mgr)
-
-	p.EnabledJSONKeyStatsInSort = ParamItem{
-		Key:          "dataCoord.enabledJSONKeyStatsInSort",
-		Version:      "2.5.5",
-		DefaultValue: "false",
-		Doc:          "Indicates whether to enable JSON key stats task with sort",
-		Export:       true,
-	}
-	p.EnabledJSONKeyStatsInSort.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

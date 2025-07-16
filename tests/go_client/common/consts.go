@@ -33,6 +33,7 @@ const (
 	DefaultFloatArrayField        = "floatArray"
 	DefaultDoubleArrayField       = "doubleArray"
 	DefaultVarcharArrayField      = "varcharArray"
+	DefaultNewField               = "newField"
 
 	DefaultFastPk     = "id"
 	DefaultFastVector = "vector"

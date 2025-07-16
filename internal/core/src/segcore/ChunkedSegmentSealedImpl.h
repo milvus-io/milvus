@@ -498,10 +498,6 @@ CreateSealedSegment(
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
     bool is_sorted_by_pk = false) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
-        schema,
-        index_meta,
-        segcore_config,
-        segment_id,
-        is_sorted_by_pk);
+        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 }  // namespace milvus::segcore

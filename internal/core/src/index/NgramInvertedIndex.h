@@ -60,15 +60,12 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     }
 
  private:
+    template <typename T>
     std::optional<TargetBitmap>
-    PrefixMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
-
-    std::optional<TargetBitmap>
-    PostfixMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
-
-    // InnerMatch is something like %xxx%.
-    std::optional<TargetBitmap>
-    InnerMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
+    ExecuteQueryWithPredicate(const std::string& literal,
+                              exec::SegmentExpr* segment,
+                              std::function<bool(const T&)> predicate,
+                              bool need_post_filter);
 
     // Match is something like xxx%xxx%xxx, xxx%xxx, %xxx%xxx, xxx_x etc.
     std::optional<TargetBitmap>

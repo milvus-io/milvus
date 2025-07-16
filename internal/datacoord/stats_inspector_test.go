@@ -60,7 +60,6 @@ func (s *statsInspectorSuite) SetupTest() {
 
 	Params.Save(Params.DataCoordCfg.TaskCheckInterval.Key, "1")
 	Params.Save(Params.DataCoordCfg.GCInterval.Key, "1")
-	Params.Save(Params.DataCoordCfg.EnableStatsTask.Key, "true")
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 	var idCounter int64 = 1000
@@ -289,26 +288,6 @@ func (s *statsInspectorSuite) TestDropStatsTask() {
 	// Test dropping non-existent task
 	err = s.inspector.DropStatsTask(999, indexpb.StatsSubJob_Sort)
 	s.NoError(err) // Non-existent tasks should return success
-}
-
-func (s *statsInspectorSuite) TestTriggerSortStatsTask() {
-	// Test triggering sort stats task
-	s.inspector.triggerSortStatsTask()
-
-	// Verify AllocID was called
-	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
-	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(30, indexpb.StatsSubJob_Sort))
-}
-
-func (s *statsInspectorSuite) TestCreateSortStatsTaskForSegment() {
-	// Get a test segment
-	segment := s.mt.segments.segments[10]
-
-	// Test creating sort stats task for segment
-	s.inspector.createSortStatsTaskForSegment(segment)
-
-	// Verify AllocID was called
-	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
 }
 
 func (s *statsInspectorSuite) TestTriggerTextStatsTask() {

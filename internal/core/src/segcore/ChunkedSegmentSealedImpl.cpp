@@ -304,7 +304,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
             merged_in_load_list = merged_in_load_list ||
-                                  schema_->ShallLoadField(milvus_field_ids[i]);
+                                  schema_->ShouldLoadField(milvus_field_ids[i]);
         }
 
         auto column_group_info = FieldDataInfo(column_group_id.get(),
@@ -368,10 +368,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
-        auto field_data_info = FieldDataInfo(field_id.get(),
-                                             num_rows,
-                                             load_info.mmap_dir_path,
-                                             schema_->ShallLoadField(field_id));
+        auto field_data_info =
+            FieldDataInfo(field_id.get(),
+                          num_rows,
+                          load_info.mmap_dir_path,
+                          schema_->ShouldLoadField(field_id));
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -1929,6 +1930,12 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 void
 ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
+        LOG_INFO(
+            "lazy check schema segment {} found newer schema version, current "
+            "schema version {}, new schema version {}",
+            id_,
+            schema_->get_schema_version(),
+            sch->get_schema_version());
         Reopen(sch);
     }
 }
@@ -1954,8 +1961,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (!enable_mmap) {
-        if (!is_proxy_column || is_proxy_column &&
-            field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
+        if (!is_proxy_column ||
+            is_proxy_column &&
+                field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += column->DataByteSize();
         }
         if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
@@ -2054,9 +2062,14 @@ ChunkedSegmentSealedImpl::FinishLoad() {
 
 void
 ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
+    auto field_id = field_meta.get_id();
+    LOG_INFO("start fill empty field {} (data type {}) for sealed segment {}",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_meta.get_id().get(), size, "");
+    auto field_data_info = FieldDataInfo(field_id.get(), size, "");
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(), field_meta, field_data_info, false);
@@ -2090,9 +2103,13 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
             break;
         }
     }
-    auto field_id = field_meta.get_id();
+
     fields_.emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
+    LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
 }
 
 }  // namespace milvus::segcore
