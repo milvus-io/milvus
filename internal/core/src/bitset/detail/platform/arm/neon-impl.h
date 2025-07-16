@@ -21,6 +21,7 @@
 #include <arm_neon.h>
 
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -1459,13 +1460,24 @@ struct ArithHelperF32<ArithOpType::Mul, CmpOp> {
 template <CompareOpType CmpOp>
 struct ArithHelperF32<ArithOpType::Div, CmpOp> {
     static inline uint32x4x2_t
-    op(const float32x4x2_t left,
-       const float32x4x2_t right,
-       const float32x4x2_t value) {
+    op_special(const float32x4x2_t left,
+               const float32x4x2_t right,
+               const float32x4x2_t value) {
+        // this is valid for the positive denominator, == and != cases.
         // left == right * value
         const float32x4x2_t rv = {vmulq_f32(right.val[0], value.val[0]),
                                   vmulq_f32(right.val[1], value.val[1])};
         return CmpHelper<CmpOp>::compare(left, rv);
+    }
+
+    static inline uint32x4x2_t
+    op(const float32x4x2_t left,
+       const float32x4x2_t right,
+       const float32x4x2_t value) {
+        // left / right == value
+        const float32x4x2_t rv = {vdivq_f32(left.val[0], right.val[0]),
+                                  vdivq_f32(left.val[1], right.val[1])};
+        return CmpHelper<CmpOp>::compare(rv, value);
     }
 };
 
@@ -1521,15 +1533,27 @@ struct ArithHelperF64<ArithOpType::Mul, CmpOp> {
 template <CompareOpType CmpOp>
 struct ArithHelperF64<ArithOpType::Div, CmpOp> {
     static inline uint64x2x4_t
-    op(const float64x2x4_t left,
-       const float64x2x4_t right,
-       const float64x2x4_t value) {
+    op_special(const float64x2x4_t left,
+               const float64x2x4_t right,
+               const float64x2x4_t value) {
         // left == right * value
         const float64x2x4_t rv = {vmulq_f64(right.val[0], value.val[0]),
                                   vmulq_f64(right.val[1], value.val[1]),
                                   vmulq_f64(right.val[2], value.val[2]),
                                   vmulq_f64(right.val[3], value.val[3])};
         return CmpHelper<CmpOp>::compare(left, rv);
+    }
+
+    static inline uint64x2x4_t
+    op(const float64x2x4_t left,
+       const float64x2x4_t right,
+       const float64x2x4_t value) {
+        // left / right == value
+        const float64x2x4_t rv = {vdivq_f64(left.val[0], right.val[0]),
+                                  vdivq_f64(left.val[1], right.val[1]),
+                                  vdivq_f64(left.val[2], right.val[2]),
+                                  vdivq_f64(left.val[3], right.val[3])};
+        return CmpHelper<CmpOp>::compare(rv, value);
     }
 };
 
@@ -1743,28 +1767,74 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     if constexpr (AOp == ArithOpType::Mod) {
         return false;
     } else {
-        // the restriction of the API
-        assert((size % 8) == 0);
+        if constexpr (AOp == ArithOpType::Div) {
+            if (std::isfinite(value) && std::isfinite(right_operand) &&
+                right_operand > 0) {
+                // a special case that allows faster processing by using the multiplication
+                //   operation instead of the division one.
 
-        //
-        const float32x4x2_t right_v = {vdupq_n_f32(right_operand),
-                                       vdupq_n_f32(right_operand)};
-        const float32x4x2_t value_v = {vdupq_n_f32(value), vdupq_n_f32(value)};
+                // the restriction of the API
+                assert((size % 8) == 0);
 
-        // todo: aligned reads & writes
+                //
+                const float32x4x2_t right_v = {vdupq_n_f32(right_operand),
+                                               vdupq_n_f32(right_operand)};
+                const float32x4x2_t value_v = {vdupq_n_f32(value),
+                                               vdupq_n_f32(value)};
 
-        const size_t size8 = (size / 8) * 8;
-        for (size_t i = 0; i < size8; i += 8) {
-            const float32x4x2_t v0v = {vld1q_f32(src + i),
-                                       vld1q_f32(src + i + 4)};
-            const uint32x4x2_t cmp =
-                ArithHelperF32<AOp, CmpOp>::op(v0v, right_v, value_v);
+                // todo: aligned reads & writes
 
-            const uint8_t mmask = movemask(cmp);
-            res_u8[i / 8] = mmask;
+                const size_t size8 = (size / 8) * 8;
+                for (size_t i = 0; i < size8; i += 8) {
+                    const float32x4x2_t v0v = {vld1q_f32(src + i),
+                                               vld1q_f32(src + i + 4)};
+                    const uint32x4x2_t cmp =
+                        ArithHelperF32<AOp, CmpOp>::op_special(
+                            v0v, right_v, value_v);
+
+                    const uint8_t mmask = movemask(cmp);
+                    res_u8[i / 8] = mmask;
+                }
+
+                return true;
+            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
+                       right_operand < 0) {
+                // flip signs and go for the multiplication case
+                return OpArithCompareImpl<float,
+                                          AOp,
+                                          CompareOpDivFlip<CmpOp>::op>::
+                    op_arith_compare(res_u8, src, -right_operand, -value, size);
+            }
+
+            // go with the default case
         }
 
-        return true;
+        // a default case
+        {
+            // the restriction of the API
+            assert((size % 8) == 0);
+
+            //
+            const float32x4x2_t right_v = {vdupq_n_f32(right_operand),
+                                           vdupq_n_f32(right_operand)};
+            const float32x4x2_t value_v = {vdupq_n_f32(value),
+                                           vdupq_n_f32(value)};
+
+            // todo: aligned reads & writes
+
+            const size_t size8 = (size / 8) * 8;
+            for (size_t i = 0; i < size8; i += 8) {
+                const float32x4x2_t v0v = {vld1q_f32(src + i),
+                                           vld1q_f32(src + i + 4)};
+                const uint32x4x2_t cmp =
+                    ArithHelperF32<AOp, CmpOp>::op(v0v, right_v, value_v);
+
+                const uint8_t mmask = movemask(cmp);
+                res_u8[i / 8] = mmask;
+            }
+
+            return true;
+        }
     }
 }
 
@@ -1779,35 +1849,86 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     if constexpr (AOp == ArithOpType::Mod) {
         return false;
     } else {
-        // the restriction of the API
-        assert((size % 8) == 0);
+        if constexpr (AOp == ArithOpType::Div) {
+            if (std::isfinite(value) && std::isfinite(right_operand) &&
+                right_operand > 0) {
+                // a special case that allows faster processing by using the multiplication
+                //   operation instead of the division one.
 
-        //
-        const float64x2x4_t right_v = {vdupq_n_f64(right_operand),
-                                       vdupq_n_f64(right_operand),
-                                       vdupq_n_f64(right_operand),
-                                       vdupq_n_f64(right_operand)};
-        const float64x2x4_t value_v = {vdupq_n_f64(value),
-                                       vdupq_n_f64(value),
-                                       vdupq_n_f64(value),
-                                       vdupq_n_f64(value)};
+                // the restriction of the API
+                assert((size % 8) == 0);
 
-        // todo: aligned reads & writes
+                //
+                const float64x2x4_t right_v = {vdupq_n_f64(right_operand),
+                                               vdupq_n_f64(right_operand),
+                                               vdupq_n_f64(right_operand),
+                                               vdupq_n_f64(right_operand)};
+                const float64x2x4_t value_v = {vdupq_n_f64(value),
+                                               vdupq_n_f64(value),
+                                               vdupq_n_f64(value),
+                                               vdupq_n_f64(value)};
 
-        const size_t size8 = (size / 8) * 8;
-        for (size_t i = 0; i < size8; i += 8) {
-            const float64x2x4_t v0v = {vld1q_f64(src + i),
-                                       vld1q_f64(src + i + 2),
-                                       vld1q_f64(src + i + 4),
-                                       vld1q_f64(src + i + 6)};
-            const uint64x2x4_t cmp =
-                ArithHelperF64<AOp, CmpOp>::op(v0v, right_v, value_v);
+                // todo: aligned reads & writes
 
-            const uint8_t mmask = movemask(cmp);
-            res_u8[i / 8] = mmask;
+                const size_t size8 = (size / 8) * 8;
+                for (size_t i = 0; i < size8; i += 8) {
+                    const float64x2x4_t v0v = {vld1q_f64(src + i),
+                                               vld1q_f64(src + i + 2),
+                                               vld1q_f64(src + i + 4),
+                                               vld1q_f64(src + i + 6)};
+                    const uint64x2x4_t cmp =
+                        ArithHelperF64<AOp, CmpOp>::op_special(
+                            v0v, right_v, value_v);
+
+                    const uint8_t mmask = movemask(cmp);
+                    res_u8[i / 8] = mmask;
+                }
+
+                return true;
+            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
+                       right_operand < 0) {
+                // flip signs and go for the multiplication case
+                return OpArithCompareImpl<double,
+                                          AOp,
+                                          CompareOpDivFlip<CmpOp>::op>::
+                    op_arith_compare(res_u8, src, -right_operand, -value, size);
+            }
+
+            // go with the default case
         }
 
-        return true;
+        // a default case
+        {
+            // the restriction of the API
+            assert((size % 8) == 0);
+
+            //
+            const float64x2x4_t right_v = {vdupq_n_f64(right_operand),
+                                           vdupq_n_f64(right_operand),
+                                           vdupq_n_f64(right_operand),
+                                           vdupq_n_f64(right_operand)};
+            const float64x2x4_t value_v = {vdupq_n_f64(value),
+                                           vdupq_n_f64(value),
+                                           vdupq_n_f64(value),
+                                           vdupq_n_f64(value)};
+
+            // todo: aligned reads & writes
+
+            const size_t size8 = (size / 8) * 8;
+            for (size_t i = 0; i < size8; i += 8) {
+                const float64x2x4_t v0v = {vld1q_f64(src + i),
+                                           vld1q_f64(src + i + 2),
+                                           vld1q_f64(src + i + 4),
+                                           vld1q_f64(src + i + 6)};
+                const uint64x2x4_t cmp =
+                    ArithHelperF64<AOp, CmpOp>::op(v0v, right_v, value_v);
+
+                const uint8_t mmask = movemask(cmp);
+                res_u8[i / 8] = mmask;
+            }
+
+            return true;
+        }
     }
 }
 
