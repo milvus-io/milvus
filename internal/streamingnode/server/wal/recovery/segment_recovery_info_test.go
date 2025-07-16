@@ -72,7 +72,7 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	assert.False(t, shouldBeRemoved)
 	assert.False(t, info.dirty)
 
-	assert.Equal(t, uint64(10), snapshot.Stat.InsertedBinarySize)
+	assert.Equal(t, uint64(10), snapshot.Stat.ModifiedBinarySize)
 	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)

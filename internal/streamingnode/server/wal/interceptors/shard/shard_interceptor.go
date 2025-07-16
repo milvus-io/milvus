@@ -148,7 +148,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),
 			PartitionID:  partition.GetPartitionId(),
-			InsertMetrics: stats.InsertMetrics{
+			ModifiedMetrics: stats.ModifiedMetrics{
 				Rows:       partition.GetRows(),
 				BinarySize: partition.GetBinarySize(),
 			},
