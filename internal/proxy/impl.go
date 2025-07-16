@@ -4333,13 +4333,14 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
-			SegmentID:    info.ID,
-			CollectionID: info.CollectionID,
-			PartitionID:  info.PartitionID,
-			NumRows:      info.NumOfRows,
-			State:        info.State,
-			Level:        commonpb.SegmentLevel(info.Level),
-			IsSorted:     info.GetIsSorted(),
+			SegmentID:      info.ID,
+			CollectionID:   info.CollectionID,
+			PartitionID:    info.PartitionID,
+			NumRows:        info.NumOfRows,
+			State:          info.State,
+			Level:          commonpb.SegmentLevel(info.Level),
+			IsSorted:       info.GetIsSorted(),
+			StorageVersion: info.GetStorageVersion(),
 		}
 	}
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -4489,17 +4490,18 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		queryInfos[i] = &milvuspb.QuerySegmentInfo{
-			SegmentID:    info.SegmentID,
-			CollectionID: info.CollectionID,
-			PartitionID:  info.PartitionID,
-			NumRows:      info.NumRows,
-			MemSize:      info.MemSize,
-			IndexName:    info.IndexName,
-			IndexID:      info.IndexID,
-			State:        info.SegmentState,
-			NodeIds:      info.NodeIds,
-			Level:        commonpb.SegmentLevel(info.Level),
-			IsSorted:     info.GetIsSorted(),
+			SegmentID:      info.SegmentID,
+			CollectionID:   info.CollectionID,
+			PartitionID:    info.PartitionID,
+			NumRows:        info.NumRows,
+			MemSize:        info.MemSize,
+			IndexName:      info.IndexName,
+			IndexID:        info.IndexID,
+			State:          info.SegmentState,
+			NodeIds:        info.NodeIds,
+			Level:          commonpb.SegmentLevel(info.Level),
+			IsSorted:       info.GetIsSorted(),
+			StorageVersion: info.GetStorageVersion(),
 		}
 	}
 
