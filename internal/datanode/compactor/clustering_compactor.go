@@ -879,21 +879,18 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 	binlogs := make([]*datapb.FieldBinlog, 0)
 
-	needFieldIDs := typeutil.NewSet[int64]()
+	requiredFields := typeutil.NewSet[int64]()
+	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
 	for _, field := range t.plan.GetSchema().GetFields() {
-		if field.GetIsPrimaryKey() ||
-			field.GetFieldID() == t.clusteringKeyField.GetFieldID() ||
-			field.GetFieldID() == 0 ||
-			field.GetFieldID() == 1 {
+		if requiredFields.Contain(field.GetFieldID()) {
 			schema.Fields = append(schema.Fields, field)
-			needFieldIDs.Insert(field.GetFieldID())
 		}
 	}
 
 	for _, fieldBinlog := range segment.GetFieldBinlogs() {
 		// for storageV2, only contains fieldID 0, and it's enough.
 		// all scalar fields are stored in the file with fieldID 0.
-		if needFieldIDs.Contain(fieldBinlog.GetFieldID()) {
+		if requiredFields.Contain(fieldBinlog.GetFieldID()) {
 			binlogs = append(binlogs, fieldBinlog)
 		}
 	}
@@ -931,8 +928,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		timestampTo   int64                 = -1
-		timestampFrom int64                 = -1
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
@@ -953,13 +948,6 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 			continue
 		}
 
-		// Update timestampFrom, timestampTo
-		if (*v).Timestamp < timestampFrom || timestampFrom == -1 {
-			timestampFrom = (*v).Timestamp
-		}
-		if (*v).Timestamp > timestampTo || timestampFrom == -1 {
-			timestampTo = (*v).Timestamp
-		}
 		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 		if !ok {
