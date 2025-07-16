@@ -34,17 +34,19 @@
 
 namespace milvus::index {
 
+const std::string STLSORT_INDEX_FILE_NAME = "stlsort-index";
+
 constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context)
     : ScalarIndex<T>(ASCENDING_SORT), is_built_(false), data_() {
-    if (file_manager_context.Valid()) {
-        file_manager_ =
-            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-        AssertInfo(file_manager_ != nullptr, "create file manager failed!");
-    }
+    field_id_ = file_manager_context.fieldDataMeta.field_id;
+    file_manager_ =
+        std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+    disk_file_manager_ =
+        std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
 }
 
 template <typename T>
@@ -67,6 +69,8 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     if (n == 0) {
         PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
+    index_build_begin_ = std::chrono::system_clock::now();
+
     data_.reserve(n);
     total_num_rows_ = n;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
@@ -91,6 +95,8 @@ template <typename T>
 void
 ScalarIndexSort<T>::BuildWithFieldData(
     const std::vector<milvus::FieldDataPtr>& field_datas) {
+    index_build_begin_ = std::chrono::system_clock::now();
+
     int64_t length = 0;
     for (const auto& data : field_datas) {
         total_num_rows_ += data->get_num_rows();
@@ -155,6 +161,15 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 template <typename T>
 IndexStatsPtr
 ScalarIndexSort<T>::Upload(const Config& config) {
+    auto index_build_duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now() - index_build_begin_)
+            .count();
+    LOG_INFO(
+        "index build done for ScalarIndexSort, field_id: {}, duration: {}ms",
+        field_id_,
+        index_build_duration);
+
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
@@ -176,11 +191,8 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     auto index_data = index_binary.GetByName("index_data");
 
     if (is_mmap_) {
-        auto mmap_filepath_opt =
-            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
-        AssertInfo(mmap_filepath_opt.has_value(),
-                   "mmap filepath is empty when load index");
-        auto mmap_filepath = mmap_filepath_opt.value();
+        auto mmap_filepath = disk_file_manager_->GetLocalIndexObjectPrefix() +
+                             STLSORT_INDEX_FILE_NAME;
         std::filesystem::create_directories(
             std::filesystem::path(mmap_filepath).parent_path());
 
@@ -246,7 +258,9 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     is_built_ = true;
 
-    LOG_INFO("load stlsort index done, is_mmap:{}", is_mmap_);
+    LOG_INFO("load ScalarIndexSort done, field_id: {}, is_mmap:{}",
+             field_id_,
+             is_mmap_);
 }
 
 template <typename T>

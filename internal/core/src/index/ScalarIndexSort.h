@@ -26,6 +26,7 @@
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/DiskFileManagerImpl.h"
 #include "storage/FileWriter.h"
 #include "common/File.h"
 
@@ -184,10 +185,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
         }
     }
 
+    int64_t field_id_ = 0;
+
     bool is_built_ = false;
     Config config_;
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;
@@ -204,6 +208,8 @@ class ScalarIndexSort : public ScalarIndex<T> {
     mutable const IndexStructure<T>* data_ptr_ = nullptr;
     mutable const IndexStructure<T>* end_ptr_ = nullptr;
     mutable size_t size_ = 0;
+
+    std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
 };
 
 template <typename T>

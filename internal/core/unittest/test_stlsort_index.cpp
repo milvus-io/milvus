@@ -11,7 +11,7 @@ void
 test_stlsort_for_range(
     const std::vector<int64_t>& data,
     DataType data_type,
-    std::optional<std::string> mmap_path,
+    bool enable_mmap,
     std::function<TargetBitmap(
         const std::shared_ptr<ScalarIndexSort<int64_t>>&)> exec_expr,
     const std::vector<bool>& expected_result) {
@@ -28,12 +28,7 @@ test_stlsort_for_range(
 
     {
         Config config;
-        if (mmap_path.has_value()) {
-            config[milvus::index::MMAP_FILE_PATH] = mmap_path.value();
-            config[milvus::index::ENABLE_MMAP] = true;
-        } else {
-            config[milvus::index::ENABLE_MMAP] = false;
-        }
+        config[milvus::index::ENABLE_MMAP] = enable_mmap;
 
         auto index = std::make_shared<index::ScalarIndexSort<int64_t>>();
         index->Load(binary_set, config);
@@ -60,11 +55,10 @@ TEST(StlSortIndexTest, TestRange) {
             };
 
         test_stlsort_for_range(
-            data, DataType::INT64, std::nullopt, exec_expr, expected_result);
+            data, DataType::INT64, false, exec_expr, expected_result);
 
-        std::string mmap_dir = "/tmp/test-stlsort-index/mmap-dir";
         test_stlsort_for_range(
-            data, DataType::INT64, mmap_dir, exec_expr, expected_result);
+            data, DataType::INT64, true, exec_expr, expected_result);
     }
 
     {
@@ -75,11 +69,10 @@ TEST(StlSortIndexTest, TestRange) {
             };
 
         test_stlsort_for_range(
-            data, DataType::INT64, std::nullopt, exec_expr, expected_result);
+            data, DataType::INT64, false, exec_expr, expected_result);
 
-        std::string mmap_dir = "/tmp/test-stlsort-index/mmap-dir";
         test_stlsort_for_range(
-            data, DataType::INT64, mmap_dir, exec_expr, expected_result);
+            data, DataType::INT64, true, exec_expr, expected_result);
     }
 }
 
@@ -95,9 +88,8 @@ TEST(StlSortIndexTest, TestIn) {
             return index->In(values.size(), values.data());
         };
     test_stlsort_for_range(
-        data, DataType::INT64, std::nullopt, exec_expr, expected_result);
+        data, DataType::INT64, false, exec_expr, expected_result);
 
-    std::string mmap_dir = "/tmp/test-stlsort-index/mmap-dir";
     test_stlsort_for_range(
-        data, DataType::INT64, mmap_dir, exec_expr, expected_result);
+        data, DataType::INT64, true, exec_expr, expected_result);
 }
