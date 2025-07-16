@@ -469,5 +469,4 @@ template class ScalarIndexSort<int32_t>;
 template class ScalarIndexSort<int64_t>;
 template class ScalarIndexSort<float>;
 template class ScalarIndexSort<double>;
-template class ScalarIndexSort<std::string>;
 }  // namespace milvus::index
