@@ -27,7 +27,6 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
-
 void
 test_ngram_with_data(const boost::container::vector<std::string>& data,
                      const std::string& literal,
@@ -45,12 +44,12 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
 
     auto field_meta = gen_field_meta(collection_id,
-                                          partition_id,
-                                          segment_id,
-                                          field_id.get(),
-                                          DataType::VARCHAR,
-                                          DataType::NONE,
-                                          false);
+                                     partition_id,
+                                     segment_id,
+                                     field_id.get(),
+                                     DataType::VARCHAR,
+                                     DataType::NONE,
+                                     false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 
@@ -100,7 +99,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     {
         Config config;
         config[milvus::index::INDEX_TYPE] = milvus::index::INVERTED_INDEX_TYPE;
-        config[milvus::index::INDEX_FILES] = std::vector<std::string>{log_path};
+        config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
 
         auto ngram_params = index::NgramParams{
             .loading_index = false,

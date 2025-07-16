@@ -74,7 +74,7 @@ class JsonFlatIndexTest : public ::testing::Test {
         int64_t index_build_id = 4000;
         int64_t index_version = 4000;
 
-        field_meta_ = gen_field_meta(
+        field_meta_ = milvus::segcore::gen_field_meta(
             collection_id, partition_id, segment_id, field_id, DataType::JSON);
         index_meta_ =
             gen_index_meta(segment_id, field_id, index_build_id, index_version);

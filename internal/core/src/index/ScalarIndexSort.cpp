@@ -34,6 +34,8 @@
 
 namespace milvus::index {
 
+const std::string MMAP_PATH_FOR_TEST = "/tmp/milvus/mmap_test";
+
 const std::string STLSORT_INDEX_FILE_NAME = "stlsort-index";
 
 constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
@@ -42,11 +44,14 @@ template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context)
     : ScalarIndex<T>(ASCENDING_SORT), is_built_(false), data_() {
-    field_id_ = file_manager_context.fieldDataMeta.field_id;
-    file_manager_ =
-        std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
-    disk_file_manager_ =
-        std::make_shared<storage::DiskFileManagerImpl>(file_manager_context);
+    // not valid means we are in unit test
+    if (file_manager_context.Valid()) {
+        field_id_ = file_manager_context.fieldDataMeta.field_id;
+        file_manager_ =
+            std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+        disk_file_manager_ = std::make_shared<storage::DiskFileManagerImpl>(
+            file_manager_context);
+    }
 }
 
 template <typename T>
@@ -191,8 +196,12 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     auto index_data = index_binary.GetByName("index_data");
 
     if (is_mmap_) {
-        auto mmap_filepath = disk_file_manager_->GetLocalIndexObjectPrefix() +
-                             STLSORT_INDEX_FILE_NAME;
+        // some test may pass invalid file_manager_context in constructor which results in a nullptr disk_file_manager_
+        auto mmap_filepath =
+            disk_file_manager_ != nullptr
+                ? disk_file_manager_->GetLocalIndexObjectPrefix() +
+                      STLSORT_INDEX_FILE_NAME
+                : MMAP_PATH_FOR_TEST;
         std::filesystem::create_directories(
             std::filesystem::path(mmap_filepath).parent_path());
 

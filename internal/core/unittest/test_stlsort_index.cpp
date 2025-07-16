@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 #include <cstdint>
-
 #include "index/ScalarIndexSort.h"
 #include "common/Types.h"
-
 using namespace milvus;
 using namespace milvus::index;
 
@@ -25,7 +23,6 @@ test_stlsort_for_range(
 
         binary_set = index->Serialize(config);
     }
-
     {
         Config config;
         config[milvus::index::ENABLE_MMAP] = enable_mmap;
@@ -35,20 +32,17 @@ test_stlsort_for_range(
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
-
         auto bitset = exec_expr(index);
         for (size_t i = 0; i < nb; i++) {
             ASSERT_EQ(bitset[i], expected_result[i]);
         }
     }
 }
-
 TEST(StlSortIndexTest, TestRange) {
     std::vector<int64_t> data = {10, 2, 6, 5, 9, 3, 7, 8, 4, 1};
     {
         std::vector<bool> expected_result = {
             false, false, true, true, false, true, true, false, true, false};
-
         auto exec_expr =
             [](const std::shared_ptr<ScalarIndexSort<int64_t>>& index) {
                 return index->Range(3, true, 7, true);
@@ -62,7 +56,7 @@ TEST(StlSortIndexTest, TestRange) {
     }
 
     {
-        std::vector<bool> expected_result(false, data.size());
+        std::vector<bool> expected_result(data.size(), false);
         auto exec_expr =
             [](const std::shared_ptr<ScalarIndexSort<int64_t>>& index) {
                 return index->Range(10, false, 70, true);
