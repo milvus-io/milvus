@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -484,7 +485,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
-	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection)
+	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
 	if err != nil {
 		log.Warn("Failed to calculate cluster compaction config fail", zap.Error(err))
@@ -560,7 +561,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		totalRows += s.NumOfRows
 	}
 
-	expectedSize := getExpectedSegmentSize(m.meta, collection)
+	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	task := &datapb.CompactionTask{
 		PlanID:             startID,
 		TriggerID:          view.(*MixSegmentView).triggerID,
@@ -598,13 +599,13 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	)
 }
 
-func getExpectedSegmentSize(meta *meta, collInfo *collectionInfo) int64 {
-	allDiskIndex := meta.indexMeta.AreAllDiskIndex(collInfo.ID, collInfo.Schema)
+func getExpectedSegmentSize(meta *meta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
+	allDiskIndex := meta.indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
 		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
-	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
