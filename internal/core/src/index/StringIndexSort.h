@@ -39,15 +39,14 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
 
     const TargetBitmap
     PrefixMatch(std::string_view prefix) {
-        auto data = GetData();
-        TargetBitmap bitset(data.size());
+        TargetBitmap bitset(Size());
         auto it = std::lower_bound(
-            data.begin(),
-            data.end(),
+            begin(),
+            end(),
             prefix,
             [](const IndexStructure<std::string>& value,
                std::string_view prefix) { return value.a_ < prefix; });
-        for (; it != data.end(); ++it) {
+        for (; it != end(); ++it) {
             if (!milvus::PrefixMatch(it->a_, prefix)) {
                 break;
             }

@@ -34,6 +34,8 @@
 
 namespace milvus::index {
 
+constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
+
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context)
@@ -169,8 +171,61 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     auto index_length = index_binary.GetByName("index_length");
     memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
 
+    is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
+
     auto index_data = index_binary.GetByName("index_data");
-    data_.resize(index_size);
+
+    if (is_mmap_) {
+        auto mmap_filepath_opt =
+            GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+        AssertInfo(mmap_filepath_opt.has_value(),
+                   "mmap filepath is empty when load index");
+        auto mmap_filepath = mmap_filepath_opt.value();
+        std::filesystem::create_directories(
+            std::filesystem::path(mmap_filepath).parent_path());
+
+        auto aligned_size =
+            ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+        {
+            auto file_writer = storage::FileWriter(mmap_filepath);
+            file_writer.Write(index_data->data.get(), (size_t)index_data->size);
+
+            if (aligned_size > index_data->size) {
+                std::vector<uint8_t> padding(aligned_size - index_data->size,
+                                             0);
+                file_writer.Write(padding.data(), padding.size());
+            }
+            file_writer.Finish();
+        }
+
+        auto file = File::Open(mmap_filepath, O_RDONLY);
+        mmap_data_ = static_cast<char*>(mmap(NULL,
+                                             (size_t)index_data->size,
+                                             PROT_READ,
+                                             MAP_PRIVATE,
+                                             file.Descriptor(),
+                                             0));
+
+        if (mmap_data_ == MAP_FAILED) {
+            file.Close();
+            remove(mmap_filepath.c_str());
+            PanicInfo(ErrorCode::UnexpectedError,
+                      "failed to mmap: {}",
+                      strerror(errno));
+        }
+
+        mmap_size_ = aligned_size;
+        data_size_ = index_data->size;
+
+        file.Close();
+        unlink(mmap_filepath.c_str());
+    } else {
+        data_.resize(index_size);
+        memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
+    }
+
+    setup_data_pointers();
+
     auto index_num_rows = index_binary.GetByName("index_num_rows");
     if (index_num_rows) {
         memcpy(&total_num_rows_,
@@ -182,13 +237,16 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     idx_to_offsets_.resize(total_num_rows_);
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
-    memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
-    for (size_t i = 0; i < data_.size(); ++i) {
-        idx_to_offsets_[data_[i].idx_] = i;
-        valid_bitset_.set(data_[i].idx_);
+
+    for (size_t i = 0; i < Size(); ++i) {
+        const auto& item = operator[](i);
+        idx_to_offsets_[item.idx_] = i;
+        valid_bitset_.set(item.idx_);
     }
 
     is_built_ = true;
+
+    LOG_INFO("load stlsort index done, is_mmap:{}", is_mmap_);
 }
 
 template <typename T>
@@ -219,10 +277,10 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
-        auto lb = std::lower_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
-        auto ub = std::upper_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto lb =
+            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
+        auto ub =
+            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
                 std::cout << "error happens in ScalarIndexSort<T>::In, "
@@ -241,10 +299,10 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count(), true);
     for (size_t i = 0; i < n; ++i) {
-        auto lb = std::lower_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
-        auto ub = std::upper_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto lb =
+            std::lower_bound(begin(), end(), IndexStructure<T>(*(values + i)));
+        auto ub =
+            std::upper_bound(begin(), end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
                 std::cout << "error happens in ScalarIndexSort<T>::NotIn, "
@@ -283,27 +341,23 @@ const TargetBitmap
 ScalarIndexSort<T>::Range(const T value, const OpType op) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
-    auto lb = data_.begin();
-    auto ub = data_.end();
+    auto lb = begin();
+    auto ub = end();
     if (ShouldSkip(value, value, op)) {
         return bitset;
     }
     switch (op) {
         case OpType::LessThan:
-            ub = std::lower_bound(
-                data_.begin(), data_.end(), IndexStructure<T>(value));
+            ub = std::lower_bound(begin(), end(), IndexStructure<T>(value));
             break;
         case OpType::LessEqual:
-            ub = std::upper_bound(
-                data_.begin(), data_.end(), IndexStructure<T>(value));
+            ub = std::upper_bound(begin(), end(), IndexStructure<T>(value));
             break;
         case OpType::GreaterThan:
-            lb = std::upper_bound(
-                data_.begin(), data_.end(), IndexStructure<T>(value));
+            lb = std::upper_bound(begin(), end(), IndexStructure<T>(value));
             break;
         case OpType::GreaterEqual:
-            lb = std::lower_bound(
-                data_.begin(), data_.end(), IndexStructure<T>(value));
+            lb = std::lower_bound(begin(), end(), IndexStructure<T>(value));
             break;
         default:
             PanicInfo(OpTypeInvalid,
@@ -331,21 +385,21 @@ ScalarIndexSort<T>::Range(T lower_bound_value,
     if (ShouldSkip(lower_bound_value, upper_bound_value, OpType::Range)) {
         return bitset;
     }
-    auto lb = data_.begin();
-    auto ub = data_.end();
+    auto lb = begin();
+    auto ub = end();
     if (lb_inclusive) {
         lb = std::lower_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
+            begin(), end(), IndexStructure<T>(lower_bound_value));
     } else {
         lb = std::upper_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
+            begin(), end(), IndexStructure<T>(lower_bound_value));
     }
     if (ub_inclusive) {
         ub = std::upper_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
+            begin(), end(), IndexStructure<T>(upper_bound_value));
     } else {
         ub = std::lower_bound(
-            data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
+            begin(), end(), IndexStructure<T>(upper_bound_value));
     }
     for (; lb < ub; ++lb) {
         bitset[lb->idx_] = true;
@@ -363,7 +417,7 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
         return std::nullopt;
     }
     auto offset = idx_to_offsets_[idx];
-    return data_[offset].a_;
+    return operator[](offset).a_;
 }
 
 template <typename T>
@@ -371,9 +425,9 @@ bool
 ScalarIndexSort<T>::ShouldSkip(const T lower_value,
                                const T upper_value,
                                const milvus::OpType op) {
-    if (!data_.empty()) {
-        auto lower_bound = data_.begin();
-        auto upper_bound = data_.rbegin();
+    if (!Empty()) {
+        auto lower_bound = begin();
+        auto upper_bound = rbegin();
         bool shouldSkip = false;
         switch (op) {
             case OpType::LessThan: {

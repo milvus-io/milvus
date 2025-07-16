@@ -26,6 +26,8 @@
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/FileWriter.h"
+#include "common/File.h"
 
 namespace milvus::index {
 
@@ -35,6 +37,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
     explicit ScalarIndexSort(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
+
+    ~ScalarIndexSort() {
+        if (is_mmap_ && mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
+            munmap(mmap_data_, mmap_size_);
+        }
+    }
 
     BinarySet
     Serialize(const Config& config) override;
@@ -87,7 +95,12 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
     int64_t
     Size() override {
-        return (int64_t)data_.size();
+        return (int64_t)size_;
+    }
+
+    bool
+    Empty() const {
+        return size_ == 0;
     }
 
     IndexStatsPtr
@@ -106,9 +119,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
 
  public:
-    const std::vector<IndexStructure<T>>&
+    const IndexStructure<T>*
     GetData() {
-        return data_;
+        return data_ptr_;
     }
 
     bool
@@ -120,15 +133,66 @@ class ScalarIndexSort : public ScalarIndex<T> {
     LoadWithoutAssemble(const BinarySet& binary_set,
                         const Config& config) override;
 
+ public:
+    // zero-cost data acess api
+    __attribute__((always_inline)) const IndexStructure<T>&
+    operator[](size_t idx) const {
+        assert(idx < size_);
+        return data_ptr_[idx];
+    }
+
+    __attribute__((always_inline)) const IndexStructure<T>*
+    begin() const {
+        return data_ptr_;
+    }
+
+    using const_iterator = const IndexStructure<T>*;
+    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+    __attribute__((always_inline)) const const_reverse_iterator
+    rbegin() const {
+        return const_reverse_iterator(end());
+    }
+
+    __attribute__((always_inline)) const IndexStructure<T>*
+    end() const {
+        return end_ptr_;
+    }
+
  private:
-    bool is_built_;
+    void
+    setup_data_pointers() const {
+        if (is_mmap_) {
+            data_ptr_ = reinterpret_cast<IndexStructure<T>*>(mmap_data_);
+            size_ = data_size_ / sizeof(IndexStructure<T>);
+            end_ptr_ = data_ptr_ + size_;
+        } else {
+            data_ptr_ = data_.data();
+            end_ptr_ = data_ptr_ + data_.size();
+            size_ = data_.size();
+        }
+    }
+
+    bool is_built_ = false;
     Config config_;
     std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
-    std::vector<IndexStructure<T>> data_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     size_t total_num_rows_{0};
     // generate valid_bitset_ to speed up NotIn and IsNull and IsNotNull operate
     TargetBitmap valid_bitset_;
+
+    // for ram. Also used for building index.
+    std::vector<IndexStructure<T>> data_;
+
+    // for mmap
+    bool is_mmap_{false};
+    int64_t mmap_size_ = 0;
+    int64_t data_size_ = 0;
+    char* mmap_data_ = nullptr;
+
+    mutable const IndexStructure<T>* data_ptr_ = nullptr;
+    mutable const IndexStructure<T>* end_ptr_ = nullptr;
+    mutable size_t size_ = 0;
 };
 
 template <typename T>

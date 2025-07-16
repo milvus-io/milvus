@@ -269,6 +269,28 @@ gen_index_meta(int64_t segment_id = 3,
 }
 
 auto
+gen_field_meta(int64_t collection_id = 1,
+               int64_t partition_id = 2,
+               int64_t segment_id = 3,
+               int64_t field_id = 101,
+               DataType data_type = DataType::NONE,
+               DataType element_type = DataType::NONE,
+               bool nullable = false) -> milvus::storage::FieldDataMeta {
+    auto meta = milvus::storage::FieldDataMeta{
+        .collection_id = collection_id,
+        .partition_id = partition_id,
+        .segment_id = segment_id,
+        .field_id = field_id,
+    };
+    meta.field_schema.set_data_type(
+        static_cast<milvus::proto::schema::DataType>(data_type));
+    meta.field_schema.set_element_type(
+        static_cast<milvus::proto::schema::DataType>(element_type));
+    meta.field_schema.set_nullable(nullable);
+    return meta;
+}
+
+auto
 gen_local_storage_config(const std::string& root_path)
     -> milvus::storage::StorageConfig {
     auto ret = milvus::storage::StorageConfig{};
