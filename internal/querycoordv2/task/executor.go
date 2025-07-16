@@ -31,10 +31,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -237,6 +239,12 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
+
+	if err := ex.checkIfShardLeaderIsStreamingNode(view); err != nil {
+		log.Warn("shard leader is not a streamingnode, skip load segment", zap.Error(err))
+		return err
+	}
+
 	log = log.With(zap.Int64("shardLeader", view.Node))
 
 	// NOTE: for balance segment task, expected load and release execution on the same shard leader
@@ -256,6 +264,26 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	elapsed := time.Since(startTs)
 	log.Info("load segments done", zap.Duration("elapsed", elapsed))
 
+	return nil
+}
+
+// checkIfShardLeaderIsStreamingNode checks if the shard leader is a streamingnode.
+// Because the L0 management at 2.6 and 2.5 is different, so when upgrading mixcoord,
+// the new mixcoord will make a wrong plan when balancing a segment from one query node to another by 2.5 delegator.
+// We need to balance the 2.5 delegator to 2.6 delegator before balancing any segment by 2.6 mixcoord.
+func (ex *Executor) checkIfShardLeaderIsStreamingNode(view *meta.DmChannel) error {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		return nil
+	}
+
+	node := ex.nodeMgr.Get(view.Node)
+	if node == nil {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("node %d is not found", view.Node))
+	}
+	nodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+	if !nodes.Contain(view.Node) {
+		return merr.WrapErrServiceInternal(fmt.Sprintf("channel %s at node %d is not working at streamingnode, skip load segment", view.GetChannelName(), view.Node))
+	}
 	return nil
 }
 

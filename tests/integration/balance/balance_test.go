@@ -185,9 +185,7 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("balance on single replica", zap.Int("channel", len(resp2.Channels)), zap.Int("segments", len(resp.Segments)))
-		// TODO: https://github.com/milvus-io/milvus/issues/42966
-		// return len(resp2.Channels) == 1 && len(resp.Segments) == 2
-		return len(resp.Segments) == 2
+		return len(resp2.Channels) == 1 && len(resp.Segments) == 2
 	}, 30*time.Second, 1*time.Second)
 
 	// check total segment number and total channel number
@@ -372,7 +370,13 @@ func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
 		resp, err := qn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
-		log.Info("segments on query node", zap.Int64("nodeID", qn.GetNodeID()), zap.Int("channel", len(resp.Channels)), zap.Int("segments", len(resp.Segments)))
+		log.Info("segments on query node before balance", zap.Int64("nodeID", qn.GetNodeID()), zap.Int("channel", len(resp.Channels)), zap.Int("segments", len(resp.Segments)))
+	}
+	for _, sn := range s.Cluster.GetAllStreamingNodes() {
+		resp, err := sn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		log.Info("channel on streaming node before balance", zap.Int64("nodeID", sn.GetNodeID()), zap.Int("channel", len(resp.Channels)), zap.Int("segments", len(resp.Segments)))
 	}
 
 	// then we add 1 query node, expected segment and channel will be move to new query node concurrently
@@ -387,6 +391,12 @@ func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
 			s.True(merr.Ok(resp.GetStatus()))
 			log.Info("segments on query node", zap.Int64("nodeID", qn.GetNodeID()), zap.Int("channel", len(resp.Channels)), zap.Int("segments", len(resp.Segments)))
 		}
+		for _, sn := range s.Cluster.GetAllStreamingNodes() {
+			resp, err := sn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+			s.NoError(err)
+			s.True(merr.Ok(resp.GetStatus()))
+			log.Info("channel on streaming node", zap.Int64("nodeID", sn.GetNodeID()), zap.Int("channel", len(resp.Channels)), zap.Int("segments", len(resp.Segments)))
+		}
 
 		resp, err := qn1.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
@@ -394,9 +404,7 @@ func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("concurrent balance channel and segment", zap.Int("channel1", len(resp2.Channels)), zap.Int("segments1", len(resp.Segments)))
-		// TODO: https://github.com/milvus-io/milvus/issues/42966
-		// return len(resp2.Channels) == 2 && len(resp.Segments) >= 20
-		return len(resp.Segments) >= 20
+		return len(resp2.Channels) == 2 && len(resp.Segments) >= 20
 	}, 30*time.Second, 1*time.Second)
 
 	// expected concurrent balance will execute successfully, shard serviceable won't be broken

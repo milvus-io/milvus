@@ -19,12 +19,15 @@ package balance
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 )
@@ -203,4 +206,25 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	distInfo += "]"
 
 	log.Info(distInfo)
+}
+
+// sortIfChannelAtWALLocated sorts the channels by the weight of the node where the WAL is located.
+// put the channel at the node where the WAL is located to the tail of the channels.
+func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
+	if !streamingutil.IsStreamingServiceEnabled() {
+		return channels
+	}
+	weighter := func(ch *meta.DmChannel) int {
+		nodeID := snmanager.StaticStreamingNodeManager.GetWALLocated(ch.GetChannelName())
+		if ch.Node == nodeID {
+			// if node is the node where the WAL is located, put it to the tail of the channels.
+			// so assign 1 to the node the WAL is located.
+			return 1
+		}
+		return 0
+	}
+	sort.Slice(channels, func(i, j int) bool {
+		return weighter(channels[i]) < weighter(channels[j])
+	})
+	return channels
 }
