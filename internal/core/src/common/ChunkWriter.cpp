@@ -32,8 +32,9 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
     std::vector<std::string_view> strs;
     std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
-    // tuple <data, size, offset>
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+    std::vector<uint8_t> null_bitmap;
+    int64_t size_total_bit = 0;
+
     for (auto batch : *data) {
         auto batch_data = batch.ValueOrDie();
         batches.emplace_back(batch_data);
@@ -46,9 +47,11 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         }
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
-            // size, offset all in bits
-            null_bitmaps.emplace_back(
-                data->null_bitmap_data(), data->length(), data->offset());
+            merged_null_bitmap(null_bitmap,
+                               size_total_bit,
+                               data->null_bitmap_data(),
+                               data->length(),
+                               data->offset());
             size += null_bitmap_n;
         }
         row_nums_ += array->length();
@@ -63,7 +66,9 @@ StringChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     // chunk layout: null bitmap, offset1, offset2, ..., offsetn, str1, str2, ..., strn, padding
     // write null bitmaps
-    write_null_bit_maps(null_bitmaps);
+    if (nullable_) {
+        target_->write(null_bitmap.data(), null_bitmap.size());
+    }
 
     // write data
     int offset_num = row_nums_ + 1;
@@ -96,8 +101,9 @@ void
 JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
     std::vector<Json> jsons;
-    // tuple <data, size, offset>
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+    std::vector<uint8_t> null_bitmap;
+    int64_t size_total_bit = 0;
+
     for (auto batch : *data) {
         auto data = batch.ValueOrDie()->column(0);
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
@@ -110,8 +116,11 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
             // size, offset all in bits
-            null_bitmaps.emplace_back(
-                data->null_bitmap_data(), data->length(), data->offset());
+            merged_null_bitmap(null_bitmap,
+                               size_total_bit,
+                               data->null_bitmap_data(),
+                               data->length(),
+                               data->offset());
             size += null_bitmap_n;
         }
         row_nums_ += array->length();
@@ -125,7 +134,9 @@ JSONChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
 
     // chunk layout: null bitmaps, offset1, offset2, ... ,json1, json2, ..., jsonn
     // write null bitmaps
-    write_null_bit_maps(null_bitmaps);
+    if (nullable_) {
+        target_->write(null_bitmap.data(), null_bitmap.size());
+    }
 
     int offset_num = row_nums_ + 1;
     uint32_t offset_start_pos = target_->tell() + sizeof(uint32_t) * offset_num;
@@ -159,8 +170,8 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     auto size = 0;
     auto is_string = IsStringDataType(element_type_);
     std::vector<Array> arrays;
-    // tuple <data, size, offset>
-    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
+    std::vector<uint8_t> null_bitmap;
+    int64_t size_total_bit = 0;
 
     for (auto batch : *data) {
         auto data = batch.ValueOrDie()->column(0);
@@ -181,8 +192,11 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
             // size, offset all in bits
-            null_bitmaps.emplace_back(
-                data->null_bitmap_data(), data->length(), data->offset());
+            merged_null_bitmap(null_bitmap,
+                               size_total_bit,
+                               data->null_bitmap_data(),
+                               data->length(),
+                               data->offset());
             size += null_bitmap_n;
         }
     }
@@ -196,8 +210,9 @@ ArrayChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
     }
 
     // chunk layout: nullbitmaps, offsets, elem_off1, elem_off2, .. data1, data2, ..., datan, padding
-    write_null_bit_maps(null_bitmaps);
-
+    if (nullable_) {
+        target_->write(null_bitmap.data(), null_bitmap.size());
+    }
     int offsets_num = row_nums_ + 1;
     int len_num = row_nums_;
     uint32_t offset_start_pos =
