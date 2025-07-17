@@ -69,6 +69,7 @@ jobs:
           exit 0
   Build:
     name: Build and test AMD64 Ubuntu 22.04
+    if: env.title_contains_run_ci == 'true'  # 仅标题匹配时执行
     runs-on: ubuntu-latest
     steps:
       - name: 'Setup $HOME'
@@ -138,7 +139,7 @@ jobs:
 
   UT-Cpp:
     # skip the UT-Cpp job in github workflow, it run in jenkins now see: UT-CPP.groovy
-    if: false 
+    if: false
     name: UT for Cpp
     needs: Build
     runs-on: ubuntu-latest
@@ -193,6 +194,7 @@ jobs:
   UT-Go:
     name: UT for Go
     needs: Build
+    if: env.title_contains_run_ci == 'true'  # 仅标题匹配时执行
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -244,6 +246,7 @@ jobs:
 
   integration-test:
     name: Integration Test
+    if: env.title_contains_run_ci == 'true'  # 仅标题匹配时执行
     needs: Build
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -295,6 +298,7 @@ jobs:
 
   codecov:
     name: Upload Code Coverage
+    if: env.title_contains_run_ci == 'true'  # 仅标题匹配时执行
     needs: [UT-Go, integration-test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
