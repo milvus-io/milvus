@@ -215,6 +215,13 @@ class TestChunkSegment : public testing::Test {
             field_infos.push_back(field_info);
         }
 
+        std::vector<std::string> str_data;
+        for (int i = 0; i < test_data_count * chunk_num; i++) {
+            str_data.push_back("test" + std::to_string(i));
+        }
+        std::sort(str_data.begin(), str_data.end());
+        std::vector<bool> validity(test_data_count, true);
+
         // generate data
         for (int chunk_id = 0; chunk_id < chunk_num;
              chunk_id++, start_id += test_data_count) {
@@ -222,8 +229,8 @@ class TestChunkSegment : public testing::Test {
             std::iota(test_data.begin(), test_data.end(), start_id);
 
             auto builder = std::make_shared<arrow::Int64Builder>();
-            auto status =
-                builder->AppendValues(test_data.begin(), test_data.end());
+            auto status = builder->AppendValues(
+                test_data.begin(), test_data.end(), validity.begin());
             ASSERT_TRUE(status.ok());
             auto res = builder->Finish();
             ASSERT_TRUE(res.ok());
