@@ -1274,6 +1274,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/43031, pr#43299, remove name check for has collection")
     def test_milvus_client_has_collection_invalid_collection_name(self, name):
         """
         target: test fast create collection normal case
