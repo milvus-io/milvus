@@ -335,3 +335,258 @@ func Test_decodeUnicode(t *testing.T) {
 	assert.NotEqual(t, `A["年份"]["月份"]`, s1)
 	assert.Equal(t, `A["年份"]["月份"]`, decodeUnicode(s1))
 }
+
+func Test_handleCompare(t *testing.T) {
+	t.Run("normal field comparison", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotNil(t, result.GetCompareExpr())
+		assert.Equal(t, planpb.OpType_GreaterThan, result.GetCompareExpr().GetOp())
+	})
+
+	t.Run("left field is JSON type", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_JSON,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_JSON,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "two column comparison with JSON type is not supported")
+	})
+
+	t.Run("right field is JSON type", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_JSON,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_JSON,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "two column comparison with JSON type is not supported")
+	})
+
+	t.Run("both fields are JSON type", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_JSON,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_JSON,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_JSON,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_JSON,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "two column comparison with JSON type is not supported")
+	})
+
+	t.Run("left field is nil", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ValueExpr{
+					ValueExpr: &planpb.ValueExpr{
+						Value: &planpb.GenericValue{
+							Val: &planpb.GenericValue_Int64Val{
+								Int64Val: 100,
+							},
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "only comparison between two fields is supported")
+	})
+
+	t.Run("right field is nil", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ValueExpr{
+					ValueExpr: &planpb.ValueExpr{
+						Value: &planpb.GenericValue{
+							Val: &planpb.GenericValue_Int64Val{
+								Int64Val: 100,
+							},
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "only comparison between two fields is supported")
+	})
+
+	t.Run("template expression", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				IsTemplate: true,
+				Expr: &planpb.Expr_ValueExpr{
+					ValueExpr: &planpb.ValueExpr{
+						Value: &planpb.GenericValue{
+							Val: &planpb.GenericValue_Int64Val{
+								Int64Val: 100,
+							},
+						},
+						TemplateVariableName: "var1",
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  102,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		result, err := handleCompare(planpb.OpType_GreaterThan, left, right)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.NotNil(t, result.GetUnaryRangeExpr())
+		assert.Equal(t, planpb.OpType_GreaterThan, result.GetUnaryRangeExpr().GetOp())
+		assert.Equal(t, "var1", result.GetUnaryRangeExpr().GetTemplateVariableName())
+	})
+}
