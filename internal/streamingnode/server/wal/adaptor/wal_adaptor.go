@@ -96,6 +96,17 @@ type walAdaptorImpl struct {
 	isFenced               *atomic.Bool
 }
 
+// Metrics returns the metrics of the wal.
+func (w *walAdaptorImpl) Metrics() types.WALMetrics {
+	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
+	recoveryMetrics := w.flusher.Metrics()
+	return types.RWWALMetrics{
+		ChannelInfo:      w.Channel(),
+		MVCCTimeTick:     currentMVCC.Timetick,
+		RecoveryTimeTick: recoveryMetrics.RecoveryTimeTick,
+	}
+}
+
 // GetLatestMVCCTimestamp get the latest mvcc timestamp of the wal at vchannel.
 func (w *walAdaptorImpl) GetLatestMVCCTimestamp(ctx context.Context, vchannel string) (uint64, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {

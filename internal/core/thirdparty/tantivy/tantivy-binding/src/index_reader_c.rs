@@ -529,7 +529,7 @@ pub extern "C" fn tantivy_json_prefix_query(
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_inner_match_ngram(
+pub extern "C" fn tantivy_ngram_match_query(
     ptr: *mut c_void,
     literal: *const c_char,
     min_gram: usize,
@@ -541,7 +541,7 @@ pub extern "C" fn tantivy_inner_match_ngram(
 
     unsafe {
         (*real)
-            .inner_match_ngram(literal, min_gram, max_gram, bitset)
+            .ngram_match_query(literal, min_gram, max_gram, bitset)
             .into()
     }
 }

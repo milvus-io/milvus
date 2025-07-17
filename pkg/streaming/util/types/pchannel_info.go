@@ -63,6 +63,10 @@ type ChannelID struct {
 	// TODO: add replica id in future.
 }
 
+func (id ChannelID) IsZero() bool {
+	return id.Name == ""
+}
+
 func (id ChannelID) String() string {
 	return id.Name
 }

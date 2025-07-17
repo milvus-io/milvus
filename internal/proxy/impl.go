@@ -959,73 +959,13 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 // DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
 func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+	interceptor, err := NewInterceptor[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse](node, "DescribeCollection")
+	if err != nil {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeCollection")
-	defer sp.End()
-	method := "DescribeCollection"
-	tr := timerecord.NewTimeRecorder(method)
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
-
-	dct := &describeCollectionTask{
-		ctx:                       ctx,
-		Condition:                 NewTaskCondition(ctx),
-		DescribeCollectionRequest: request,
-		mixCoord:                  node.mixCoord,
-	}
-
-	log := log.Ctx(ctx).With(
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
-
-	log.Debug("DescribeCollection received")
-
-	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn("DescribeCollection failed to enqueue",
-			zap.Error(err))
-
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
-		return &milvuspb.DescribeCollectionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	log.Debug("DescribeCollection enqueued",
-		zap.Uint64("BeginTS", dct.BeginTs()),
-		zap.Uint64("EndTS", dct.EndTs()))
-
-	if err := dct.WaitToFinish(); err != nil {
-		log.Warn("DescribeCollection failed to WaitToFinish",
-			zap.Error(err),
-			zap.Uint64("BeginTS", dct.BeginTs()),
-			zap.Uint64("EndTS", dct.EndTs()))
-
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
-
-		return &milvuspb.DescribeCollectionResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	log.Debug("DescribeCollection done",
-		zap.Uint64("BeginTS", dct.BeginTs()),
-		zap.Uint64("EndTS", dct.EndTs()),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-	)
-
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
-	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dct.result, nil
+	return interceptor.Call(ctx, request)
 }
 
 // AddCollectionField add a field to collection
@@ -4393,13 +4333,14 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
-			SegmentID:    info.ID,
-			CollectionID: info.CollectionID,
-			PartitionID:  info.PartitionID,
-			NumRows:      info.NumOfRows,
-			State:        info.State,
-			Level:        commonpb.SegmentLevel(info.Level),
-			IsSorted:     info.GetIsSorted(),
+			SegmentID:      info.ID,
+			CollectionID:   info.CollectionID,
+			PartitionID:    info.PartitionID,
+			NumRows:        info.NumOfRows,
+			State:          info.State,
+			Level:          commonpb.SegmentLevel(info.Level),
+			IsSorted:       info.GetIsSorted(),
+			StorageVersion: info.GetStorageVersion(),
 		}
 	}
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -4549,17 +4490,18 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
 	for i, info := range infoResp.Infos {
 		queryInfos[i] = &milvuspb.QuerySegmentInfo{
-			SegmentID:    info.SegmentID,
-			CollectionID: info.CollectionID,
-			PartitionID:  info.PartitionID,
-			NumRows:      info.NumRows,
-			MemSize:      info.MemSize,
-			IndexName:    info.IndexName,
-			IndexID:      info.IndexID,
-			State:        info.SegmentState,
-			NodeIds:      info.NodeIds,
-			Level:        commonpb.SegmentLevel(info.Level),
-			IsSorted:     info.GetIsSorted(),
+			SegmentID:      info.SegmentID,
+			CollectionID:   info.CollectionID,
+			PartitionID:    info.PartitionID,
+			NumRows:        info.NumRows,
+			MemSize:        info.MemSize,
+			IndexName:      info.IndexName,
+			IndexID:        info.IndexID,
+			State:          info.SegmentState,
+			NodeIds:        info.NodeIds,
+			Level:          commonpb.SegmentLevel(info.Level),
+			IsSorted:       info.GetIsSorted(),
+			StorageVersion: info.GetStorageVersion(),
 		}
 	}
 

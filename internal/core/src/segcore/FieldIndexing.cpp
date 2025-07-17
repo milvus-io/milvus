@@ -15,7 +15,6 @@
 #include "common/EasyAssert.h"
 #include "fmt/format.h"
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
 
 #include "common/SystemProperty.h"
 #include "segcore/FieldIndexing.h"
@@ -98,50 +97,6 @@ VectorFieldIndexing::recreate_index(DataType data_type,
             config_->GetMetricType(),
             knowhere::Version::GetCurrentVersion().VersionNumber(),
             view_data);
-    }
-}
-
-void
-VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
-                                     int64_t ack_end,
-                                     const VectorBase* vec_base) {
-    // No BuildIndexRange support for sparse vector.
-    AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT ||
-                   field_meta_.get_data_type() == DataType::VECTOR_FLOAT16 ||
-                   field_meta_.get_data_type() == DataType::VECTOR_BFLOAT16,
-               "Data type of vector field is not in (VECTOR_FLOAT, "
-               "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
-    auto dim = field_meta_.get_dim();
-    AssertInfo(
-        ConcurrentDenseVectorCheck(vec_base, field_meta_.get_data_type()),
-        "vec_base can't cast to ConcurrentVector type");
-    auto num_chunk = vec_base->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "ack_end is bigger than num_chunk");
-    auto conf = get_build_params(field_meta_.get_data_type());
-    data_.grow_to_at_least(ack_end);
-    for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk_data = vec_base->get_chunk_data(chunk_id);
-        std::unique_ptr<index::VectorIndex> indexing = nullptr;
-        if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT) {
-            indexing = std::make_unique<index::VectorMemIndex<float>>(
-                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
-        } else if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT16) {
-            indexing = std::make_unique<index::VectorMemIndex<float16>>(
-                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
-        } else {
-            indexing = std::make_unique<index::VectorMemIndex<bfloat16>>(
-                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
-        }
-        auto dataset = knowhere::GenDataSet(
-            vec_base->get_size_per_chunk(), dim, chunk_data);
-        indexing->BuildWithDataset(dataset, conf);
-        data_[chunk_id] = std::move(indexing);
     }
 }
 
@@ -364,35 +319,6 @@ VectorFieldIndexing::sync_data_with_index() const {
 bool
 VectorFieldIndexing::has_raw_data() const {
     return index_->HasRawData();
-}
-
-template <typename T>
-void
-ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
-                                        int64_t ack_end,
-                                        const VectorBase* vec_base) {
-    auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
-    AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
-    auto num_chunk = source->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
-    data_.grow_to_at_least(ack_end);
-    for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        auto chunk_data = source->get_chunk_data(chunk_id);
-        // build index for chunk
-        // seem no lint, not pass valid_data here
-        // TODO
-        if constexpr (std::is_same_v<T, std::string>) {
-            auto indexing = index::CreateStringIndexSort();
-            indexing->Build(vec_base->get_size_per_chunk(),
-                            static_cast<const T*>(chunk_data));
-            data_[chunk_id] = std::move(indexing);
-        } else {
-            auto indexing = index::CreateScalarIndexSort<T>();
-            indexing->Build(vec_base->get_size_per_chunk(),
-                            static_cast<const T*>(chunk_data));
-            data_[chunk_id] = std::move(indexing);
-        }
-    }
 }
 
 std::unique_ptr<FieldIndexing>

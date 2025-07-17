@@ -279,7 +279,7 @@ RustResult tantivy_json_prefix_query(void *ptr,
                                      const char *prefix,
                                      void *bitset);
 
-RustResult tantivy_inner_match_ngram(void *ptr,
+RustResult tantivy_ngram_match_query(void *ptr,
                                      const char *literal,
                                      uintptr_t min_gram,
                                      uintptr_t max_gram,

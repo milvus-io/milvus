@@ -960,7 +960,6 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    scheme: s3
     enablev2: false
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
@@ -1137,7 +1136,7 @@ quotaAndLimits:
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
     forceDeny: false
     ttProtection:
-      enabled: false
+      enabled: true
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.

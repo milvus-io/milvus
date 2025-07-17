@@ -179,7 +179,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Require().NoError(err)
 	s.Equal(s.task.primaryKeyField, s.task.plan.Schema.Fields[2])
 	s.Equal(false, s.task.isVectorClusteringKey)
-	s.Equal(true, s.task.memoryBufferSize > 0)
+	s.Equal(true, s.task.memoryLimit > 0)
 	s.Equal(8, s.task.getWorkerPoolSize())
 	s.Equal(8, s.task.mappingPool.Cap())
 	s.Equal(8, s.task.flushPool.Cap())
@@ -305,7 +305,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 		func(ctx context.Context, strings []string) ([][]byte, error) {
 			// 32m, only two buffers can be generated
 			one.Do(func() {
-				s.task.memoryBufferSize = 32 * 1024 * 1024
+				s.task.memoryLimit = 32 * 1024 * 1024
 			})
 			return lo.Values(kvs), nil
 		})

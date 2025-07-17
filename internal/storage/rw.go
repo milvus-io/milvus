@@ -141,13 +141,6 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 	}
 }
 
-func GuessStorageVersion(binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema) int64 {
-	if len(binlogs) == len(schema.Fields) {
-		return StorageV1
-	}
-	return StorageV2
-}
-
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
@@ -284,7 +277,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, maxRowNum,
+			blobsWriter, allocator, maxRowNum,
 			rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 			rwOptions.storageConfig,
 		)

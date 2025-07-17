@@ -539,7 +539,7 @@ impl IndexReaderWrapper {
     }
 
     // **Note**: literal length must be larger or equal to min_gram.
-    pub fn inner_match_ngram(
+    pub fn ngram_match_query(
         &self,
         literal: &str,
         min_gram: usize,

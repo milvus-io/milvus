@@ -1192,16 +1192,6 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 	return nil
 }
 
-// GetVectorFieldSchema get vector field schema from collection schema.
-func GetVectorFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
-	for _, fieldSchema := range schema.GetFields() {
-		if IsVectorType(fieldSchema.DataType) {
-			return fieldSchema, nil
-		}
-	}
-	return nil, errors.New("vector field is not found")
-}
-
 // GetVectorFieldSchemas get vector fields schema from collection schema.
 func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
 	ret := make([]*schemapb.FieldSchema, 0)
@@ -1211,6 +1201,16 @@ func GetVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldS
 		}
 	}
 
+	return ret
+}
+
+func GetDenseVectorFieldSchemas(schema *schemapb.CollectionSchema) []*schemapb.FieldSchema {
+	ret := make([]*schemapb.FieldSchema, 0)
+	for _, fieldSchema := range schema.GetFields() {
+		if IsDenseFloatVectorType(fieldSchema.DataType) || IsBinaryVectorType(fieldSchema.DataType) || IsIntVectorType(fieldSchema.DataType) {
+			ret = append(ret, fieldSchema)
+		}
+	}
 	return ret
 }
 

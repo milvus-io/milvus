@@ -6125,7 +6125,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
-    auto str1_index = milvus::index::CreateScalarIndexSort<std::string>();
+    auto str1_index = milvus::index::CreateStringIndexMarisa();
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
@@ -6281,7 +6281,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
-    auto str1_index = milvus::index::CreateScalarIndexSort<std::string>();
+    auto str1_index = milvus::index::CreateStringIndexMarisa();
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
@@ -6438,7 +6438,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
-    auto str1_index = milvus::index::CreateScalarIndexSort<std::string>();
+    auto str1_index = milvus::index::CreateStringIndexMarisa();
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;

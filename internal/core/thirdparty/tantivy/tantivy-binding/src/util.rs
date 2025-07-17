@@ -1,10 +1,8 @@
-use core::slice;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_void};
 use std::ops::Bound;
 use tantivy::{directory::MmapDirectory, Index};
 
-use crate::convert_to_rust_slice;
 use crate::error::Result;
 
 #[inline]

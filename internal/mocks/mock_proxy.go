@@ -93,6 +93,65 @@ func (_c *MockProxy_AddCollectionField_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// AddUserTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AddUserTags(_a0 context.Context, _a1 *milvuspb.AddUserTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddUserTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddUserTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddUserTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddUserTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AddUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddUserTags'
+type MockProxy_AddUserTags_Call struct {
+	*mock.Call
+}
+
+// AddUserTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddUserTagsRequest
+func (_e *MockProxy_Expecter) AddUserTags(_a0 interface{}, _a1 interface{}) *MockProxy_AddUserTags_Call {
+	return &MockProxy_AddUserTags_Call{Call: _e.mock.On("AddUserTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_AddUserTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddUserTagsRequest)) *MockProxy_AddUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddUserTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AddUserTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AddUserTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AddUserTags_Call) RunAndReturn(run func(context.Context, *milvuspb.AddUserTagsRequest) (*commonpb.Status, error)) *MockProxy_AddUserTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocTimestamp provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) AllocTimestamp(_a0 context.Context, _a1 *milvuspb.AllocTimestampRequest) (*milvuspb.AllocTimestampResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1214,6 +1273,65 @@ func (_c *MockProxy_CreateRole_Call) RunAndReturn(run func(context.Context, *mil
 	return _c
 }
 
+// CreateRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) CreateRowPolicy(_a0 context.Context, _a1 *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_CreateRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateRowPolicy'
+type MockProxy_CreateRowPolicy_Call struct {
+	*mock.Call
+}
+
+// CreateRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.CreateRowPolicyRequest
+func (_e *MockProxy_Expecter) CreateRowPolicy(_a0 interface{}, _a1 interface{}) *MockProxy_CreateRowPolicy_Call {
+	return &MockProxy_CreateRowPolicy_Call{Call: _e.mock.On("CreateRowPolicy", _a0, _a1)}
+}
+
+func (_c *MockProxy_CreateRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.CreateRowPolicyRequest)) *MockProxy_CreateRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_CreateRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_CreateRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_CreateRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error)) *MockProxy_CreateRowPolicy_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) Delete(_a0 context.Context, _a1 *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1328,6 +1446,65 @@ func (_c *MockProxy_DeleteCredential_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *MockProxy_DeleteCredential_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)) *MockProxy_DeleteCredential_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteUserTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DeleteUserTags(_a0 context.Context, _a1 *milvuspb.DeleteUserTagsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteUserTags")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteUserTagsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DeleteUserTagsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DeleteUserTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DeleteUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteUserTags'
+type MockProxy_DeleteUserTags_Call struct {
+	*mock.Call
+}
+
+// DeleteUserTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DeleteUserTagsRequest
+func (_e *MockProxy_Expecter) DeleteUserTags(_a0 interface{}, _a1 interface{}) *MockProxy_DeleteUserTags_Call {
+	return &MockProxy_DeleteUserTags_Call{Call: _e.mock.On("DeleteUserTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_DeleteUserTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DeleteUserTagsRequest)) *MockProxy_DeleteUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DeleteUserTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DeleteUserTags_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_DeleteUserTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DeleteUserTags_Call) RunAndReturn(run func(context.Context, *milvuspb.DeleteUserTagsRequest) (*commonpb.Status, error)) *MockProxy_DeleteUserTags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2154,6 +2331,65 @@ func (_c *MockProxy_DropRole_Call) Return(_a0 *commonpb.Status, _a1 error) *Mock
 }
 
 func (_c *MockProxy_DropRole_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRoleRequest) (*commonpb.Status, error)) *MockProxy_DropRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropRowPolicy provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DropRowPolicy(_a0 context.Context, _a1 *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropRowPolicy")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropRowPolicyRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropRowPolicyRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DropRowPolicy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropRowPolicy'
+type MockProxy_DropRowPolicy_Call struct {
+	*mock.Call
+}
+
+// DropRowPolicy is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DropRowPolicyRequest
+func (_e *MockProxy_Expecter) DropRowPolicy(_a0 interface{}, _a1 interface{}) *MockProxy_DropRowPolicy_Call {
+	return &MockProxy_DropRowPolicy_Call{Call: _e.mock.On("DropRowPolicy", _a0, _a1)}
+}
+
+func (_c *MockProxy_DropRowPolicy_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DropRowPolicyRequest)) *MockProxy_DropRowPolicy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropRowPolicyRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DropRowPolicy_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_DropRowPolicy_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DropRowPolicy_Call) RunAndReturn(run func(context.Context, *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error)) *MockProxy_DropRowPolicy_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3794,6 +4030,65 @@ func (_c *MockProxy_GetStatisticsChannel_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// GetUserTags provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) GetUserTags(_a0 context.Context, _a1 *milvuspb.GetUserTagsRequest) (*milvuspb.GetUserTagsResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetUserTags")
+	}
+
+	var r0 *milvuspb.GetUserTagsResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetUserTagsRequest) (*milvuspb.GetUserTagsResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetUserTagsRequest) *milvuspb.GetUserTagsResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.GetUserTagsResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetUserTagsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_GetUserTags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetUserTags'
+type MockProxy_GetUserTags_Call struct {
+	*mock.Call
+}
+
+// GetUserTags is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.GetUserTagsRequest
+func (_e *MockProxy_Expecter) GetUserTags(_a0 interface{}, _a1 interface{}) *MockProxy_GetUserTags_Call {
+	return &MockProxy_GetUserTags_Call{Call: _e.mock.On("GetUserTags", _a0, _a1)}
+}
+
+func (_c *MockProxy_GetUserTags_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetUserTagsRequest)) *MockProxy_GetUserTags_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.GetUserTagsRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_GetUserTags_Call) Return(_a0 *milvuspb.GetUserTagsResponse, _a1 error) *MockProxy_GetUserTags_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_GetUserTags_Call) RunAndReturn(run func(context.Context, *milvuspb.GetUserTagsRequest) (*milvuspb.GetUserTagsResponse, error)) *MockProxy_GetUserTags_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetVersion provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) GetVersion(_a0 context.Context, _a1 *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -4956,6 +5251,124 @@ func (_c *MockProxy_ListResourceGroups_Call) Return(_a0 *milvuspb.ListResourceGr
 }
 
 func (_c *MockProxy_ListResourceGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)) *MockProxy_ListResourceGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListRowPolicies provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListRowPolicies(_a0 context.Context, _a1 *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRowPolicies")
+	}
+
+	var r0 *milvuspb.ListRowPoliciesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListRowPoliciesRequest) *milvuspb.ListRowPoliciesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListRowPoliciesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListRowPoliciesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListRowPolicies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRowPolicies'
+type MockProxy_ListRowPolicies_Call struct {
+	*mock.Call
+}
+
+// ListRowPolicies is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListRowPoliciesRequest
+func (_e *MockProxy_Expecter) ListRowPolicies(_a0 interface{}, _a1 interface{}) *MockProxy_ListRowPolicies_Call {
+	return &MockProxy_ListRowPolicies_Call{Call: _e.mock.On("ListRowPolicies", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListRowPolicies_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListRowPoliciesRequest)) *MockProxy_ListRowPolicies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListRowPoliciesRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListRowPolicies_Call) Return(_a0 *milvuspb.ListRowPoliciesResponse, _a1 error) *MockProxy_ListRowPolicies_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListRowPolicies_Call) RunAndReturn(run func(context.Context, *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error)) *MockProxy_ListRowPolicies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListUsersWithTag provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListUsersWithTag(_a0 context.Context, _a1 *milvuspb.ListUsersWithTagRequest) (*milvuspb.ListUsersWithTagResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListUsersWithTag")
+	}
+
+	var r0 *milvuspb.ListUsersWithTagResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListUsersWithTagRequest) (*milvuspb.ListUsersWithTagResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListUsersWithTagRequest) *milvuspb.ListUsersWithTagResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListUsersWithTagResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListUsersWithTagRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListUsersWithTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListUsersWithTag'
+type MockProxy_ListUsersWithTag_Call struct {
+	*mock.Call
+}
+
+// ListUsersWithTag is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListUsersWithTagRequest
+func (_e *MockProxy_Expecter) ListUsersWithTag(_a0 interface{}, _a1 interface{}) *MockProxy_ListUsersWithTag_Call {
+	return &MockProxy_ListUsersWithTag_Call{Call: _e.mock.On("ListUsersWithTag", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListUsersWithTag_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListUsersWithTagRequest)) *MockProxy_ListUsersWithTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListUsersWithTagRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListUsersWithTag_Call) Return(_a0 *milvuspb.ListUsersWithTagResponse, _a1 error) *MockProxy_ListUsersWithTag_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListUsersWithTag_Call) RunAndReturn(run func(context.Context, *milvuspb.ListUsersWithTagRequest) (*milvuspb.ListUsersWithTagResponse, error)) *MockProxy_ListUsersWithTag_Call {
 	_c.Call.Return(run)
 	return _c
 }

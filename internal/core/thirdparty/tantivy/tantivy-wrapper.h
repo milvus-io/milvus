@@ -965,19 +965,19 @@ struct TantivyIndexWrapper {
     }
 
     void
-    inner_match_ngram(const std::string& literal,
+    ngram_match_query(const std::string& literal,
                       uintptr_t min_gram,
                       uintptr_t max_gram,
                       void* bitset) {
-        auto array = tantivy_inner_match_ngram(
+        auto array = tantivy_ngram_match_query(
             reader_, literal.c_str(), min_gram, max_gram, bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
-                   "TantivyIndexWrapper.inner_match_ngram: {}",
+                   "TantivyIndexWrapper.ngram_match_query: {}",
                    res.result_->error);
         AssertInfo(
             res.result_->value.tag == Value::Tag::None,
-            "TantivyIndexWrapper.inner_match_ngram: invalid result type");
+            "TantivyIndexWrapper.ngram_match_query: invalid result type");
     }
 
     // json query

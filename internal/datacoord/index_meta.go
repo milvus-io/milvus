@@ -1113,10 +1113,10 @@ func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64)
 	return lo.Without(segmentIDs, indexed...)
 }
 
-func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
+func (m *indexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.CollectionSchema) bool {
 	indexInfos := m.GetIndexesForCollection(collectionID, "")
 
-	vectorFields := typeutil.GetVectorFieldSchemas(schema)
+	vectorFields := typeutil.GetDenseVectorFieldSchemas(schema)
 	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
 		return t.FieldID, GetIndexType(t.IndexParams)
 	})
@@ -1127,8 +1127,7 @@ func (m *indexMeta) AreAllDiskIndex(collectionID int64, schema *schemapb.Collect
 		return false
 	})
 
-	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
-	return allDiskIndex
+	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
 }
 
 func (m *indexMeta) HasIndex(collectionID int64) bool {

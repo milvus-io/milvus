@@ -26,6 +26,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -52,6 +53,12 @@ const (
 
 	// L0Import indicates whether to import l0 segments only.
 	L0Import = "l0_import"
+
+	// StorageVersion indicates the storage version to use for import.
+	// Type: int64
+	// storage v2: 2
+	// storage v1: others or not set
+	StorageVersion = "storage_version"
 
 	// StartTs StartTs2 EndTs EndTs2 are used to filter data during backup-restore import.
 	StartTs  = "start_ts"
@@ -125,6 +132,22 @@ func IsL0Import(options Options) bool {
 		return false
 	}
 	return true
+}
+
+func GetStorageVersion(options Options) (int64, error) {
+	storageVersion, err := funcutil.GetAttrByKeyFromRepeatedKV(StorageVersion, options)
+	if err != nil {
+		// not set, use storage v1 by default
+		return storage.StorageV1, nil
+	}
+	version, err := strconv.ParseInt(storageVersion, 10, 64)
+	if err != nil {
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf("parse storage_version failed, value=%s, err=%s", storageVersion, err))
+	}
+	if version == storage.StorageV2 {
+		return storage.StorageV2, nil
+	}
+	return storage.StorageV1, nil
 }
 
 // SkipDiskQuotaCheck indicates whether the import skips the disk quota check.
