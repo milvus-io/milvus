@@ -42,6 +42,31 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  check-title-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get PR Title
+        id: pr-title
+        uses: actions/github-script@v6
+        with:
+          result-encoding: string
+          script: |
+            return context.payload.pull_request.title
+            
+      - name: Check if title contains [run-ci-v1]
+        id: check-title
+        run: |
+          if [[ "${{ steps.pr-title.outputs.result }}" == *"[run-ci-v1]"* ]]; then
+            echo "title_contains_run_ci=true" >> $GITHUB_ENV
+          else
+            echo "title_contains_run_ci=false" >> $GITHUB_ENV
+          fi
+      
+      - name: Skip if title does not match
+        if: env.title_contains_run_ci != 'true'
+        run: |
+          echo "PR Title does not contain [run-ci-v1]. Skipping further steps."
+          exit 0
   Build:
     name: Build and test AMD64 Ubuntu 22.04
     runs-on: ubuntu-latest
