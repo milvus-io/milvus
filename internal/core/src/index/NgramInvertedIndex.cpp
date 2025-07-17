@@ -86,15 +86,18 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         nested_path_,
         JSON_CAST_TYPE,
         JSON_CAST_FUNCTION,
+        // add data
         [this](const folly::fbvector<std::string>& values, int64_t offset) {
             this->wrapper_->template add_array_data<std::string>(
                 values.data(), values.size(), offset);
         },
+        // handle null
         [this](int64_t offset) {
             this->null_offset_.push_back(offset);
             this->wrapper_->template add_array_data<std::string>(
                 nullptr, 0, offset);
         },
+        // handle error
         [this](const Json& json,
                const std::string& nested_path,
                simdjson::error_code error) {
@@ -181,6 +184,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
             return MatchQuery(literal, segment);
         case proto::plan::OpType::InnerMatch: {
             bool need_post_filter = literal.length() > max_gram_;
+
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
                     auto x =
@@ -191,12 +195,14 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                     auto data_val = x.value();
                     return data_val.find(literal) != std::string::npos;
                 };
+
                 return ExecuteQueryWithPredicate<milvus::Json>(
                     literal, segment, predicate, need_post_filter);
             } else {
                 auto predicate = [&literal](const std::string_view& data) {
                     return data.find(literal) != std::string::npos;
                 };
+
                 return ExecuteQueryWithPredicate<std::string_view>(
                     literal, segment, predicate, need_post_filter);
             }
@@ -252,6 +258,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                            std::equal(
                                literal.rbegin(), literal.rend(), data.rbegin());
                 };
+
                 return ExecuteQueryWithPredicate<std::string_view>(
                     literal, segment, predicate, true);
             }

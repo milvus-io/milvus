@@ -51,14 +51,17 @@ JsonInvertedIndex<T>::build_index_for_json(
         nested_path_,
         cast_type_,
         cast_function_,
+        // add data
         [this](const folly::fbvector<T>& values, int64_t offset) {
             this->wrapper_->template add_array_data<T>(
                 values.data(), values.size(), offset);
         },
+        // handle null
         [this](int64_t offset) {
             this->null_offset_.push_back(offset);
             this->wrapper_->template add_array_data<T>(nullptr, 0, offset);
         },
+        // handle error
         [this](const Json& json,
                const std::string& nested_path,
                simdjson::error_code error) {
