@@ -20,7 +20,7 @@ const (
 	// DefaultBufferSize is the default buffer size for writing data to storage.
 	DefaultWriteBufferSize = 32 * 1024 * 1024 // 32MB
 	// DefaultBufferSize is the default buffer size for reading data from storage.
-	DefaultReadBufferSize = -1 // use -1 for unlimited
+	DefaultReadBufferSize = 32 * 1024 * 1024 // 32MB
 	// DefaultMultiPartUploadSize is the default size of each part of a multipart upload.
 	DefaultMultiPartUploadSize = 10 * 1024 * 1024 // 10MB
 	// Arrow will convert these field IDs to a metadata key named PARQUET:field_id on the appropriate field.
