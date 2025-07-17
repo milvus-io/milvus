@@ -27,6 +27,7 @@ using JsonErrorRecorder = std::function<void(const Json& json,
                                              simdjson::error_code error)>;
 
 using JsonNullAdder = std::function<void(int64_t offset)>;
+using JsonNonExistAdder = std::function<void(int64_t offset)>;
 
 // A helper function for processing json data for building inverted index
 template <typename T>
@@ -39,6 +40,7 @@ ProcessJsonFieldData(
     JsonCastFunction cast_function,
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 extern template void
@@ -50,6 +52,7 @@ ProcessJsonFieldData<bool>(
     JsonCastFunction cast_function,
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 extern template void
@@ -61,6 +64,7 @@ ProcessJsonFieldData<int64_t>(
     JsonCastFunction cast_function,
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 extern template void
@@ -72,6 +76,7 @@ ProcessJsonFieldData<double>(
     JsonCastFunction cast_function,
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 extern template void
@@ -83,6 +88,7 @@ ProcessJsonFieldData<std::string>(
     JsonCastFunction cast_function,
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 }  // namespace milvus::index

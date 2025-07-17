@@ -27,6 +27,7 @@ ProcessJsonFieldData(
     JsonCastFunction cast_function,
     JsonDataAdder<T> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder) {
     int64_t offset = 0;
     using SIMDJSON_T =
@@ -41,6 +42,7 @@ ProcessJsonFieldData(
         for (int64_t i = 0; i < n; i++) {
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (schema.nullable() && !data->is_valid(i)) {
+                non_exist_adder(offset);
                 null_adder(offset++);
                 continue;
             }
@@ -49,7 +51,7 @@ ProcessJsonFieldData(
             if (!exists || !json_column->exist(nested_path)) {
                 error_recorder(
                     *json_column, nested_path, simdjson::NO_SUCH_FIELD);
-                null_adder(offset++);
+                non_exist_adder(offset++);
                 continue;
             }
 
@@ -102,6 +104,7 @@ ProcessJsonFieldData<bool>(
     JsonCastFunction cast_function,
     JsonDataAdder<bool> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 template void
@@ -113,6 +116,7 @@ ProcessJsonFieldData<int64_t>(
     JsonCastFunction cast_function,
     JsonDataAdder<int64_t> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 template void
@@ -124,6 +128,7 @@ ProcessJsonFieldData<double>(
     JsonCastFunction cast_function,
     JsonDataAdder<double> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 template void
@@ -135,6 +140,7 @@ ProcessJsonFieldData<std::string>(
     JsonCastFunction cast_function,
     JsonDataAdder<std::string> data_adder,
     JsonNullAdder null_adder,
+    JsonNonExistAdder non_exist_adder,
     JsonErrorRecorder error_recorder);
 
 }  // namespace milvus::index
