@@ -920,9 +920,11 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			internalpb.RateType_DMLUpsert, collectionLimiter)
 		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMinKey),
 			internalpb.RateType_DMLDelete, collectionLimiter)
-		log.RatedDebug(10, "QuotaCenter cool write rates off done",
-			zap.Int64("collectionID", collection),
-			zap.Float64("factor", factor))
+		if factor < 1.0 {
+			log.RatedDebug(10, "QuotaCenter cool write rates off done",
+				zap.Int64("collectionID", collection),
+				zap.Float64("factor", factor))
+		}
 	}
 
 	if len(ttCollections) > 0 {
@@ -1014,16 +1016,17 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 			continue
 		}
 		factor := float64(maxDelay.Nanoseconds()-curMaxDelay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
-		if factor <= 0.9 {
+		if factor <= 0.95 {
 			log.RatedWarn(10, "QuotaCenter: limit writing due to long timeTick delay",
 				zap.Int64("collectionID", collectionID),
 				zap.Time("curTs", t1),
 				zap.Duration("delay", curMaxDelay),
 				zap.Duration("MaxDelay", maxDelay),
 				zap.Float64("factor", factor))
+			collectionFactor[collectionID] = factor
+			continue
 		}
-
-		collectionFactor[collectionID] = factor
+		collectionFactor[collectionID] = 1.0
 	}
 
 	return collectionFactor
