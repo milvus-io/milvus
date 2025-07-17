@@ -464,10 +464,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -677,10 +677,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -983,10 +983,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1320,10 +1320,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1543,10 +1543,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1856,10 +1856,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),

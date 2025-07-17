@@ -1445,11 +1445,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJsonForIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
-                    auto value = value_array[i];
+                    auto type = type_array[row_id];
+                    auto offset = offset_array[row_id];
+                    auto size = size_array[row_id];
                     bitset[row_id] = f(json, type, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1951,7 +1950,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
     TargetBitmap result;
     TargetBitmap valid_result;
-    result.append(*cached_match_res_, current_data_global_pos_, real_batch_size);
+    result.append(
+        *cached_match_res_, current_data_global_pos_, real_batch_size);
     valid_result.append(cached_index_chunk_valid_res_,
                         current_data_global_pos_,
                         real_batch_size);
