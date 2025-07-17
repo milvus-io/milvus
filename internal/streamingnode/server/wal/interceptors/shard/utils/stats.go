@@ -4,8 +4,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
+
+// PartitionUniqueKey is the unique key of a partition.
+type PartitionUniqueKey struct {
+	CollectionID int64
+	PartitionID  int64 // -1 means all partitions, see common.AllPartitionsID.
+}
+
+// IsAllPartitions returns true if the partition is all partitions.
+func (k *PartitionUniqueKey) IsAllPartitions() bool {
+	return k.PartitionID == common.AllPartitionsID
+}
 
 // SegmentBelongs is the info of segment belongs to a channel.
 type SegmentBelongs struct {
@@ -14,6 +26,14 @@ type SegmentBelongs struct {
 	CollectionID int64
 	PartitionID  int64
 	SegmentID    int64
+}
+
+// PartitionUniqueKey returns the partition unique key of the segment belongs.
+func (s *SegmentBelongs) PartitionUniqueKey() PartitionUniqueKey {
+	return PartitionUniqueKey{
+		CollectionID: s.CollectionID,
+		PartitionID:  s.PartitionID,
+	}
 }
 
 // SegmentStats is the usage stats of a segment.
