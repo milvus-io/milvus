@@ -57,6 +57,7 @@ func TestSearchDefaultGrowing(t *testing.T) {
 
 // test search collection and partition name not exist
 func TestSearchInvalidCollectionPartitionName(t *testing.T) {
+	t.Skipf("https://github.com/milvus-io/milvus/issues/43031, pr#43299, remove name check for describe collection")
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
