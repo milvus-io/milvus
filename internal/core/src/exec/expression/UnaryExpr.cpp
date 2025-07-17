@@ -1484,8 +1484,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (expr_->op_type_ == proto::plan::OpType::InnerMatch &&
-               !has_offset_input_ && CanUseNgramIndex(field_id_)) {
+    } else if (CanExecNgramMatch(expr_->op_type_)) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
@@ -1929,9 +1928,46 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                       op_type);
         }
     };
-    auto res = ProcessTextMatchIndex(func, query);
-    return res;
+
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    if (cached_match_res_ == nullptr) {
+        auto index = segment_->GetTextIndex(field_id_);
+        auto res = std::move(func(index, query));
+        auto valid_res = index->IsNotNull();
+        cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
+        cached_index_chunk_valid_res_ = std::move(valid_res);
+        if (cached_match_res_->size() < active_count_) {
+            // some entities are not visible in inverted index.
+            // only happend on growing segment.
+            TargetBitmap tail(active_count_ - cached_match_res_->size());
+            cached_match_res_->append(tail);
+            cached_index_chunk_valid_res_.append(tail);
+        }
+    }
+
+    TargetBitmap result;
+    TargetBitmap valid_result;
+    result.append(*cached_match_res_, current_data_global_pos_, real_batch_size);
+    valid_result.append(cached_index_chunk_valid_res_,
+                        current_data_global_pos_,
+                        real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          std::move(valid_result));
 };
+
+bool
+PhyUnaryRangeFilterExpr::CanExecNgramMatch(proto::plan::OpType op_type) {
+    return (op_type == proto::plan::OpType::InnerMatch ||
+            op_type == proto::plan::OpType::Match ||
+            op_type == proto::plan::OpType::PrefixMatch ||
+            op_type == proto::plan::OpType::PostfixMatch) &&
+           !has_offset_input_ && CanUseNgramIndex(field_id_);
+}
 
 std::optional<VectorPtr>
 PhyUnaryRangeFilterExpr::ExecNgramMatch() {
@@ -1941,9 +1977,10 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     auto literal = value_arg_.GetValue<std::string>();
-
-    TargetBitmap result;
-    TargetBitmap valid_result;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return std::nullopt;
+    }
 
     if (cached_ngram_match_res_ == nullptr) {
         auto pinned_index = segment_->GetNgramIndex(field_id_);
@@ -1951,7 +1988,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
-        auto res_opt = index->InnerMatchQuery(literal, this);
+        auto res_opt = index->ExecuteQuery(literal, expr_->op_type_, this);
         if (!res_opt.has_value()) {
             return std::nullopt;
         }
@@ -1961,19 +1998,16 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
         cached_index_chunk_valid_res_ = std::move(valid_res);
     }
 
-    auto real_batch_size =
-        (current_data_chunk_pos_ + batch_size_ > active_count_)
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
+    TargetBitmap result;
+    TargetBitmap valid_result;
     result.append(
-        *cached_ngram_match_res_, current_data_chunk_pos_, real_batch_size);
+        *cached_ngram_match_res_, current_data_global_pos_, real_batch_size);
     valid_result.append(cached_index_chunk_valid_res_,
-                        current_data_chunk_pos_,
+                        current_data_global_pos_,
                         real_batch_size);
-    current_data_chunk_pos_ += real_batch_size;
-
-    return std::optional<VectorPtr>(std::make_shared<ColumnVector>(
-        std::move(result), std::move(valid_result)));
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          std::move(valid_result));
 }
 
 }  // namespace exec

@@ -3,7 +3,7 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 as builder
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 ninja-build && \
-    wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
+    wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
     g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
     clang-format-12 clang-tidy-12  lcov libtool m4 autoconf automake python3 python3-pip \
@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.2.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.4.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 RUN pip3 install conan==1.64.1
 # Install rust

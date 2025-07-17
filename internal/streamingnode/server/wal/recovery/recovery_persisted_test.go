@@ -8,18 +8,22 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -92,6 +96,7 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 					{PartitionId: 2},
 				},
 				Vchannel: "v1",
+				State:    etcdpb.CollectionState_CollectionCreated,
 			},
 			{
 				CollectionId: 2,
@@ -100,9 +105,25 @@ func TestInitRecoveryInfoFromCoord(t *testing.T) {
 					{PartitionId: 4},
 				},
 				Vchannel: "v2",
+				State:    etcdpb.CollectionState_CollectionCreated,
+			},
+			{
+				CollectionId: 3,
+				Partitions: []*rootcoordpb.PartitionInfoOnPChannel{
+					{PartitionId: 5},
+					{PartitionId: 6},
+				},
+				Vchannel: "v3",
+				State:    etcdpb.CollectionState_CollectionDropping,
 			},
 		},
 	}, nil)
+	c.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
+		assert.Equal(t, "v3", req.GetChannelName())
+		return &datapb.DropVirtualChannelResponse{
+			Status: merr.Success(),
+		}, nil
+	})
 	fc.Set(c)
 
 	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog), resource.OptMixCoordClient(fc))

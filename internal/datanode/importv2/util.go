@@ -38,7 +38,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -54,15 +57,18 @@ func NewSyncTask(ctx context.Context,
 	insertData *storage.InsertData,
 	deleteData *storage.DeleteData,
 	bm25Stats map[int64]*storage.BM25Stats,
+	storageVersion int64,
+	storageConfig *indexpb.StorageConfig,
 ) (syncmgr.Task, error) {
 	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{
-			ID:            segmentID,
-			State:         commonpb.SegmentState_Importing,
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: vchannel,
+			ID:             segmentID,
+			State:          commonpb.SegmentState_Importing,
+			CollectionID:   collectionID,
+			PartitionID:    partitionID,
+			InsertChannel:  vchannel,
+			StorageVersion: storageVersion,
 		}, func(info *datapb.SegmentInfo) pkoracle.PkStat {
 			bfs := pkoracle.NewBloomFilterSet()
 			return bfs
@@ -93,7 +99,8 @@ func NewSyncTask(ctx context.Context,
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
 		WithSchema(metaCache.Schema()). // TODO specify import schema if needed
-		WithSyncPack(syncPack)
+		WithSyncPack(syncPack).
+		WithStorageConfig(storageConfig)
 	return task, nil
 }
 
@@ -141,15 +148,16 @@ func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData)
 		return field.GetFieldID()
 	})
 
-	rows, field := GetInsertDataRowCount(data, schema)
+	rows, baseFieldID := GetInsertDataRowCount(data, schema)
 	for fieldID, d := range data.Data {
-		if d.RowNum() == 0 && (CanBeZeroRowField(idToField[fieldID])) {
+		tempField := idToField[fieldID]
+		if d.RowNum() == 0 && (CanBeZeroRowField(tempField)) {
 			continue
 		}
 		if d.RowNum() != rows {
 			return merr.WrapErrImportFailed(
 				fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, field '%s' with '%d' rows",
-					idToField[field].GetName(), rows, idToField[fieldID].GetName(), d.RowNum()))
+					idToField[baseFieldID].GetName(), rows, tempField.GetName(), d.RowNum()))
 		}
 	}
 	return nil
@@ -210,7 +218,6 @@ func (h *nullDefaultAppender[T]) AppendDefault(fieldData storage.FieldData, defa
 		}
 		return fieldData.AppendDataRows(values)
 	}
-	return nil
 }
 
 func (h *nullDefaultAppender[T]) AppendNull(fieldData storage.FieldData, rowNum int) error {
@@ -236,13 +243,22 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 		if !IsFillableField(field) {
 			continue
 		}
-		if tempData, ok := data.Data[field.GetFieldID()]; ok {
-			if tempData.RowNum() > 0 {
-				continue // values have been read from data file
+
+		tempData, ok := data.Data[field.GetFieldID()]
+		if ok && tempData != nil {
+			// values have been read from data file, row number must be equal to other fields
+			// checked by CheckRowsEqual() in preImportTask , double-check here
+			if tempData.RowNum() == rowNum {
+				continue
+			}
+			if tempData.RowNum() > 0 && tempData.RowNum() != rowNum {
+				return merr.WrapErrImportFailed(
+					fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, other fields with '%d' rows",
+						field.GetName(), tempData.RowNum(), rowNum))
 			}
 		}
 
-		// add a new column and fill with null or default
+		// if the FieldData is not found, or it is nil, add a new column and fill with null or default
 		dataType := field.GetDataType()
 		fieldData, err := storage.NewFieldData(dataType, field, rowNum)
 		if err != nil {
@@ -342,6 +358,43 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 	return nil
 }
 
+func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData, rowNum int) error {
+	if !schema.GetEnableDynamicField() {
+		return nil
+	}
+	dynamicField := typeutil.GetDynamicField(schema)
+	if dynamicField == nil {
+		return merr.WrapErrImportFailed("collection schema is illegal, enable_dynamic_field is true but the dynamic field doesn't exist")
+	}
+
+	tempData, ok := data.Data[dynamicField.GetFieldID()]
+	if ok && tempData != nil {
+		// values have been read from data file, row number must be equal to other fields
+		// checked by CheckRowsEqual() in preImportTask , double-check here
+		if tempData.RowNum() == rowNum {
+			return nil
+		}
+		if tempData.RowNum() > 0 && tempData.RowNum() != rowNum {
+			return merr.WrapErrImportFailed(
+				fmt.Sprintf("imported rows are not aligned, field '%s' with '%d' rows, other fields with '%d' rows",
+					dynamicField.GetName(), tempData.RowNum(), rowNum))
+		}
+	}
+
+	// if the FieldData is not found, or it is nil, add a new column and fill with empty json
+	fieldData, err := storage.NewFieldData(dynamicField.GetDataType(), dynamicField, rowNum)
+	if err != nil {
+		return err
+	}
+	jsonFD := fieldData.(*storage.JSONFieldData)
+	bs := []byte("{}")
+	for i := 0; i < rowNum; i++ {
+		jsonFD.Data = append(jsonFD.Data, bs)
+	}
+	data.Data[dynamicField.GetFieldID()] = fieldData
+	return nil
+}
+
 func RunEmbeddingFunction(task *ImportTask, data *storage.InsertData) error {
 	if err := RunBm25Function(task, data); err != nil {
 		return err
@@ -425,6 +478,9 @@ func CanBeZeroRowField(field *schemapb.FieldSchema) bool {
 	if field.GetIsDynamic() {
 		return true // dyanmic field, row count could be 0
 	}
+	if field.GetIsFunctionOutput() {
+		return true // function output field, row count could be 0
+	}
 	if IsFillableField(field) {
 		return true // nullable/default_value field can be automatically filled if the file doesn't contain this column
 	}
@@ -442,6 +498,10 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 	}
 
 	for fieldID, fd := range data.Data {
+		if fd == nil {
+			// normaly is impossible, just to avoid potential crash here
+			continue
+		}
 		if fd.RowNum() == 0 && CanBeZeroRowField(fields[fieldID]) {
 			continue
 		}
@@ -497,4 +557,20 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 		metaCaches[channel] = metaCache
 	}
 	return metaCaches
+}
+
+// GetBufferSize returns the memory buffer size required by this task
+func GetTaskBufferSize(task Task) int64 {
+	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
+	vchannelNum := len(task.GetVchannels())
+	partitionNum := len(task.GetPartitionIDs())
+	totalBufferSize := int64(baseBufferSize * vchannelNum * partitionNum)
+
+	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
+	memoryLimit := int64(float64(hardware.GetMemoryCount()) * percentage / 100.0)
+
+	if totalBufferSize > memoryLimit {
+		return memoryLimit
+	}
+	return totalBufferSize
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -31,6 +30,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	tr *timerecord.TimeRecorder,
 	currentTime time.Time,
 	collectionTtl int64,
+	compactionParams compaction.Params,
 ) ([]*datapb.CompactionSegment, error) {
 	_ = tr.RecordSpan()
 
@@ -42,11 +42,8 @@ func mergeSortMultipleSegments(ctx context.Context,
 	segIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedSegmentIDs().GetBegin(), plan.GetPreAllocatedSegmentIDs().GetEnd())
 	logIDAlloc := allocator.NewLocalAllocator(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetPreAllocatedLogIDs().GetEnd())
 	compAlloc := NewCompactionAllocator(segIDAlloc, logIDAlloc)
-	compactionParams, err := compaction.ParseParamsFromJSON(plan.GetJsonParams())
-	if err != nil {
-		return nil, err
-	}
-	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096)
+	writer, err := NewMultiSegmentWriter(ctx, binlogIO, compAlloc, plan.GetMaxSize(), plan.GetSchema(), compactionParams, maxRows, partitionID, collectionID, plan.GetChannel(), 4096,
+		storage.WithStorageConfig(compactionParams.StorageConfig))
 	if err != nil {
 		return nil, err
 	}
@@ -57,9 +54,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 		return nil, err
 	}
 
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
-
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
@@ -68,7 +62,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 			plan.GetSchema(),
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithVersion(s.StorageVersion),
-			storage.WithBucketName(bucketName),
+			storage.WithStorageConfig(compactionParams.StorageConfig),
 		)
 		if err != nil {
 			return nil, err
@@ -86,6 +80,12 @@ func mergeSortMultipleSegments(ctx context.Context,
 		}
 		segmentFilters[i] = compaction.NewEntityFilter(delta, collectionTtl, currentTime)
 	}
+
+	defer func() {
+		for _, r := range segmentReaders {
+			r.Close()
+		}
+	}()
 
 	var predicate func(r storage.Record, ri, i int) bool
 	switch pkField.DataType {

@@ -516,17 +516,25 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, false, Params.AutoUpgradeSegmentIndex.GetAsBool())
 		assert.Equal(t, 2, Params.FilesPerPreImportTask.GetAsInt())
 		assert.Equal(t, 10800*time.Second, Params.ImportTaskRetention.GetAsDuration(time.Second))
-		assert.Equal(t, 6144, Params.MaxSizeInMBPerImportTask.GetAsInt())
+		assert.Equal(t, 16384, Params.MaxSizeInMBPerImportTask.GetAsInt())
 		assert.Equal(t, 2*time.Second, Params.ImportScheduleInterval.GetAsDuration(time.Second))
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
 		assert.Equal(t, 120*time.Second, Params.ImportCheckIntervalLow.GetAsDuration(time.Second))
 		assert.Equal(t, 1024, Params.MaxFilesPerImportReq.GetAsInt())
 		assert.Equal(t, 1024, Params.MaxImportJobNum.GetAsInt())
 		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
+		assert.Equal(t, 1, Params.ImportFileNumPerSlot.GetAsInt())
+		assert.Equal(t, 160*1024*1024, Params.ImportMemoryLimitPerSlot.GetAsInt())
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
+		assert.Equal(t, hardware.GetCPUNum(), Params.GCRemoveConcurrent.GetAsInt())
+		params.Save("dataCoord.gc.removeConcurrent", "32")
+		assert.Equal(t, 32, Params.GCRemoveConcurrent.GetAsInt())
+		assert.Equal(t, 0.6, Params.GCSlowDownCPUUsageThreshold.GetAsFloat())
+		params.Save("dataCoord.gc.slowDownCPUUsageThreshold", "0.5")
+		assert.Equal(t, 0.5, Params.GCSlowDownCPUUsageThreshold.GetAsFloat())
 		params.Save("dataCoord.compaction.gcInterval", "100")
 		assert.Equal(t, float64(100), Params.CompactionGCIntervalInSeconds.GetAsDuration(time.Second).Seconds())
 		params.Save("dataCoord.compaction.dropTolerance", "100")
@@ -557,11 +565,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1000*time.Second, Params.TaskSlowThreshold.GetAsDuration(time.Second))
 
 		params.Save("datacoord.statsTask.enable", "true")
-		assert.True(t, Params.EnableStatsTask.GetAsBool())
+		assert.True(t, Params.EnableSortCompaction.GetAsBool())
 		params.Save("datacoord.taskCheckInterval", "500")
 		assert.Equal(t, 500*time.Second, Params.TaskCheckInterval.GetAsDuration(time.Second))
 		params.Save("datacoord.statsTaskTriggerCount", "3")
-		assert.Equal(t, 3, Params.StatsTaskTriggerCount.GetAsInt())
+		assert.Equal(t, 3, Params.SortCompactionTriggerCount.GetAsInt())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -590,6 +598,10 @@ func TestComponentParam(t *testing.T) {
 		maxParallelSyncTaskNum := Params.MaxParallelSyncTaskNum.GetAsInt()
 		t.Logf("maxParallelSyncTaskNum: %d", maxParallelSyncTaskNum)
 
+		maxParallelSyncMgrTasksPerCPUCore := Params.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt()
+		t.Logf("maxParallelSyncMgrTasksPerCPUCore: %d", maxParallelSyncMgrTasksPerCPUCore)
+		assert.Equal(t, 16, maxParallelSyncMgrTasksPerCPUCore)
+
 		size := Params.FlushInsertBufferSize.GetAsInt()
 		t.Logf("FlushInsertBufferSize: %d", size)
 
@@ -607,13 +619,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 128, Params.MaxChannelCheckpointsPerRPC.GetAsInt())
 		assert.Equal(t, 10*time.Second, Params.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
 
-		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
-		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
-		assert.Equal(t, 16, maxConcurrentImportTaskNum)
+		assert.Equal(t, 4, Params.ImportConcurrencyPerCPUCore.GetAsInt())
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
-		assert.Equal(t, 64*1024*1024, Params.ImportInsertBufferSize.GetAsInt())
+		assert.Equal(t, 16*1024*1024, Params.ImportBaseBufferSize.GetAsInt())
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 16, Params.MaxTaskSlotNum.GetAsInt())
+		assert.Equal(t, 20.0, Params.ImportMemoryLimitPercentage.GetAsFloat())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, 16, Params.SlotCap.GetAsInt())

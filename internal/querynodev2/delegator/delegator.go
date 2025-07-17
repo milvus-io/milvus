@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -162,6 +163,10 @@ type shardDelegator struct {
 
 	// current forward policy
 	l0ForwardPolicy string
+
+	// schema version
+	schemaChangeMutex sync.RWMutex
+	schemaVersion     uint64
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -363,7 +368,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	log.Debug("Delegator search done")
+	log.Debug("Delegator search done", zap.Int("results", len(results)))
 
 	return results, nil
 }
@@ -665,6 +670,22 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	log.Debug("Delegator Query done")
+	if log.Core().Enabled(zap.DebugLevel) {
+		sealedIDs := lo.FlatMap(sealed, func(item SnapshotItem, _ int) []int64 {
+			return lo.Map(item.Segments, func(segment SegmentEntry, _ int) int64 {
+				return segment.SegmentID
+			})
+		})
+		slices.Sort(sealedIDs)
+		growingIDs := lo.Map(growing, func(item SegmentEntry, _ int) int64 {
+			return item.SegmentID
+		})
+		slices.Sort(growingIDs)
+		log.Debug("execute count on segments...",
+			zap.Int64s("sealedIDs", sealedIDs),
+			zap.Int64s("growingIDs", growingIDs),
+		)
+	}
 
 	return results, nil
 }
@@ -914,7 +935,7 @@ func (sd *shardDelegator) speedupGuranteeTS(
 		return guaranteeTS
 	}
 	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
-	if mvcc, err := streaming.WAL().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
+	if mvcc, err := streaming.WAL().Local().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
 		return mvcc
 	}
 	return guaranteeTS
@@ -997,11 +1018,14 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 
 	log.Info("delegator received update schema event")
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0)
-	if err != nil {
-		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
-		return err
-	}
+	sd.schemaChangeMutex.Lock()
+	defer sd.schemaChangeMutex.Unlock()
+
+	// set updated schema version as load barrier
+	// prevent concurrent load segment with old schema
+	sd.schemaVersion = schVersion
+
+	sealed, growing, version := sd.distribution.PinOnlineSegments()
 	defer sd.distribution.Unpin(version)
 
 	log.Info("update schema targets...",

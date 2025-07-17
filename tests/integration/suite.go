@@ -19,6 +19,7 @@ package integration
 import (
 	"context"
 	"flag"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,11 @@ type MiniClusterSuite struct {
 	Cluster    *cluster.MiniClusterV3
 	cancelFunc context.CancelFunc
 	opt        clusterSuiteOption
+}
+
+// WorkDir returns the work directory of the cluster.
+func (s *MiniClusterSuite) WorkDir() string {
+	return os.Getenv(cluster.MilvusWorkDirEnvKey)
 }
 
 // WithMilvusConfig sets the environment variable for the given key.
@@ -79,7 +85,8 @@ func (s *MiniClusterSuite) SetupSuite() {
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout)
 	s.cancelFunc = cancel
 
-	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs))
+	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir()))
+	s.T().Log("Setup test success")
 }
 
 func (s *MiniClusterSuite) SetupTest() {

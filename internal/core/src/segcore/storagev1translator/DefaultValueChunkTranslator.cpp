@@ -28,6 +28,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
       field_meta_(field_meta),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
@@ -35,6 +36,11 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
             /* support_eviction */ false) {
     meta_.num_rows_until_chunk_.push_back(0);
     meta_.num_rows_until_chunk_.push_back(field_data_info.row_count);
+    virtual_chunk_config(field_data_info.row_count,
+                         1,
+                         meta_.num_rows_until_chunk_,
+                         meta_.virt_chunk_order_,
+                         meta_.vcid_to_cid_arr_);
 }
 
 DefaultValueChunkTranslator::~DefaultValueChunkTranslator() {
@@ -85,13 +91,7 @@ DefaultValueChunkTranslator::get_cells(
                ast.ToString());
     arrow::ArrayVector array_vec;
     array_vec.emplace_back(builder->Finish().ValueOrDie());
-    auto chunk = create_chunk(
-        field_meta_,
-        IsVectorDataType(field_meta_.get_data_type()) &&
-                !IsSparseFloatVectorDataType(field_meta_.get_data_type())
-            ? field_meta_.get_dim()
-            : 1,
-        array_vec);
+    auto chunk = create_chunk(field_meta_, array_vec);
 
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>

@@ -57,6 +57,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	})
 
 	if len(results) == 1 {
+		log.Debug("Shortcut return ReduceSearchResults", zap.Any("result info", info))
 		return results[0], nil
 	}
 

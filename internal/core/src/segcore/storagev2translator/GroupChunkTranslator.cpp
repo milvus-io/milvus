@@ -58,6 +58,7 @@ GroupChunkTranslator::GroupChunkTranslator(
           num_fields,
           use_mmap ? milvus::cachinglayer::StorageType::DISK
                    : milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
           // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it
           // to use the warm up policy of scalar field?
           milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
@@ -215,15 +216,10 @@ GroupChunkTranslator::load_group_chunk(
                    "Field id not found in field_metas");
         const auto& field_meta = it->second;
         const arrow::ArrayVector& array_vec = table->column(i)->chunks();
-        auto dim =
-            IsVectorDataType(field_meta.get_data_type()) &&
-                    !IsSparseFloatVectorDataType(field_meta.get_data_type())
-                ? field_meta.get_dim()
-                : 1;
         std::unique_ptr<Chunk> chunk;
         if (!use_mmap_) {
             // Memory mode
-            chunk = create_chunk(field_meta, dim, array_vec);
+            chunk = create_chunk(field_meta, array_vec);
         } else {
             // Mmap mode
             auto filepath =
@@ -240,9 +236,7 @@ GroupChunkTranslator::load_group_chunk(
 
             std::filesystem::create_directories(filepath.parent_path());
 
-            auto file =
-                File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-            chunk = create_chunk(field_meta, dim, file, 0, array_vec);
+            chunk = create_chunk(field_meta, array_vec, filepath.string());
             auto ok = unlink(filepath.c_str());
             AssertInfo(
                 ok == 0,

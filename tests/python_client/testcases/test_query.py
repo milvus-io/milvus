@@ -488,7 +488,7 @@ class TestQueryParams(TestcaseBase):
 
         expr_3 = f'{ct.default_int64_field_name} in not [1, 2]'
         error_3 = {ct.err_code: 65535, ct.err_msg: "cannot parse expression: int64 in not [1, 2], "
-                                                   "error: value 'not[1,2]' in list cannot be a non-const expression"}
+                                                   "error: not can only apply on boolean: invalid parameter"}
         collection_w.query(expr_3, check_task=CheckTasks.err_res, check_items=error_3)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2237,7 +2237,9 @@ class TestQueryOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=DefaultConfig.DEFAULT_USING)
 
         # list connection to check
-        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: []})
+        self.connection_wrap.list_connections()
+        # delete the check because we have added "self.client = MilvusClient(uri=uri, token=cf.param_info.param_token)"
+        # at line156 in client_base.py.  So the result of list connections will not be empty
 
         # query after remove default connection
         collection_w.query(default_term_expr, check_task=CheckTasks.err_res,
@@ -7049,6 +7051,39 @@ class TestQueryTextMatch(TestcaseBase):
             assert len(res) > 0
             for r in res:
                 assert any([token in r[field] for token in multi_words])
+
+
+class TestQueryCompareTwoColumn(TestcaseBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_compare_two_column_with_last_expr_skip(self):
+        """
+        target: test query compare two column with last expr skip
+        method: 1. create collection and insert data
+                2. query with two column compare expr with last expr help to skip compare
+        expected: query successfully
+        """
+        fields = [
+            FieldSchema(name="f1", dtype=DataType.INT64, is_primary=True, nullable=False),
+            FieldSchema(name="f2", dtype=DataType.SPARSE_FLOAT_VECTOR),
+            FieldSchema(name="f3", dtype=DataType.INT64, is_primary=False, nullable=False),
+            FieldSchema(name="f4", dtype=DataType.INT64, is_primary=False, nullable=False),
+        ]
+        schema = CollectionSchema(fields=fields)
+        col_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(
+            name=col_name,
+            schema=schema,
+        )
+        collection_w.create_index("f3", {"index_type": "INVERTED"})
+        collection_w.create_index("f2", {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"})
+        for i in range(100):
+            collection_w.insert({"f1": i, "f2": {10: 0.07638, 3: 0.3925}, "f3": 4, "f4": 2})
+        collection_w.flush()
+        collection_w.load()
+        # f4 / 4 > 1 always false, so f3 < f4 will not be executed
+        res = collection_w.query(expr="f4 / 4 > 1 and f3 < f4", output_fields=["count(*)"])[0]
+        assert res[0]['count(*)'] == 0
+        collection_w.drop()
 
 
 class TestQueryTextMatchNegative(TestcaseBase):

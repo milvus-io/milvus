@@ -34,7 +34,6 @@ func TestBroadcast(t *testing.T) {
 		BroadcastID: 1,
 	})
 	assert.NoError(t, err)
-	bs.Close()
 }
 
 func newMockServer(t *testing.T, sendDelay time.Duration) lazygrpc.Service[streamingpb.StreamingCoordBroadcastServiceClient] {

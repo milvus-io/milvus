@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <utility>
 #include <vector>
 #include "arrow/array/array_primitive.h"
 #include "arrow/type_fwd.h"
@@ -22,14 +23,17 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+
+#include "storage/FileWriter.h"
+
 namespace milvus {
 class ChunkWriterBase {
  public:
     explicit ChunkWriterBase(bool nullable) : nullable_(nullable) {
     }
 
-    ChunkWriterBase(File& file, size_t offset, bool nullable)
-        : file_(&file), file_offset_(offset), nullable_(nullable) {
+    ChunkWriterBase(std::string file_path, bool nullable)
+        : file_path_(std::move(file_path)), nullable_(nullable) {
     }
 
     virtual void
@@ -45,24 +49,44 @@ class ChunkWriterBase {
 
     void
     write_null_bit_maps(
-        const std::vector<std::pair<const uint8_t*, int64_t>>& null_bitmaps) {
+        const std::vector<std::tuple<const uint8_t*, int64_t, int64_t>>&
+            null_bitmaps) {
         if (nullable_) {
-            for (auto [data, size] : null_bitmaps) {
+            // merge all null bitmaps in case of multiple chunk null bitmap dislocation
+            // say [0xFF, 0x00] with size [7, 8] cannot be treated as [0xFF, 0x00] after merged but
+            // [0x7F, 0x00], othersize the null index will be dislocated
+            std::vector<uint8_t> merged_null_bitmap;
+            int64_t size_total_bit = 0;
+            for (auto [data, size_bits, offset_bits] : null_bitmaps) {
+                // resize in byte
+                merged_null_bitmap.resize((size_total_bit + size_bits + 7) / 8,
+                                          0xFF);
                 if (data != nullptr) {
-                    target_->write(data, size);
+                    bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                        data,
+                        offset_bits,
+                        merged_null_bitmap.data(),
+                        size_total_bit,
+                        size_bits);
                 } else {
                     // have to append always-true bitmap due to arrow optimize this
-                    std::vector<uint8_t> null_bitmap(size, 0xff);
-                    target_->write(null_bitmap.data(), size);
+                    std::vector<uint8_t> null_bitmap(size_bits, 0xff);
+                    bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
+                        null_bitmap.data(),
+                        0,
+                        merged_null_bitmap.data(),
+                        size_total_bit,
+                        size_bits);
                 }
+                size_total_bit += size_bits;
             }
+            target_->write(merged_null_bitmap.data(), (size_total_bit + 7) / 8);
         }
     }
 
  protected:
     int row_nums_ = 0;
-    File* file_ = nullptr;
-    size_t file_offset_ = 0;
+    std::string file_path_{""};
     bool nullable_ = false;
     std::shared_ptr<ChunkTarget> target_;
 };
@@ -73,8 +97,8 @@ class ChunkWriter final : public ChunkWriterBase {
     ChunkWriter(int dim, bool nullable) : ChunkWriterBase(nullable), dim_(dim) {
     }
 
-    ChunkWriter(int dim, File& file, size_t offset, bool nullable)
-        : ChunkWriterBase(file, offset, nullable), dim_(dim){};
+    ChunkWriter(int dim, std::string file_path, bool nullable)
+        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim){};
 
     void
     write(const arrow::ArrayVector& array_vec) override {
@@ -92,8 +116,8 @@ class ChunkWriter final : public ChunkWriterBase {
         }
 
         row_nums_ = row_nums;
-        if (file_) {
-            target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+        if (!file_path_.empty()) {
+            target_ = std::make_shared<MmapChunkTarget>(file_path_);
         } else {
             target_ = std::make_shared<MemChunkTarget>(size);
         }
@@ -146,8 +170,8 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
         size += (data->length() + 7) / 8;
     }
     row_nums_ = row_nums;
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (!file_path_.empty()) {
+        target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -203,10 +227,10 @@ class ArrayChunkWriter : public ChunkWriterBase {
         : ChunkWriterBase(nullable), element_type_(element_type) {
     }
     ArrayChunkWriter(const milvus::DataType element_type,
-                     File& file,
-                     size_t offset,
+                     std::string file_path,
                      bool nullable)
-        : ChunkWriterBase(file, offset, nullable), element_type_(element_type) {
+        : ChunkWriterBase(std::move(file_path), nullable),
+          element_type_(element_type) {
     }
 
     void
@@ -226,9 +250,8 @@ class VectorArrayChunkWriter : public ChunkWriterBase {
     }
     VectorArrayChunkWriter(int64_t dim,
                            const milvus::DataType element_type,
-                           File& file,
-                           size_t offset)
-        : ChunkWriterBase(file, offset, false),
+                           std::string file_path)
+        : ChunkWriterBase(std::move(file_path), false),
           element_type_(element_type),
           dim_(dim) {
     }
@@ -256,16 +279,12 @@ class SparseFloatVectorChunkWriter : public ChunkWriterBase {
 };
 
 std::unique_ptr<Chunk>
-create_chunk(const FieldMeta& field_meta,
-             int dim,
-             const arrow::ArrayVector& array_vec);
+create_chunk(const FieldMeta& field_meta, const arrow::ArrayVector& array_vec);
 
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
-             int dim,
-             File& file,
-             size_t file_offset,
-             const arrow::ArrayVector& array_vec);
+             const arrow::ArrayVector& array_vec,
+             const std::string& file_path);
 
 arrow::ArrayVector
 read_single_column_batches(std::shared_ptr<arrow::RecordBatchReader> reader);

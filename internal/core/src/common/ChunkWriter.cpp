@@ -12,6 +12,7 @@
 #include "common/ChunkWriter.h"
 #include <cstdint>
 #include <memory>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -26,13 +27,16 @@
 #include "common/VectorTrait.h"
 #include "simdjson/common_defs.h"
 #include "simdjson/padded_string.h"
+#include "storage/FileWriter.h"
+
 namespace milvus {
 
 void
 StringChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     std::vector<std::string_view> strs;
-    std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+    // tuple <data, size, offset>
+    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
         for (int i = 0; i < array->length(); i++) {
@@ -42,15 +46,17 @@ StringChunkWriter::write(const arrow::ArrayVector& array_vec) {
         }
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
-            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            // size, offset all in bits
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
             size += null_bitmap_n;
         }
         row_nums_ += array->length();
     }
 
     size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_STRING_PADDING;
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (!file_path_.empty()) {
+        target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -90,7 +96,8 @@ void
 JSONChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     std::vector<Json> jsons;
-    std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+    // tuple <data, size, offset>
+    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
@@ -101,14 +108,16 @@ JSONChunkWriter::write(const arrow::ArrayVector& array_vec) {
         }
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
-            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            // size, offset all in bits
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
             size += null_bitmap_n;
         }
         row_nums_ += array->length();
     }
     size += sizeof(uint32_t) * (row_nums_ + 1) + simdjson::SIMDJSON_PADDING;
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (!file_path_.empty()) {
+        target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -149,7 +158,8 @@ ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
     auto size = 0;
     auto is_string = IsStringDataType(element_type_);
     std::vector<Array> arrays;
-    std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+    // tuple <data, size, offset>
+    std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
 
     for (const auto& data : array_vec) {
         auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
@@ -168,15 +178,17 @@ ArrayChunkWriter::write(const arrow::ArrayVector& array_vec) {
         row_nums_ += array->length();
         if (nullable_) {
             auto null_bitmap_n = (data->length() + 7) / 8;
-            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            // size, offset all in bits
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
             size += null_bitmap_n;
         }
     }
 
     // offsets + lens
     size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (!file_path_.empty()) {
+        target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -255,8 +267,8 @@ VectorArrayChunkWriter::write(const arrow::ArrayVector& arrow_array_vec) {
 
     // offsets + lens
     size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (!file_path_.empty()) {
+        target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -319,8 +331,8 @@ SparseFloatVectorChunkWriter::write(const arrow::ArrayVector& array_vec) {
         row_nums_ += array->length();
     }
     size += sizeof(uint64_t) * (row_nums_ + 1);
-    if (file_) {
-        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    if (!file_path_.empty()) {
+        target_ = std::make_shared<MmapChunkTarget>(file_path_);
     } else {
         target_ = std::make_shared<MemChunkTarget>(size);
     }
@@ -362,218 +374,96 @@ SparseFloatVectorChunkWriter::finish() {
         row_nums_, data, size, nullable_);
 }
 
-std::unique_ptr<Chunk>
-create_chunk(const FieldMeta& field_meta,
-             int dim,
-             const arrow::ArrayVector& array_vec) {
-    std::shared_ptr<ChunkWriterBase> w;
+template <typename... Args>
+std::shared_ptr<ChunkWriterBase>
+create_chunk_writer(const FieldMeta& field_meta, Args&&... args) {
+    int dim = IsVectorDataType(field_meta.get_data_type()) &&
+                      !IsSparseFloatVectorDataType(field_meta.get_data_type())
+                  ? field_meta.get_dim()
+                  : 1;
     bool nullable = field_meta.is_nullable();
-
     switch (field_meta.get_data_type()) {
-        case milvus::DataType::BOOL: {
-            w = std::make_shared<ChunkWriter<arrow::BooleanArray, bool>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::INT8: {
-            w = std::make_shared<ChunkWriter<arrow::Int8Array, int8_t>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::INT16: {
-            w = std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::INT32: {
-            w = std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::INT64: {
-            w = std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::FLOAT: {
-            w = std::make_shared<ChunkWriter<arrow::FloatArray, float>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::DOUBLE: {
-            w = std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_FLOAT: {
-            w = std::make_shared<
+        case milvus::DataType::BOOL:
+            return std::make_shared<ChunkWriter<arrow::BooleanArray, bool>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::INT8:
+            return std::make_shared<ChunkWriter<arrow::Int8Array, int8_t>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::INT16:
+            return std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::INT32:
+            return std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::INT64:
+            return std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::FLOAT:
+            return std::make_shared<ChunkWriter<arrow::FloatArray, float>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::DOUBLE:
+            return std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::VECTOR_FLOAT:
+            return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp32>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_BINARY: {
-            w = std::make_shared<
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::VECTOR_BINARY:
+            return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bin1>>(
-                dim / 8, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_FLOAT16: {
-            w = std::make_shared<
+                dim / 8, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::VECTOR_FLOAT16:
+            return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp16>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_BFLOAT16: {
-            w = std::make_shared<
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::VECTOR_BFLOAT16:
+            return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
-                dim, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_INT8: {
-            w = std::make_shared<
+                dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::VECTOR_INT8:
+            return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::int8>>(
-                dim, nullable);
-            break;
-        }
+                dim, std::forward<Args>(args)..., nullable);
         case milvus::DataType::VARCHAR:
         case milvus::DataType::STRING:
-        case milvus::DataType::TEXT: {
-            w = std::make_shared<StringChunkWriter>(nullable);
-            break;
-        }
-        case milvus::DataType::JSON: {
-            w = std::make_shared<JSONChunkWriter>(nullable);
-            break;
-        }
-        case milvus::DataType::ARRAY: {
-            w = std::make_shared<ArrayChunkWriter>(
-                field_meta.get_element_type(), nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_SPARSE_FLOAT: {
-            w = std::make_shared<SparseFloatVectorChunkWriter>(nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_ARRAY: {
-            w = std::make_shared<VectorArrayChunkWriter>(
-                dim, field_meta.get_element_type());
-            break;
-        }
+        case milvus::DataType::TEXT:
+            return std::make_shared<StringChunkWriter>(
+                std::forward<Args>(args)..., nullable);
+        case milvus::DataType::JSON:
+            return std::make_shared<JSONChunkWriter>(
+                std::forward<Args>(args)..., nullable);
+        case milvus::DataType::ARRAY:
+            return std::make_shared<ArrayChunkWriter>(
+                field_meta.get_element_type(),
+                std::forward<Args>(args)...,
+                nullable);
+        case milvus::DataType::VECTOR_SPARSE_FLOAT:
+            return std::make_shared<SparseFloatVectorChunkWriter>(
+                std::forward<Args>(args)..., nullable);
+        case milvus::DataType::VECTOR_ARRAY:
+            return std::make_shared<VectorArrayChunkWriter>(
+                dim,
+                field_meta.get_element_type(),
+                std::forward<Args>(args)...);
         default:
             PanicInfo(Unsupported, "Unsupported data type");
     }
+}
 
-    w->write(array_vec);
-    return w->finish();
+std::unique_ptr<Chunk>
+create_chunk(const FieldMeta& field_meta, const arrow::ArrayVector& array_vec) {
+    auto cw = create_chunk_writer(field_meta);
+    cw->write(array_vec);
+    return cw->finish();
 }
 
 std::unique_ptr<Chunk>
 create_chunk(const FieldMeta& field_meta,
-             int dim,
-             File& file,
-             size_t file_offset,
-             const arrow::ArrayVector& array_vec) {
-    std::shared_ptr<ChunkWriterBase> w;
-    bool nullable = field_meta.is_nullable();
-
-    switch (field_meta.get_data_type()) {
-        case milvus::DataType::BOOL: {
-            w = std::make_shared<ChunkWriter<arrow::BooleanArray, bool>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::INT8: {
-            w = std::make_shared<ChunkWriter<arrow::Int8Array, int8_t>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::INT16: {
-            w = std::make_shared<ChunkWriter<arrow::Int16Array, int16_t>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::INT32: {
-            w = std::make_shared<ChunkWriter<arrow::Int32Array, int32_t>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::INT64: {
-            w = std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::FLOAT: {
-            w = std::make_shared<ChunkWriter<arrow::FloatArray, float>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::DOUBLE: {
-            w = std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_FLOAT: {
-            w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp32>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_BINARY: {
-            w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bin1>>(
-                dim / 8, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_FLOAT16: {
-            w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp16>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_BFLOAT16: {
-            w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::bf16>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_INT8: {
-            w = std::make_shared<
-                ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::int8>>(
-                dim, file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VARCHAR:
-        case milvus::DataType::STRING:
-        case milvus::DataType::TEXT: {
-            w = std::make_shared<StringChunkWriter>(
-                file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::JSON: {
-            w = std::make_shared<JSONChunkWriter>(file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::ARRAY: {
-            w = std::make_shared<ArrayChunkWriter>(
-                field_meta.get_element_type(), file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_SPARSE_FLOAT: {
-            w = std::make_shared<SparseFloatVectorChunkWriter>(
-                file, file_offset, nullable);
-            break;
-        }
-        case milvus::DataType::VECTOR_ARRAY: {
-            w = std::make_shared<VectorArrayChunkWriter>(
-                dim, field_meta.get_element_type(), file, file_offset);
-            break;
-        }
-        default:
-            PanicInfo(Unsupported, "Unsupported data type");
-    }
-
-    w->write(array_vec);
-    return w->finish();
+             const arrow::ArrayVector& array_vec,
+             const std::string& file_path) {
+    auto cw = create_chunk_writer(field_meta, file_path);
+    cw->write(array_vec);
+    return cw->finish();
 }
 
 arrow::ArrayVector

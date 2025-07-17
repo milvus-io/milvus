@@ -27,6 +27,46 @@
 
 namespace milvus::segcore::storagev1translator {
 
+void
+virtual_chunk_config(int64_t total_row_count,
+                     int64_t nr_chunks,
+                     const std::vector<int64_t>& num_rows_until_chunk,
+                     int64_t& virt_chunk_order,
+                     std::vector<int64_t>& vcid_to_cid_arr) {
+    // if there is no chunks, just use a single virtual chunk
+    if (nr_chunks == 0) {
+        virt_chunk_order = 0;
+        vcid_to_cid_arr.resize(1);
+        vcid_to_cid_arr[0] = 0;
+        return;
+    }
+
+    // simply assume `avg_num_rows_per_chunk` is far less than 2^64, even far less than 2^32
+    auto avg_num_rows_per_chunk = total_row_count / nr_chunks;
+    virt_chunk_order = 0;
+    while (avg_num_rows_per_chunk >= 2 * (1 << virt_chunk_order)) {
+        virt_chunk_order++;
+    }
+    auto num_rows_per_virt_chunk = 1 << virt_chunk_order;
+    auto nr_virt_chunks = total_row_count / num_rows_per_virt_chunk;
+    if (total_row_count % num_rows_per_virt_chunk != 0) {
+        ++nr_virt_chunks;
+    }
+    vcid_to_cid_arr.resize(nr_virt_chunks);
+    size_t cid = 0;
+    for (size_t i = 0; i < vcid_to_cid_arr.size(); i++) {
+        // svc is the start row of the virtual chunk, it must be less than `total_row_count`
+        int64_t svc = i * num_rows_per_virt_chunk;
+        // find the first cid whose end row is greater than svc
+        // cid will not be out of range, because svc is always less than `total_row_count`
+        // and the last item of `num_rows_until_chunk` is `total_row_count`
+        while (svc >= num_rows_until_chunk[cid + 1]) {
+            ++cid;
+        }
+        vcid_to_cid_arr[i] = cid;
+    }
+}
+
 ChunkTranslator::ChunkTranslator(
     int64_t segment_id,
     FieldMeta field_meta,
@@ -43,6 +83,7 @@ ChunkTranslator::ChunkTranslator(
       mmap_dir_path_(field_data_info.mmap_dir_path),
       meta_(use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(field_meta.get_data_type()),
                 /* is_index */ false,
@@ -62,6 +103,11 @@ ChunkTranslator::ChunkTranslator(
                            field_data_info.field_id,
                            meta_.num_rows_until_chunk_.back(),
                            field_data_info.row_count));
+    virtual_chunk_config(field_data_info.row_count,
+                         files_and_rows_.size(),
+                         meta_.num_rows_until_chunk_,
+                         meta_.virt_chunk_order_,
+                         meta_.vcid_to_cid_arr_);
 }
 
 size_t
@@ -71,6 +117,8 @@ ChunkTranslator::num_cells() const {
 
 milvus::cachinglayer::cid_t
 ChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
+    // For now, the cell id is identical to the uid, so the meta_.cell_id_mapping_mode is IDENTICAL.
+    // Note: if you want to use a customized cell id mapping mode, don't forget to change the meta_.cell_id_mapping_mode to CUSTOMIZED.
     return uid;
 }
 
@@ -128,12 +176,7 @@ ChunkTranslator::get_cells(
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_,
-                                 IsVectorDataType(data_type) &&
-                                         !IsSparseFloatVectorDataType(data_type)
-                                     ? field_meta_.get_dim()
-                                     : 1,
-                                 array_vec);
+            chunk = create_chunk(field_meta_, array_vec);
         } else {
             // we don't know the resulting file size beforehand, thus using a separate file for each chunk.
             auto filepath = folder / std::to_string(cid);
@@ -144,22 +187,12 @@ ChunkTranslator::get_cells(
                      cid,
                      filepath.string());
 
-            auto file =
-                File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
-
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             bool popped = channel->pop(r);
             AssertInfo(popped, "failed to pop arrow reader from channel");
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
-            chunk = create_chunk(field_meta_,
-                                 IsVectorDataType(data_type) &&
-                                         !IsSparseFloatVectorDataType(data_type)
-                                     ? field_meta_.get_dim()
-                                     : 1,
-                                 file,
-                                 /*file_offset*/ 0,
-                                 array_vec);
+            chunk = create_chunk(field_meta_, array_vec, filepath.string());
             auto ok = unlink(filepath.c_str());
             AssertInfo(
                 ok == 0,

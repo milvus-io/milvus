@@ -115,3 +115,14 @@ func (s *pchannelStats) View() PChannelStatsView {
 		VChannels: vchannels,
 	}
 }
+
+// CollectionIDs returns the collection ids of the pchannel.
+func (s *pchannelStats) CollectionIDs() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	collectionIDs := make([]int64, 0, len(s.vchannels))
+	for _, v := range s.vchannels {
+		collectionIDs = append(collectionIDs, v)
+	}
+	return collectionIDs
+}

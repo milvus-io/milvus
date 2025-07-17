@@ -26,7 +26,6 @@
 #include "index/StringIndexMarisa.h"
 #include "index/InvertedIndexTantivy.h"
 #include "storage/FileManager.h"
-#include "storage/DiskFileManagerImpl.h"
 #include "storage/MemFileManagerImpl.h"
 
 namespace milvus {

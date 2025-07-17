@@ -31,6 +31,7 @@ SealedIndexTranslator::SealedIndexTranslator(
       meta_(load_index_info->enable_mmap
                 ? milvus::cachinglayer::StorageType::DISK
                 : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
             milvus::segcore::getCacheWarmupPolicy(
                 IsVectorDataType(load_index_info->field_type),
                 /* is_index */ true),

@@ -459,3 +459,9 @@ func (mc *MilvusClient) RunAnalyzer(ctx context.Context, option client.RunAnalyz
 	tokenSets, err := mc.mClient.RunAnalyzer(ctx, option, callOptions...)
 	return tokenSets, err
 }
+
+// AddCollectionField Add collection field
+func (mc *MilvusClient) AddCollectionField(ctx context.Context, option client.AddCollectionFieldOption, callOptions ...grpc.CallOption) error {
+	err := mc.mClient.AddCollectionField(ctx, option, callOptions...)
+	return err
+}

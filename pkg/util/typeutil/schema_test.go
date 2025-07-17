@@ -298,7 +298,41 @@ func TestSchema(t *testing.T) {
 	})
 }
 
-func TestSchema_GetVectorFieldSchema(t *testing.T) {
+func TestSchema_GetVectorFieldSchemas(t *testing.T) {
+	schemaNormal := &schemapb.CollectionSchema{
+		Name:        "testColl",
+		Description: "",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      100,
+				Name:         "field_int64",
+				IsPrimaryKey: true,
+				Description:  "",
+				DataType:     5,
+			},
+			{
+				FieldID:      107,
+				Name:         "field_float_vector",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     101,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("GetVectorFieldSchemas", func(t *testing.T) {
+		fieldSchema := GetVectorFieldSchemas(schemaNormal)
+		assert.Equal(t, 1, len(fieldSchema))
+		assert.Equal(t, "field_float_vector", fieldSchema[0].Name)
+	})
+
 	schemaSparse := &schemapb.CollectionSchema{
 		Name:        "testColl",
 		Description: "",

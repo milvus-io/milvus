@@ -65,7 +65,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 			End:   2000,
 		},
 	}
-	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan)
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, nil, plan, compaction.GenParams())
 	var err error
 	s.task.compactionParams, err = compaction.ParseParamsFromJSON("")
 	s.Require().NoError(err)

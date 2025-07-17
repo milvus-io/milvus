@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -44,6 +45,7 @@ func RecoverRecoveryStorage(
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		log.FieldComponent(componentRecoveryStorage),
 		zap.String("channel", recoveryStreamBuilder.Channel().String()),
 		zap.String("state", recoveryStorageStateWorking)))
@@ -93,6 +95,16 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *RecoverySnapshot
 }
 
+// Metrics gets the metrics of the wal.
+func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return RecoveryMetrics{
+		RecoveryTimeTick: r.checkpoint.TimeTick,
+	}
+}
+
 // UpdateFlusherCheckpoint updates the checkpoint of flusher.
 // TODO: should be removed in future, after merge the flusher logic into recovery storage.
 func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint) {
@@ -100,7 +112,7 @@ func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint)
 	defer r.mu.Unlock()
 	if r.flusherCheckpoint == nil || r.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
 		r.flusherCheckpoint = checkpoint
-		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()))
+		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
 		return
 	}
 	r.Logger().Warn("update illegal checkpoint of flusher", zap.String("current", r.flusherCheckpoint.MessageID.String()), zap.String("target", checkpoint.MessageID.String()))
@@ -365,6 +377,11 @@ func (r *recoveryStorageImpl) handleCreatePartition(msg message.ImmutableCreateP
 
 // handleDropPartition handles the drop partition message.
 func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropPartitionMessageV1) {
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; !ok || vchannelInfo.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		// TODO: drop partition should never happen after the drop collection message.
+		// But now we don't have strong promise on it.
+		return
+	}
 	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
 	// flush all existing segments.
 	r.flushAllSegmentOfPartition(msg, msg.Header().CollectionId, msg.Header().PartitionId)

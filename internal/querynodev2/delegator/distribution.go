@@ -179,9 +179,25 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	}
 	sealed, growing = current.Get(partitions...)
 	version = current.version
-	targetVersion := current.GetTargetVersion()
-	filterReadable := d.readableFilter(targetVersion)
-	sealed, growing = d.filterSegments(sealed, growing, filterReadable)
+	if d.queryView.GetLoadedRatio() == 1.0 {
+		// if query view is fully loaded, we can use current target version to filter segments
+		targetVersion := current.GetTargetVersion()
+		filterReadable := d.readableFilter(targetVersion)
+		sealed, growing = d.filterSegments(sealed, growing, filterReadable)
+	} else {
+		// if query view is not fully loaded, we need to filter segments by query view's segment list to offer partial result
+		sealed = lo.Map(sealed, func(item SnapshotItem, _ int) SnapshotItem {
+			return SnapshotItem{
+				NodeID: item.NodeID,
+				Segments: lo.Filter(item.Segments, func(entry SegmentEntry, _ int) bool {
+					return d.queryView.sealedSegmentRowCount[entry.SegmentID] > 0
+				}),
+			}
+		})
+		growing = lo.Filter(growing, func(entry SegmentEntry, _ int) bool {
+			return d.queryView.growingSegments.Contain(entry.SegmentID)
+		})
+	}
 
 	if len(d.queryView.unloadedSealedSegments) > 0 {
 		// append distribution of unloaded segment
@@ -319,14 +335,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 			// remain the target version for already loaded segment to void skipping this segment when executing search
 			entry.TargetVersion = oldEntry.TargetVersion
 		} else {
-			_, ok := d.queryView.sealedSegmentRowCount[entry.SegmentID]
-			if ok || d.queryView.growingSegments.Contain(entry.SegmentID) {
-				// set segment version to query view version, to support partial result
-				entry.TargetVersion = d.queryView.GetVersion()
-			} else {
-				// set segment version to unreadableTargetVersion, if it's not in query view
-				entry.TargetVersion = unreadableTargetVersion
-			}
+			entry.TargetVersion = unreadableTargetVersion
 		}
 		d.sealedSegments[entry.SegmentID] = entry
 	}
@@ -400,6 +409,10 @@ func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions 
 		// sealed segment already exists or dropped, make growing segment redundant
 		if sealedSet.Contain(s.SegmentID) || droppedSet.Contain(s.SegmentID) {
 			s.TargetVersion = redundantTargetVersion
+			log.Info("set growing segment redundant, wait for release",
+				zap.Int64("segmentID", s.SegmentID),
+				zap.Int64("targetVersion", s.TargetVersion),
+			)
 			d.growingSegments[s.SegmentID] = s
 			redundantGrowings = append(redundantGrowings, s.SegmentID)
 		}

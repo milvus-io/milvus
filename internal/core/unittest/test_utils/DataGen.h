@@ -26,7 +26,6 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -1383,15 +1382,11 @@ GenVecIndexing(int64_t N,
 template <typename T>
 inline index::IndexBasePtr
 GenScalarIndexing(int64_t N, const T* data) {
-    if constexpr (std::is_same_v<T, std::string>) {
-        auto indexing = index::CreateStringIndexSort();
-        indexing->Build(N, data);
-        return indexing;
-    } else {
-        auto indexing = index::CreateScalarIndexSort<T>();
-        indexing->Build(N, data);
-        return indexing;
-    }
+    static_assert(std::is_arithmetic_v<T>,
+                  "ScalarIndexSort only supports arithmetic types");
+    auto indexing = index::CreateScalarIndexSort<T>();
+    indexing->Build(N, data);
+    return indexing;
 }
 
 inline std::vector<char>

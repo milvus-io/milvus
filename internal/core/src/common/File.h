@@ -54,7 +54,7 @@ class File {
                    "failed to create mmap file {}: {}",
                    filepath,
                    strerror(errno));
-        FILE* fs = fdopen(fd, "wb+");
+        FILE* fs = fdopen(fd, get_mode_from_flags(flags));
         AssertInfo(fs != nullptr,
                    "failed to open file {}: {}",
                    filepath,
@@ -115,71 +115,29 @@ class File {
     }
 
  private:
+    static inline const char*
+    get_mode_from_flags(int flags) {
+        switch (flags) {
+            case O_RDONLY: {
+                return "rb";
+            }
+            case O_WRONLY: {
+                return flags & O_APPEND ? "ab" : "wb";
+            }
+            case O_RDWR: {
+                return flags & O_APPEND ? "ab+" : "wb+";
+            }
+            default: {
+                AssertInfo(false, "invalid file flags: {}", flags);
+            }
+        }
+    }
+
     explicit File(int fd, FILE* fs, const std::string& filepath)
         : fd_(fd), filepath_(filepath), fs_(fs) {
     }
     int fd_{-1};
     FILE* fs_;
     std::string filepath_;
-};
-
-class BufferedWriter {
- public:
-    // Constructor: Initialize with the file pointer and the buffer size (default 4KB).
-    explicit BufferedWriter(File& file, size_t buffer_size = 4096)
-        : file_(file),
-          buffer_size_(buffer_size),
-          buffer_(new char[buffer_size]) {
-    }
-
-    ~BufferedWriter() {
-        // Ensure the buffer is flushed when the object is destroyed
-        flush();
-        delete[] buffer_;
-    }
-
-    // Write method to handle data larger than the buffer
-    void
-    Write(const void* data, size_t size) {
-        if (size > buffer_size_) {
-            flush();
-            ssize_t written_data_size = file_.FWrite(data, size);
-            if (written_data_size != size) {
-                THROW_FILE_WRITE_ERROR(file_.Path())
-            }
-            return;
-        }
-
-        if (buffer_pos_ + size > buffer_size_) {
-            flush();
-        }
-
-        std::memcpy(buffer_ + buffer_pos_, data, size);
-        buffer_pos_ += size;
-    }
-
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
-    void
-    WriteInt(T value) {
-        Write(&value, sizeof(value));
-    }
-
-    // Flush method: Write the contents of the buffer to the file
-    void
-    flush() {
-        if (buffer_pos_ > 0) {
-            ssize_t written_data_size = file_.FWrite(buffer_, buffer_pos_);
-            if (written_data_size != buffer_pos_) {
-                THROW_FILE_WRITE_ERROR(file_.Path())
-            }
-            buffer_pos_ = 0;
-        }
-    }
-
- private:
-    File& file_;            // File pointer
-    size_t buffer_size_;    // Size of the internal buffer
-    char* buffer_;          // The buffer itself
-    size_t buffer_pos_{0};  // Current position in the buffer
 };
 }  // namespace milvus

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -92,7 +91,7 @@ func (p *preImportTask) GetTaskState() taskcommon.State {
 }
 
 func (p *preImportTask) GetTaskSlot() int64 {
-	return int64(funcutil.Min(len(p.GetFileStats())))
+	return int64(CalculateTaskSlot(p, p.importMeta))
 }
 
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {

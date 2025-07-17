@@ -156,9 +156,9 @@ TEST(TextMatch, Index) {
                                          "milvus_tokenizer",
                                          "{}");
     index->CreateReader(milvus::index::SetBitsetSealed);
-    index->AddText("football, basketball, pingpang", true, 0);
-    index->AddText("", false, 1);
-    index->AddText("swimming, football", true, 2);
+    index->AddTextSealed("football, basketball, pingpang", true, 0);
+    index->AddTextSealed("", false, 1);
+    index->AddTextSealed("swimming, football", true, 2);
     index->Commit();
     index->Reload();
 

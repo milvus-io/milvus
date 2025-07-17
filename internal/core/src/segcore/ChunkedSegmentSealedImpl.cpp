@@ -43,6 +43,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
+#include "monitor/scope_metric.h"
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
@@ -184,12 +185,10 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     if (auto it = info.index_params.find(index::INDEX_TYPE);
         it != info.index_params.end() &&
         it->second == index::NGRAM_INDEX_TYPE) {
-        ngram_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-    } else {
-        scalar_indexings_[field_id] =
-            std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+        ngram_fields_.insert(field_id);
     }
+    scalar_indexings_[field_id] =
+        std::move(const_cast<LoadIndexInfo&>(info).cache_index);
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -292,7 +291,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         for (int i = 0; i < field_id_list.size(); ++i) {
             milvus_field_ids.push_back(FieldId(field_id_list.Get(i)));
             merged_in_load_list = merged_in_load_list ||
-                                  schema_->ShallLoadField(milvus_field_ids[i]);
+                                  schema_->ShouldLoadField(milvus_field_ids[i]);
         }
 
         auto column_group_info = FieldDataInfo(column_group_id.get(),
@@ -300,7 +299,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                load_info.mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
-            "segment {} loads column group {} with field ids {} with num_rows "
+            "segment {} loads column group {} with field ids {} with "
+            "num_rows "
             "{}",
             this->get_segment_id(),
             column_group_id.get(),
@@ -333,12 +333,18 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
             load_field_data_common(
                 field_id, column, num_rows, data_type, info.enable_mmap, true);
         }
+
+        if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            stats_.mem_size += chunked_column_group->memory_size();
+        }
     }
 }
 
 void
 ChunkedSegmentSealedImpl::load_field_data_internal(
     const LoadFieldDataInfo& load_info) {
+    SCOPE_CGO_CALL_METRIC();
+
     size_t num_rows = storage::GetNumRowsForLoadInfo(load_info);
     AssertInfo(
         !num_rows_.has_value() || num_rows_ == num_rows,
@@ -349,10 +355,11 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
-        auto field_data_info = FieldDataInfo(field_id.get(),
-                                             num_rows,
-                                             load_info.mmap_dir_path,
-                                             schema_->ShallLoadField(field_id));
+        auto field_data_info =
+            FieldDataInfo(field_id.get(),
+                          num_rows,
+                          load_info.mmap_dir_path,
+                          schema_->ShouldLoadField(field_id));
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
                  field_id.get(),
@@ -412,6 +419,8 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 void
 ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
                                                      FieldDataInfo& data) {
+    SCOPE_CGO_CALL_METRIC();
+
     auto num_rows = data.row_count;
     AssertInfo(SystemProperty::Instance().IsSystem(field_id),
                "system field is not system field");
@@ -425,7 +434,7 @@ ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
         std::shared_ptr<milvus::ArrowDataWrapper> r;
         while (data.arrow_reader_channel->pop(r)) {
             auto array_vec = read_single_column_batches(r->reader);
-            auto chunk = create_chunk(field_meta, 1, array_vec);
+            auto chunk = create_chunk(field_meta, array_vec);
             auto chunk_ptr = static_cast<FixedWidthChunk*>(chunk.get());
             std::copy_n(static_cast<const Timestamp*>(chunk_ptr->Span().data()),
                         chunk_ptr->Span().row_count(),
@@ -452,6 +461,8 @@ ChunkedSegmentSealedImpl::load_system_field_internal(FieldId field_id,
 
 void
 ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
+    SCOPE_CGO_CALL_METRIC();
+
     AssertInfo(info.row_count > 0, "The row count of deleted record is 0");
     AssertInfo(info.primary_keys, "Deleted primary keys is null");
     AssertInfo(info.timestamps, "Deleted timestamps is null");
@@ -620,8 +631,8 @@ ChunkedSegmentSealedImpl::chunk_index_impl(FieldId field_id,
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    auto iter = ngram_indexings_.find(field_id);
-    if (iter == ngram_indexings_.end()) {
+    auto iter = scalar_indexings_.find(field_id);
+    if (iter == scalar_indexings_.end()) {
         return PinWrapper<index::NgramInvertedIndex*>(nullptr);
     }
     auto slot = iter->second.get();
@@ -759,7 +770,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     auto metric_type = vec_index->GetMetricType();
     auto has_raw_data = vec_index->HasRawData();
 
-    if (has_raw_data && !TEST_skip_index_for_retrieve_) {
+    if (has_raw_data) {
         // If index has raw data, get vector from memory.
         auto ids_ds = GenIdsDataset(count, ids);
         if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
@@ -969,18 +980,17 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     IndexMetaPtr index_meta,
     const SegcoreConfig& segcore_config,
     int64_t segment_id,
-    bool TEST_skip_index_for_retrieve,
     bool is_sorted_by_pk)
     : segcore_config_(segcore_config),
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       binlog_index_bitset_(schema->size()),
+      ngram_fields_(schema->size()),
       scalar_indexings_(schema->size()),
       insert_record_(*schema, MAX_ROW_COUNT),
       schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
-      TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           &insert_record_,
@@ -1046,13 +1056,21 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               const int64_t* seg_offsets,
                                               int64_t count,
                                               T* dst) {
-    static_assert(IsScalar<T>);
-    field->BulkValueAt(
-        [dst](const char* value, size_t i) {
-            dst[i] = *static_cast<const S*>(static_cast<const void*>(value));
-        },
-        seg_offsets,
-        count);
+    static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
+    // use field->data_type_ to determine the type of dst
+    field->BulkPrimitiveValueAt(
+        static_cast<void*>(dst), seg_offsets, count);
+}
+
+// for dense vector
+void
+ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
+                                              ChunkedColumnInterface* field,
+                                              const int64_t* seg_offsets,
+                                              int64_t count,
+                                              void* dst_raw) {
+    auto dst_vec = reinterpret_cast<char*>(dst_raw);
+    field->BulkVectorValueAt(dst_vec, seg_offsets, element_sizeof, count);
 }
 
 template <typename S>
@@ -1108,23 +1126,6 @@ ChunkedSegmentSealedImpl::bulk_subscript_vector_array_impl(
         count);
 }
 
-// for dense vector
-void
-ChunkedSegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
-                                              ChunkedColumnInterface* field,
-                                              const int64_t* seg_offsets,
-                                              int64_t count,
-                                              void* dst_raw) {
-    auto dst_vec = reinterpret_cast<char*>(dst_raw);
-    field->BulkValueAt(
-        [&](const char* value, size_t i) {
-            auto dst = dst_vec + i * element_sizeof;
-            memcpy(dst, value, element_sizeof);
-        },
-        seg_offsets,
-        count);
-}
-
 void
 ChunkedSegmentSealedImpl::ClearData() {
     {
@@ -1135,6 +1136,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         index_has_raw_data_.clear();
         system_ready_count_ = 0;
         num_rows_ = std::nullopt;
+        ngram_fields_.clear();
         scalar_indexings_.clear();
         vector_indexings_.clear();
         insert_record_.clear();
@@ -1186,7 +1188,7 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
         if (iter != fields_.end()) {
             iter->second->BulkRawStringAt(
                 [&](std::string_view value, size_t offset, bool is_valid) {
-                    index->AddText(std::string(value), is_valid, offset);
+                    index->AddTextSealed(std::string(value), is_valid, offset);
                 });
         } else {  // fetch raw data from index.
             auto field_index_iter = scalar_indexings_.find(field_id);
@@ -1207,9 +1209,9 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             for (size_t i = 0; i < n; i++) {
                 auto raw = impl->Reverse_Lookup(i);
                 if (!raw.has_value()) {
-                    index->AddNull(i);
+                    index->AddNullSealed(i);
                 }
-                index->AddText(raw.value(), true, i);
+                index->AddTextSealed(raw.value(), true, i);
             }
         }
     }
@@ -1285,73 +1287,73 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
         }
 
         case DataType::BOOL: {
-            bulk_subscript_impl<bool>(column.get(),
-                                      seg_offsets,
-                                      count,
-                                      ret->mutable_scalars()
-                                          ->mutable_bool_data()
-                                          ->mutable_data()
-                                          ->mutable_data());
+            bulk_subscript_impl<bool, bool>(column.get(),
+                                            seg_offsets,
+                                            count,
+                                            ret->mutable_scalars()
+                                                ->mutable_bool_data()
+                                                ->mutable_data()
+                                                ->mutable_data());
             break;
         }
         case DataType::INT8: {
-            bulk_subscript_impl<int8_t>(column.get(),
-                                        seg_offsets,
-                                        count,
-                                        ret->mutable_scalars()
-                                            ->mutable_int_data()
-                                            ->mutable_data()
-                                            ->mutable_data());
+            bulk_subscript_impl<int8_t, int32_t>(column.get(),
+                                                 seg_offsets,
+                                                 count,
+                                                 ret->mutable_scalars()
+                                                     ->mutable_int_data()
+                                                     ->mutable_data()
+                                                     ->mutable_data());
             break;
         }
         case DataType::INT16: {
-            bulk_subscript_impl<int16_t>(column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_int_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int16_t, int32_t>(column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_int_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::INT32: {
-            bulk_subscript_impl<int32_t>(column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_int_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int32_t, int32_t>(column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_int_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::INT64: {
-            bulk_subscript_impl<int64_t>(column.get(),
-                                         seg_offsets,
-                                         count,
-                                         ret->mutable_scalars()
-                                             ->mutable_long_data()
-                                             ->mutable_data()
-                                             ->mutable_data());
+            bulk_subscript_impl<int64_t, int64_t>(column.get(),
+                                                  seg_offsets,
+                                                  count,
+                                                  ret->mutable_scalars()
+                                                      ->mutable_long_data()
+                                                      ->mutable_data()
+                                                      ->mutable_data());
             break;
         }
         case DataType::FLOAT: {
-            bulk_subscript_impl<float>(column.get(),
-                                       seg_offsets,
-                                       count,
-                                       ret->mutable_scalars()
-                                           ->mutable_float_data()
-                                           ->mutable_data()
-                                           ->mutable_data());
+            bulk_subscript_impl<float, float>(column.get(),
+                                              seg_offsets,
+                                              count,
+                                              ret->mutable_scalars()
+                                                  ->mutable_float_data()
+                                                  ->mutable_data()
+                                                  ->mutable_data());
             break;
         }
         case DataType::DOUBLE: {
-            bulk_subscript_impl<double>(column.get(),
-                                        seg_offsets,
-                                        count,
-                                        ret->mutable_scalars()
-                                            ->mutable_double_data()
-                                            ->mutable_data()
-                                            ->mutable_data());
+            bulk_subscript_impl<double, double>(column.get(),
+                                                seg_offsets,
+                                                count,
+                                                ret->mutable_scalars()
+                                                    ->mutable_double_data()
+                                                    ->mutable_data()
+                                                    ->mutable_data());
             break;
         }
         case DataType::VECTOR_FLOAT: {
@@ -1392,6 +1394,15 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 ret->mutable_vectors()->mutable_binary_vector()->data());
             break;
         }
+        case DataType::VECTOR_INT8: {
+            bulk_subscript_impl(
+                field_meta.get_sizeof(),
+                column.get(),
+                seg_offsets,
+                count,
+                ret->mutable_vectors()->mutable_int8_vector()->data());
+            break;
+        }
         case DataType::VECTOR_SPARSE_FLOAT: {
             auto dst = ret->mutable_vectors()->mutable_sparse_float_vector();
             int64_t max_dim = 0;
@@ -1415,15 +1426,6 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                 count);
             dst->set_dim(max_dim);
             ret->mutable_vectors()->set_dim(dst->dim());
-            break;
-        }
-        case DataType::VECTOR_INT8: {
-            bulk_subscript_impl(
-                field_meta.get_sizeof(),
-                column.get(),
-                seg_offsets,
-                count,
-                ret->mutable_vectors()->mutable_int8_vector()->data());
             break;
         }
         case DataType::VECTOR_ARRAY: {
@@ -1882,6 +1884,12 @@ ChunkedSegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
 void
 ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
+        LOG_INFO(
+            "lazy check schema segment {} found newer schema version, current "
+            "schema version {}, new schema version {}",
+            id_,
+            schema_->get_schema_version(),
+            sch->get_schema_version());
         Reopen(sch);
     }
 }
@@ -1907,7 +1915,11 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     }
 
     if (!enable_mmap) {
-        stats_.mem_size += column->DataByteSize();
+        if (!is_proxy_column ||
+            is_proxy_column &&
+                field_id.get() != DEFAULT_SHORT_COLUMN_GROUP_ID) {
+            stats_.mem_size += column->DataByteSize();
+        }
         if (!IsVariableDataType(data_type) || IsStringDataType(data_type)) {
             LoadSkipIndex(field_id, data_type, column);
         }
@@ -2004,9 +2016,14 @@ ChunkedSegmentSealedImpl::FinishLoad() {
 
 void
 ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
+    auto field_id = field_meta.get_id();
+    LOG_INFO("start fill empty field {} (data type {}) for sealed segment {}",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
-    auto field_data_info = FieldDataInfo(field_meta.get_id().get(), size, "");
+    auto field_data_info = FieldDataInfo(field_id.get(), size, "");
     std::unique_ptr<Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
             get_segment_id(), field_meta, field_data_info, false);
@@ -2040,9 +2057,13 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
             break;
         }
     }
-    auto field_id = field_meta.get_id();
+
     fields_.emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
+    LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
+             field_meta.get_data_type(),
+             field_id.get(),
+             id_);
 }
 
 }  // namespace milvus::segcore

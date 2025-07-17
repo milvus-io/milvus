@@ -24,13 +24,29 @@ namespace milvus::segcore::storagev1translator {
 
 struct CTMeta : public milvus::cachinglayer::Meta {
     std::vector<int64_t> num_rows_until_chunk_;
+    // virtual chunk is used to speed up the offset->cid translation
+    // all virtual chunks have the same number of rows
+    std::vector<int64_t>
+        vcid_to_cid_arr_;  // the first cid of each virtual chunk
+    int64_t
+        virt_chunk_order_;  // indicates the size of each virtual chunk, i.e. 2^virt_chunk_order_
     CTMeta(milvus::cachinglayer::StorageType storage_type,
+           milvus::cachinglayer::CellIdMappingMode cell_id_mapping_mode,
            CacheWarmupPolicy cache_warmup_policy,
            bool support_eviction)
-        : milvus::cachinglayer::Meta(
-              storage_type, cache_warmup_policy, support_eviction) {
+        : milvus::cachinglayer::Meta(storage_type,
+                                     cell_id_mapping_mode,
+                                     cache_warmup_policy,
+                                     support_eviction) {
     }
 };
+
+void
+virtual_chunk_config(int64_t total_row_count,
+                     int64_t nr_chunks,
+                     const std::vector<int64_t>& num_rows_until_chunk,
+                     int64_t& virt_chunk_order,
+                     std::vector<int64_t>& vcid_to_cid_arr);
 
 // For this translator each Chunk is a CacheCell, cid_t == uid_t.
 class ChunkTranslator : public milvus::cachinglayer::Translator<milvus::Chunk> {

@@ -732,7 +732,6 @@ class TestMilvusClientSearchPagination(TestMilvusClientV2Base):
             limit=default_limit,
             check_task=CheckTasks.err_res,
             check_items=error)
-    
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("offset", [-1, 16385])
@@ -823,7 +822,7 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.tags(CaseLabel.GPU)
+    # @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
     @pytest.mark.parametrize('index', ct.all_index_types[:8])
     @pytest.mark.parametrize('metric_type', ct.dense_metrics)

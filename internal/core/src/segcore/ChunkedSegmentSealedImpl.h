@@ -49,7 +49,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
                                       int64_t segment_id,
-                                      bool TEST_skip_index_for_retrieve = false,
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
     void
@@ -121,7 +120,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasNgramIndex(FieldId field_id) const override {
         std::shared_lock lck(mutex_);
-        return ngram_indexings_.find(field_id) != ngram_indexings_.end();
+        return ngram_fields_.find(field_id) != ngram_fields_.end();
     }
 
     PinWrapper<index::NgramInvertedIndex*>
@@ -312,6 +311,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         T* dst_raw);
 
+    static void
+    bulk_subscript_impl(int64_t element_sizeof,
+                        ChunkedColumnInterface* field,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* dst_raw);
+
     template <typename S>
     static void
     bulk_subscript_ptr_impl(
@@ -334,13 +340,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<T>* dst);
-
-    static void
-    bulk_subscript_impl(int64_t element_sizeof,
-                        ChunkedColumnInterface* field,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        void* dst_raw);
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id, int64_t count) const;
@@ -433,8 +432,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;
 
-    // ngram field index
-    std::unordered_map<FieldId, index::CacheIndexBasePtr> ngram_indexings_;
+    // fields that has ngram index
+    std::unordered_set<FieldId> ngram_fields_{};
 
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
@@ -463,10 +462,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     SegmentStats stats_{};
 
-    // for sparse vector unit test only! Once a type of sparse index that
-    // doesn't has raw data is added, this should be removed.
-    bool TEST_skip_index_for_retrieve_ = false;
-
     // whether the segment is sorted by the pk
     // 1. will skip index loading for primary key field
     bool is_sorted_by_pk_ = false;
@@ -482,14 +477,8 @@ CreateSealedSegment(
     IndexMetaPtr index_meta = empty_index_meta,
     int64_t segment_id = 0,
     const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
-    bool TEST_skip_index_for_retrieve = false,
     bool is_sorted_by_pk = false) {
     return std::make_unique<ChunkedSegmentSealedImpl>(
-        schema,
-        index_meta,
-        segcore_config,
-        segment_id,
-        TEST_skip_index_for_retrieve,
-        is_sorted_by_pk);
+        schema, index_meta, segcore_config, segment_id, is_sorted_by_pk);
 }
 }  // namespace milvus::segcore
