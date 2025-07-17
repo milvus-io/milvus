@@ -94,6 +94,8 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
     is_built_ = true;
+
+    setup_data_pointers();
 }
 
 template <typename T>
@@ -135,6 +137,8 @@ ScalarIndexSort<T>::BuildWithFieldData(
         idx_to_offsets_[data_[i].idx_] = i;
     }
     is_built_ = true;
+
+    setup_data_pointers();
 }
 
 template <typename T>
