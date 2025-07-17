@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -51,6 +52,11 @@ const (
 )
 
 var searchCollectionName = ""
+
+func (s *CoordDownSearch) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().LogCfg.Level.Key, "debug")
+	s.MiniClusterSuite.SetupSuite()
+}
 
 func (s *CoordDownSearch) loadCollection(collectionName string, dim int) {
 	c := s.Cluster

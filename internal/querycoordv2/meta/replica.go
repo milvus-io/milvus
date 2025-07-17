@@ -107,6 +107,8 @@ func NewReplicaWithPriority(replica *querypb.Replica, priority commonpb.LoadPrio
 		replicaPB:    proto.Clone(replica).(*querypb.Replica),
 		rwNodes:      typeutil.NewUniqueSet(replica.Nodes...),
 		roNodes:      typeutil.NewUniqueSet(replica.RoNodes...),
+		rwSQNodes:    typeutil.NewUniqueSet(replica.RwSqNodes...),
+		roSQNodes:    typeutil.NewUniqueSet(replica.RoSqNodes...),
 		loadPriority: priority,
 	}
 }
@@ -212,7 +214,7 @@ func (replica *Replica) NodesCount() int {
 
 // Contains checks if the node is in rw nodes of the replica.
 func (replica *Replica) Contains(node int64) bool {
-	return replica.ContainRONode(node) || replica.ContainRWNode(node) || replica.ContainSQNode(node) || replica.ContainRWSQNode(node)
+	return replica.ContainRONode(node) || replica.ContainRWNode(node) || replica.ContainSQNode(node)
 }
 
 // ContainRONode checks if the node is in ro nodes of the replica.

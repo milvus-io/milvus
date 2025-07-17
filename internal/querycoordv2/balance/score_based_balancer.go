@@ -661,6 +661,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 			br.AddRecord(StrRecordf("node %d skip balance since current score(%f) lower than assigned one (%f)", node, currentScore, assignedScore))
 			continue
 		}
+		channels = sortIfChannelAtWALLocated(channels)
 
 		for _, ch := range channels {
 			channelScore := b.calculateChannelScore(ch, replica.GetCollectionID())
