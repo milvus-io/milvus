@@ -1693,6 +1693,50 @@ func TestMetaTable_RenameCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "new", coll.Name)
 	})
+
+	t.Run("rename collection ok", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, merr.WrapErrCollectionNotFound("error"))
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				util.DefaultDBName: model.NewDefaultDatabase(nil),
+			},
+			catalog: catalog,
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					DBID:         1,
+					Name:         "old",
+				},
+			},
+		}
+		meta.names.insert(util.DefaultDBName, "old", 1)
+		err := meta.RenameCollection(context.TODO(), util.DefaultDBName, "old", util.DefaultDBName, "new", 1000)
+		assert.NoError(t, err)
+
+		id, ok := meta.names.get(util.DefaultDBName, "new")
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), id)
+
+		coll, ok := meta.collID2Meta[1]
+		assert.True(t, ok)
+		assert.Equal(t, "new", coll.Name)
+	})
 }
 
 func TestMetaTable_ChangePartitionState(t *testing.T) {
