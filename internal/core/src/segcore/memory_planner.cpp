@@ -189,8 +189,10 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
             // split memory limit for each block, check if it's greater than 0
             auto reader_memory_limit = memory_limit / blocks.size();
-            if (reader_memory_limit < FILE_SLICE_SIZE) {
-                reader_memory_limit = FILE_SLICE_SIZE;
+            if (reader_memory_limit <
+                FILE_SLICE_SIZE.load(std::memory_order_acquire)) {
+                reader_memory_limit =
+                    FILE_SLICE_SIZE.load(std::memory_order_acquire);
             }
 
             for (const auto& block : blocks) {
