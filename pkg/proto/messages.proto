@@ -120,6 +120,7 @@ message TimeTickMessageHeader {}
 message InsertMessageHeader {
     int64 collection_id                            = 1;
     repeated PartitionSegmentAssignment partitions = 2;
+    schema.IDs delete_primary_keys =3;
 }
 
 // PartitionSegmentAssignment is the segment assignment of a partition.

@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 )
 
 var UnmashalerDispatcher = (&msgstream.ProtoUDFactory{}).NewUnmarshalDispatcher()
@@ -39,7 +40,7 @@ func NewMsgPackFromMessage(msgs ...message.ImmutableMessage) (*msgstream.MsgPack
 			finalErr = errors.CombineErrors(finalErr, errors.Wrapf(err, "Failed to convert message to msgpack, %v", msg.MessageID()))
 			continue
 		}
-		allTsMsgs = append(allTsMsgs, tsMsg)
+		allTsMsgs = append(allTsMsgs, tsMsg...)
 	}
 	if len(allTsMsgs) == 0 {
 		return nil, finalErr
@@ -80,12 +81,11 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 
 	tsMsgs := make([]msgstream.TsMsg, 0, txnMsg.Size())
 	err := txnMsg.RangeOver(func(im message.ImmutableMessage) error {
-		var tsMsg msgstream.TsMsg
-		tsMsg, err := parseSingleMsg(im)
+		tsMsgList, err := parseSingleMsg(im)
 		if err != nil {
 			return err
 		}
-		tsMsgs = append(tsMsgs, tsMsg)
+		tsMsgs = append(tsMsgs, tsMsgList...)
 		return nil
 	})
 	if err != nil {
@@ -95,7 +95,7 @@ func parseTxnMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 }
 
 // parseSingleMsg converts message to ts message.
-func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+func parseSingleMsg(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 	switch msg.Version() {
 	case message.VersionV1, message.VersionOld:
 		return fromMessageToTsMsgV1(msg)
@@ -107,7 +107,7 @@ func parseSingleMsg(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
 }
 
 // fromMessageToTsMsgV1 converts message to ts message.
-func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+func fromMessageToTsMsgV1(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 	tsMsg, err := UnmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to unmarshal message")
@@ -125,7 +125,7 @@ func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 }
 
 // fromMessageToTsMsgV2 converts message to ts message.
-func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+func fromMessageToTsMsgV2(msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 	var tsMsg msgstream.TsMsg
 	var err error
 	switch msg.MessageType() {
@@ -151,11 +151,11 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		MsgGroup:  "", // Not important any more.
 		Timestamp: msg.TimeTick(),
 	})
-	return tsMsg, nil
+	return []msgstream.TsMsg{tsMsg}, nil
 }
 
 // recoverMessageFromHeader recovers message from header.
-func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessage) (msgstream.TsMsg, error) {
+func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessage) ([]msgstream.TsMsg, error) {
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
 		insertMessage, err := message.AsImmutableInsertMessageV1(msg)
@@ -164,26 +164,38 @@ func recoverMessageFromHeader(tsMsg msgstream.TsMsg, msg message.ImmutableMessag
 		}
 		// insertMsg has multiple partition and segment assignment is done by insert message header.
 		// so recover insert message from header before send it.
-		return recoverInsertMsgFromHeader(tsMsg.(*msgstream.InsertMsg), insertMessage.Header(), msg.TimeTick())
+		recoveredMsg, err := recoverInsertMsgFromHeader(tsMsg.(*msgstream.InsertMsg), insertMessage.Header(), msg.TimeTick())
+		if err != nil {
+			return nil, err
+		}
+		return recoveredMsg, nil
 	case message.MessageTypeDelete:
 		deleteMessage, err := message.AsImmutableDeleteMessageV1(msg)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to convert message to delete message")
 		}
-		return recoverDeleteMsgFromHeader(tsMsg.(*msgstream.DeleteMsg), deleteMessage.Header(), msg.TimeTick())
+		recoveredMsg, err := recoverDeleteMsgFromHeader(tsMsg.(*msgstream.DeleteMsg), deleteMessage.Header(), msg.TimeTick())
+		if err != nil {
+			return nil, err
+		}
+		return []msgstream.TsMsg{recoveredMsg}, nil
 	case message.MessageTypeImport:
 		importMessage, err := message.AsImmutableImportMessageV1(msg)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to convert message to import message")
 		}
-		return recoverImportMsgFromHeader(tsMsg.(*msgstream.ImportMsg), importMessage.Header(), msg.TimeTick())
+		recoveredMsg, err := recoverImportMsgFromHeader(tsMsg.(*msgstream.ImportMsg), importMessage.Header(), msg.TimeTick())
+		if err != nil {
+			return nil, err
+		}
+		return []msgstream.TsMsg{recoveredMsg}, nil
 	default:
-		return tsMsg, nil
+		return []msgstream.TsMsg{tsMsg}, nil
 	}
 }
 
 // recoverInsertMsgFromHeader recovers insert message from header.
-func recoverInsertMsgFromHeader(insertMsg *msgstream.InsertMsg, header *message.InsertMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
+func recoverInsertMsgFromHeader(insertMsg *msgstream.InsertMsg, header *message.InsertMessageHeader, timetick uint64) ([]msgstream.TsMsg, error) {
 	if insertMsg.GetCollectionID() != header.GetCollectionId() {
 		panic("unreachable code, collection id is not equal")
 	}
@@ -208,7 +220,36 @@ func recoverInsertMsgFromHeader(insertMsg *msgstream.InsertMsg, header *message.
 	}
 	insertMsg.Timestamps = timestamps
 	insertMsg.Base.Timestamp = timetick
-	return insertMsg, nil
+	if header.GetDeletePrimaryKeys() != nil {
+		dmsg := &msgstream.DeleteMsg{
+			BaseMsg: msgstream.BaseMsg{
+				Ctx:            insertMsg.TraceCtx(),
+				BeginTimestamp: insertMsg.BeginTs(),
+				EndTimestamp:   insertMsg.EndTs(),
+				MsgPosition:    insertMsg.Position(),
+			},
+			DeleteRequest: &msgpb.DeleteRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+					commonpbutil.WithTimeStamp(insertMsg.Base.Timestamp),
+					commonpbutil.WithSourceID(insertMsg.Base.SourceID),
+					commonpbutil.WithMsgID(insertMsg.Base.MsgID),
+				),
+				ShardName:      insertMsg.ShardName,
+				CollectionName: insertMsg.CollectionName,
+				PartitionName:  insertMsg.PartitionName,
+				DbName:         insertMsg.DbName,
+				CollectionID:   insertMsg.CollectionID,
+				PartitionID:    insertMsg.PartitionID,
+				PrimaryKeys:    header.GetDeletePrimaryKeys(),
+				NumRows:        int64(insertMsg.GetNumRows()),
+				Timestamps:     insertMsg.GetTimestamps(),
+			},
+		}
+		return []msgstream.TsMsg{dmsg, insertMsg}, nil
+	}
+
+	return []msgstream.TsMsg{insertMsg}, nil
 }
 
 func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.DeleteMessageHeader, timetick uint64) (msgstream.TsMsg, error) {
