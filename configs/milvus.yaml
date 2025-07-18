@@ -1139,7 +1139,7 @@ quotaAndLimits:
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
       # seconds
-      maxTimeTickDelay: 300
+      maxTimeTickDelay: 1200
     memProtection:
       # When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
       # When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
