@@ -209,6 +209,11 @@ func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balance
 	var rwNodes, roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
 		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
+		if rwQueryNodesLessThan260 := filterNodeLessThan260(rwNodes, b.nodeManager); len(rwQueryNodesLessThan260) > 0 {
+			// Add rwNodes to roNodes to balance channels from querynode to streamingnode forcely.
+			roNodes = append(roNodes, rwQueryNodesLessThan260...)
+			log.Info("force to balance channels from querynode to streamingnode", zap.Int64s("rwQueryNodesLessThan260", rwQueryNodesLessThan260))
+		}
 		roNodes = append(roNodes, replica.GetRONodes()...)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
