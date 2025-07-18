@@ -12,12 +12,17 @@
 #pragma once
 
 #include <memory>
+#include <thread>
+
+#include <folly/io/async/EventBase.h>
+#include <folly/system/ThreadName.h>
 
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/lrucache/DList.h"
 #include "cachinglayer/Translator.h"
 #include "cachinglayer/Utils.h"
 #include "common/type_c.h"
+#include "log/Log.h"
 
 namespace milvus::cachinglayer {
 
@@ -42,7 +47,14 @@ class Manager {
     Manager&
     operator=(Manager&&) = delete;
 
-    ~Manager() = default;
+    ~Manager() {
+        if (event_base_) {
+            event_base_->terminateLoopSoon();
+        }
+        if (event_base_thread_ && event_base_thread_->joinable()) {
+            event_base_thread_->join();
+        }
+    }
 
     template <typename CellT>
     std::shared_ptr<CacheSlot<CellT>>
@@ -52,8 +64,8 @@ class Manager {
         auto dlist = (translator->meta()->support_eviction && evictionEnabled_)
                          ? dlist_.get()
                          : nullptr;
-        auto cache_slot =
-            std::make_shared<CacheSlot<CellT>>(std::move(translator), dlist);
+        auto cache_slot = std::make_shared<CacheSlot<CellT>>(
+            std::move(translator), dlist, event_base_.get());
         cache_slot->Warmup();
         return cache_slot;
     }
@@ -94,12 +106,20 @@ class Manager {
                            bool evictionEnabled,
                            EvictionConfig eviction_config);
 
-    Manager() = default;  // Private constructor
+    Manager() {
+        event_base_ = std::make_unique<folly::EventBase>();
+        event_base_thread_ = std::make_unique<std::thread>([this] {
+            LOG_INFO("[MCL] Starting cache EventBase thread");
+            folly::setThreadName("cache-eb");
+            event_base_->loopForever();
+        });
+    }
 
     std::unique_ptr<internal::DList> dlist_{nullptr};
     CacheWarmupPolicies warmup_policies_{};
     bool evictionEnabled_{false};
-    CacheLimit cache_limit_{};
+    std::unique_ptr<folly::EventBase> event_base_;
+    std::unique_ptr<std::thread> event_base_thread_;
 };  // class Manager
 
 }  // namespace milvus::cachinglayer

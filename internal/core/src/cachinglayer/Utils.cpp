@@ -23,34 +23,39 @@ namespace milvus::cachinglayer::internal {
 
 int64_t
 getHostTotalMemory() {
+    static int64_t cached_total_memory = []() -> int64_t {
 #ifdef __linux__
-    std::ifstream meminfo("/proc/meminfo");
-    if (!meminfo.is_open()) {
-        LOG_WARN("[MCL] Failed to open /proc/meminfo");
-        return 0;
-    }
+        std::ifstream meminfo("/proc/meminfo");
+        if (!meminfo.is_open()) {
+            LOG_WARN("[MCL] Failed to open /proc/meminfo");
+            return 0;
+        }
 
-    std::string line;
-    while (std::getline(meminfo, line)) {
-        if (line.find("MemTotal:") == 0) {
-            std::istringstream iss(line);
-            std::string key;
-            int64_t value;
-            std::string unit;
+        std::string line;
+        while (std::getline(meminfo, line)) {
+            if (line.find("MemTotal:") == 0) {
+                std::istringstream iss(line);
+                std::string key;
+                int64_t value;
+                std::string unit;
 
-            if (iss >> key >> value >> unit) {
-                // Convert kB to bytes
-                if (unit == "kB") {
-                    value *= 1024;
+                if (iss >> key >> value >> unit) {
+                    // Convert kB to bytes
+                    if (unit == "kB") {
+                        value *= 1024;
+                    }
+                    return value;
                 }
-                return value;
             }
         }
-    }
+        return 0;
 #else
-    LOG_WARN("[MCL] Host memory detection not implemented for this platform");
+        LOG_WARN(
+            "[MCL] Host memory detection not implemented for this platform");
+        return 0;
 #endif
-    return 0;
+    }();
+    return cached_total_memory;
 }
 
 // Impl based on pkg/util/hardware/container_linux.go::getContainerMemLimit()

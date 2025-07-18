@@ -199,6 +199,8 @@ class CacheSlotTest : public ::testing::Test {
     std::unique_ptr<DList> dlist_;
     MockTranslator* translator_ = nullptr;
     std::shared_ptr<CacheSlot<TestCell>> cache_slot_;
+    std::unique_ptr<folly::EventBase> event_base_;
+    std::unique_ptr<std::thread> event_base_thread_;
 
     std::vector<std::pair<cid_t, int64_t>> cell_sizes_ = {
         {0, 50}, {1, 150}, {2, 100}, {3, 200}, {4, 75}};
@@ -218,6 +220,8 @@ class CacheSlotTest : public ::testing::Test {
     static constexpr int64_t DISK_LIMIT = 0;
     const std::string SLOT_KEY = "test_slot";
 
+    CacheSlotTest() = default;
+
     void
     SetUp() override {
         auto limit = ResourceUsage{MEMORY_LIMIT, DISK_LIMIT};
@@ -227,14 +231,26 @@ class CacheSlotTest : public ::testing::Test {
         auto temp_translator_uptr = std::make_unique<MockTranslator>(
             cell_sizes_, uid_to_cid_map_, SLOT_KEY, StorageType::MEMORY);
         translator_ = temp_translator_uptr.get();
+        event_base_ = std::make_unique<folly::EventBase>();
+        event_base_thread_ = std::make_unique<std::thread>([this] {
+            LOG_INFO("[MCL] Starting cache EventBase thread");
+            folly::setThreadName("cache-eb");
+            event_base_->loopForever();
+        });
         cache_slot_ = std::make_shared<CacheSlot<TestCell>>(
-            std::move(temp_translator_uptr), dlist_.get());
+            std::move(temp_translator_uptr), dlist_.get(), event_base_.get());
     }
 
     void
     TearDown() override {
         cache_slot_.reset();
         dlist_.reset();
+        if (event_base_) {
+            event_base_->terminateLoopSoon();
+        }
+        if (event_base_thread_ && event_base_thread_->joinable()) {
+            event_base_thread_->join();
+        }
     }
 };
 
@@ -345,7 +361,7 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
         {
             try {
                 SemiInlineGet(std::move(future));
-            } catch (const std::invalid_argument& e) {
+            } catch (const milvus::SegcoreError& e) {
                 std::string error_what = e.what();
                 EXPECT_TRUE(error_what.find("out of range") !=
                                 std::string::npos ||
@@ -353,7 +369,7 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
                 throw;
             }
         },
-        std::invalid_argument);
+        milvus::SegcoreError);
 
     EXPECT_EQ(translator_->GetCellsCallCount(), 0);
 }
@@ -599,7 +615,7 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
                                          /*for_concurrent_test*/ true);
     MockTranslator* translator_1 = translator_1_ptr.get();
     auto slot1 = std::make_shared<CacheSlot<TestCell>>(
-        std::move(translator_1_ptr), dlist_.get());
+        std::move(translator_1_ptr), dlist_.get(), event_base_.get());
 
     std::vector<std::pair<cid_t, int64_t>> cell_sizes_2 = {
         {0, 55}, {1, 65}, {2, 75}, {3, 85}, {4, 95}};
@@ -613,7 +629,7 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
                                          /*for_concurrent_test*/ true);
     MockTranslator* translator_2 = translator_2_ptr.get();
     auto slot2 = std::make_shared<CacheSlot<TestCell>>(
-        std::move(translator_2_ptr), dlist_.get());
+        std::move(translator_2_ptr), dlist_.get(), event_base_.get());
 
     bool with_bonus_cells = GetParam();
     if (with_bonus_cells) {
@@ -749,7 +765,7 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
                                              StorageType::MEMORY,
                                              /*for_concurrent_test*/ true);
         auto sl = std::make_shared<CacheSlot<TestCell>>(
-            std::move(translator_3_ptr), dlist_ptr);
+            std::move(translator_3_ptr), dlist_ptr, event_base_.get());
         return sl;
     };
     std::shared_ptr<CacheSlot<TestCell>> slot3 = create_new_slot3();
