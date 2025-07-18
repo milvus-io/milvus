@@ -21,6 +21,7 @@
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "storage/ThreadPools.h"
 #include "segcore/memory_planner.h"
 
@@ -42,8 +43,6 @@ GroupChunkTranslator::GroupChunkTranslator(
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
     bool use_mmap,
-    const std::vector<milvus_storage::RowGroupMetadataVector>&
-        row_group_meta_list,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
@@ -52,7 +51,6 @@ GroupChunkTranslator::GroupChunkTranslator(
       column_group_info_(column_group_info),
       insert_files_(insert_files),
       use_mmap_(use_mmap),
-      row_group_meta_list_(row_group_meta_list),
       load_priority_(load_priority),
       meta_(
           num_fields,
@@ -64,8 +62,22 @@ GroupChunkTranslator::GroupChunkTranslator(
           milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
                                                 /* is_index */ false),
           /* support_eviction */ true) {
-    AssertInfo(insert_files_.size() == row_group_meta_list_.size(),
-               "Number of insert files must match number of row group metas");
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+    
+    // Get row group metadata from files
+    for (const auto& file : insert_files_) {
+        auto reader =
+            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+        row_group_meta_list_.push_back(
+            reader->file_metadata()->GetRowGroupMetadataVector());
+        auto status = reader->Close();
+        AssertInfo(status.ok(),
+                   "failed to close file reader when get row group "
+                   "metadata from file: " +
+                       file + " with error: " + status.ToString());
+    }
+
     meta_.num_rows_until_chunk_.push_back(0);
     for (const auto& row_group_meta : row_group_meta_list_) {
         for (int i = 0; i < row_group_meta.size(); ++i) {
@@ -126,7 +138,17 @@ GroupChunkTranslator::get_file_and_row_group_index(
         remaining_cid -= file_metas.size();
     }
 
-    return {0, 0};  // Default to first file and first row group if not found
+    // cid is out of range, this should not happen
+    AssertInfo(false, 
+               fmt::format("cid {} is out of range. Total row groups across all files: {}", 
+                          cid, 
+                          [this]() {
+                              size_t total = 0;
+                              for (const auto& file_metas : row_group_meta_list_) {
+                                  total += file_metas.size();
+                              }
+                              return total;
+                          }()));
 }
 
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
@@ -137,11 +159,7 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     cells.reserve(cids.size());
 
     // Create row group lists for requested cids
-    std::vector<std::vector<int64_t>> row_group_lists;
-    row_group_lists.reserve(insert_files_.size());
-    for (size_t i = 0; i < insert_files_.size(); ++i) {
-        row_group_lists.emplace_back();
-    }
+    std::vector<std::vector<int64_t>> row_group_lists(insert_files_.size());
 
     for (auto cid : cids) {
         auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
