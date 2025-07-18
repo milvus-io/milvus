@@ -28,9 +28,7 @@
 namespace milvus::cachinglayer::internal {
 
 ListNode::NodePin::NodePin(ListNode* node) : node_(node) {
-    if (node_) {
-        node_->pin_count_++;
-    }
+    // The pin_count_ is incremented in ListNode::pin() before this constructor is called.
 }
 
 ListNode::NodePin::~NodePin() {
@@ -69,8 +67,9 @@ bool
 ListNode::manual_evict() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
     if (state_ == State::LOADING) {
-        LOG_ERROR("[MCL] manual_evict() called on a {} cell",
-                  state_to_string(state_));
+        LOG_ERROR("[MCL] manual_evict() called on a {} cell {}",
+                  state_to_string(state_),
+                  key());
         return false;
     }
     if (state_ == State::NOT_LOADED) {
@@ -78,8 +77,9 @@ ListNode::manual_evict() {
     }
     if (pin_count_.load() > 0) {
         LOG_ERROR(
-            "[MCL] manual_evict() called on a LOADED and pinned cell, aborting "
-            "eviction.");
+            "[MCL] manual_evict() called on a LOADED and pinned cell {}, "
+            "aborting eviction.",
+            key());
         return false;
     }
     // cell is LOADED
@@ -103,6 +103,10 @@ ListNode::pin() {
                    "Programming error: read_op called on a {} cell",
                    state_to_string(state_));
         // pin the cell now so that we can avoid taking the lock again in deferValue.
+        if (pin_count_.fetch_add(1) == 0 && state_ == State::LOADED && dlist_) {
+            // node became inevictable, decrease evictable size
+            dlist_->decreaseEvictableSize(size_);
+        }
         auto p = NodePin(this);
         if (state_ == State::LOADED) {
             internal::cache_op_result_count_hit(size_.storage_type())
@@ -132,6 +136,7 @@ ListNode::pin() {
     state_ = State::LOADING;
 
     // pin the cell now so that we can avoid taking the lock again in deferValue.
+    pin_count_.fetch_add(1);
     auto p = NodePin(this);
     return std::make_pair(
         true,
@@ -141,20 +146,27 @@ ListNode::pin() {
 
 void
 ListNode::set_error(folly::exception_wrapper error) {
-    std::unique_lock<std::shared_mutex> lock(mtx_);
-    AssertInfo(state_ != State::NOT_LOADED,
-               "Programming error: set_error() called on a {} cell",
-               state_to_string(state_));
-    // may be successfully loaded by another thread as a bonus, they will update used memory.
-    if (state_ == State::LOADED) {
-        return;
+    std::unique_ptr<folly::SharedPromise<folly::Unit>> promise = nullptr;
+    {
+        std::unique_lock<std::shared_mutex> lock(mtx_);
+        AssertInfo(state_ != State::NOT_LOADED,
+                   "Programming error: set_error() called on a {} cell",
+                   state_to_string(state_));
+        // may be successfully loaded by another thread as a bonus, they will update used memory.
+        if (state_ == State::LOADED) {
+            return;
+        }
+        // else: state_ is LOADING, reset to NOT_LOADED
+        state_ = State::NOT_LOADED;
+        if (load_promise_) {
+            promise = std::move(load_promise_);
+        }
     }
-    // else: state_ is LOADING, reset to NOT_LOADED
-    state_ = State::NOT_LOADED;
     // Notify waiting threads about the error
-    if (load_promise_) {
-        load_promise_->setException(error);
-        load_promise_ = nullptr;
+    // setException may call continuation of bound futures inline, and those continuation may also need to acquire the
+    // lock, which may cause deadlock. So we release the lock before calling setException.
+    if (promise) {
+        promise->setException(error);
     }
 }
 
@@ -176,6 +188,10 @@ ListNode::unpin() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
     if (pin_count_.fetch_sub(1) == 1) {
         touch(false);
+        // Notify DList that this node became evictable
+        if (dlist_ && state_ == State::LOADED) {
+            dlist_->increaseEvictableSize(size_);
+        }
     }
 }
 
