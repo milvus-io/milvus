@@ -111,7 +111,7 @@ func WithPartitionIDs(partitionIDs []int64) SegmentFilter {
 
 func WithStartPosNotRecorded() SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return !info.startPosRecorded
+		return !info.startPosRecorded && info.startPosition != nil
 	})
 }
 
