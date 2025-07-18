@@ -118,6 +118,9 @@ func (t *L0PreImportTask) Clone() Task {
 		partitionIDs:  t.GetPartitionIDs(),
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
+		req:           t.req,
+		manager:       t.manager,
+		cm:            t.cm,
 	}
 }
 

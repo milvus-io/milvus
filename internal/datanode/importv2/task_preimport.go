@@ -125,6 +125,9 @@ func (t *PreImportTask) Clone() Task {
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
 		options:       t.options,
+		req:           t.req,
+		manager:       t.manager,
+		cm:            t.cm,
 	}
 }
 

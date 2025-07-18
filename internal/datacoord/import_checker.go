@@ -228,7 +228,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 			log.Warn("add preimport task failed", WrapTaskLog(t, zap.Error(err))...)
 			return
 		}
-		log.Info("add new preimport task", WrapTaskLog(t)...)
+		log.Info("add new preimport task", WrapTaskLog(t, zap.Any("fileStats", t.GetFileStats()))...)
 	}
 
 	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
@@ -300,7 +300,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 			updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
 			return
 		}
-		log.Info("add new import task", WrapTaskLog(t)...)
+		log.Info("add new import task", WrapTaskLog(t, zap.Any("fileStats", t.GetFileStats()))...)
 	}
 
 	updateJobState(internalpb.ImportJobState_Importing, UpdateRequestedDiskSize(requestSize))

@@ -130,6 +130,10 @@ func (t *ImportTask) Clone() Task {
 		cancel:       cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		allocator:    t.allocator,
+		manager:      t.manager,
+		syncMgr:      t.syncMgr,
+		cm:           t.cm,
 		metaCaches:   t.metaCaches,
 	}
 }

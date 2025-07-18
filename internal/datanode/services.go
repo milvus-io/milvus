@@ -372,8 +372,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 }
 
 func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
-		zap.Int64("jobID", req.GetJobID()))
+	log := log.Ctx(ctx).WithRateGroup("datanode.QueryPreImport", 1, 60)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QueryPreImportResponse{Status: merr.Status(err)}, nil
@@ -384,22 +383,34 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 			Status: merr.Status(importv2.WrapTaskNotFoundError(req.GetTaskID())),
 		}, nil
 	}
-	log.RatedInfo(10, "datanode query preimport", zap.String("state", task.GetState().String()),
-		zap.String("reason", task.GetReason()))
+	fileStats := task.(interface {
+		GetFileStats() []*datapb.ImportFileStats
+	}).GetFileStats()
+	logFields := []zap.Field{
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("jobID", task.GetJobID()),
+		zap.String("state", task.GetState().String()),
+		zap.String("reason", task.GetReason()),
+		zap.Int64("nodeID", node.GetNodeID()),
+		zap.Any("fileStats", fileStats),
+	}
+	if task.GetState() == datapb.ImportTaskStateV2_InProgress {
+		log.RatedInfo(30, "datanode query preimport", logFields...)
+	} else {
+		log.Info("datanode query preimport", logFields...)
+	}
+
 	return &datapb.QueryPreImportResponse{
-		Status: merr.Success(),
-		TaskID: task.GetTaskID(),
-		State:  task.GetState(),
-		Reason: task.GetReason(),
-		FileStats: task.(interface {
-			GetFileStats() []*datapb.ImportFileStats
-		}).GetFileStats(),
+		Status:    merr.Success(),
+		TaskID:    task.GetTaskID(),
+		State:     task.GetState(),
+		Reason:    task.GetReason(),
+		FileStats: fileStats,
 	}, nil
 }
 
 func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
-	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
-		zap.Int64("jobID", req.GetJobID()))
+	log := log.Ctx(ctx).WithRateGroup("datanode.QueryImport", 1, 60)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &datapb.QueryImportResponse{Status: merr.Status(err)}, nil
@@ -420,22 +431,35 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 			Status: merr.Status(importv2.WrapTaskNotFoundError(req.GetTaskID())),
 		}, nil
 	}
-	log.RatedInfo(10, "datanode query import", zap.String("state", task.GetState().String()),
-		zap.String("reason", task.GetReason()))
+	segmentsInfo := task.(interface {
+		GetSegmentsInfo() []*datapb.ImportSegmentInfo
+	}).GetSegmentsInfo()
+	logFields := []zap.Field{
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("jobID", task.GetJobID()),
+		zap.String("state", task.GetState().String()),
+		zap.String("reason", task.GetReason()),
+		zap.Int64("nodeID", node.GetNodeID()),
+		zap.Any("segmentsInfo", segmentsInfo),
+	}
+	if task.GetState() == datapb.ImportTaskStateV2_InProgress {
+		log.RatedInfo(30, "datanode query import", logFields...)
+	} else {
+		log.Info("datanode query import", logFields...)
+	}
 	return &datapb.QueryImportResponse{
-		Status: merr.Success(),
-		TaskID: task.GetTaskID(),
-		State:  task.GetState(),
-		Reason: task.GetReason(),
-		ImportSegmentsInfo: task.(interface {
-			GetSegmentsInfo() []*datapb.ImportSegmentInfo
-		}).GetSegmentsInfo(),
+		Status:             merr.Success(),
+		TaskID:             task.GetTaskID(),
+		State:              task.GetState(),
+		Reason:             task.GetReason(),
+		ImportSegmentsInfo: segmentsInfo,
 	}, nil
 }
 
 func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("taskID", req.GetTaskID()),
-		zap.Int64("jobID", req.GetJobID()))
+		zap.Int64("jobID", req.GetJobID()),
+		zap.Int64("nodeID", node.GetNodeID()))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
