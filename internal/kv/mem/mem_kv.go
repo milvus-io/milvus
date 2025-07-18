@@ -229,12 +229,14 @@ func (kv *MemoryKV) MultiSaveAndRemove(ctx context.Context, saves map[string]str
 	}
 	kv.Lock()
 	defer kv.Unlock()
-	for key, value := range saves {
-		kv.tree.ReplaceOrInsert(memoryKVItem{key, StringValue(value)})
-	}
 	for _, key := range removals {
 		kv.tree.Delete(memoryKVItem{key: key})
 	}
+
+	for key, value := range saves {
+		kv.tree.ReplaceOrInsert(memoryKVItem{key, StringValue(value)})
+	}
+
 	return nil
 }
 
