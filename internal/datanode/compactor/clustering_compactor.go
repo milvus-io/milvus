@@ -864,14 +864,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
-	fieldBinlogPaths := make([][]string, 0)
-	for idx := 0; idx < binlogNum; idx++ {
-		var ps []string
-		for _, f := range segment.GetFieldBinlogs() {
-			ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
-		}
-		fieldBinlogPaths = append(fieldBinlogPaths, ps)
-	}
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
 	schema := &schemapb.CollectionSchema{
@@ -887,14 +879,19 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		}
 	}
 
-	for _, fieldBinlog := range segment.GetFieldBinlogs() {
-		// for storageV2, only contains fieldID 0, and it's enough.
-		// all scalar fields are stored in the file with fieldID 0.
-		if requiredFields.Contain(fieldBinlog.GetFieldID()) {
-			binlogs = append(binlogs, fieldBinlog)
+	switch segment.GetStorageVersion() {
+	case storage.StorageV1:
+		for _, fieldBinlog := range segment.GetFieldBinlogs() {
+			if requiredFields.Contain(fieldBinlog.GetFieldID()) {
+				binlogs = append(binlogs, fieldBinlog)
+			}
 		}
+	case storage.StorageV2:
+		binlogs = segment.GetFieldBinlogs()
+	default:
+		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))
+		return nil, fmt.Errorf("unsupported storage version %d", segment.GetStorageVersion())
 	}
-
 	rr, err := storage.NewBinlogRecordReader(ctx,
 		binlogs,
 		schema,
