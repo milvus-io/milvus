@@ -144,15 +144,11 @@ func AssignSegments(job ImportJob, task ImportTask, alloc allocator.Allocator, m
 		}
 	}
 
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	if isL0Import {
-		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
-	}
 	segmentLevel := datapb.SegmentLevel_L1
-	if isL0Import {
+	segmentMaxSize := getExpectedSegmentSize(meta, job.GetCollectionID(), job.GetSchema())
+	if importutilv2.IsL0Import(job.GetOptions()) {
 		segmentLevel = datapb.SegmentLevel_L0
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
 	}
 
 	// alloc new segments
@@ -333,22 +329,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	}, nil
 }
 
-func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, allDiskIndex bool) [][]*datapb.ImportFileStats {
+func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
 	if len(files) == 0 {
 		return nil
-	}
-
-	var segmentMaxSize int
-	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		segmentMaxSize = Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt() * 1024 * 1024
-	} else {
-		// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-		segmentMaxSize = Params.DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
-	}
-	isL0Import := importutilv2.IsL0Import(job.GetOptions())
-	if isL0Import {
-		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
 	}
 
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
