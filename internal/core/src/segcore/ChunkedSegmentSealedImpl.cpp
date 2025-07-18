@@ -388,13 +388,18 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                      this->get_segment_id(),
                      field_id.get());
         } else {
-            std::vector<std::pair<std::string, int64_t>>
-                insert_files_with_entries_nums;
+            std::vector<storagev1translator::ChunkTranslator::FileInfo>
+                file_infos;
+            file_infos.reserve(info.insert_files.size());
             for (int i = 0; i < info.insert_files.size(); i++) {
-                insert_files_with_entries_nums.emplace_back(
-                    info.insert_files[i], info.entries_nums[i]);
+                file_infos.emplace_back(
+                    storagev1translator::ChunkTranslator::FileInfo{
+                        info.insert_files[i],
+                        info.entries_nums[i],
+                        info.memory_sizes[i]});
             }
-            storage::SortByPath(insert_files_with_entries_nums);
+
+            storage::SortByPath(file_infos);
 
             auto field_meta = schema_->operator[](field_id);
             std::unique_ptr<Translator<milvus::Chunk>> translator =
@@ -402,7 +407,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     this->get_segment_id(),
                     field_meta,
                     field_data_info,
-                    std::move(insert_files_with_entries_nums),
+                    std::move(file_infos),
                     info.enable_mmap,
                     load_info.load_priority);
 
