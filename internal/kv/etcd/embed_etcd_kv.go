@@ -466,12 +466,13 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]
 	}
 
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
-	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
-	}
 
 	for _, keyDelete := range removals {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+	}
+
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
@@ -491,12 +492,13 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]
 // MultiSaveBytesAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *EmbedEtcdKV) MultiSaveBytesAndRemove(ctx context.Context, saves map[string][]byte, removals []string) error {
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
-	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
-	}
 
 	for _, keyDelete := range removals {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+	}
+
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
@@ -532,12 +534,12 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves m
 	}
 
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
-	for key, value := range saves {
-		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
-	}
-
 	for _, keyDelete := range removals {
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
+	}
+
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
