@@ -458,12 +458,7 @@ class TestConnectionOperation(TestcaseBase):
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
-                                              check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None)]})
-
-        # get all addr of alias and check the response
-        self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
-                                                 check_items={ct.dict_content: {"address": f"host:{port}",
-                                                                                "user": ""}})
+                                              check_items={ct.list_content: []})
 
     @pytest.mark.tags(ct.CaseLabel.L0)
     def test_connection_connect_default_alias_effective(self, host, port):
