@@ -133,26 +133,6 @@ func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 	}, nil
 }
 
-// GetAllAvailableChannels returns all available channel info.
-func (m *managerImpl) GetAllAvailableChannels() ([]types.PChannelInfo, error) {
-	// reject operation if manager is closing.
-	if !m.lifetime.AddIf(isGetable) {
-		return nil, errWALManagerClosed
-	}
-	defer m.lifetime.Done()
-
-	// collect all available wal info.
-	infos := make([]types.PChannelInfo, 0)
-	m.wltMap.Range(func(channel string, lt *walLifetime) bool {
-		if l := lt.GetWAL(); l != nil {
-			info := l.Channel()
-			infos = append(infos, info)
-		}
-		return true
-	})
-	return infos, nil
-}
-
 // Close these manager and release all managed WAL.
 func (m *managerImpl) Close() {
 	m.lifetime.SetState(managerRemoveable)
