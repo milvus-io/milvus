@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -126,33 +127,35 @@ func TestShardManager(t *testing.T) {
 	err = m.CheckIfCollectionExists(1)
 	assert.NoError(t, err)
 
-	err = m.CheckIfPartitionCanBeCreated(1, 2)
+	err = m.CheckIfPartitionCanBeCreated(PartitionUniqueKey{CollectionID: 1, PartitionID: common.AllPartitionsID})
 	assert.ErrorIs(t, err, ErrPartitionExists)
-	err = m.CheckIfPartitionCanBeCreated(3, 9)
+	err = m.CheckIfPartitionCanBeCreated(PartitionUniqueKey{CollectionID: 1, PartitionID: 2})
+	assert.ErrorIs(t, err, ErrPartitionExists)
+	err = m.CheckIfPartitionCanBeCreated(PartitionUniqueKey{CollectionID: 3, PartitionID: 9})
 	assert.ErrorIs(t, err, ErrCollectionNotFound)
-	err = m.CheckIfPartitionCanBeCreated(1, 7)
+	err = m.CheckIfPartitionCanBeCreated(PartitionUniqueKey{CollectionID: 1, PartitionID: 7})
 	assert.NoError(t, err)
-	err = m.CheckIfPartitionExists(1, 7)
+	err = m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 7})
 	assert.ErrorIs(t, err, ErrPartitionNotFound)
-	err = m.CheckIfPartitionExists(1, 2)
+	err = m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 2})
 	assert.NoError(t, err)
 
-	err = m.CheckIfSegmentCanBeCreated(1, 2, 1001)
+	err = m.CheckIfSegmentCanBeCreated(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}, 1001)
 	assert.ErrorIs(t, err, ErrSegmentExists)
-	err = m.CheckIfSegmentCanBeCreated(3, 2, 1001)
+	err = m.CheckIfSegmentCanBeCreated(PartitionUniqueKey{CollectionID: 3, PartitionID: 2}, 1001)
 	assert.ErrorIs(t, err, ErrCollectionNotFound)
-	err = m.CheckIfSegmentCanBeCreated(1, 4, 1001)
+	err = m.CheckIfSegmentCanBeCreated(PartitionUniqueKey{CollectionID: 1, PartitionID: 4}, 1001)
 	assert.ErrorIs(t, err, ErrPartitionNotFound)
-	err = m.CheckIfSegmentCanBeCreated(1, 2, 1003)
+	err = m.CheckIfSegmentCanBeCreated(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}, 1003)
 	assert.NoError(t, err)
 
-	err = m.CheckIfSegmentCanBeFlushed(1, 2, 1001)
+	err = m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}, 1001)
 	assert.ErrorIs(t, err, ErrSegmentOnGrowing)
-	err = m.CheckIfSegmentCanBeFlushed(1, 2, 1003)
+	err = m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}, 1003)
 	assert.ErrorIs(t, err, ErrSegmentNotFound)
-	err = m.CheckIfSegmentCanBeFlushed(3, 8, 1001)
+	err = m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 3, PartitionID: 8}, 1001)
 	assert.ErrorIs(t, err, ErrCollectionNotFound)
-	err = m.CheckIfSegmentCanBeFlushed(1, 7, 1001)
+	err = m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 1, PartitionID: 7}, 1001)
 	assert.ErrorIs(t, err, ErrPartitionNotFound)
 
 	// Test Create and Drop
@@ -169,8 +172,9 @@ func TestShardManager(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	m.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(createCollectionMsg))
 	assert.NoError(t, m.CheckIfCollectionExists(7))
-	assert.NoError(t, m.CheckIfPartitionExists(7, 8))
-	assert.NoError(t, m.CheckIfPartitionExists(7, 9))
+	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 8}))
+	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 9}))
+	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: common.AllPartitionsID}))
 
 	createPartitionMsg := message.NewCreatePartitionMessageBuilderV1().
 		WithVChannel("v3").
@@ -184,7 +188,7 @@ func TestShardManager(t *testing.T) {
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(2))
 	m.CreatePartition(message.MustAsImmutableCreatePartitionMessageV1(createPartitionMsg))
-	assert.NoError(t, m.CheckIfPartitionExists(7, 10))
+	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 7, PartitionID: 10}))
 
 	createSegmentMsg := message.NewCreateSegmentMessageBuilderV2().
 		WithVChannel("v3").
@@ -200,8 +204,8 @@ func TestShardManager(t *testing.T) {
 		WithTimeTick(600).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(3))
-	m.partitionManagers[10].onAllocating = make(chan struct{})
-	ch, err := m.WaitUntilGrowingSegmentReady(7, 10)
+	m.partitionManagers[PartitionUniqueKey{CollectionID: 7, PartitionID: 10}].onAllocating = make(chan struct{})
+	ch, err := m.WaitUntilGrowingSegmentReady(PartitionUniqueKey{CollectionID: 7, PartitionID: 10})
 	assert.NoError(t, err)
 	select {
 	case <-time.After(10 * time.Millisecond):
@@ -209,9 +213,9 @@ func TestShardManager(t *testing.T) {
 		t.Error("segment should not be ready")
 	}
 	m.CreateSegment(message.MustAsImmutableCreateSegmentMessageV2(createSegmentMsg))
-	assert.ErrorIs(t, m.CheckIfSegmentCanBeFlushed(7, 10, 1003), ErrSegmentOnGrowing)
+	assert.ErrorIs(t, m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 7, PartitionID: 10}, 1003), ErrSegmentOnGrowing)
 	<-ch
-	ch, err = m.WaitUntilGrowingSegmentReady(7, 10)
+	ch, err = m.WaitUntilGrowingSegmentReady(PartitionUniqueKey{CollectionID: 7, PartitionID: 10})
 	assert.NoError(t, err)
 	<-ch
 
@@ -229,13 +233,14 @@ func TestShardManager(t *testing.T) {
 		IntoImmutableMessage(rmq.NewRmqID(4))
 	m.AsyncFlushSegment(utils.SealSegmentSignal{
 		SegmentBelongs: utils.SegmentBelongs{
-			PartitionID: 10,
-			SegmentID:   1003,
+			CollectionID: 7,
+			PartitionID:  10,
+			SegmentID:    1003,
 		},
 		SealPolicy: policy.PolicyCapacity(),
 	})
 	m.FlushSegment(message.MustAsImmutableFlushMessageV2(flushSegmentMsg))
-	assert.ErrorIs(t, m.CheckIfSegmentCanBeFlushed(7, 10, 1003), ErrSegmentNotFound)
+	assert.ErrorIs(t, m.CheckIfSegmentCanBeFlushed(PartitionUniqueKey{CollectionID: 7, PartitionID: 10}, 1003), ErrSegmentNotFound)
 
 	dropPartitionMsg := message.NewDropPartitionMessageBuilderV1().
 		WithVChannel("v1").
@@ -249,7 +254,7 @@ func TestShardManager(t *testing.T) {
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(7))
 	m.DropPartition(message.MustAsImmutableDropPartitionMessageV1(dropPartitionMsg))
-	assert.ErrorIs(t, m.CheckIfPartitionExists(1, 2), ErrPartitionNotFound)
+	assert.ErrorIs(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}), ErrPartitionNotFound)
 
 	dropCollectionMsg := message.NewDropCollectionMessageBuilderV1().
 		WithVChannel("v1").

@@ -85,14 +85,14 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&msgpb.CreatePartitionRequest{}).
 		MustBuildMutable()
-	shardManager.EXPECT().CheckIfPartitionCanBeCreated(mock.Anything, mock.Anything).Return(nil)
+	shardManager.EXPECT().CheckIfPartitionCanBeCreated(mock.Anything).Return(nil)
 	shardManager.EXPECT().CreatePartition(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfPartitionCanBeCreated(mock.Anything, mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfPartitionCanBeCreated(mock.Anything, mock.Anything).Return(mockErr)
+	shardManager.EXPECT().CheckIfPartitionCanBeCreated(mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfPartitionCanBeCreated(mock.Anything).Return(mockErr)
 	shardManager.EXPECT().CreatePartition(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
@@ -106,14 +106,14 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&msgpb.DropPartitionRequest{}).
 		MustBuildMutable()
-	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything, mock.Anything).Return(nil)
+	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything).Return(nil)
 	shardManager.EXPECT().DropPartition(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything, mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything, mock.Anything).Return(mockErr)
+	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfPartitionExists(mock.Anything).Return(mockErr)
 	shardManager.EXPECT().DropPartition(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
@@ -128,14 +128,14 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&messagespb.CreateSegmentMessageBody{}).
 		MustBuildMutable()
-	shardManager.EXPECT().CheckIfSegmentCanBeCreated(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	shardManager.EXPECT().CheckIfSegmentCanBeCreated(mock.Anything, mock.Anything).Return(nil)
 	shardManager.EXPECT().CreateSegment(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfSegmentCanBeCreated(mock.Anything, mock.Anything, mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfSegmentCanBeCreated(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+	shardManager.EXPECT().CheckIfSegmentCanBeCreated(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfSegmentCanBeCreated(mock.Anything, mock.Anything).Return(mockErr)
 	shardManager.EXPECT().CreateSegment(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)
@@ -150,14 +150,14 @@ func TestShardInterceptor(t *testing.T) {
 		}).
 		WithBody(&messagespb.FlushMessageBody{}).
 		MustBuildMutable()
-	shardManager.EXPECT().CheckIfSegmentCanBeFlushed(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	shardManager.EXPECT().CheckIfSegmentCanBeFlushed(mock.Anything, mock.Anything).Return(nil)
 	shardManager.EXPECT().FlushSegment(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
 
-	shardManager.EXPECT().CheckIfSegmentCanBeFlushed(mock.Anything, mock.Anything, mock.Anything).Unset()
-	shardManager.EXPECT().CheckIfSegmentCanBeFlushed(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+	shardManager.EXPECT().CheckIfSegmentCanBeFlushed(mock.Anything, mock.Anything).Unset()
+	shardManager.EXPECT().CheckIfSegmentCanBeFlushed(mock.Anything, mock.Anything).Return(mockErr)
 	shardManager.EXPECT().FlushSegment(mock.Anything).Return()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.Error(t, err)

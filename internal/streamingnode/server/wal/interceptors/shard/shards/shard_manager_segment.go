@@ -33,43 +33,43 @@ func (r *AssignSegmentResult) Ack() {
 }
 
 // CheckIfSegmentCanBeCreated checks if a segment can be created for the specified collection and partition.
-func (m *shardManagerImpl) CheckIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) CheckIfSegmentCanBeCreated(uniquePartitionKey PartitionUniqueKey, segmentID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.checkIfSegmentCanBeCreated(collectionID, partitionID, segmentID)
+	return m.checkIfSegmentCanBeCreated(uniquePartitionKey, segmentID)
 }
 
 // checkIfSegmentCanBeCreated checks if a segment can be created for the specified collection and partition.
-func (m *shardManagerImpl) checkIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) checkIfSegmentCanBeCreated(uniquePartitionKey PartitionUniqueKey, segmentID int64) error {
 	// segment can be created only if the collection and partition exists.
-	if err := m.checkIfPartitionExists(collectionID, partitionID); err != nil {
+	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return err
 	}
 
-	if m := m.partitionManagers[partitionID].GetSegmentManager(segmentID); m != nil {
+	if m := m.partitionManagers[uniquePartitionKey].GetSegmentManager(segmentID); m != nil {
 		return ErrSegmentExists
 	}
 	return nil
 }
 
 // CheckIfSegmentCanBeDropped checks if a segment can be flushed.
-func (m *shardManagerImpl) CheckIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
+func (m *shardManagerImpl) CheckIfSegmentCanBeFlushed(uniquePartitionKey PartitionUniqueKey, segmentID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.checkIfSegmentCanBeFlushed(collecionID, partitionID, segmentID)
+	return m.checkIfSegmentCanBeFlushed(uniquePartitionKey, segmentID)
 }
 
 // checkIfSegmentCanBeFlushed checks if a segment can be flushed.
-func (m *shardManagerImpl) checkIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
-	if err := m.checkIfPartitionExists(collecionID, partitionID); err != nil {
+func (m *shardManagerImpl) checkIfSegmentCanBeFlushed(uniquePartitionKey PartitionUniqueKey, segmentID int64) error {
+	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return err
 	}
 
 	// segment can be flushed only if the segment exists, and its state is flushed.
 	// pm must exists, because we have checked the partition exists.
-	pm := m.partitionManagers[partitionID]
+	pm := m.partitionManagers[uniquePartitionKey]
 	sm := pm.GetSegmentManager(segmentID)
 	if sm == nil {
 		return ErrSegmentNotFound
@@ -86,13 +86,14 @@ func (m *shardManagerImpl) CreateSegment(msg message.ImmutableCreateSegmentMessa
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.checkIfSegmentCanBeCreated(msg.Header().CollectionId, msg.Header().PartitionId, msg.Header().SegmentId); err != nil {
+	uniquePartitionKey := PartitionUniqueKey{CollectionID: msg.Header().CollectionId, PartitionID: msg.Header().PartitionId}
+	if err := m.checkIfSegmentCanBeCreated(uniquePartitionKey, msg.Header().SegmentId); err != nil {
 		logger.Warn("segment already exists")
 		return
 	}
 
 	s := newSegmentAllocManager(m.pchannel, msg)
-	pm, ok := m.partitionManagers[s.GetPartitionID()]
+	pm, ok := m.partitionManagers[uniquePartitionKey]
 	if !ok {
 		panic("critical error: partition manager not found when a segment is created")
 	}
@@ -108,12 +109,17 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.checkIfSegmentCanBeFlushed(collectionID, partitionID, segmentID); err != nil {
+	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+	if err := m.checkIfSegmentCanBeFlushed(uniquePartitionKey, segmentID); err != nil {
 		logger.Warn("segment can not be flushed", zap.Error(err))
 		return
 	}
 
-	pm := m.partitionManagers[partitionID]
+	pm, ok := m.partitionManagers[uniquePartitionKey]
+	if !ok {
+		logger.Warn("partition not found when FlushSegment")
+		return
+	}
 	pm.MustRemoveFlushedSegment(segmentID)
 }
 
@@ -122,7 +128,8 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	pm, ok := m.partitionManagers[req.PartitionID]
+	uniqueKey := PartitionUniqueKey{CollectionID: req.CollectionID, PartitionID: req.PartitionID}
+	pm, ok := m.partitionManagers[uniqueKey]
 	if !ok {
 		return nil, ErrPartitionNotFound
 	}
@@ -144,14 +151,14 @@ func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error
 }
 
 // WaitUntilGrowingSegmentReady waits until the growing segment is ready.
-func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(collectionID int64, partitonID int64) (<-chan struct{}, error) {
+func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.checkIfPartitionExists(collectionID, partitonID); err != nil {
+	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return nil, err
 	}
-	return m.partitionManagers[partitonID].WaitPendingGrowingSegmentReady(), nil
+	return m.partitionManagers[uniquePartitionKey].WaitPendingGrowingSegmentReady(), nil
 }
 
 // FlushAndFenceSegmentAllocUntil flush all segment that contains the message which timetick is less than the incoming timetick.
@@ -173,7 +180,8 @@ func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, ti
 	// collect all partitions
 	for partitionID := range collectionInfo.PartitionIDs {
 		// Seal all segments and fence assign to the partition manager.
-		pm, ok := m.partitionManagers[partitionID]
+		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+		pm, ok := m.partitionManagers[uniqueKey]
 		if !ok {
 			logger.Warn("partition not found when FlushAndFenceSegmentAllocUntil", zap.Int64("partitionID", partitionID))
 			continue
@@ -195,7 +203,7 @@ func (m *shardManagerImpl) AsyncFlushSegment(signal utils.SealSegmentSignal) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	pm, ok := m.partitionManagers[signal.SegmentBelongs.PartitionID]
+	pm, ok := m.partitionManagers[signal.SegmentBelongs.PartitionUniqueKey()]
 	if !ok {
 		logger.Warn("partition not found when AsyncMustSeal, may be already dropped")
 		return
