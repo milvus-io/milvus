@@ -1,8 +1,10 @@
 package meta
 
 import (
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -236,17 +238,31 @@ func (replica *mutableReplica) removeChannelExclusiveNodes(nodes ...int64) {
 func (replica *mutableReplica) tryBalanceNodeForChannel() {
 	channelNodeInfos := replica.replicaPB.GetChannelNodeInfos()
 	if len(channelNodeInfos) == 0 {
+		log.Info("no channel node info, skip balance",
+			zap.Int64("collection", replica.replicaPB.GetCollectionID()),
+			zap.Int64("replica", replica.replicaPB.GetID()))
 		return
 	}
 
 	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
 	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
 	channelExclusiveFactor := paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.GetAsInt()
+	log.Info("try balance node for channel",
+		zap.Int64("collection", replica.replicaPB.GetCollectionID()),
+		zap.Int64("replica", replica.replicaPB.GetID()),
+		zap.Bool("enableChannelExclusiveMode", enableChannelExclusiveMode),
+		zap.Int("channelExclusiveFactor", channelExclusiveFactor),
+		zap.Int("rwNodesCount", replica.rwNodes.Len()),
+	)
 	// if balance policy or node count doesn't match condition, clean up channel node info
 	if !enableChannelExclusiveMode || len(replica.rwNodes) < len(channelNodeInfos)*channelExclusiveFactor {
 		for name := range replica.replicaPB.GetChannelNodeInfos() {
 			replica.replicaPB.ChannelNodeInfos[name] = &querypb.ChannelNodeInfo{}
 		}
+		log.Info("exit channel exclusive mode",
+			zap.Int64("collection", replica.replicaPB.GetCollectionID()),
+			zap.Int64("replica", replica.replicaPB.GetID()),
+		)
 		return
 	}
 
@@ -278,6 +294,12 @@ func (replica *mutableReplica) tryBalanceNodeForChannel() {
 					}
 				}
 				replica.replicaPB.ChannelNodeInfos[channelName].RwNodes = currentNodes
+				log.Info("assign exclusive nodes to channel",
+					zap.Int64("collection", replica.replicaPB.GetCollectionID()),
+					zap.Int64("replica", replica.replicaPB.GetID()),
+					zap.String("channel", channelName),
+					zap.Int64s("nodes", currentNodes),
+				)
 			}
 		}
 	}

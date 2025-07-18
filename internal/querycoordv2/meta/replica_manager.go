@@ -142,6 +142,10 @@ func (m *ReplicaManager) Spawn(ctx context.Context, collection int64, replicaNum
 
 			channelExclusiveNodeInfo := make(map[string]*querypb.ChannelNodeInfo)
 			if enableChannelExclusiveMode {
+				log.Info("enable channel exclusive mode",
+					zap.Int64("collection", collection),
+					zap.Int64("replica", id),
+					zap.String("resource group", rgName))
 				for _, channel := range channels {
 					channelExclusiveNodeInfo[channel] = &querypb.ChannelNodeInfo{}
 				}
