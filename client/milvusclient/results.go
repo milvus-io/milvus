@@ -82,6 +82,35 @@ func (sr *ResultSet) fillPKEntry(receiver any) (err error) {
 	rv := rr
 
 	switch rt.Kind() {
+	case reflect.Array:
+		pkField := sr.sch.PKField()
+		et := rt.Elem()
+		for et.Kind() == reflect.Ptr {
+			et = et.Elem()
+		}
+		// check the length of array match the length of dataset
+		arrayLen := rt.Len()
+		dataLen := sr.IDs.Len()
+		if arrayLen != dataLen {
+			return errors.Newf("fill pk entry failed, array length %d not match data length %d", arrayLen, dataLen)
+		}
+		candidates := row.ParseCandidate(et)
+		candi, ok := candidates[pkField.Name]
+		if !ok {
+			return nil
+		}
+
+		for i := 0; i < arrayLen; i++ {
+			row := rv.Index(i)
+			for row.Kind() == reflect.Ptr {
+				row = row.Elem()
+			}
+			val, err := sr.IDs.Get(i)
+			if err != nil {
+				return err
+			}
+			row.Field(candi).Set(reflect.ValueOf(val))
+		}
 	case reflect.Slice:
 		pkField := sr.sch.PKField()
 
@@ -110,7 +139,7 @@ func (sr *ResultSet) fillPKEntry(receiver any) (err error) {
 		}
 		rr.Set(rv)
 	default:
-		return errors.Newf("receiver need to be slice or array but get %v", rt.Kind())
+		return errors.Newf("fill pk entry failed, receiver need to be slice or array but get %v", rt.Kind())
 	}
 	return nil
 }
@@ -151,7 +180,29 @@ func (ds DataSet) Unmarshal(receiver any) (err error) {
 
 	switch rt.Kind() {
 	// TODO maybe support Array and just fill data
-	// case reflect.Array:
+	case reflect.Array:
+		et := rt.Elem()
+		if et.Kind() != reflect.Ptr {
+			return errors.Newf("receiver must be array of pointers but get: %v", et.Kind())
+		}
+		for et.Kind() == reflect.Ptr {
+			et = et.Elem()
+		}
+		// check the length of array match the length of dataset or not
+		arrayLen := rt.Len()
+		dataLen := ds.Len()
+		if arrayLen != dataLen {
+			return errors.Newf("receiver array length %d does not match dataset length %d", arrayLen, dataLen)
+		}
+		// fill data
+		for i := 0; i < arrayLen; i++ {
+			data := reflect.New(et)
+			err := ds.fillData(data.Elem(), et, i)
+			if err != nil {
+				return err
+			}
+			rv.Index(i).Set(data)
+		}
 	case reflect.Slice:
 		et := rt.Elem()
 		if et.Kind() != reflect.Ptr {
@@ -170,7 +221,7 @@ func (ds DataSet) Unmarshal(receiver any) (err error) {
 		}
 		rr.Set(rv)
 	default:
-		return errors.Newf("receiver need to be slice or array but get %v", rt.Kind())
+		return errors.Newf("unmarshal failed, receiver need to be slice or array but get %v", rt.Kind())
 	}
 	return nil
 }
