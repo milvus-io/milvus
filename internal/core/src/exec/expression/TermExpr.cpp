@@ -588,6 +588,9 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -597,6 +600,9 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
                 auto value = value_array[i];
                 if (!valid) {
                     invalid_row_ids.push_back(row_id);
+                    invalid_offset.push_back(offset);
+                    invalid_type.push_back(type);
+                    invalid_size.push_back(size);
                     continue;
                 }
                 auto f = [&]() {
@@ -689,11 +695,10 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
-                    auto value = value_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, type, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
