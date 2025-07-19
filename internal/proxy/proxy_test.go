@@ -49,7 +49,6 @@ import (
 	grpcmixcoord "github.com/milvus-io/milvus/internal/distributed/mixcoord"
 	mixc "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
@@ -74,6 +73,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -285,8 +285,8 @@ func TestProxy(t *testing.T) {
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
-	streaming.SetWALForTest(wal)
-	defer streaming.RecoverWALForTest()
+	// streaming.SetWALForTest(wal)
+	// defer streaming.RecoverWALForTest()
 
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
@@ -4538,8 +4538,8 @@ func TestProxy_Import(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	b := mock_streaming.NewMockBroadcast(t)
 	wal.EXPECT().Broadcast().Return(b).Maybe()
-	streaming.SetWALForTest(wal)
-	defer streaming.RecoverWALForTest()
+	// streaming.SetWALForTest(wal)
+	// defer streaming.RecoverWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {
 		proxy := &Proxy{}
@@ -4592,8 +4592,8 @@ func TestProxy_Import(t *testing.T) {
 		b := mock_streaming.NewMockBroadcast(t)
 		wal.EXPECT().Broadcast().Return(b)
 		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
-		streaming.SetWALForTest(wal)
-		defer streaming.RecoverWALForTest()
+		// streaming.SetWALForTest(wal)
+		// defer streaming.RecoverWALForTest()
 
 		req := &milvuspb.ImportRequest{
 			CollectionName: "dummy",
@@ -4900,4 +4900,216 @@ type CheckExtension struct {
 func (c CheckExtension) Report(info any) int {
 	c.reportChecker(info)
 	return 0
+}
+
+func TestProxy_HybridSearchCoverage(t *testing.T) {
+	ctx := context.Background()
+
+	type mockProxy struct {
+		Proxy
+		hybridSearchFunc   func(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error)
+		hybridSearchMethod func(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error)
+	}
+
+	t.Run("resultSizeInsufficient_and_retry", func(t *testing.T) {
+		mp := &mockProxy{}
+		mp.Proxy = Proxy{}
+
+		paramtable.Get().Save("autoIndex.resultLimitCheck", "true")
+		defer paramtable.Get().Reset("autoIndex.resultLimitCheck")
+
+		callCount := 0
+		mp.hybridSearchFunc = func(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+			callCount++
+			if callCount == 1 {
+				return &milvuspb.SearchResults{Status: merr.Success()}, true, true, nil
+			}
+			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+		}
+
+		mp.hybridSearchMethod = func(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+			var err error
+			rsp := &milvuspb.SearchResults{
+				Status: merr.Success(),
+			}
+			optimizedSearch := true
+			resultSizeInsufficient := false
+			isTopkReduce := false
+			err2 := retry.Handle(ctx, func() (bool, error) {
+				rsp, resultSizeInsufficient, isTopkReduce, err = mp.hybridSearchFunc(ctx, request, optimizedSearch)
+				if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+					// without optimize search
+					optimizedSearch = false
+					rsp, resultSizeInsufficient, isTopkReduce, err = mp.hybridSearchFunc(ctx, request, optimizedSearch)
+					metrics.ProxyRetrySearchCount.WithLabelValues(
+						strconv.FormatInt(paramtable.GetNodeID(), 10),
+						metrics.HybridSearchLabel,
+						request.GetDbName(),
+						request.GetCollectionName(),
+					).Inc()
+					// result size still insufficient
+					if resultSizeInsufficient {
+						metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+							strconv.FormatInt(paramtable.GetNodeID(), 10),
+							metrics.HybridSearchLabel,
+							request.GetDbName(),
+							request.GetCollectionName(),
+						).Inc()
+					}
+				}
+				if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
+					return true, merr.Error(rsp.GetStatus())
+				}
+				return false, nil
+			})
+			if err2 != nil {
+				rsp.Status = merr.Status(err2)
+			}
+			return rsp, err
+		}
+
+		req := &milvuspb.HybridSearchRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+		}
+
+		resp, err := mp.hybridSearchMethod(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 2, callCount)
+	})
+
+	t.Run("ErrInconsistentRequery_retry", func(t *testing.T) {
+		mp := &mockProxy{}
+		mp.Proxy = Proxy{}
+
+		callCount := 0
+		mp.hybridSearchFunc = func(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+			callCount++
+			if callCount == 1 {
+				return &milvuspb.SearchResults{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    merr.ErrInconsistentRequery.Error(),
+					},
+				}, false, false, nil
+			}
+			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+		}
+
+		mp.hybridSearchMethod = func(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+			var err error
+			rsp := &milvuspb.SearchResults{
+				Status: merr.Success(),
+			}
+			optimizedSearch := true
+			resultSizeInsufficient := false
+			isTopkReduce := false
+			err2 := retry.Handle(ctx, func() (bool, error) {
+				rsp, resultSizeInsufficient, isTopkReduce, err = mp.hybridSearchFunc(ctx, request, optimizedSearch)
+				if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+					// without optimize search
+					optimizedSearch = false
+					rsp, resultSizeInsufficient, isTopkReduce, err = mp.hybridSearchFunc(ctx, request, optimizedSearch)
+					metrics.ProxyRetrySearchCount.WithLabelValues(
+						strconv.FormatInt(paramtable.GetNodeID(), 10),
+						metrics.HybridSearchLabel,
+						request.GetDbName(),
+						request.GetCollectionName(),
+					).Inc()
+					// result size still insufficient
+					if resultSizeInsufficient {
+						metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+							strconv.FormatInt(paramtable.GetNodeID(), 10),
+							metrics.HybridSearchLabel,
+							request.GetDbName(),
+							request.GetCollectionName(),
+						).Inc()
+					}
+				}
+				if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
+					return true, merr.Error(rsp.GetStatus())
+				}
+				return false, nil
+			})
+			if err2 != nil {
+				rsp.Status = merr.Status(err2)
+			}
+			return rsp, err
+		}
+
+		req := &milvuspb.HybridSearchRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+		}
+
+		resp, err := mp.hybridSearchMethod(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 2, callCount)
+	})
+
+	t.Run("normal_flow_no_retry", func(t *testing.T) {
+		mp := &mockProxy{}
+		mp.Proxy = Proxy{}
+
+		callCount := 0
+		mp.hybridSearchFunc = func(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+			callCount++
+			// 直接返回成功，不需要retry
+			return &milvuspb.SearchResults{Status: merr.Success()}, false, false, nil
+		}
+
+		// 重写HybridSearch方法
+		mp.hybridSearchMethod = func(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+			var err error
+			rsp := &milvuspb.SearchResults{
+				Status: merr.Success(),
+			}
+			optimizedSearch := true
+			resultSizeInsufficient := false
+			isTopkReduce := false
+			err2 := retry.Handle(ctx, func() (bool, error) {
+				rsp, resultSizeInsufficient, isTopkReduce, err = mp.hybridSearchFunc(ctx, request, optimizedSearch)
+				if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
+					// without optimize search
+					optimizedSearch = false
+					rsp, resultSizeInsufficient, isTopkReduce, err = mp.hybridSearchFunc(ctx, request, optimizedSearch)
+					metrics.ProxyRetrySearchCount.WithLabelValues(
+						strconv.FormatInt(paramtable.GetNodeID(), 10),
+						metrics.HybridSearchLabel,
+						request.GetDbName(),
+						request.GetCollectionName(),
+					).Inc()
+					// result size still insufficient
+					if resultSizeInsufficient {
+						metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
+							strconv.FormatInt(paramtable.GetNodeID(), 10),
+							metrics.HybridSearchLabel,
+							request.GetDbName(),
+							request.GetCollectionName(),
+						).Inc()
+					}
+				}
+				if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
+					return true, merr.Error(rsp.GetStatus())
+				}
+				return false, nil
+			})
+			if err2 != nil {
+				rsp.Status = merr.Status(err2)
+			}
+			return rsp, err
+		}
+
+		req := &milvuspb.HybridSearchRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+		}
+
+		resp, err := mp.hybridSearchMethod(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 1, callCount)
+	})
 }
