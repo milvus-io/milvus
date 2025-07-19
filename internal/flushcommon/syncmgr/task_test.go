@@ -349,12 +349,13 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
 		flag := false
 		handler := func(_ error) { flag = true }
+		// segment not found should be ignored.
 		task := s.getSuiteSyncTask(new(SyncPack)).WithFailureCallback(handler)
 
 		err := task.Run(ctx)
 
-		s.Error(err)
-		s.True(flag)
+		s.NoError(err)
+		s.False(flag)
 	})
 
 	s.metacache.ExpectedCalls = nil

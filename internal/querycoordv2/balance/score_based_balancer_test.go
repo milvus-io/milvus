@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -1621,4 +1623,38 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceChannelOnStoppingNode() {
 	}
 	suite.Equal(node2Counter.Load(), int32(5))
 	suite.Equal(node3Counter.Load(), int32(5))
+}
+
+func TestFilterOutNodeLessThan260(t *testing.T) {
+	nodes := []int64{1, 2, 3, 4, 5}
+	nodeManager := session.NewNodeManager()
+	filteredNodes := filterNodeLessThan260(nodes, nodeManager)
+	assert.ElementsMatch(t, filteredNodes, []int64{1, 2, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.5.0"),
+	}))
+	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
+	assert.ElementsMatch(t, filteredNodes, []int64{1, 2, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.6.0-dev"),
+	}))
+	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
+	assert.ElementsMatch(t, filteredNodes, []int64{1, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.6.0"),
+	}))
+	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
+	assert.ElementsMatch(t, filteredNodes, []int64{1, 4, 5})
 }
