@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from collections import Counter
 from time import sleep
-from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import MilvusClient, AnnSearchRequest, RRFRanker
 from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
@@ -236,6 +236,7 @@ class Op(Enum):
     drop_partition = 'drop_partition'
     load_balance = 'load_balance'
     bulk_insert = 'bulk_insert'
+    rename_collection = 'rename_collection'
     unknown = 'unknown'
 
 
@@ -338,12 +339,21 @@ class Checker:
         self.scale = 1 * 10 ** 6
         self.files = []
         self.word_freq = Counter()
-        self.ms = MilvusSys()
-        self.bucket_name = self.ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        self.bucket_name = kwargs.get("bucket_name", None)
         self.db_wrap = ApiDatabaseWrapper()
         self.c_wrap = ApiCollectionWrapper()
         self.p_wrap = ApiPartitionWrapper()
         self.utility_wrap = ApiUtilityWrapper()
+        if cf.param_info.param_uri:
+            uri = cf.param_info.param_uri
+        else:
+            uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
+        
+        if cf.param_info.param_token:
+            token = cf.param_info.param_token
+        else:
+            token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
+        self.milvus_client = MilvusClient(uri=uri, token=token)
         c_name = collection_name if collection_name is not None else cf.gen_unique_str(
             'Checker_')
         self.c_name = c_name
@@ -571,6 +581,39 @@ class CollectionReleaseChecker(Checker):
         res, result = self.release_collection()
         if result:
             self.c_wrap.release()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP)
+
+
+
+class CollectionRenameChecker(Checker):
+    """check collection rename operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+        self.replica_number = replica_number
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("CollectionRenameChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+
+    @trace()
+    def rename_collection(self, old_collection_name, new_collection_name):
+        res, result = self.utility_wrap.rename_collection(old_collection_name=old_collection_name, new_collection_name=new_collection_name)
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        new_collection_name = "CollectionRenameChecker_" + cf.gen_unique_str("new_")
+        res, result = self.rename_collection(self.c_name, new_collection_name)
+        if result:
+            result = self.milvus_client.has_collection(collection_name=new_collection_name)
+            if result:
+                self.c_name = new_collection_name
+                data = cf.gen_row_data_by_schema(nb=1, schema=self.schema)
+                self.milvus_client.insert(collection_name=new_collection_name, data=data)
         return res, result
 
     def keep_running(self):
