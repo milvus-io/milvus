@@ -69,13 +69,13 @@ test_run() {
     int64_t index_version = 4000;
     int64_t lack_binlog_row = 100;
 
-    auto field_meta = gen_field_meta(collection_id,
-                                     partition_id,
-                                     segment_id,
-                                     field_id,
-                                     dtype,
-                                     element_type,
-                                     nullable);
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id,
+                                                      dtype,
+                                                      element_type,
+                                                      nullable);
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
@@ -480,13 +480,13 @@ test_string() {
     int64_t index_version = 4001;
     int64_t lack_binlog_row = 100;
 
-    auto field_meta = gen_field_meta(collection_id,
-                                     partition_id,
-                                     segment_id,
-                                     field_id,
-                                     dtype,
-                                     DataType::NONE,
-                                     nullable);
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id,
+                                                      dtype,
+                                                      DataType::NONE,
+                                                      nullable);
     auto index_meta =
         gen_index_meta(segment_id, field_id, index_build_id, index_version);
 

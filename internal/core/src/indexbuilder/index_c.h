@@ -47,10 +47,10 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result);
 
 // =========== Followings are used only in test ==========
 CStatus
-CreateIndexV0(enum CDataType dtype,
-              const char* serialized_type_params,
-              const char* serialized_index_params,
-              CIndex* res_index);
+CreateIndexForUT(enum CDataType dtype,
+                 const char* serialized_type_params,
+                 const char* serialized_index_params,
+                 CIndex* res_index);
 
 CStatus
 BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors);
