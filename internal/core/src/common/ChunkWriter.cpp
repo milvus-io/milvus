@@ -446,7 +446,7 @@ create_chunk_writer(const FieldMeta& field_meta, Args&&... args) {
                 field_meta.get_element_type(),
                 std::forward<Args>(args)...);
         default:
-            PanicInfo(Unsupported, "Unsupported data type");
+            ThrowInfo(Unsupported, "Unsupported data type");
     }
 }
 

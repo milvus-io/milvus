@@ -95,7 +95,7 @@ class Expr {
 
     virtual std::string
     ToString() const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
     virtual bool
@@ -105,7 +105,7 @@ class Expr {
 
     virtual std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
     std::vector<std::shared_ptr<Expr>>&
@@ -836,7 +836,7 @@ class SegmentExpr : public Expr {
             return ProcessAllChunksForMultipleChunk<T>(
                 func, skip_func, res, valid_res, values...);
         } else {
-            PanicInfo(ErrorCode::Unsupported, "unreachable");
+            ThrowInfo(ErrorCode::Unsupported, "unreachable");
         }
     }
 
@@ -974,7 +974,7 @@ class SegmentExpr : public Expr {
                         return ProcessIndexChunksForValid<std::string>();
                     }
                     default:
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
                                   element_type);
                 }
@@ -1037,7 +1037,7 @@ class SegmentExpr : public Expr {
                             use_index, input);
                     }
                     default:
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
                                   element_type);
                 }

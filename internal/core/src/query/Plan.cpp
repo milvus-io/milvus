@@ -60,7 +60,7 @@ ParsePlaceholderGroup(const Plan* plan,
         } else {
             auto line_size = info.values().Get(0).size();
             if (field_meta.get_sizeof() != line_size) {
-                PanicInfo(
+                ThrowInfo(
                     DimNotMatch,
                     fmt::format("vector dimension mismatch, expected vector "
                                 "size(byte) {}, actual {}.",
@@ -90,7 +90,7 @@ ParsePlanNodeProto(proto::plan::PlanNode& plan_node,
 
     auto res = plan_node.ParsePartialFromCodedStream(&input_stream);
     if (!res) {
-        PanicInfo(UnexpectedError, "parse plan node proto failed");
+        ThrowInfo(UnexpectedError, "parse plan node proto failed");
     }
 }
 

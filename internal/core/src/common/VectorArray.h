@@ -50,7 +50,7 @@ class VectorArray : public milvus::VectorTrait {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(vector_field.data_case()));
             }
@@ -114,7 +114,7 @@ class VectorArray : public milvus::VectorTrait {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }
@@ -137,7 +137,7 @@ class VectorArray : public milvus::VectorTrait {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }
@@ -157,7 +157,7 @@ class VectorArray : public milvus::VectorTrait {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }
@@ -217,7 +217,7 @@ class VectorArray : public milvus::VectorTrait {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }
@@ -277,7 +277,7 @@ class VectorArrayView {
             }
             default: {
                 // TODO(SpadeA): add other vector types.
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }
@@ -297,7 +297,7 @@ class VectorArrayView {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }
@@ -332,7 +332,7 @@ class VectorArrayView {
             }
             default: {
                 // TODO(SpadeA): add other vector types
-                PanicInfo(NotImplemented,
+                ThrowInfo(NotImplemented,
                           "Not implemented vector type: {}",
                           static_cast<int>(element_type_));
             }

@@ -295,7 +295,7 @@ cache_slot_count(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_slot_count_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -309,7 +309,7 @@ cache_cell_count(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_cell_count_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -323,7 +323,7 @@ cache_cell_loaded_count(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_cell_loaded_count_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -337,7 +337,7 @@ cache_load_latency(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_load_latency_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -351,7 +351,7 @@ cache_op_result_count_hit(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_op_result_count_hit_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -365,7 +365,7 @@ cache_op_result_count_miss(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_op_result_count_miss_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -379,7 +379,7 @@ cache_cell_eviction_count(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_cell_eviction_count_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -398,7 +398,7 @@ cache_item_lifetime_seconds(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_item_lifetime_seconds_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -412,7 +412,7 @@ cache_load_count_success(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_load_count_success_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -426,7 +426,7 @@ cache_load_count_fail(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_load_count_fail_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 
@@ -440,7 +440,7 @@ cache_memory_overhead_bytes(StorageType storage_type) {
         case StorageType::MIXED:
             return monitor::internal_cache_memory_overhead_bytes_mixed;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
 }
 

@@ -281,7 +281,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
                 size_to_evict.file_bytes);
             break;
         default:
-            PanicInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
+            ThrowInfo(ErrorCode::UnexpectedError, "Unknown StorageType");
     }
     return size_to_evict;
 }

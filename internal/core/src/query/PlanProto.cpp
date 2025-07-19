@@ -62,7 +62,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                     search_info.iterative_filter_execution = true;
                 } else {
                     // check if hints is valid
-                    PanicInfo(ConfigInvalid,
+                    ThrowInfo(ConfigInvalid,
                               "hints: {} not supported",
                               query_info_proto.hints());
                 }
@@ -71,7 +71,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
                     search_info.iterative_filter_execution = true;
                 } else {
                     // check if hints is valid
-                    PanicInfo(ConfigInvalid,
+                    ThrowInfo(ConfigInvalid,
                               "hints: {} not supported",
                               search_info.search_params_[HINTS]);
                 }
@@ -395,7 +395,7 @@ ProtoParser::ParseCallExprs(const proto::plan::CallExpr& expr_pb) {
 
     auto function = factory.GetFilterFunction(func_sig);
     if (function == nullptr) {
-        PanicInfo(ExprInvalid,
+        ThrowInfo(ExprInvalid,
                   "function " + func_sig.ToString() + " not found. ");
     }
     return std::make_shared<expr::CallExpr>(
@@ -577,14 +577,14 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         default: {
             std::string s;
             google::protobuf::TextFormat::PrintToString(expr_pb, &s);
-            PanicInfo(ExprInvalid,
+            ThrowInfo(ExprInvalid,
                       std::string("unsupported expr proto node: ") + s);
         }
     }
     if (type_check(result->type())) {
         return result;
     }
-    PanicInfo(
+    ThrowInfo(
         ExprInvalid, "expr type check failed, actual type: {}", result->type());
 }
 

@@ -153,7 +153,7 @@ class BitmapIndex : public ScalarIndex<T> {
                 return RegexQuery(regex_pattern);
             }
             default:
-                PanicInfo(ErrorCode::OpTypeInvalid,
+                ThrowInfo(ErrorCode::OpTypeInvalid,
                           "not supported op type: {} for index PatterMatch",
                           op);
         }

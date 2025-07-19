@@ -220,7 +220,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     PinWrapper<SpanBase>
     Span(int64_t chunk_id) const override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "Span only supported for ChunkedColumn");
     }
 
@@ -228,7 +228,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     BulkValueAt(std::function<void(const char*, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "BulkValueAt only supported for ChunkedColumn and "
                   "ProxyChunkColumn");
     }
@@ -237,7 +237,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     BulkPrimitiveValueAt(void* dst,
                          const int64_t* offsets,
                          int64_t count) override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "BulkPrimitiveValueAt only supported for ChunkedColumn");
     }
 
@@ -246,7 +246,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t element_sizeof,
                       int64_t count) override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "BulkVectorValueAt only supported for ChunkedColumn");
     }
 
@@ -254,7 +254,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     StringViews(int64_t chunk_id,
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "StringViews only supported for VariableColumn");
     }
 
@@ -262,13 +262,13 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     ArrayViews(
         int64_t chunk_id,
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "ArrayViews only supported for ArrayChunkedColumn");
     }
 
     PinWrapper<std::vector<VectorArrayView>>
     VectorArrayViews(int64_t chunk_id) const override {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::Unsupported,
             "VectorArrayViews only supported for ChunkedVectorArrayColumn");
     }
@@ -276,7 +276,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "ViewsByOffsets only supported for VariableColumn");
     }
 
@@ -400,7 +400,7 @@ class ChunkedColumn : public ChunkedColumnBase {
                 break;
             }
             default: {
-                PanicInfo(
+                ThrowInfo(
                     ErrorCode::Unsupported,
                     "BulkScalarValueAt is not supported for unknown scalar "
                     "data type: {}",
@@ -473,7 +473,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
                     const int64_t* offsets,
                     int64_t count) const override {
         if constexpr (!std::is_same_v<T, std::string>) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkRawStringAt only supported for "
                       "ChunkedVariableColumn<std::string>");
         }
@@ -509,7 +509,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
                   const int64_t* offsets,
                   int64_t count) const override {
         if constexpr (!std::is_same_v<T, Json>) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "RawJsonAt only supported for ChunkedVariableColumn<Json>");
         }

@@ -620,7 +620,7 @@ SegmentGrowingImpl::chunk_string_view_impl(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
         std::nullopt) const {
-    PanicInfo(ErrorCode::NotImplemented,
+    ThrowInfo(ErrorCode::NotImplemented,
               "chunk string view impl not implement for growing segment");
 }
 
@@ -630,7 +630,7 @@ SegmentGrowingImpl::chunk_array_view_impl(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len =
         std::nullopt) const {
-    PanicInfo(ErrorCode::NotImplemented,
+    ThrowInfo(ErrorCode::NotImplemented,
               "chunk array view impl not implement for growing segment");
 }
 
@@ -639,7 +639,7 @@ SegmentGrowingImpl::chunk_view_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    PanicInfo(ErrorCode::NotImplemented,
+    ThrowInfo(ErrorCode::NotImplemented,
               "chunk view by offsets not implemented for growing segment");
 }
 
@@ -763,7 +763,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                                                  ->mutable_vector_array()
                                                  ->mutable_data());
         } else {
-            PanicInfo(DataTypeInvalid, "logical error");
+            ThrowInfo(DataTypeInvalid, "logical error");
         }
         return result;
     }
@@ -880,7 +880,7 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
             break;
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("unsupported type {}", field_meta.get_data_type()));
         }
@@ -1061,11 +1061,11 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
                                            static_cast<Timestamp*>(output));
             break;
         case SystemFieldType::RowId:
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "RowId retrieve is not supported");
             break;
         default:
-            PanicInfo(DataTypeInvalid, "unknown subscript fields");
+            ThrowInfo(DataTypeInvalid, "unknown subscript fields");
     }
 }
 
@@ -1098,7 +1098,7 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported type {}", data_type));
                 }
             }

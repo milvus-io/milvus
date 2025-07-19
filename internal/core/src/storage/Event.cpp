@@ -69,7 +69,7 @@ GetEventFixPartSize(EventType event_type) {
             return GetFixPartSize(data);
         }
         default:
-            PanicInfo(DataFormatBroken,
+            ThrowInfo(DataFormatBroken,
                       fmt::format("unsupported event type {}", event_type));
     }
 }

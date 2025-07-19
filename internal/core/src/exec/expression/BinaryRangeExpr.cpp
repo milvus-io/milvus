@@ -95,7 +95,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format(
                                       "unsupported value type {} in expression",
                                       value_type));
@@ -117,7 +117,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format(
                                       "unsupported value type {} in expression",
                                       value_type));
@@ -145,7 +145,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     break;
                 }
                 default: {
-                    PanicInfo(
+                    ThrowInfo(
                         DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
@@ -154,7 +154,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }

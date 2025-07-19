@@ -72,7 +72,7 @@ class ScalarIndex : public IndexBase {
     void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index don't support build index with dataset");
     };
 
@@ -96,14 +96,14 @@ class ScalarIndex : public IndexBase {
     InApplyFilter(size_t n,
                   const T* values,
                   const std::function<bool(size_t /* offset */)>& filter) {
-        PanicInfo(ErrorCode::Unsupported, "InApplyFilter is not implemented");
+        ThrowInfo(ErrorCode::Unsupported, "InApplyFilter is not implemented");
     }
 
     virtual void
     InApplyCallback(size_t n,
                     const T* values,
                     const std::function<void(size_t /* offset */)>& callback) {
-        PanicInfo(ErrorCode::Unsupported, "InApplyCallback is not implemented");
+        ThrowInfo(ErrorCode::Unsupported, "InApplyCallback is not implemented");
     }
 
     virtual const TargetBitmap
@@ -131,7 +131,7 @@ class ScalarIndex : public IndexBase {
 
     virtual const TargetBitmap
     PatternMatch(const std::string& pattern, proto::plan::OpType op) {
-        PanicInfo(Unsupported, "pattern match is not supported");
+        ThrowInfo(Unsupported, "pattern match is not supported");
     }
 
     virtual bool
@@ -158,17 +158,17 @@ class ScalarIndex : public IndexBase {
 
     virtual const TargetBitmap
     RegexQuery(const std::string& pattern) {
-        PanicInfo(Unsupported, "regex query is not supported");
+        ThrowInfo(Unsupported, "regex query is not supported");
     }
 
     virtual void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) {
-        PanicInfo(Unsupported, "BuildwithFieldData is not supported");
+        ThrowInfo(Unsupported, "BuildwithFieldData is not supported");
     }
 
     virtual void
     LoadWithoutAssemble(const BinarySet& binary_set, const Config& config) {
-        PanicInfo(Unsupported, "LoadWithoutAssemble is not supported");
+        ThrowInfo(Unsupported, "LoadWithoutAssemble is not supported");
     }
 };
 
