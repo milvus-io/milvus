@@ -72,6 +72,13 @@ fn get_jieba_dict(
                     )));
                 }
                 let text = word.as_str().unwrap().to_string();
+
+                // remove word if word is ""
+                // add empty string to tokenizer will case panic
+                if text.len() == 0 {
+                    continue;
+                }
+
                 if text == "_default_" || text == "_extend_default_" {
                     if system_dict.is_some() {
                         return Err(TantivyBindingError::InvalidArgument(format!(
