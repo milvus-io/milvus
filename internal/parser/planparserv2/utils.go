@@ -399,6 +399,11 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 		return nil, errors.New("only comparison between two fields is supported")
 	}
 
+	// Check if both left and right are non-JSON types
+	if typeutil.IsJSONType(leftColumnInfo.GetDataType()) || typeutil.IsJSONType(rightColumnInfo.GetDataType()) {
+		return nil, errors.New("two column comparison with JSON type is not supported")
+	}
+
 	expr := &planpb.Expr{
 		Expr: &planpb.Expr_CompareExpr{
 			CompareExpr: &planpb.CompareExpr{
