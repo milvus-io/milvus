@@ -56,4 +56,21 @@ func TestFunctionConfig(t *testing.T) {
 		assert.True(t, cfg.TextEmbeddingProviders.GetDoc(key) != "")
 	}
 	assert.True(t, cfg.TextEmbeddingProviders.GetDoc("Unknow") == "")
+
+	keys = []string{
+		"tei.enable",
+		"tei.credential",
+		"vllm.enable",
+		"vllm.credential",
+		"cohere.credential",
+		"cohere.url",
+		"voyageai.credential",
+		"voyageai.url",
+		"siliconflow.url",
+		"siliconflow.credential",
+	}
+	for _, key := range keys {
+		assert.True(t, cfg.RerankModelProviders.GetDoc(key) != "")
+	}
+	assert.True(t, cfg.RerankModelProviders.GetDoc("Unknow") == "")
 }
