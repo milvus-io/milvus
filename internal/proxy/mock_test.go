@@ -375,3 +375,7 @@ func newFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.Fie
 func newBFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
 	return testutils.NewBFloat16VectorFieldData(fieldName, numRows, dim)
 }
+
+func newStructArrayFieldData(StructArrayFieldSchema *schemapb.StructArrayFieldSchema, fieldName string, numRows int, dim int) *schemapb.FieldData {
+	return testutils.GenerateStructFieldData(StructArrayFieldSchema, fieldName, numRows, dim)
+}

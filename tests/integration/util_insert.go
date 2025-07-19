@@ -181,6 +181,19 @@ func NewInt8VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldD
 	return testutils.NewInt8VectorFieldData(fieldName, numRows, dim)
 }
 
+func NewStructArrayFieldData(schema *schemapb.StructArrayFieldSchema, fieldName string, numRow int, dim int) *schemapb.FieldData {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: testutils.GenerateArrayOfStructArray(schema, numRow, dim),
+			},
+		},
+	}
+	return fieldData
+}
+
 func GenerateInt64Array(numRows int, start int64) []int64 {
 	ret := make([]int64, numRows)
 	for i := 0; i < numRows; i++ {

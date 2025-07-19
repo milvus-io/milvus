@@ -236,6 +236,12 @@ func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *q
 		return fieldSchema.GetFieldID(), !common.IsSystemField(fieldSchema.GetFieldID())
 	})
 
+	for _, structArrayField := range resp.GetSchema().GetStructArrayFields() {
+		for _, field := range structArrayField.GetFields() {
+			collection.LoadFields = append(collection.LoadFields, field.GetFieldID())
+		}
+	}
+
 	// put updated meta back to store
 	err = m.putCollection(ctx, true, &Collection{
 		CollectionLoadInfo: collection,

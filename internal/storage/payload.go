@@ -44,6 +44,7 @@ type PayloadWriterInterface interface {
 	AddBFloat16VectorToPayload([]byte, int) error
 	AddSparseFloatVectorToPayload(*SparseFloatVectorFieldData) error
 	AddInt8VectorToPayload([]int8, int) error
+	AddOneVectorArrayToPayload(*schemapb.VectorField) error
 	FinishPayloadWriter() error
 	GetPayloadBufferFromWriter() ([]byte, error)
 	GetPayloadLengthFromWriter() (int, error)
@@ -65,6 +66,7 @@ type PayloadReaderInterface interface {
 	GetDoubleFromPayload() ([]float64, []bool, error)
 	GetStringFromPayload() ([]string, []bool, error)
 	GetArrayFromPayload() ([]*schemapb.ScalarField, []bool, error)
+	GetVectorArrayFromPayload() ([]*schemapb.VectorField, error)
 	GetJSONFromPayload() ([][]byte, []bool, error)
 	GetBinaryVectorFromPayload() ([]byte, int, error)
 	GetFloat16VectorFromPayload() ([]byte, int, error)

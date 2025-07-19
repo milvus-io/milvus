@@ -142,7 +142,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	for i := 1; i <= rows; i++ {
 		value, err := reader.NextValue()
 		s.NoError(err)
-		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.NoError(err)
@@ -225,7 +225,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
 		Value:     genRowWithBM25(0),
 	}
-	rec, err := ValueSerializer([]*Value{v}, s.schema.Fields)
+	rec, err := ValueSerializer([]*Value{v}, s.schema)
 	s.NoError(err)
 
 	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
@@ -338,7 +338,7 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 		value, err := reader.NextValue()
 		s.NoError(err)
 
-		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.Error(err)
