@@ -241,6 +241,7 @@ class Op(Enum):
     bulk_insert = 'bulk_insert'
     alter_collection = 'alter_collection'
     add_field = 'add_field'
+    rename_collection = 'rename_collection'
     unknown = 'unknown'
 
 
@@ -634,6 +635,39 @@ class CollectionReleaseChecker(Checker):
         res, result = self.release_collection()
         if result:
             self.c_wrap.release()
+        return res, result
+
+    def keep_running(self):
+        while self._keep_running:
+            self.run_task()
+            sleep(constants.WAIT_PER_OP)
+
+
+
+class CollectionRenameChecker(Checker):
+    """check collection rename operations in a dependent thread"""
+
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1, schema=None, ):
+        self.replica_number = replica_number
+        if collection_name is None:
+            collection_name = cf.gen_unique_str("CollectionRenameChecker_")
+        super().__init__(collection_name=collection_name, shards_num=shards_num, schema=schema)
+
+    @trace()
+    def rename_collection(self, old_collection_name, new_collection_name):
+        res, result = self.utility_wrap.rename_collection(old_collection_name=old_collection_name, new_collection_name=new_collection_name)
+        return res, result
+
+    @exception_handler()
+    def run_task(self):
+        new_collection_name = "CollectionRenameChecker_" + cf.gen_unique_str("new_")
+        res, result = self.rename_collection(self.c_name, new_collection_name)
+        if result:
+            result = self.milvus_client.has_collection(collection_name=new_collection_name)
+            if result:
+                self.c_name = new_collection_name
+                data = cf.gen_row_data_by_schema(nb=1, schema=self.schema)
+                self.milvus_client.insert(collection_name=new_collection_name, data=data)
         return res, result
 
     def keep_running(self):
