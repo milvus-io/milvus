@@ -26,6 +26,7 @@ default_vector_field_name = "vector"
 default_float_field_name = ct.default_float_field_name
 default_string_field_name = ct.default_string_field_name
 
+
 class TestAsyncMilvusClientCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of collection interface """
 
