@@ -88,6 +88,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/43031, pr#43299, remove name check for describe collection")
     def test_milvus_client_insert_invalid_collection_name(self, collection_name):
         """
         target: test high level api: client.create_collection
@@ -104,6 +105,7 @@ class TestMilvusClientInsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/43031, pr#43299, remove name check for describe collection")
     def test_milvus_client_insert_collection_name_over_max_length(self):
         """
         target: test high level api: client.create_collection
@@ -630,6 +632,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/43031, pr#43299, remove name check for describe collection")
     def test_milvus_client_upsert_invalid_collection_name(self, collection_name):
         """
         target: test high level api: client.create_collection
@@ -646,6 +649,7 @@ class TestMilvusClientUpsertInvalid(TestMilvusClientV2Base):
                     check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/43031, pr#43299, remove name check for describe collection")
     def test_milvus_client_upsert_collection_name_over_max_length(self):
         """
         target: test high level api: client.create_collection
