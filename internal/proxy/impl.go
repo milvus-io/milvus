@@ -3046,6 +3046,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	})
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
+	} else if err != nil {
+		rsp.Status = merr.Status(err)
 	}
 	return rsp, err
 }
