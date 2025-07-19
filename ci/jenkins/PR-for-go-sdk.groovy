@@ -2,7 +2,7 @@
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
 
-def milvus_helm_chart_version = '4.2.53'
+def milvus_helm_chart_version = '4.2.56'
 
 pipeline {
     options {
