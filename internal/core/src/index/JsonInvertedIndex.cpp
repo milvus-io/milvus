@@ -21,6 +21,7 @@
 #include "log/Log.h"
 #include "common/JsonUtils.h"
 #include "simdjson/error.h"
+#include "index/JsonIndexBuilder.h"
 
 namespace milvus::index {
 
@@ -42,74 +43,30 @@ template <typename T>
 void
 JsonInvertedIndex<T>::build_index_for_json(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-    int64_t offset = 0;
     LOG_INFO("Start to build json inverted index for field: {}", nested_path_);
-    using SIMDJSON_T =
-        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
-    auto tokens = parse_json_pointer(nested_path_);
-
-    bool is_array = cast_type_.data_type() == JsonCastType::DataType::ARRAY;
-
-    for (const auto& data : field_datas) {
-        auto n = data->get_num_rows();
-        for (int64_t i = 0; i < n; i++) {
-            auto json_column = static_cast<const Json*>(data->RawValue(i));
-            if (this->schema_.nullable() && !data->is_valid(i)) {
-                this->null_offset_.push_back(offset);
-                this->wrapper_->template add_array_data<T>(
-                    nullptr, 0, offset++);
-                continue;
-            }
-
-            auto exists = path_exists(json_column->dom_doc(), tokens);
-            if (!exists || !json_column->exist(nested_path_)) {
-                error_recorder_.Record(
-                    *json_column, nested_path_, simdjson::NO_SUCH_FIELD);
-                this->null_offset_.push_back(offset);
-                this->wrapper_->template add_array_data<T>(
-                    nullptr, 0, offset++);
-                continue;
-            }
-            folly::fbvector<T> values;
-            if (is_array) {
-                auto doc = json_column->dom_doc();
-                auto array_res = doc.at_pointer(nested_path_).get_array();
-                if (array_res.error() != simdjson::SUCCESS) {
-                    error_recorder_.Record(
-                        *json_column, nested_path_, array_res.error());
-                } else {
-                    auto array_values = array_res.value();
-                    for (auto value : array_values) {
-                        auto val = value.template get<SIMDJSON_T>();
-
-                        if (val.error() == simdjson::SUCCESS) {
-                            values.push_back(static_cast<T>(val.value()));
-                        }
-                    }
-                }
-            } else {
-                if (cast_function_.match<T>()) {
-                    auto res = JsonCastFunction::CastJsonValue<T>(
-                        cast_function_, *json_column, nested_path_);
-                    if (res.has_value()) {
-                        values.push_back(res.value());
-                    }
-                } else {
-                    value_result<SIMDJSON_T> res =
-                        json_column->at<SIMDJSON_T>(nested_path_);
-                    if (res.error() != simdjson::SUCCESS) {
-                        error_recorder_.Record(
-                            *json_column, nested_path_, res.error());
-                    } else {
-                        values.push_back(static_cast<T>(res.value()));
-                    }
-                }
-            }
+    ProcessJsonFieldData<T>(
+        field_datas,
+        this->schema_,
+        nested_path_,
+        cast_type_,
+        cast_function_,
+        // add data
+        [this](const folly::fbvector<T>& values, int64_t offset) {
             this->wrapper_->template add_array_data<T>(
-                values.data(), values.size(), offset++);
-        }
-    }
+                values.data(), values.size(), offset);
+        },
+        // handle null
+        [this](int64_t offset) {
+            this->null_offset_.push_back(offset);
+            this->wrapper_->template add_array_data<T>(nullptr, 0, offset);
+        },
+        // handle error
+        [this](const Json& json,
+               const std::string& nested_path,
+               simdjson::error_code error) {
+            this->error_recorder_.Record(json, nested_path, error);
+        });
 
     error_recorder_.PrintErrStats();
 }

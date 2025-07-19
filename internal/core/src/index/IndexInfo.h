@@ -17,6 +17,7 @@
 
 #include "common/JsonCastType.h"
 #include "common/Types.h"
+#include "common/Consts.h"
 
 namespace milvus::index {
 
@@ -37,8 +38,8 @@ struct CreateIndexInfo {
     uint32_t tantivy_index_version{7};
     JsonCastType json_cast_type{JsonCastType::UNKNOWN};
     std::string json_path;
-    std::string json_cast_function;
-    std::optional<NgramParams> ngram_params;
+    std::string json_cast_function{UNKNOW_CAST_FUNCTION_NAME};
+    std::optional<NgramParams> ngram_params{std::nullopt};
 };
 
 }  // namespace milvus::index

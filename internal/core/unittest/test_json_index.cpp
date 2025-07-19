@@ -57,9 +57,11 @@ TEST(JsonIndexTest, TestJSONErrRecorder) {
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::FromString("DOUBLE"),
-        json_path,
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("DOUBLE"),
+            .json_path = json_path,
+        },
         file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
@@ -118,9 +120,11 @@ TEST(JsonIndexTest, TestJsonContains) {
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::FromString("ARRAY_DOUBLE"),
-        json_path,
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("ARRAY_DOUBLE"),
+            .json_path = json_path,
+        },
         file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
@@ -212,11 +216,13 @@ TEST(JsonIndexTest, TestJsonCast) {
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::FromString("DOUBLE"),
-        json_path,
-        file_manager_ctx,
-        "STRING_TO_DOUBLE");
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("DOUBLE"),
+            .json_path = json_path,
+            .json_cast_function = "STRING_TO_DOUBLE",
+        },
+        file_manager_ctx);
     auto json_index = std::unique_ptr<JsonInvertedIndex<double>>(
         static_cast<JsonInvertedIndex<double>*>(inv_index.release()));
 
