@@ -1716,6 +1716,39 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 	return nil
 }
 
+// check whether insertMsg has all fields in schema
+func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*schemapb.FieldData, skipPkFieldCheck bool, skipDynamicFieldCheck bool) error {
+	log := log.With(zap.String("collection", schema.GetName()))
+
+	// find bm25 generated fields
+	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(schema)...)
+	dataNameSet := typeutil.NewSet[string]()
+	for _, data := range fieldsData {
+		dataNameSet.Insert(data.GetFieldName())
+	}
+
+	for _, fieldSchema := range schema.Fields {
+		if bm25Fields.Contain(fieldSchema.GetName()) {
+			continue
+		}
+		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
+				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
+				// autoGenField
+				continue
+			}
+
+			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			}
+		}
+	}
+
+	return nil
+}
+
 func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
 	log := log.With(zap.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
@@ -2507,6 +2540,14 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 		}
 	}
 	return false
+}
+
+func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		fields = append(fields, fSchema.OutputFieldNames...)
+	}
+	return fields
 }
 
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {

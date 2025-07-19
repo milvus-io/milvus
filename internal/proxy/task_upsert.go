@@ -29,11 +29,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -68,6 +71,14 @@ type upsertTask struct {
 	// delete task need use the oldIDs
 	oldIDs          *schemapb.IDs
 	schemaTimestamp uint64
+
+	// write after read, generate write part by queryPreExecute
+	mixCoord types.MixCoordClient
+	node     types.ProxyComponent
+
+	partialUpdate   bool
+	deletePKs       *schemapb.IDs
+	insertFieldData []*schemapb.FieldData
 }
 
 // TraceCtx returns upsertTask context
@@ -147,6 +158,208 @@ func (it *upsertTask) OnEnqueue() error {
 	return nil
 }
 
+func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error) {
+	log := log.Ctx(ctx).With(zap.String("collectionName", t.req.GetCollectionName()))
+	var err error
+	queryReq := &milvuspb.QueryRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Retrieve,
+			Timestamp: t.BeginTs(),
+		},
+		DbName:                t.req.GetDbName(),
+		CollectionName:        t.req.GetCollectionName(),
+		ConsistencyLevel:      commonpb.ConsistencyLevel_Strong,
+		NotReturnAllMeta:      false,
+		OutputFields:          []string{"*"},
+		UseDefaultConsistency: false,
+		GuaranteeTimestamp:    t.BeginTs(),
+	}
+	pkField, err := typeutil.GetPrimaryFieldSchema(t.schema.CollectionSchema)
+	if err != nil {
+		return nil, err
+	}
+
+	var partitionIDs []int64
+	if t.partitionKeyMode {
+		// multi entities with same pk and diff partition keys may be hashed to multi physical partitions
+		// if deleteMsg.partitionID = common.InvalidPartition,
+		// all segments with this pk under the collection will have the delete record
+		partitionIDs = []int64{common.AllPartitionsID}
+		queryReq.PartitionNames = []string{}
+	} else {
+		// partition name could be defaultPartitionName or name specified by sdk
+		partName := t.upsertMsg.DeleteMsg.PartitionName
+		if err := validatePartitionTag(partName, true); err != nil {
+			log.Warn("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
+			return nil, err
+		}
+		partID, err := globalMetaCache.GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
+		if err != nil {
+			log.Warn("Failed to get partition id", zap.String("collectionName", t.req.GetCollectionName()), zap.String("partitionName", partName), zap.Error(err))
+			return nil, err
+		}
+		partitionIDs = []int64{partID}
+		queryReq.PartitionNames = []string{partName}
+	}
+
+	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+	qt := &queryTask{
+		ctx:       t.ctx,
+		Condition: NewTaskCondition(t.ctx),
+		RetrieveRequest: &internalpb.RetrieveRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID:            paramtable.GetNodeID(),
+			PartitionIDs:     partitionIDs,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		},
+		request:  queryReq,
+		plan:     plan,
+		mixCoord: t.mixCoord,
+		lb:       t.node.(*Proxy).lbPolicy,
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
+	defer func() {
+		sp.End()
+	}()
+	queryResult, err := t.node.(*Proxy).query(ctx, qt, sp)
+	if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
+		return nil, err
+	}
+	return queryResult, err
+}
+
+func (it *upsertTask) queryPreExecute(ctx context.Context) error {
+	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
+
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema.CollectionSchema)
+	if err != nil {
+		log.Warn("get primary field schema failed", zap.Error(err))
+		return err
+	}
+
+	primaryFieldData, err := typeutil.GetPrimaryFieldData(it.req.GetFieldsData(), primaryFieldSchema)
+	if err != nil {
+		log.Warn("get primary field data failed", zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("must assign pk when upsert, primary field: %v", primaryFieldSchema.Name))
+	}
+
+	oldIDs, err := parsePrimaryFieldData2IDs(primaryFieldData)
+	if err != nil {
+		log.Warn("parse primary field data to IDs failed", zap.Error(err))
+		return err
+	}
+
+	oldIDSize := typeutil.GetSizeOfIDs(oldIDs)
+	if oldIDSize == 0 {
+		it.deletePKs = &schemapb.IDs{}
+		it.insertFieldData = it.req.GetFieldsData()
+		log.Info("old records not found, just do insert")
+		return nil
+	}
+
+	tr := timerecord.NewTimeRecorder("Proxy-Upsert-retrieveByPKs")
+	// retrieve by primary key to get original field data
+	resp, err := retrieveByPKs(ctx, it, oldIDs, []string{"*"})
+	if err != nil {
+		log.Info("retrieve by primary key failed", zap.Error(err))
+		return err
+	}
+
+	if len(resp.GetFieldsData()) == 0 {
+		log.Info("retrieve by primary key failed, no data found", zap.Any("queryResult", resp))
+		return merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
+	}
+
+	existFieldData := resp.GetFieldsData()
+	pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
+	if err != nil {
+		log.Info("get primary field data failed", zap.Error(err))
+		return err
+	}
+	existIDs, err := parsePrimaryFieldData2IDs(pkFieldData)
+	if err != nil {
+		log.Info("parse primary field data to ids failed", zap.Error(err))
+		return err
+	}
+	log.Debug("retrieveByPKs cost",
+		zap.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
+		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
+
+	// check whether the primary key is exist in query result
+	idsChecker, err := typeutil.NewIDsChecker(existIDs)
+	if err != nil {
+		log.Info("create primary key checker failed", zap.Error(err))
+		return err
+	}
+
+	// Build mapping from existing primary keys to their positions in query result
+	// This ensures we can correctly locate data even if query results are not in the same order as request
+	existPKToIndex := make(map[interface{}]int)
+	for j := 0; j < typeutil.GetSizeOfIDs(existIDs); j++ {
+		pk := typeutil.GetPK(existIDs, int64(j))
+		existPKToIndex[pk] = j
+	}
+
+	// set field id for user passed field data
+	upsertFieldData := it.upsertMsg.InsertMsg.GetFieldsData()
+	for _, fieldData := range upsertFieldData {
+		fieldName := fieldData.GetFieldName()
+		if fieldData.GetIsDynamic() {
+			fieldName = "$meta"
+		}
+		fieldID, ok := it.schema.MapFieldID(fieldName)
+		if !ok {
+			log.Info("field not found in schema", zap.Any("field", fieldData))
+			return merr.WrapErrParameterInvalidMsg("field not found in schema")
+		}
+		fieldData.FieldId = fieldID
+		fieldData.FieldName = fieldName
+	}
+
+	lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
+	it.deletePKs = &schemapb.IDs{}
+	it.insertFieldData = make([]*schemapb.FieldData, len(existFieldData))
+	for i := 0; i < oldIDSize; i++ {
+		exist, err := idsChecker.Contains(oldIDs, i)
+		if err != nil {
+			log.Info("check primary key exist in query result failed", zap.Error(err))
+			return err
+		}
+
+		if exist {
+			// treat upsert as update
+			// 1. if pk exist in query result, add it to deletePKs
+			typeutil.AppendIDs(it.deletePKs, oldIDs, i)
+			// 2. construct the field data for update using correct index mapping
+			oldPK := typeutil.GetPK(oldIDs, int64(i))
+			existIndex, ok := existPKToIndex[oldPK]
+			if !ok {
+				return merr.WrapErrParameterInvalidMsg("primary key not found in exist data mapping")
+			}
+			typeutil.AppendFieldData(it.insertFieldData, existFieldData, int64(existIndex))
+			err := typeutil.UpdateFieldData(it.insertFieldData, upsertFieldData, int64(i))
+			if err != nil {
+				log.Info("update field data failed", zap.Error(err))
+				return err
+			}
+		} else {
+			// treat upsert as insert
+			if lackOfFieldErr != nil {
+				log.Info("check fields data by schema failed", zap.Error(lackOfFieldErr))
+				return lackOfFieldErr
+			}
+			// use field data from upsert request
+			typeutil.AppendFieldData(it.insertFieldData, upsertFieldData, int64(i))
+		}
+	}
+
+	return nil
+}
+
 func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
 	defer sp.End()
@@ -156,8 +369,21 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
+	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(it.schema.CollectionSchema)...)
+	log.Info("upsert task insertPreExecute", zap.Any("bm25Fields", bm25Fields), zap.Any("partialUpdate", it.partialUpdate), zap.Any("schema", it.schema.CollectionSchema))
 	// Calculate embedding fields
 	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+		if it.partialUpdate {
+			// remove the old bm25 fields
+			ret := make([]*schemapb.FieldData, 0)
+			for _, fieldData := range it.upsertMsg.InsertMsg.GetFieldsData() {
+				if bm25Fields.Contain(fieldData.GetFieldName()) {
+					continue
+				}
+				ret = append(ret, fieldData)
+			}
+			it.upsertMsg.InsertMsg.FieldsData = ret
+		}
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
 		defer sp.End()
 		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
@@ -263,17 +489,19 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	log := log.Ctx(ctx).With(
 		zap.String("collectionName", collName))
 
+	if !it.partialUpdate {
+		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
+	}
+	if typeutil.GetSizeOfIDs(it.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		log.Info("deletePKs is empty, skip deleteExecute")
+		return nil
+	}
+
 	if err := validateCollectionName(collName); err != nil {
 		log.Info("Invalid collectionName", zap.Error(err))
 		return err
 	}
-	collID, err := globalMetaCache.GetCollectionID(ctx, it.req.GetDbName(), collName)
-	if err != nil {
-		log.Info("Failed to get collection id", zap.Error(err))
-		return err
-	}
-	it.upsertMsg.DeleteMsg.CollectionID = collID
-	it.collectionID = collID
 
 	if it.partitionKeyMode {
 		// multi entities with same pk and diff partition keys may be hashed to multi physical partitions
@@ -327,11 +555,14 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrCollectionReplicateMode("upsert")
 	}
 
+	// check collection exists
 	collID, err := globalMetaCache.GetCollectionID(context.Background(), it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("fail to get collection id", zap.Error(err))
 		return err
 	}
+	it.collectionID = collID
+
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn("fail to get collection info", zap.Error(err))
@@ -390,6 +621,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 				CollectionName: it.req.CollectionName,
+				CollectionID:   it.collectionID,
 				PartitionName:  it.req.PartitionName,
 				FieldsData:     it.req.FieldsData,
 				NumRows:        uint64(it.req.NumRows),
@@ -405,12 +637,30 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				),
 				DbName:         it.req.DbName,
 				CollectionName: it.req.CollectionName,
+				CollectionID:   it.collectionID,
 				NumRows:        int64(it.req.NumRows),
 				PartitionName:  it.req.PartitionName,
-				CollectionID:   it.collectionID,
 			},
 		},
 	}
+
+	// check if num_rows is valid
+	if it.req.NumRows <= 0 {
+		return merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(it.req.NumRows), "num_rows should be greater than 0")
+	}
+
+	if it.partialUpdate {
+		err = it.queryPreExecute(ctx)
+		if err != nil {
+			log.Warn("Fail to queryPreExecute", zap.Error(err))
+			return err
+		}
+		// reconstruct upsert msg after queryPreExecute
+		it.upsertMsg.InsertMsg.FieldsData = it.insertFieldData
+		it.upsertMsg.DeleteMsg.PrimaryKeys = it.deletePKs
+		it.upsertMsg.DeleteMsg.NumRows = int64(typeutil.GetSizeOfIDs(it.deletePKs))
+	}
+
 	err = it.insertPreExecute(ctx)
 	if err != nil {
 		log.Warn("Fail to insertPreExecute", zap.Error(err))
@@ -503,6 +753,12 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 	collID := it.upsertMsg.DeleteMsg.CollectionID
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
+
+	if typeutil.GetSizeOfIDs(it.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		log.Info("deletePKs is empty, skip deleteExecute")
+		return nil
+	}
+
 	// hash primary keys to channels
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
@@ -510,7 +766,6 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		it.result.Status = merr.Status(err)
 		return err
 	}
-	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
 	it.upsertMsg.DeleteMsg.HashValues = typeutil.HashPK2Channels(it.upsertMsg.DeleteMsg.PrimaryKeys, channelNames)
 
 	// repack delete msg by dmChannel

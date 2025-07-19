@@ -331,7 +331,7 @@ func TestUpsertAutoID(t *testing.T) {
 	// upsert without pks -> error
 	vecColumn = hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
 	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(vecColumn))
-	common.CheckErr(t, err, false, "has no corresponding fieldData pass in: invalid parameter")
+	common.CheckErr(t, err, false, "must assign pk when upsert, primary field: int64: invalid parameter")
 }
 
 // test upsert autoId collection
@@ -417,7 +417,7 @@ func TestUpsertNotExistCollectionPartition(t *testing.T) {
 	// create default collection with autoID true
 	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 
-	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithPartition("aaa"))
+	_, errUpsert = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName))
 	common.CheckErr(t, errUpsert, false, "num_rows should be greater than 0")
 
 	// upsert not exist partition
@@ -544,6 +544,116 @@ func TestUpsertWithoutLoading(t *testing.T) {
 		WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	common.CheckQueryResult(t, []column.Column{pkColumn, jsonColumn, vecColumn}, resSet.Fields)
+}
+
+func TestUpsertPartialFields(t *testing.T) {
+	/*
+		1. prepare create -> insert -> index -> load -> query
+		2. paritial upsert exist entities -> data updated -> query and verify
+	*/
+	t.Parallel()
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	// connect
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create -> insert [0, 3000) -> flush -> index -> load
+	// create -> insert -> flush -> index -> load
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	genPkWithSingleScalarField := func(option *hp.GenDataOption) ([]column.Column, []column.Column) {
+		log.Info("genPkWithSingleScalarField")
+		columns := make([]column.Column, 0, 2)
+		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeInt64, *option))
+		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeFloat, *option))
+		return columns, nil
+	}
+
+	genPkWithSinglVectorField := func(option *hp.GenDataOption) ([]column.Column, []column.Column) {
+		log.Info("genPkWithSinglVectorField")
+		columns := make([]column.Column, 0, 2)
+		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeInt64, *option))
+		columns = append(columns, hp.GenColumnDataWithOption(entity.FieldTypeFloatVector, *option))
+		return columns, nil
+	}
+
+	upsertNb := 200
+	for _, genColumnsFunc := range []func(*hp.GenDataOption) ([]column.Column, []column.Column){genPkWithSingleScalarField, genPkWithSinglVectorField} {
+		// upsert exist entities [0, 200) -> query and verify
+		columns, dynamicColumns := genColumnsFunc(hp.TNewDataOption().TWithNb(upsertNb).TWithStart(0))
+		upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...))
+		common.CheckErr(t, err, true)
+		require.EqualValues(t, upsertNb, upsertRes.UpsertCount)
+
+		expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, upsertNb)
+		resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(expr).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+		common.CheckErr(t, err, true)
+		common.CheckPartialResult(t, append(columns, hp.MergeColumnsToDynamic(upsertNb, dynamicColumns, common.DefaultDynamicFieldName)), resSet.Fields)
+	}
+}
+
+func TestPartialUpsertDynamicField(t *testing.T) {
+	// enable dynamic field and insert dynamic column
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create -> insert [0, 3000) -> flush -> index -> load
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+	time.Sleep(time.Second * 4)
+	// verify that dynamic field exists
+	upsertNb := 10
+	resSet, err := mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s < %d", common.DefaultDynamicNumberField, upsertNb)).
+		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, upsertNb, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
+
+	// 1. query and gets empty
+	targetPk := int64(20000)
+	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s == %d", common.DefaultInt64FieldName, targetPk)).
+		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 0, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
+
+	// 2. upsert exist pk with dynamic column [a=1]
+	dynamicColumnA := column.NewColumnInt32(common.DefaultDynamicNumberField, []int32{1})
+	vecColumn := hp.GenColumnData(1, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	pkColumnA := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{targetPk})
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumnA, dynamicColumnA, vecColumn))
+	common.CheckErr(t, err, true)
+	time.Sleep(time.Second * 4)
+	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s == %d", common.DefaultInt64FieldName, targetPk)).
+		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
+	common.EqualColumn(t, hp.MergeColumnsToDynamic(1, []column.Column{dynamicColumnA}, common.DefaultDynamicFieldName), resSet.GetColumn(common.DefaultDynamicFieldName))
+
+	// 3. upsert exist pk with dynamic column [b=true]
+	dynamicColumnB := column.NewColumnBool(common.DefaultDynamicBoolField, []bool{true})
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumnA, dynamicColumnB))
+	common.CheckErr(t, err, true)
+	time.Sleep(time.Second * 4)
+	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s == %d", common.DefaultInt64FieldName, targetPk)).
+		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
+	common.EqualColumn(t, hp.MergeColumnsToDynamic(1, []column.Column{dynamicColumnA, dynamicColumnB}, common.DefaultDynamicFieldName), resSet.GetColumn(common.DefaultDynamicFieldName))
+
+	// 4. upsert exist pk with dynamic column [a=2, b=false]
+	dynamicColumnA = column.NewColumnInt32(common.DefaultDynamicNumberField, []int32{2})
+	_, err = mc.Upsert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName).WithColumns(pkColumnA, dynamicColumnA))
+	common.CheckErr(t, err, true)
+	time.Sleep(time.Second * 4)
+	resSet, err = mc.Query(ctx, client.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s == %d", common.DefaultInt64FieldName, targetPk)).
+		WithOutputFields(common.DefaultDynamicFieldName).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+	require.Equal(t, 1, resSet.GetColumn(common.DefaultDynamicFieldName).Len())
+	common.EqualColumn(t, hp.MergeColumnsToDynamic(1, []column.Column{dynamicColumnA, dynamicColumnB}, common.DefaultDynamicFieldName), resSet.GetColumn(common.DefaultDynamicFieldName))
 }
 
 func TestUpsertPartitionKeyCollection(t *testing.T) {

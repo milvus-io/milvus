@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -2400,6 +2401,22 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator, factory)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		err = node.sched.Start()
+		assert.NoError(t, err)
+		defer node.sched.Close()
+		err = node.initRateCollector()
+		assert.NoError(t, err)
+		node.mixCoord = mixc
 		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
@@ -2470,6 +2487,8 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			vChannels:     nil,
 			pChannels:     nil,
 			schema:        nil,
+			node:          node,
+			mixCoord:      mixc,
 		}
 
 		fieldID := common.StartOfUserFieldID
@@ -3823,6 +3842,22 @@ func TestPartitionKey(t *testing.T) {
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator, factory)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		err = node.sched.Start()
+		assert.NoError(t, err)
+		defer node.sched.Close()
+		err = node.initRateCollector()
+		assert.NoError(t, err)
+		node.mixCoord = qc
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,
@@ -3850,6 +3885,8 @@ func TestPartitionKey(t *testing.T) {
 			segIDAssigner: segAllocator,
 			chMgr:         chMgr,
 			chTicker:      ticker,
+			node:          node,
+			mixCoord:      qc,
 		}
 
 		// don't support specify partition name if use partition key
@@ -4058,6 +4095,22 @@ func TestDefaultPartition(t *testing.T) {
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		node, err := NewProxy(ctx, factory)
+		assert.NoError(t, err)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		node.tsoAllocator = &timestampAllocator{
+			tso: newMockTimestampAllocatorInterface(),
+		}
+		scheduler, err := newTaskScheduler(ctx, node.tsoAllocator, factory)
+		assert.NoError(t, err)
+		node.sched = scheduler
+		err = node.sched.Start()
+		assert.NoError(t, err)
+		defer node.sched.Close()
+		err = node.initRateCollector()
+		assert.NoError(t, err)
+		node.mixCoord = qc
 		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,
@@ -4085,6 +4138,8 @@ func TestDefaultPartition(t *testing.T) {
 			segIDAssigner: segAllocator,
 			chMgr:         chMgr,
 			chTicker:      ticker,
+			node:          node,
+			mixCoord:      qc,
 		}
 
 		ut.req.PartitionName = ""
