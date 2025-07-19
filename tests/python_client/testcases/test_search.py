@@ -7628,7 +7628,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         vectors = [vectors[i][-1] for i in range(default_nq)]
         # 3. range search with L2
         range_search_params = {"metric_type": "COSINE",
-                               "radius": 0, "range_filter": 1}
+                               "radius": -1, "range_filter": 1}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
@@ -7729,7 +7729,7 @@ class TestCollectionRangeSearch(TestcaseBase):
 
         # 6. Search
         range_search_params = {"metric_type": "COSINE", "params": {
-            "nprobe": 10, "radius": 0, "range_filter": 1}}
+            "nprobe": 10, "radius": -1, "range_filter": 1}}
         collection_w.search(vectors, default_search_field,
                             range_search_params, limit,
                             check_task=CheckTasks.check_search_results,
@@ -7918,8 +7918,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                          enable_dynamic_field=enable_dynamic_field)[0:5]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"radius": 0,
-                                                                   "range_filter": 1000}}
+        range_search_params = {"metric_type": "COSINE", "params": {"radius": -1,
+                                                                   "range_filter": 1}}
         log.info("test_range_search_new_data: searching for original data after load")
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
@@ -8657,8 +8657,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
-                                                                   "range_filter": 1000}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": -1,
+                                                                   "range_filter": 1}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -8704,8 +8704,8 @@ class TestCollectionRangeSearch(TestcaseBase):
                                                                       dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": 0,
-                                                                   "range_filter": 1000}}
+        range_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10, "radius": -1,
+                                                                   "range_filter": 1}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
@@ -8752,7 +8752,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         range_search_params = {"metric_type": "COSINE", "params": {
-            "nprobe": 10, "radius": 0, "range_filter": 1000}}
+            "nprobe": 10, "radius": -1, "range_filter": 1}}
         collection_w.search(vectors[:nq], default_search_field,
                             range_search_params, limit,
                             default_search_exp, _async=_async,
