@@ -615,25 +615,25 @@ func (t *searchTask) hybridSearchRank(ctx context.Context, span trace.Span, mult
 	// The first step of hybrid search is without meta information. If rerank requires meta data, we need to do requery.
 	// At this time, outputFields and rerank input_fields will be recalled.
 	// If we want to save memory, we can only recall the rerank input_fields in this step, and recall the output_fields in the third step
-	if t.needRequery {
-		idsList := lo.FilterMap(multipleMilvusResults, func(m *milvuspb.SearchResults, _ int) (*schemapb.IDs, bool) {
-			return m.Results.Ids, true
-		})
-		allIDs, count := mergeIDs(idsList)
-		if count == 0 {
-			t.result = &milvuspb.SearchResults{
-				Status: merr.Success(),
-				Results: &schemapb.SearchResultData{
-					NumQueries: t.Nq,
-					TopK:       t.rankParams.limit,
-					FieldsData: make([]*schemapb.FieldData, 0),
-					Scores:     []float32{},
-					Ids:        &schemapb.IDs{},
-					Topks:      []int64{},
-				},
-			}
-			return nil
+	idsList := lo.FilterMap(multipleMilvusResults, func(m *milvuspb.SearchResults, _ int) (*schemapb.IDs, bool) {
+		return m.Results.Ids, true
+	})
+	allIDs, count := mergeIDs(idsList)
+	if count == 0 {
+		t.result = &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: t.Nq,
+				TopK:       t.rankParams.limit,
+				FieldsData: make([]*schemapb.FieldData, 0),
+				Scores:     []float32{},
+				Ids:        &schemapb.IDs{},
+				Topks:      []int64{},
+			},
 		}
+		return nil
+	}
+	if t.needRequery {
 		allNames := typeutil.NewSet[string](t.translatedOutputFields...)
 		allNames.Insert(t.functionScore.GetAllInputFieldNames()...)
 		queryResult, err := t.requeryFunc(t, span, allIDs, allNames.Collect())
