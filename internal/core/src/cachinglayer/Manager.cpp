@@ -32,7 +32,6 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
     std::call_once(once, [&]() {
         Manager& manager = GetInstance();
         manager.warmup_policies_ = warmup_policies;
-        manager.cache_limit_ = cache_limit;
         manager.evictionEnabled_ = evictionEnabled;
 
         if (!evictionEnabled) {

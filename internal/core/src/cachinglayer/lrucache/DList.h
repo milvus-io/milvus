@@ -13,9 +13,13 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <chrono>
+#include <queue>
+#include <unordered_map>
 
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise.h>
+#include <folly/io/async/EventBase.h>
 
 #include "cachinglayer/lrucache/ListNode.h"
 #include "cachinglayer/Utils.h"
@@ -31,7 +35,8 @@ class DList {
         : max_memory_(max_memory),
           low_watermark_(low_watermark),
           high_watermark_(high_watermark),
-          eviction_config_(eviction_config) {
+          eviction_config_(eviction_config),
+          next_request_id_(1) {
         AssertInfo(low_watermark.AllGEZero(),
                    "[MCL] low watermark must be greater than or equal to 0");
         AssertInfo((high_watermark - low_watermark).AllGEZero(),
@@ -48,6 +53,7 @@ class DList {
         if (eviction_thread_.joinable()) {
             eviction_thread_.join();
         }
+        clearWaitingQueue();
     }
 
     // If after evicting all unpinned items, the used_memory_ is still larger than new_limit, false will be returned
@@ -67,12 +73,21 @@ class DList {
     bool
     IsEmpty() const;
 
-    // This method uses a global lock.
-    bool
-    reserveMemory(const ResourceUsage& size);
+    folly::SemiFuture<bool>
+    reserveMemoryWithTimeout(const ResourceUsage& size,
+                             std::chrono::milliseconds timeout,
+                             folly::EventBase* event_base);
+
+    // Called when a node becomes evictable (pin count drops to 0), or when a node is loaded as a bonus.
+    void
+    increaseEvictableSize(const ResourceUsage& size);
+
+    // Called when a node is pinned(pin count increases from 0), or when a node is removed(evicted or released).
+    void
+    decreaseEvictableSize(const ResourceUsage& size);
 
     // Used only when load failed. This will only cause used_memory_ to decrease, which will not affect the correctness
-    // of concurrent reserveMemory() even without lock.
+    // of concurrent reserveMemoryWithTimeout() even without lock.
     void
     releaseMemory(const ResourceUsage& size);
 
@@ -105,6 +120,49 @@ class DList {
  private:
     friend class DListTestFriend;
 
+    // Waiting request for timeout-based memory reservation
+    struct WaitingRequest {
+        ResourceUsage required_size;
+        std::chrono::steady_clock::time_point deadline;
+        folly::Promise<bool> promise;
+        folly::EventBase* event_base;
+        uint64_t request_id;
+
+        WaitingRequest(ResourceUsage size,
+                       std::chrono::steady_clock::time_point dl,
+                       folly::Promise<bool> p,
+                       folly::EventBase* eb,
+                       uint64_t id)
+            : required_size(size),
+              deadline(dl),
+              promise(std::move(p)),
+              event_base(eb),
+              request_id(id) {
+        }
+    };
+
+    // Comparator for priority queue (smaller size and earlier deadline have higher priority)
+    struct WaitingRequestComparator {
+        bool
+        operator()(const std::unique_ptr<WaitingRequest>& a,
+                   const std::unique_ptr<WaitingRequest>& b) {
+            // First priority: deadline (earlier deadline has higher priority)
+            if (a->deadline != b->deadline) {
+                return a->deadline > b->deadline;
+            }
+            // Second priority: resource size (smaller size has higher priority)
+            int64_t total_a =
+                a->required_size.memory_bytes + a->required_size.file_bytes;
+            int64_t total_b =
+                b->required_size.memory_bytes + b->required_size.file_bytes;
+            return total_a > total_b;
+        }
+    };
+
+    // reserveMemory without taking lock, must be called with lock held.
+    bool
+    reserveMemoryInternal(const ResourceUsage& size);
+
     void
     evictionLoop();
 
@@ -116,6 +174,14 @@ class DList {
     ResourceUsage
     tryEvict(const ResourceUsage& expected_eviction,
              const ResourceUsage& min_eviction);
+
+    // Notify waiting requests when resources are available
+    void
+    notifyWaitingRequests();
+
+    // Clear all waiting requests (used in destructor)
+    void
+    clearWaitingQueue();
 
     // Must be called under the lock of list_mtx_ and list_node->mtx_.
     // ListNode is guaranteed to be not in the list.
@@ -161,6 +227,21 @@ class DList {
     std::thread eviction_thread_;
     std::condition_variable eviction_thread_cv_;
     std::atomic<bool> stop_eviction_loop_{false};
+
+    // Waiting queue for timeout-based memory reservation
+    std::priority_queue<std::unique_ptr<WaitingRequest>,
+                        std::vector<std::unique_ptr<WaitingRequest>>,
+                        WaitingRequestComparator>
+        waiting_queue_;
+
+    // Quick lookup map for waiting requests (for timeout handling)
+    std::unordered_map<uint64_t, WaitingRequest*> waiting_requests_map_;
+
+    // Counter for generating unique request IDs
+    std::atomic<uint64_t> next_request_id_;
+
+    // Total size of nodes that are loaded and unpinned
+    std::atomic<ResourceUsage> evictable_size_{};
 };
 
 }  // namespace milvus::cachinglayer::internal

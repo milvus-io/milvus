@@ -5,6 +5,9 @@
 #include <vector>
 #include <memory>
 
+#include <folly/futures/Future.h>
+#include <folly/io/async/EventBase.h>
+
 #include "cachinglayer/lrucache/DList.h"
 #include "cachinglayer/Utils.h"
 #include "common/EasyAssert.h"
@@ -29,9 +32,20 @@ class DListTest : public ::testing::Test {
     std::unique_ptr<DList> dlist;
     // Keep track of nodes to prevent them from being deleted prematurely
     std::vector<std::shared_ptr<MockListNode>> managed_nodes;
+    std::unique_ptr<folly::EventBase> event_base_;
+    std::unique_ptr<std::thread> event_base_thread_;
+
+    DListTest() = default;
 
     void
     SetUp() override {
+        event_base_ = std::make_unique<folly::EventBase>();
+        event_base_thread_ = std::make_unique<std::thread>([this] {
+            LOG_INFO("[MCL] Starting cache EventBase thread");
+            folly::setThreadName("cache-eb");
+            event_base_->loopForever();
+        });
+        
         dlist = std::make_unique<DList>(
             initial_limit, low_watermark, high_watermark, eviction_config_);
         managed_nodes.clear();
@@ -39,8 +53,26 @@ class DListTest : public ::testing::Test {
 
     void
     TearDown() override {
-        managed_nodes.clear();
         dlist.reset();
+        managed_nodes.clear();
+        if (event_base_) {
+            event_base_->terminateLoopSoon();
+        }
+        if (event_base_thread_ && event_base_thread_->joinable()) {
+            event_base_thread_->join();
+        }
+    }
+
+    // Helper method to reserve memory with a large timeout for testing
+    // This simulates the old synchronous reserveMemory behavior
+    bool
+    reserveMemorySync(const ResourceUsage& size,
+                      std::chrono::milliseconds timeout =
+                          std::chrono::milliseconds(100)) {
+        // Use 1 hour timeout for tests
+        auto future =
+            dlist->reserveMemoryWithTimeout(size, timeout, event_base_.get());
+        return std::move(future).get();
     }
 
     // Helper to create a mock node, simulate loading it, and add it to the list.
@@ -70,6 +102,10 @@ class DListTest : public ::testing::Test {
         // Manually adjust used memory and list pointers
         DLF::test_add_used_memory(dlist.get(), size);
         DLF::test_push_head(dlist.get(), node);
+
+        if (pin_count == 0) {
+            dlist->increaseEvictableSize(size);
+        }
 
         return node;
     }
@@ -199,7 +235,7 @@ TEST_F(DListTest, UpdateLimitInvalid) {
 
 TEST_F(DListTest, ReserveMemorySufficient) {
     ResourceUsage size{20, 10};
-    EXPECT_TRUE(dlist->reserveMemory(size));
+    EXPECT_TRUE(reserveMemorySync(size));
     EXPECT_EQ(get_used_memory(), size);
 }
 
@@ -219,7 +255,7 @@ TEST_F(DListTest, ReserveMemoryRequiresEviction) {
     // Potential total: 110, 55. Need to free to low watermark 80, 40.
     ResourceUsage reserve_size{20, 15};
     // Evicting node1 ({40, 15}) is sufficient.
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_node2 + reserve_size);
     DLF::verify_list(dlist.get(), {node2});
@@ -238,7 +274,7 @@ TEST_F(DListTest, ReserveMemoryEvictPinnedSkipped) {
     EXPECT_CALL(*node_evict, clear_data()).Times(1);
 
     ResourceUsage reserve_size{20, 20};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_pinned + reserve_size);
     DLF::verify_list(dlist.get(), {node_pinned});
@@ -260,7 +296,7 @@ TEST_F(DListTest, ReserveMemoryEvictLockedSkipped) {
     std::unique_lock locked_node_lock(node_locked->test_get_mutex());
 
     ResourceUsage reserve_size{20, 20};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     locked_node_lock.unlock();
 
@@ -275,7 +311,7 @@ TEST_F(DListTest, ReserveMemoryInsufficientEvenWithEviction) {
 
     ResourceUsage reserve_size{200, 100};
 
-    EXPECT_FALSE(dlist->reserveMemory(reserve_size));
+    EXPECT_FALSE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_node1);
     EXPECT_FALSE(dlist->IsEmpty());
@@ -360,7 +396,7 @@ TEST_F(DListTest, ReserveMemoryEvictOnlyMemoryNeeded) {
     // node_disk_only is at tail, but it contains no memory, and disk usage is below low watermark,
     // thus evicting it does not help. We need to evict node_mixed to free up memory.
     ResourceUsage reserve_size{60, 0};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_disk + reserve_size);
     DLF::verify_list(dlist.get(), {node_disk_only});
@@ -380,7 +416,7 @@ TEST_F(DListTest, ReserveMemoryEvictOnlyDiskNeeded) {
     // node_memory_only is at tail, but it contains no disk, and memory usage is below low watermark,
     // thus evicting it does not help. We need to evict node_mixed to free up disk.
     ResourceUsage reserve_size{0, 30};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_memory + reserve_size);
     DLF::verify_list(dlist.get(), {node_memory_only});
@@ -401,7 +437,7 @@ TEST_F(DListTest, ReserveMemoryEvictBothNeeded) {
     EXPECT_CALL(*node3, clear_data()).Times(0);
 
     ResourceUsage reserve_size{10, 15};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage3 + reserve_size);
     DLF::verify_list(dlist.get(), {node3});
@@ -418,7 +454,7 @@ TEST_F(DListTest, ReserveToAboveLowWatermarkNoEviction) {
 
     // after reserve, 45, 22, end up in 85, 42, no eviction
     ResourceUsage reserve_size{45, 22};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage1 + usage2 + reserve_size);
     DLF::verify_list(dlist.get(), {node1, node2});
@@ -435,7 +471,7 @@ TEST_F(DListTest, ReserveToAboveHighWatermarkNoEvictionThenAutoEviction) {
 
     // after reserve, 55, 26, end up in 95, 46, above high watermark, no eviction
     ResourceUsage reserve_size{55, 26};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage1 + usage2 + reserve_size);
     DLF::verify_list(dlist.get(), {node1, node2});
@@ -462,7 +498,7 @@ TEST_F(DListTest, ReserveMemoryFailsAllPinned) {
     EXPECT_CALL(*node2, clear_data()).Times(0);
 
     ResourceUsage reserve_size{20, 20};
-    EXPECT_FALSE(dlist->reserveMemory(reserve_size));
+    EXPECT_FALSE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_node1 + usage_node2);
     DLF::verify_list(dlist.get(), {node1, node2});
@@ -483,7 +519,7 @@ TEST_F(DListTest, ReserveMemoryFailsAllLocked) {
     EXPECT_CALL(*node2, clear_data()).Times(0);
 
     ResourceUsage reserve_size{20, 20};
-    EXPECT_FALSE(dlist->reserveMemory(reserve_size));
+    EXPECT_FALSE(reserveMemorySync(reserve_size));
 
     lock1.unlock();
     lock2.unlock();
@@ -495,7 +531,7 @@ TEST_F(DListTest, ReserveMemoryFailsAllLocked) {
 TEST_F(DListTest, ReserveMemoryFailsSpecificPinned) {
     MockListNode* node_evict =
         add_and_load_node({80, 40}, "evict_candidate", 0, 1);
-    MockListNode* node_small = add_and_load_node({10, 5}, "small");
+    MockListNode* node_small = add_and_load_node({9, 4}, "small");
     ResourceUsage usage_evict = node_evict->size();
     ResourceUsage usage_small = node_small->size();
     DLF::verify_list(dlist.get(), {node_evict, node_small});
@@ -505,7 +541,7 @@ TEST_F(DListTest, ReserveMemoryFailsSpecificPinned) {
     EXPECT_CALL(*node_small, clear_data()).Times(0);
 
     ResourceUsage reserve_size{20, 20};
-    EXPECT_FALSE(dlist->reserveMemory(reserve_size));
+    EXPECT_FALSE(reserveMemorySync(reserve_size));
 
     EXPECT_EQ(get_used_memory(), usage_evict + usage_small);
     DLF::verify_list(dlist.get(), {node_evict, node_small});
@@ -513,7 +549,7 @@ TEST_F(DListTest, ReserveMemoryFailsSpecificPinned) {
 
 TEST_F(DListTest, ReserveMemoryFailsSpecificLocked) {
     MockListNode* node_evict = add_and_load_node({80, 40}, "evict_candidate");
-    MockListNode* node_small = add_and_load_node({10, 5}, "small");
+    MockListNode* node_small = add_and_load_node({9, 4}, "small");
     ResourceUsage usage_evict = node_evict->size();
     ResourceUsage usage_small = node_small->size();
     DLF::verify_list(dlist.get(), {node_evict, node_small});
@@ -525,7 +561,7 @@ TEST_F(DListTest, ReserveMemoryFailsSpecificLocked) {
     EXPECT_CALL(*node_small, clear_data()).Times(0);
 
     ResourceUsage reserve_size{20, 20};
-    EXPECT_FALSE(dlist->reserveMemory(reserve_size));
+    EXPECT_FALSE(reserveMemorySync(reserve_size));
 
     lock_evict.unlock();
 
@@ -711,7 +747,7 @@ TEST_F(DListTest, ReserveMemoryUsesLowWatermark) {
     // Expected eviction (target low watermark): 95/95 + 10/10 - 80/80 = 25/25.
     // Evicting node1 (45/45) satisfies both min and expected.
     ResourceUsage reserve_size{10, 10};
-    EXPECT_TRUE(dlist->reserveMemory(reserve_size));
+    EXPECT_TRUE(reserveMemorySync(reserve_size));
 
     // Expected usage: usage2 + reserve_size = (50,50) + (10,10) = (60,60)
     EXPECT_EQ(get_used_memory(), usage2 + reserve_size);
