@@ -52,7 +52,7 @@ pipeline {
                                               gitMode: gitMode ,
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
-                                              make_cmd: "make clean && make USE_ASAN=ON build-cpp-with-coverage",
+                                              make_cmd: "make clean && make jobs=8 USE_ASAN=ON build-cpp-with-coverage",
                                               test_entrypoint: "./scripts/run_cpp_codecov.sh",
                                               codecov_report_name: "cpp-unit-test",
                                               codecov_files: "./lcov_output.info",
