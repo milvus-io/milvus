@@ -6,14 +6,13 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package coordinator
 
 import (
@@ -23,14 +22,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tikv"
 )
@@ -148,4 +152,40 @@ func TestMixcoord_DisableActiveStandby(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	err = core.Stop()
 	assert.NoError(t, err)
+}
+
+func TestMixCoord_FlushAll(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockey.PatchConvey("test flush all success", t, func() {
+			mockDataCoord := &datacoord.Server{}
+			coord := &mixCoordImpl{
+				datacoordServer: mockDataCoord,
+			}
+			expectedResp := &datapb.FlushAllResponse{
+				Status:  merr.Success(),
+				FlushTs: 12345,
+			}
+			mockey.Mock((*datacoord.Server).FlushAll).Return(expectedResp, nil).Build()
+
+			resp, err := coord.FlushAll(context.Background(), &datapb.FlushAllRequest{})
+			assert.NoError(t, err)
+			assert.Equal(t, expectedResp, resp)
+		})
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		mockey.PatchConvey("test flush all failure", t, func() {
+			mockDataCoord := &datacoord.Server{}
+			coord := &mixCoordImpl{
+				datacoordServer: mockDataCoord,
+			}
+			expectedErr := errors.New("mock flush all error")
+			mockey.Mock((*datacoord.Server).FlushAll).Return(nil, expectedErr).Build()
+
+			resp, err := coord.FlushAll(context.Background(), &datapb.FlushAllRequest{})
+			assert.Error(t, err)
+			assert.Equal(t, expectedErr, err)
+			assert.Nil(t, resp)
+		})
+	})
 }
