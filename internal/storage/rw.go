@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -60,12 +61,16 @@ type rwOptions struct {
 	uploader            uploaderFn
 	multiPartUploadSize int64
 	columnGroups        []storagecommon.ColumnGroup
+	collectionID        int64
 	storageConfig       *indexpb.StorageConfig
 }
 
 func (o *rwOptions) validate() error {
 	if o.storageConfig == nil {
 		return merr.WrapErrServiceInternal("storage config is nil")
+	}
+	if o.storageConfig.CollectionID == 0 {
+		return merr.WrapErrServiceInternal("storage config collection id is empty")
 	}
 	if o.op == OpWrite && o.uploader == nil {
 		return merr.WrapErrServiceInternal("uploader is nil for writer")
@@ -96,6 +101,12 @@ func DefaultReaderOptions() *rwOptions {
 	return &rwOptions{
 		bufferSize: packed.DefaultReadBufferSize,
 		op:         OpRead,
+	}
+}
+
+func WithCollectionID(collID int64) RwOption {
+	return func(options *rwOptions) {
+		options.collectionID = collID
 	}
 }
 
@@ -220,13 +231,20 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+
+	binlogReaderOpts := []BinlogReaderOption{}
+	if hookutil.IsClusterEncyptionEnabled() {
+		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
+			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+		}
+	}
 	switch rwOptions.version {
 	case StorageV1:
 		blobsReader, err := makeBlobsReader(ctx, binlogs, rwOptions.downloader)
 		if err != nil {
 			return nil, err
 		}
-		return newCompositeBinlogRecordReader(schema, blobsReader)
+		return newCompositeBinlogRecordReader(schema, blobsReader, binlogReaderOpts...)
 	case StorageV2:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
@@ -269,11 +287,24 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 		}
 		return rwOptions.uploader(ctx, kvs)
 	}
+
+	opts := []StreamWriterOption{}
+	if hookutil.IsClusterEncyptionEnabled() {
+		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
+		if ez != nil {
+			encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
+			if err != nil {
+				return nil, err
+			}
+			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
+		}
+	}
+
 	switch rwOptions.version {
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
 		return newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID, schema,
-			blobsWriter, allocator, chunkSize, rootPath, maxRowNum,
+			blobsWriter, allocator, chunkSize, rootPath, maxRowNum, opts...,
 		)
 	case StorageV2:
 		return newPackedBinlogRecordWriter(collectionID, partitionID, segmentID, schema,

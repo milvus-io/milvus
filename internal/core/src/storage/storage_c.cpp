@@ -16,7 +16,12 @@
 
 #include "storage/storage_c.h"
 #include "storage/FileWriter.h"
+#include "common/EasyAssert.h"
 #include "monitor/prometheus_client.h"
+#include "rapidjson/error/error.h"
+#include "rapidjson/rapidjson.h"
+#include "rapidjson/reader.h"
+#include "storage/PluginLoader.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -154,4 +159,39 @@ void
 ResizeTheadPool(int64_t priority, float ratio) {
     milvus::ThreadPools::ResizeThreadPool(
         static_cast<milvus::ThreadPoolPriority>(priority), ratio);
+}
+
+void
+CleanPluginLoader() {
+    milvus::storage::PluginLoader::GetInstance().unloadAll();
+}
+
+CStatus
+InitPluginLoader(const char* plugin_path) {
+    try {
+        milvus::storage::PluginLoader::GetInstance().load(plugin_path);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+PutOrRefPluginContext(CPluginContext c_plugin_context){
+    auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipherPluginPtr) {
+        return milvus::FailureCStatus(milvus::PluginLoadFailed, "cipher plugin not loaded");
+    }
+    cipherPluginPtr-> Update(c_plugin_context.ez_id, c_plugin_context.collection_id, std::string(c_plugin_context.key));
+    return milvus::SuccessCStatus();
+}
+
+CStatus
+UnRefPluginContext(CPluginContext c_plugin_context){
+    auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
+    if (!cipherPluginPtr) {
+        return milvus::FailureCStatus(milvus::PluginLoadFailed, "cipher plugin not loaded");
+    }
+    cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, "");
+    return milvus::SuccessCStatus();
 }
