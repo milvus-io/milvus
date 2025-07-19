@@ -137,12 +137,14 @@ class SegmentSealed : public SegmentInternalInterface {
                     return path.substr(0, index.nested_path.length()) ==
                            index.nested_path;
                 }
+                if (index.nested_path != path) {
+                    return false;
+                }
                 if (any_type) {
                     return true;
                 }
-                return index.nested_path == path &&
-                       milvus::index::json::IsDataTypeSupported(
-                           index.cast_type, data_type, is_json_contain);
+                return milvus::index::json::IsDataTypeSupported(
+                    index.cast_type, data_type, is_json_contain);
             });
         return it != json_indices.end();
     }
