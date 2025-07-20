@@ -22,7 +22,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -112,7 +111,7 @@ func (s *Server) parseAndVerifyNestedPath(identifier string, schema *schemapb.Co
 		return "", err
 	}
 	if identifierExpr.GetColumnExpr().GetInfo().GetFieldId() != fieldID {
-		return "", errors.New("fieldID not match with field name")
+		return "", fmt.Errorf("field parsed from json path (%v) not match with field specified in request (%v)", identifierExpr.GetColumnExpr().GetInfo().GetFieldId(), fieldID)
 	}
 
 	nestedPath := identifierExpr.GetColumnExpr().GetInfo().GetNestedPath()
