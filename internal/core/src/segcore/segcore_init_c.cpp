@@ -186,6 +186,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const bool evictionEnabled,
                        const int64_t cache_touch_window_ms,
                        const int64_t eviction_interval_ms,
+                       const int64_t cache_cell_unaccessed_survival_time,
                        const float loading_memory_factor,
                        const float overloaded_memory_threshold_percentage,
                        const float max_disk_usage_percentage) {
@@ -201,7 +202,12 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          disk_high_watermark_bytes,
          disk_max_bytes},
         evictionEnabled,
-        {cache_touch_window_ms, eviction_interval_ms, overloaded_memory_threshold_percentage, max_disk_usage_percentage, loading_memory_factor});
+        {cache_touch_window_ms,
+         eviction_interval_ms,
+         cache_cell_unaccessed_survival_time,
+         overloaded_memory_threshold_percentage,
+         max_disk_usage_percentage,
+         loading_memory_factor});
 }
 
 }  // namespace milvus::segcore

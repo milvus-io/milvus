@@ -57,7 +57,8 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
             "disk watermark: low {}, high {}, max {}, "
             "cache touch window: {} ms, eviction interval: {} ms, "
             "physical memory max ratio: {}, max disk usage percentage: {}, "
-            "loading memory factor: {}",
+            "loading memory factor: {}, cache cell unaccessed survival time: "
+            "{} ms",
             FormatBytes(low_watermark.memory_bytes),
             FormatBytes(high_watermark.memory_bytes),
             FormatBytes(max.memory_bytes),
@@ -68,7 +69,8 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
             eviction_config.eviction_interval.count(),
             eviction_config.overloaded_memory_threshold_percentage,
             eviction_config.max_disk_usage_percentage,
-            eviction_config.loading_memory_factor);
+            eviction_config.loading_memory_factor,
+            eviction_config.cache_cell_unaccessed_survival_time.count());
     });
 }
 
