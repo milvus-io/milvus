@@ -472,7 +472,7 @@ func TestSearchGroupByUnsupportedDataType(t *testing.T) {
 	queryVec := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	for _, unsupportedField := range []string{
 		common.DefaultFloatFieldName, common.DefaultDoubleFieldName,
-		common.DefaultJSONFieldName, common.DefaultFloatVecFieldName, common.DefaultInt8ArrayField, common.DefaultFloatArrayField,
+		common.DefaultFloatVecFieldName, common.DefaultInt8ArrayField, common.DefaultFloatArrayField,
 	} {
 		_, err := mc.Search(ctx, client.NewSearchOption(collName, common.DefaultLimit, queryVec).WithGroupByField(unsupportedField).WithANNSField(common.DefaultFloatVecFieldName).WithConsistencyLevel(entity.ClStrong))
 		common.CheckErr(t, err, false, "unsupported data type")
