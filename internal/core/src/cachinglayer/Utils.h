@@ -247,6 +247,8 @@ struct EvictionConfig {
     // Use cache_touch_window_ms to reduce the frequency of touching and reduce contention.
     std::chrono::milliseconds cache_touch_window;
     std::chrono::milliseconds eviction_interval;
+    // Time after which an unaccessed cache cell will be evicted
+    std::chrono::seconds cache_cell_unaccessed_survival_time;
     // Overloaded memory threshold percentage - limits cache memory usage to this percentage of total physical memory
     float overloaded_memory_threshold_percentage;
     // Max disk usage percentage - limits disk cache usage to this percentage of total disk space (not used yet)
@@ -257,6 +259,7 @@ struct EvictionConfig {
     EvictionConfig()
         : cache_touch_window(std::chrono::milliseconds(0)),
           eviction_interval(std::chrono::milliseconds(0)),
+          cache_cell_unaccessed_survival_time(std::chrono::seconds(0)),
           overloaded_memory_threshold_percentage(0.9),
           max_disk_usage_percentage(0.95),
           loading_memory_factor(2.5f) {
@@ -265,6 +268,7 @@ struct EvictionConfig {
     EvictionConfig(int64_t cache_touch_window_ms, int64_t eviction_interval_ms)
         : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
           eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
+          cache_cell_unaccessed_survival_time(std::chrono::seconds(0)),
           overloaded_memory_threshold_percentage(0.9),
           max_disk_usage_percentage(0.95),
           loading_memory_factor(2.5f) {
@@ -272,11 +276,14 @@ struct EvictionConfig {
 
     EvictionConfig(int64_t cache_touch_window_ms,
                    int64_t eviction_interval_ms,
+                   int64_t cache_cell_unaccessed_survival_time,
                    float overloaded_memory_threshold_percentage,
                    float max_disk_usage_percentage,
-                   float loading_memory_factor = 2.5f)
+                   float loading_memory_factor)
         : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
           eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
+          cache_cell_unaccessed_survival_time(
+              std::chrono::seconds(cache_cell_unaccessed_survival_time)),
           overloaded_memory_threshold_percentage(
               overloaded_memory_threshold_percentage),
           max_disk_usage_percentage(max_disk_usage_percentage),

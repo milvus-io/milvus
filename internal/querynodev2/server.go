@@ -382,6 +382,7 @@ func (node *QueryNode) InitSegcore() error {
 	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+	cacheCellUnaccessedSurvivalTime := C.int64_t(paramtable.Get().QueryNodeCfg.CacheCellUnaccssedSurvivalTime.GetAsInt64())
 	loadingMemoryFactor := C.float(paramtable.Get().QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
@@ -392,7 +393,7 @@ func (node *QueryNode) InitSegcore() error {
 		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
-		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs,
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
 		loadingMemoryFactor, overloadedMemoryThresholdPercentage, maxDiskUsagePercentage)
 
 	err = initcore.InitInterminIndexConfig(paramtable.Get())

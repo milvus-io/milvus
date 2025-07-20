@@ -2842,6 +2842,7 @@ type queryNodeConfig struct {
 	TieredCacheTouchWindowMs       ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs       ParamItem `refreshable:"false"`
 	TieredLoadingMemoryFactor      ParamItem `refreshable:"false"`
+	CacheCellUnaccssedSurvivalTime ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3159,6 +3160,24 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: false,
 	}
 	p.TieredLoadingMemoryFactor.Init(base.mgr)
+
+	p.CacheCellUnaccssedSurvivalTime = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			timeout := getAsInt64(v)
+			if timeout <= 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%d", timeout)
+		},
+		Doc: `Time in seconds after which an unaccessed cache cell will be evicted. 
+If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
+If set to 0, time based eviction is disabled.`,
+		Export: true,
+	}
+	p.CacheCellUnaccssedSurvivalTime.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",

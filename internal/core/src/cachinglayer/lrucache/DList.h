@@ -115,7 +115,10 @@ class DList {
     //    we don't update used_memory_ here.
     // 2. when a cell is loaded as a bonus, we need to touch it to insert into the LRU and update
     //    used_memory_ to track the memory usage(usage of such cell is not counted during reservation).
-    void
+    // 
+    // Returns the time point when the item was last touched. This methods always acquires the 
+    // global list_mtx_, thus the returned time point is guaranteed to be monotonically increasing.
+    std::chrono::high_resolution_clock::time_point
     touchItem(ListNode* list_node,
               std::optional<ResourceUsage> size = std::nullopt);
 
@@ -188,7 +191,8 @@ class DList {
     // Returns the logical amount of resources that are evicted. 0 means no eviction happened.
     ResourceUsage
     tryEvict(const ResourceUsage& expected_eviction,
-             const ResourceUsage& min_eviction);
+             const ResourceUsage& min_eviction,
+             const bool evict_expired_items = false);
 
     // Notify waiting requests when resources are available.
     // This method should be called with list_mtx_ already held.

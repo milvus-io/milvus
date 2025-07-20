@@ -165,20 +165,18 @@ DList::evictionLoop() {
         }
         auto used = used_memory_.load();
         // if usage is above high watermark, evict until low watermark is reached.
-        if (used.memory_bytes >= high_watermark_.memory_bytes ||
-            used.file_bytes >= high_watermark_.file_bytes) {
-            tryEvict(
-                {
-                    used.memory_bytes >= high_watermark_.memory_bytes
-                        ? used.memory_bytes - low_watermark_.memory_bytes
-                        : 0,
-                    used.file_bytes >= high_watermark_.file_bytes
-                        ? used.file_bytes - low_watermark_.file_bytes
-                        : 0,
-                },
-                // in eviction loop, we always evict as much as possible until low watermark.
-                {0, 0});
-        }
+        tryEvict(
+            {
+                used.memory_bytes >= high_watermark_.memory_bytes
+                    ? used.memory_bytes - low_watermark_.memory_bytes
+                    : 0,
+                used.file_bytes >= high_watermark_.file_bytes
+                    ? used.file_bytes - low_watermark_.file_bytes
+                    : 0,
+            },
+            // in eviction loop, we always evict as much as possible until low watermark.
+            {0, 0},
+            eviction_config_.cache_cell_unaccessed_survival_time.count() > 0);
     }
 }
 
@@ -237,7 +235,8 @@ DList::chainString() const {
 
 ResourceUsage
 DList::tryEvict(const ResourceUsage& expected_eviction,
-                const ResourceUsage& min_eviction) {
+                const ResourceUsage& min_eviction,
+                const bool evict_expired_items) {
     // Fast path: check if we have enough evictable resources
     auto current_evictable = evictable_size_.load();
     if (!current_evictable.CanHold(min_eviction)) {
@@ -269,7 +268,8 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
     ResourceUsage actively_pinned{0, 0};
 
     // accumulate victims using expected_eviction.
-    for (auto it = tail_; it != nullptr; it = it->next_) {
+    ListNode* it = nullptr;
+    for (it = tail_; it != nullptr; it = it->next_) {
         if (!would_help(it->size())) {
             continue;
         }
@@ -281,6 +281,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             to_evict.push_back(it);
             size_to_evict += it->size();
             if (size_to_evict.CanHold(expected_eviction)) {
+                it = it->next_;
                 break;
             }
         } else {
@@ -289,6 +290,30 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             item_locks.pop_back();
             if (acquired_lock) {
                 actively_pinned += it->size();
+            }
+        }
+    }
+    if (evict_expired_items) {
+        auto time_threshold =
+            std::chrono::high_resolution_clock::now() -
+            eviction_config_.cache_cell_unaccessed_survival_time;
+        for (; it != nullptr; it = it->next_) {
+            auto& lock = item_locks.emplace_back(it->mtx_, std::try_to_lock);
+            bool acquired_lock = lock.owns_lock();
+            if (acquired_lock && it->pin_count_ == 0) {
+                if (it->last_touch_ < time_threshold) {
+                    to_evict.push_back(it);
+                    size_to_evict += it->size();
+                } else {
+                    // since all ListNodes in a DList are sorted by last_touch_,
+                    // we can break here.
+                    break;
+                }
+            } else {
+                item_locks.pop_back();
+                if (acquired_lock) {
+                    actively_pinned += it->size();
+                }
             }
         }
     }
@@ -427,7 +452,7 @@ DList::releaseMemory(const ResourceUsage& size) {
     notifyWaitingRequests();
 }
 
-void
+std::chrono::high_resolution_clock::time_point
 DList::touchItem(ListNode* list_node, std::optional<ResourceUsage> size) {
     std::lock_guard<std::mutex> list_lock(list_mtx_);
     popItem(list_node);
@@ -441,6 +466,7 @@ DList::touchItem(ListNode* list_node, std::optional<ResourceUsage> size) {
             notifyWaitingRequests();
         }
     }
+    return std::chrono::high_resolution_clock::now();
 }
 
 void
