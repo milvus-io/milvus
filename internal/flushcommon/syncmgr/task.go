@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -126,9 +125,8 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			log.Info("segment dropped, discard sync task")
 			return nil
 		}
-		log.Warn("failed to sync data, segment not found in metacache")
-		err := merr.WrapErrSegmentNotFound(t.segmentID)
-		return err
+		log.Warn("segment not found in metacache, may be already synced")
+		return nil
 	}
 
 	switch segmentInfo.GetStorageVersion() {
