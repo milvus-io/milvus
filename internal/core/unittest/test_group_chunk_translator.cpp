@@ -100,30 +100,22 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, "");
-    // Get row group metadata
-    std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-    auto fr =
-        std::make_shared<milvus_storage::FileRowGroupReader>(fs_, paths_[0]);
-
-    row_group_meta_list.push_back(
-        fr->file_metadata()->GetRowGroupMetadataVector());
-    auto status = fr->Close();
-    AssertInfo(
-        status.ok(),
-        "failed to close file reader when get row group metadata from file: " +
-            paths_[0] + " with error: " + status.ToString());
 
     auto translator = std::make_unique<GroupChunkTranslator>(segment_id_,
                                                              field_metas,
                                                              column_group_info,
                                                              paths_,
                                                              use_mmap,
-                                                             row_group_meta_list,
                                                              schema_->get_field_ids().size(),
                                                              milvus::proto::common::LoadPriority::LOW);
 
-    // num cells
-    EXPECT_EQ(translator->num_cells(), row_group_meta_list[0].size());
+    // num cells - get the expected number from the file directly
+    auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(fs_, paths_[0]);
+    auto expected_num_cells = fr->file_metadata()->GetRowGroupMetadataVector().size();
+    auto row_group_metadata_vector = fr->file_metadata()->GetRowGroupMetadataVector();
+    auto status = fr->Close();
+    AssertInfo(status.ok(), "failed to close file reader");
+    EXPECT_EQ(translator->num_cells(), expected_num_cells);
 
     // cell id of
     for (size_t i = 0; i < translator->num_cells(); ++i) {
@@ -133,14 +125,16 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     // key
     EXPECT_EQ(translator->key(), "seg_0_cg_0");
 
+
+
     // estimated byte size
     for (size_t i = 0; i < translator->num_cells(); ++i) {
         auto [file_idx, row_group_idx] =
             translator->get_file_and_row_group_index(i);
-        auto& row_group_meta = row_group_meta_list[file_idx].Get(row_group_idx);
+        // Get the expected memory size from the file directly
+        auto expected_memory_size = static_cast<int64_t>(row_group_metadata_vector.Get(row_group_idx).memory_size());
         auto usage = translator->estimated_byte_size_of_cell(i);
-        EXPECT_EQ(usage.memory_bytes,
-                  static_cast<int64_t>(row_group_meta.memory_size()));
+        EXPECT_EQ(usage.memory_bytes, expected_memory_size);
     }
 
     // getting cells
