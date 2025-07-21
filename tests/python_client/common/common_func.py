@@ -1654,20 +1654,6 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
 
     return df, binary_raw_values
 
-#
-# def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True):
-#     int_values = [i for i in range(start, start + nb)]
-#     float_values = [np.float32(i) for i in range(start, start + nb)]
-#     string_values = [str(i) for i in range(start, start + nb)]
-#     json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
-#                    for i in range(start, start + nb)]
-#     float_vec_values = gen_vectors(nb, dim)
-#     if with_json is False:
-#         data = [int_values, float_values, string_values, float_vec_values]
-#     else:
-#         data = [int_values, float_values, string_values, json_values, float_vec_values]
-#     return data
-
 
 def gen_default_list_sparse_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=False):
     int_values = [i for i in range(start, start + nb)]
@@ -1728,17 +1714,33 @@ def prepare_bulk_insert_data(schema=None,
     return files
 
 
-def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=None):
+def gen_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=0):
+    return get_column_data_by_schema(nb=nb, schema=schema, skip_vectors=skip_vectors, start=start)
+
+
+def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=0):
+    """
+    Generates column data based on the given schema.
+    
+    Args:
+        nb (int): Number of rows to generate. Defaults to ct.default_nb.
+        schema (Schema): Collection schema. If None, uses default schema.
+        skip_vectors (bool): Whether to skip vector fields. Defaults to False.
+        start (int): Starting value for primary key fields (default: 0)
+    
+    Returns:
+        list: List of column data arrays matching the schema fields (excluding auto_id fields).
+    """
     if schema is None:
         schema = gen_default_collection_schema()
     fields = schema.fields
-    fields_not_auto_id = []
+    fields_to_gen = []
     for field in fields:
-        if not field.auto_id:
-            fields_not_auto_id.append(field)
+        if not field.auto_id and not field.is_function_output:
+            fields_to_gen.append(field)
     data = []
-    for field in fields_not_auto_id:
-        if field.dtype == DataType.FLOAT_VECTOR and skip_vectors is True:
+    for field in fields_to_gen:
+        if field.dtype in ct.all_vector_types and skip_vectors is True:
             tmp = []
         else:
             tmp = gen_data_by_collection_field(field, nb=nb, start=start)
@@ -1746,38 +1748,86 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=None):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0):
+    """
+    Generates row data based on the given schema.
+    
+    Args:
+        nb (int): Number of rows to generate. Defaults to ct.default_nb.
+        schema (Schema): Collection schema or collection info. If None, uses default schema.
+        start (int): Starting value for primary key fields. Defaults to 0.
+    
+    Returns:
+        list[dict]: List of dictionaries where each dictionary represents a row,
+                    with field names as keys and generated data as values.
+    
+    Notes:
+        - Skips auto_id fields and function output fields.
+        - For primary key fields, generates sequential values starting from 'start'.
+        - For non-primary fields, generates random data based on field type.
+    """
     if schema is None:
         schema = gen_default_collection_schema()
+
     # ignore auto id field and the fields in function output
     func_output_fields = []
-    if hasattr(schema, "functions"):
-        functions = schema.functions
+    if isinstance(schema, dict):
+        # a dict of collection schema info is usually from client.describe_collection()
+        fields = schema.get('fields', [])
+        functions = schema.get('functions', [])
         for func in functions:
-            output_field_names = func.output_field_names
+            output_field_names = func.get('output_field_names', [])
             func_output_fields.extend(output_field_names)
-    func_output_fields = list(set(func_output_fields))
-    fields = schema.fields
-    fields_needs_data = []
-    for field in fields:
-        if field.auto_id:
-            continue
-        if field.name in func_output_fields:
-            continue
-        fields_needs_data.append(field)
-    data = []
-    for i in range(nb):
-        tmp = {}
-        for field in fields_needs_data:
-            tmp[field.name] = gen_data_by_collection_field(field)
-            if start is not None and field.dtype == DataType.INT64:
-                tmp[field.name] = start
-                start += 1
-            if field.nullable is True:
-                # 10% percent of data is null
-                if random.random() < 0.1:
-                    tmp[field.name] = None
-        data.append(tmp)
+        func_output_fields = list(set(func_output_fields))
+
+        fields_needs_data = []
+        for field in fields:
+            if field.get('auto_id', False):
+                continue
+            if field.get('name', None) in func_output_fields:
+                continue
+            fields_needs_data.append(field)
+        data = []
+        for i in range(nb):
+            tmp = {}
+            for field in fields_needs_data:
+                tmp[field.get('name', None)] = gen_data_by_collection_field(field)
+                if field.get('is_primary', False) is True and field.get('type', None) == DataType.INT64:
+                    tmp[field.get('name', None)] = start
+                    start += 1
+                if field.get('is_primary', False) is True and field.get('type', None) == DataType.VARCHAR:
+                    tmp[field.get('name', None)] = str(start)
+                    start += 1
+            data.append(tmp)
+    else:
+        # a schema object is usually form orm schema object
+        fields = schema.fields
+        if hasattr(schema, "functions"):
+            functions = schema.functions
+            for func in functions:
+                output_field_names = func.output_field_names
+                func_output_fields.extend(output_field_names)
+        func_output_fields = list(set(func_output_fields))
+
+        fields_needs_data = []
+        for field in fields:
+            if field.auto_id:
+                continue
+            if field.name in func_output_fields:
+                continue
+            fields_needs_data.append(field)
+        data = []
+        for i in range(nb):
+            tmp = {}
+            for field in fields_needs_data:
+                tmp[field.name] = gen_data_by_collection_field(field)
+                if field.is_primary is True and field.dtype == DataType.INT64:
+                    tmp[field.name] = start
+                    start += 1
+                if field.is_primary is True and field.dtype == DataType.VARCHAR:
+                    tmp[field.name] = str(start)
+                    start += 1
+            data.append(tmp)
     return data
 
 
@@ -1964,143 +2014,214 @@ def gen_varchar_data(length: int, nb: int, text_mode=False):
         return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
 
-def gen_data_by_collection_field(field, nb=None, start=None):
-    # if nb is None, return one data, else return a list of data
-    nullable = field.nullable
-    if nullable is True:
-        if random.random() < 0.1:
-            return None
-    data_type = field.dtype
-    enable_analyzer = field.params.get("enable_analyzer", False)
+def gen_data_by_collection_field(field, nb=None, start=0):
+    """
+    Generates test data for a given collection field based on its data type and properties.
+    
+    Args:
+        field (dict or Field): Field information, either as a dictionary (v2 client) or Field object (ORM client)
+        nb (int, optional): Bumber of data batch to generate. If None, returns a single value which usually used by row data generation
+        start (int, optional): Starting value for primary key fields (default: 0)
+    
+    Returns:
+        Single value if nb is None, otherwise returns a list of generated values
+    
+    Notes:
+        - Handles various data types including primitive types, vectors, arrays and JSON
+        - For nullable fields, generates None values approximately 20% of the time
+        - Special handling for primary key fields (sequential values)
+        - For varchar field, use min(20, max_length) to gen data
+        - For vector fields, generates random vectors of specified dimension
+        - For array fields, generates arrays filled with random values of element type
+    """
+    
+    if isinstance(field, dict):
+        # for v2 client, it accepts a dict of field info
+        nullable = field.get('nullable', False)
+        data_type = field.get('type', None)
+        enable_analyzer = field.get('params').get("enable_analyzer", False)
+        is_primary = field.get('is_primary', False)
+    else:
+        # for ORM client, it accepts a field object
+        nullable = field.nullable
+        data_type = field.dtype
+        enable_analyzer = field.params.get("enable_analyzer", False)
+        is_primary = field.is_primary
+
+    # generate data according to the data type
     if data_type == DataType.BOOL:
         if nb is None:
-            return random.choice([True, False])
-        return [random.choice([True, False]) for _ in range(nb)]
-    if data_type == DataType.INT8:
+            return random.choice([True, False]) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [random.choice([True, False]) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0  and random.random() < 0.4 else random.choice([True, False]) for i in range(nb)]
+    elif data_type == DataType.INT8:
         if nb is None:
-            return random.randint(-128, 127)
-        return [random.randint(-128, 127) for _ in range(nb)]
-    if data_type == DataType.INT16:
+            return random.randint(-128, 127) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [random.randint(-128, 127) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-128, 127) for i in range(nb)]
+    elif data_type == DataType.INT16:
         if nb is None:
-            return random.randint(-32768, 32767)
-        return [random.randint(-32768, 32767) for _ in range(nb)]
-    if data_type == DataType.INT32:
+            return random.randint(-32768, 32767) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [random.randint(-32768, 32767) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-32768, 32767) for i in range(nb)]
+    elif data_type == DataType.INT32:
         if nb is None:
-            return random.randint(-2147483648, 2147483647)
-        return [random.randint(-2147483648, 2147483647) for _ in range(nb)]
-    if data_type == DataType.INT64:
+            return random.randint(-2147483648, 2147483647) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [random.randint(-2147483648, 2147483647) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-2147483648, 2147483647) for i in range(nb)]
+    elif data_type == DataType.INT64:
         if nb is None:
-            return random.randint(-9223372036854775808, 9223372036854775807)
-        if start is not None:
-            return [i for i in range(start, start+nb)]
-        return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(nb)]
-    if data_type == DataType.FLOAT:
+            return random.randint(-9223372036854775808, 9223372036854775807) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            if is_primary is True: 
+                return [i for i in range(start, start+nb)]
+            else:
+                return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-9223372036854775808, 9223372036854775807) for i in range(nb)]
+    elif data_type == DataType.FLOAT:
         if nb is None:
-            return np.float32(random.random())
-        return [np.float32(random.random()) for _ in range(nb)]
-    if data_type == DataType.DOUBLE:
+            return np.float32(random.random()) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [np.float32(random.random()) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else np.float32(random.random()) for i in range(nb)]
+    elif data_type == DataType.DOUBLE:
         if nb is None:
-            return np.float64(random.random())
-        return [np.float64(random.random()) for _ in range(nb)]
-    if data_type == DataType.VARCHAR:
-        max_length = field.params['max_length']
+            return np.float64(random.random()) if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [np.float64(random.random()) for _ in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else np.float64(random.random()) for i in range(nb)]
+    elif data_type == DataType.VARCHAR:
+        if isinstance(field, dict):
+            max_length = field.get('params')['max_length']
+        else:
+            max_length = field.params['max_length']
         max_length = min(20, max_length-1)
         length = random.randint(0, max_length)
         if nb is None:
-            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0]
-        return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
-    if data_type == DataType.JSON:
+            return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0] if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            if is_primary is True:
+                return [str(i) for i in range(start, start+nb)]
+            else:
+                return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0] for i in range(nb)]
+    elif data_type == DataType.JSON:
         if nb is None:
-            return {"name": fake.name(), "address": fake.address(), "count": random.randint(0, 100)}
-        data = [{"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
-        return data
-    if data_type == DataType.FLOAT_VECTOR:
-        dim = field.params['dim']
+            return {"name": fake.name(), "address": fake.address(), "count": random.randint(0, 100)} if random.random() < 0.8 or nullable is False else None
+        if nullable is False:
+            return [{"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
+        else:
+            # gen 20% none data for nullable field
+            return [None if i % 2 == 0 and random.random() < 0.4 else {"name": str(i), "address": i, "count": random.randint(0, 100)} for i in range(nb)]
+    elif data_type in ct.all_vector_types:
+        if isinstance(field, dict):
+            dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.get('params')['dim']
+        else:
+            dim = ct.default_dim if data_type == DataType.SPARSE_FLOAT_VECTOR else field.params['dim']
         if nb is None:
-            return [random.random() for i in range(dim)]
-        return [[random.random() for i in range(dim)] for _ in range(nb)]
-    if data_type == DataType.BFLOAT16_VECTOR:
-        dim = field.params['dim']
-        if nb is None:
-            return RNG.uniform(size=dim).astype(bfloat16)
-        return [RNG.uniform(size=dim).astype(bfloat16) for _ in range(int(nb))]
-        # if nb is None:
-        #     raw_vector = [random.random() for _ in range(dim)]
-        #     bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
-        #     return bytes(bf16_vector)
-        # bf16_vectors = []
-        # for i in range(nb):
-        #     raw_vector = [random.random() for _ in range(dim)]
-        #     bf16_vector = np.array(raw_vector, dtype=bfloat16).view(np.uint8).tolist()
-        #     bf16_vectors.append(bytes(bf16_vector))
-        # return bf16_vectors
-    if data_type == DataType.FLOAT16_VECTOR:
-        dim = field.params['dim']
-        if nb is None:
-            return np.array([random.random() for _ in range(int(dim))], dtype=np.float16)
-        return [np.array([random.random() for _ in range(int(dim))], dtype=np.float16) for _ in range(int(nb))]
-    if data_type == DataType.INT8_VECTOR:
-        dim = field.params['dim']
-        if nb is None:
-            raw_vector = [random.randint(-128, 127) for _ in range(dim)]
-            int8_vector = np.array(raw_vector, dtype=np.int8)
-            return int8_vector
-        raw_vectors = [[random.randint(-128, 127) for _ in range(dim)] for _ in range(nb)]
-        int8_vectors = [np.array(raw_vector, dtype=np.int8) for raw_vector in raw_vectors]
-        return int8_vectors
-
-    if data_type == DataType.BINARY_VECTOR:
-        dim = field.params['dim']
-        if nb is None:
-            raw_vector = [random.randint(0, 1) for _ in range(dim)]
-            binary_byte = bytes(np.packbits(raw_vector, axis=-1).tolist())
-            return binary_byte
-        return [bytes(np.packbits([random.randint(0, 1) for _ in range(dim)], axis=-1).tolist()) for _ in range(nb)]
-    if data_type == DataType.SPARSE_FLOAT_VECTOR:
-        if nb is None:
-            return gen_sparse_vectors(nb=1)[0]
-        return gen_sparse_vectors(nb=nb)
-    if data_type == DataType.ARRAY:
-        max_capacity = field.params['max_capacity']
+            return gen_vectors(1, dim, vector_data_type=data_type)[0]
+        if nullable is False:
+            return gen_vectors(nb, dim, vector_data_type=data_type)
+        else:
+            raise MilvusException(message=f"gen data failed, vector field does not support nullable")
+    elif data_type == DataType.ARRAY:
+        if isinstance(field, dict):
+            max_capacity = field.get('params')['max_capacity']
+        else:
+            max_capacity = field.params['max_capacity']
         element_type = field.element_type
         if element_type == DataType.INT8:
             if nb is None:
-                return [random.randint(-128, 127) for _ in range(max_capacity)]
-            return [[random.randint(-128, 127) for _ in range(max_capacity)] for _ in range(nb)]
+                return [random.randint(-128, 127) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[random.randint(-128, 127) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-128, 127) for i in range(nb)]
         if element_type == DataType.INT16:
             if nb is None:
-                return [random.randint(-32768, 32767) for _ in range(max_capacity)]
-            return [[random.randint(-32768, 32767) for _ in range(max_capacity)] for _ in range(nb)]
+                return [random.randint(-32768, 32767) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[random.randint(-32768, 32767) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-32768, 32767) for i in range(nb)]
         if element_type == DataType.INT32:
             if nb is None:
-                return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)]
-            return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
+                return [random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[random.randint(-2147483648, 2147483647) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-2147483648, 2147483647) for i in range(nb)]
         if element_type == DataType.INT64:
             if nb is None:
-                return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)]
-            return [[random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)] for _ in range(nb)]
-
+                return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[random.randint(-9223372036854775808, 9223372036854775807) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else random.randint(-9223372036854775808, 9223372036854775807) for i in range(nb)]
         if element_type == DataType.BOOL:
             if nb is None:
-                return [random.choice([True, False]) for _ in range(max_capacity)]
-            return [[random.choice([True, False]) for _ in range(max_capacity)] for _ in range(nb)]
-
+                return [random.choice([True, False]) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[random.choice([True, False]) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else random.choice([True, False]) for i in range(nb)]
         if element_type == DataType.FLOAT:
             if nb is None:
-                return [np.float32(random.random()) for _ in range(max_capacity)]
-            return [[np.float32(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+                return [np.float32(random.random()) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[np.float32(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else np.float32(random.random()) for i in range(nb)]
         if element_type == DataType.DOUBLE:
             if nb is None:
-                return [np.float64(random.random()) for _ in range(max_capacity)]
-            return [[np.float64(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
-
+                return [np.float64(random.random()) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [[np.float64(random.random()) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else np.float64(random.random()) for i in range(nb)]
         if element_type == DataType.VARCHAR:
-            max_length = field.params['max_length']
+            if isinstance(field, dict):
+                max_length = field.get('params')['max_length']
+            else:
+                max_length = field.params['max_length']
             max_length = min(20, max_length - 1)
             length = random.randint(0, max_length)
             if nb is None:
-                return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)]
-            return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
+                return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] if random.random() < 0.8 or nullable is False else None
+            if nullable is False:
+                return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
+            else:
+                # gen 20% none data for nullable field
+                return [None if i % 2 == 0 and random.random() < 0.4 else "".join([chr(random.randint(97, 122)) for _ in range(length)]) for i in range(nb)]
+    else:
+        raise MilvusException(message=f"gen data failed, data type {data_type} not implemented")
     return None
 
 
@@ -3406,11 +3527,30 @@ def install_milvus_operator_specific_config(namespace, milvus_mode, release_name
 
 
 def get_wildcard_output_field_names(collection_w, output_fields):
-    all_fields = [field.name for field in collection_w.schema.fields]
+    """
+    Processes output fields with wildcard ('*') expansion for collection queries.
+    
+    Args:
+        collection_w (Union[dict, CollectionWrapper]): Collection information, 
+        either as a dict (v2 client) or ORM wrapper.
+        output_fields (List[str]): List of requested output fields, may contain '*' wildcard.
+    
+    Returns:
+        List[str]: Expanded list of output fields with wildcard replaced by all available field names.
+    """
+    if not isinstance(collection_w, dict):
+        # in orm, it accepts a collection wrapper
+        field_names = [field.name for field in collection_w.schema.fields]
+    else:
+        # in client v2, it accepts a dict of collection info
+        fields = collection_w.get('fields', None)
+        field_names = [field.get('name') for field in fields]
+
     output_fields = output_fields.copy()
     if "*" in output_fields:
         output_fields.remove("*")
-        output_fields.extend(all_fields)
+        output_fields.extend(field_names)
+
     return output_fields
 
 

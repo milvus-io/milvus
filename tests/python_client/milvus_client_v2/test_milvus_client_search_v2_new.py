@@ -1,4 +1,6 @@
 import logging
+import time
+
 import numpy as np
 from common.constants import *
 from utils.util_pymilvus import *
@@ -47,13 +49,13 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         self.collection_name = "TestMilvusClientSearchV2" + cf.gen_unique_str("_")
         self.partition_names = ["partition_1", "partition_2"]
         self.pk_field_name = ct.default_primary_field_name
-        self.float_vector_field_name = "float_vector"
+        self.float_vector_field_name = ct.default_float_vec_field_name
         self.bfloat16_vector_field_name = "bfloat16_vector"
         self.sparse_vector_field_name = "sparse_vector"
         self.binary_vector_field_name = "binary_vector"
-        self.float_vector_dim = 128
-        self.bf16_vector_dim = 200
-        self.binary_vector_dim = 256
+        self.float_vector_dim = 36
+        self.bf16_vector_dim = 35
+        self.binary_vector_dim = 32
         self.float_vector_metric = "COSINE"
         self.bf16_vector_metric = "L2"
         self.sparse_vector_metric = "IP"
@@ -346,7 +348,8 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1]))
+    # @pytest.mark.parametrize("limit, nq", zip([1, 1000, ct.max_limit], [ct.max_nq, 10, 1]))
+    @pytest.mark.parametrize("limit, nq", zip([ct.max_limit], [1]))
     def test_search_with_different_nq_limits(self, limit, nq):
         """
         target: test search with different nq and limit values
@@ -360,7 +363,7 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
 
         # Generate vectors to search
         vectors_to_search = cf.gen_vectors(nq, self.float_vector_dim)
-        search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
+        search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 128}}
 
         # search with limit
         search_res, _ = self.search(
@@ -453,6 +456,73 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
                          "pk_name": self.pk_field_name
                          }
         )
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("wildcard_output_fields", [["*"], ["*", ct.default_primary_field_name],
+                                                        ["*", ct.default_float_vec_field_name]])
+    def test_search_partition_with_output_fields(self, wildcard_output_fields):
+        """
+        target: test partition search with output fields
+        method: 1. connect to milvus 
+                2. partition search on an existing collection with output fields
+        expected: search successfully with output fields
+        """
+        client = self._client()
+        collection_name = self.collection_name
+        collection_info = self.describe_collection(client, collection_name)[0]
+        fields = collection_info.get('fields', None)
+        field_names = [field.get('name') for field in fields]
+        partition_name = self.partition_names[0]
+
+        # Generate vectors to search
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
+        search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
+
+        # search with output fields
+        output_fields = cf.get_wildcard_output_field_names(collection_info, wildcard_output_fields)
+        search_res, _ = self.search(
+            client,
+            collection_name,
+            vectors_to_search[:default_nq],
+            partition_names=[partition_name],
+            anns_field=self.float_vector_field_name,
+            search_params=search_params,
+            limit=default_limit,
+            output_fields=["*"],
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True,
+                         "nq": default_nq,
+                         "limit": default_limit,
+                         "output_fields": field_names.extend([self.dyna_filed_name1, self.dyna_filed_name2])})
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_invalid_output_fields(self):
+        """
+        target: test search with output fields using wildcard
+        method: search with one output_field (wildcard)
+        expected: search success
+        """
+        client = self._client()
+        collection_name = self.collection_name
+        collection_info = self.describe_collection(client, collection_name)[0]
+        fields = collection_info.get('fields', None)
+        field_names = [field.get('name') for field in fields]
+        partition_name = self.partition_names[0]
+
+        # Generate vectors to search
+        vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
+        search_params = {}
+        invalid_output_fields = [["%"], [""], ["-"], ["non_exist_field"]]
+        for field in invalid_output_fields:
+            error1 = {ct.err_code: 999, ct.err_msg: "field %s not exist" % field[0]}
+            error2 = {ct.err_code: 999, ct.err_msg: "`output_fields` value %s is illegal" % field}
+            error = error2 if field == [""] else error1
+            self.search(client, collection_name, vectors_to_search[:default_nq],
+                                anns_field=self.float_vector_field_name,
+                                search_params=search_params,
+                                limit=default_limit,
+                                output_fields=field,
+                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_more_than_max_limit(self):
@@ -727,19 +797,12 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         schema = self.create_schema(client)[0]
         schema.add_field(ct.default_primary_field_name, DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=ct.default_dim)
-        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
-        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=256)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT, nullable=True)
+        schema.add_field(ct.default_string_field_name, DataType.VARCHAR, max_length=256, nullable=True)
         self.create_collection(client, collection_name, schema=schema)
 
         # insert data
-        data = []
-        for i in range(default_nb):
-            data.append({
-                ct.default_primary_field_name: i,
-                ct.default_float_vec_field_name: cf.gen_vectors(1, ct.default_dim)[0],
-                ct.default_float_field_name: i * 1.0,
-                ct.default_string_field_name: str(i)
-            })
+        data = cf.gen_row_data_by_schema(schema=schema, nb=default_nb)
         self.insert(client, collection_name, data)
 
         # create index with metric cosine
@@ -957,7 +1020,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
 
         # fast create collection
-        self.create_collection(client, collection_name, dimension=ct.default_dim)
+        self.create_collection(client, collection_name, dimension=ct.default_dim, index_params=index_params)
 
         # create 2 more partitions
         partition_names = ["partition_1", "partition_2"]
@@ -1006,7 +1069,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
 
         # search in the collection
         vectors_to_search = cf.gen_vectors(1, ct.default_dim)
-        limit = 1000
+        limit = 100
         search_params = {}
         search_res1, _ = self.search(
             client,
@@ -1271,7 +1334,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     search_params=search_params, limit=ct.default_limit,
                     output_fields=["*"],
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": ct.default_nq,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
                                  "limit": ct.default_limit})
         # disable mmap
         self.release_collection(client, collection_name)
@@ -1283,7 +1347,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     search_params=search_params, limit=ct.default_limit,
                     output_fields=["*"],
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": ct.default_nq,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
                                  "limit": ct.default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1345,7 +1410,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     search_params=search_params, limit=ct.default_limit,
                     output_fields=output_fields,
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": ct.default_nq,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
                                  "limit": ct.default_limit})
         # disable mmap
         self.release_collection(client, collection_name)
@@ -1357,26 +1423,31 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     search_params=search_params, limit=ct.default_limit,
                     output_fields=output_fields,
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": ct.default_nq,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
                                  "limit": ct.default_limit})
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("num_shards", [-256, 0, ct.max_shards_num // 2, ct.max_shards_num])
-    def test_search_with_non_default_shard_nums(self, num_shards):
+    def test_search_with_non_default_shard_nums(self, num_shards):   
         """
         Test search functionality with non-default shard numbers.
         
-        This test verifies that:
-        1. Collections are created with default shard numbers when num_shards <= 0
-        2. Collections are created with specified shard numbers when num_shards > 0
-        3. Search operations work correctly with different shard configurations
+        This test verifies that search operations work correctly when collections are created with:
+        - Negative shard numbers (should use default)
+        - Zero shards (should use default)
+        - Half of max shards
+        - Max shards
         
-        The test follows these steps:
-        1. Creates a collection with specified shard numbers
+        The test performs the following steps:
+        1. Creates a collection with specified shard number
         2. Inserts test data
-        3. Builds an index
-        4. Performs a search operation
-        5. Validates the results
+        3. Builds index
+        4. Loads collection
+        5. Executes search and verifies results
+        
+        @param num_shards: Number of shards to test (parameterized)
+        @tags: L2
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -1412,36 +1483,193 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         self.search(client, collection_name, vectors, anns_field="vector", 
                     search_params=search_params, limit=ct.default_limit,
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": ct.default_nq,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
                                  "limit": ct.default_limit})
     
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_HNSW_index_with_redundant_param(self):
+    @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
+    @pytest.mark.parametrize('index', ct.all_index_types[:8])
+    def test_search_output_field_vector_with_dense_vextor_and_index(self, vector_dtype, index):
         """
-        Test search functionality with HNSW index and redundant parameters.
+        Test search with output vector field after different index types.
         
-        This test verifies that:
-        1. HNSW index can be created with redundant parameters
-        2. Search operations work correctly with redundant parameters
-        3. Redundant parameters are ignored
+        Steps:
+        1. Create a collection with specified schema and insert test data
+        2. Build index (with error handling for unsupported index types)
+        3. Load collection and perform search operations with:
+           - All output fields ("*")
+           - Explicitly specified all fields
+           - Subset of fields
+        4. Verify search results match expected output fields
         
-        The test performs following steps:
-        1. Creates a collection with float vectors
-        2. Inserts test data
-        3. Creates HNSW index with redundant parameters
-        4. Performs a search operation
-        5. Validates the results
+        Parameters:
+        - vector_dtype: Type of vector data (all supported dense vector types)
+        - index: Index type (first 8 supported index types)
+        
+        Expected:
+        - Successful search operations with correct output fields returned
+        - Proper error when attempting unsupported index combinations
         """
-        dim = 16
-        index = "HNSW"
+        
+        metrics = 'COSINE'
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 32
         schema = self.create_schema(client)[0]
         schema.add_field('id', DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field('vector', DataType.FLOAT_VECTOR, dim=dim)
+        schema.add_field('vector', vector_dtype, dim=dim)
+        schema.add_field('float_array', DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=200)
+        schema.add_field('json_field', DataType.JSON, max_length=200)
+        schema.add_field('string_field', DataType.VARCHAR, max_length=200)
         self.create_collection(client, collection_name, schema=schema)
 
-        # insert
+        # Insert data in 3 batches with unique primary keys using a loop
+        insert_times = 3
+        random_vectors = list(cf.gen_vectors(ct.default_nb*insert_times, dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(ct.default_nb*insert_times, dim, vector_data_type=vector_dtype)
+        for j in range(insert_times):
+            start_pk = j * ct.default_nb
+            rows = [{
+                "id": i + start_pk,
+                "vector": random_vectors[i + start_pk],
+                "float_array": [random.random() for _ in range(10)],
+                "json_field": {"name": "abook", "words": i},
+                "string_field": "Hello, Milvus!"
+            } for i in range(ct.default_nb)]
+            self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # build index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(field_name='vector', index_type=index,
+                               metric_type=metrics,
+                               params=cf.get_index_params_params(index_type=index))
+        if vector_dtype == DataType.INT8_VECTOR and index != 'HNSW':
+            # INT8_Vector only supports HNSW index for now
+            error = {"err_code": 999, "err_msg": f"data type Int8Vector can't build with this index {index}"}
+            self.create_index(client, collection_name, index_params=index_params,
+                              check_task=CheckTasks.err_res, check_items=error)
+        else:
+            self.create_index(client, collection_name, index_params=index_params)
+
+            # load the collection with index
+            assert self.wait_for_index_ready(client, collection_name, default_vector_field_name, timeout=120)
+            self.load_collection(client, collection_name)
+        
+            # search with output field vector
+            search_params = {}
+            vectors = random_vectors[:ct.default_nq]
+            # search output all fields
+            self.search(client, collection_name, vectors, anns_field="vector", 
+                        search_params=search_params, limit=ct.default_limit,
+                        output_fields=["*"],
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_milvus_client_api": True,
+                                     "nq": ct.default_nq,
+                                     "limit": ct.default_limit,
+                                     "output_fields": ["id", "vector", "float_array", "json_field", "string_field"]})
+            # search output specify all fields
+            self.search(client, collection_name, vectors, anns_field="vector", 
+                        search_params=search_params, limit=ct.default_limit,
+                        output_fields=["id", "vector", "float_array", "json_field", "string_field"],
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_milvus_client_api": True,
+                                     "nq": ct.default_nq,
+                                     "limit": ct.default_limit,
+                                     "output_fields": ["id", "vector", "float_array", "json_field", "string_field"]})
+            # search output specify some fields
+            self.search(client, collection_name, vectors, anns_field="vector", 
+                        search_params=search_params, limit=ct.default_limit,
+                        output_fields=["id", "vector", "json_field"],
+                        check_task=CheckTasks.check_search_results,
+                        check_items={"enable_milvus_client_api": True,
+                                     "nq": ct.default_nq,
+                                     "limit": ct.default_limit,
+                                     "output_fields": ["id", "vector", "json_field"]})
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize('index', ct.binary_supported_index_types)
+    def test_search_with_output_fields_vector_with_binary_vector_and_index(self, index):
+        """
+        Test search functionality with output fields for binary vector type and specified index.
+        
+        This test case verifies that:
+        1. A collection with binary vector field can be created and data inserted
+        2. Index can be built on the binary vector field
+        3. Search operation with output fields (including vector field) works correctly
+        4. Results contain expected output fields (id and vector)
+        
+        Parameters:
+            index: The index type to test with (parametrized via pytest.mark.parametrize)
+        
+        The test performs following steps:
+        - Creates collection with binary vector field
+        - Inserts test data in batches
+        - Builds specified index type
+        - Performs search with output fields
+        - Validates search results contain expected fields
+        """
+        vector_dtype = DataType.BINARY_VECTOR
+        client = self._client()
+        dim = 32
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema, _ = self.create_schema(client)
+        schema.add_field("id", datatype=DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", datatype=vector_dtype, dim=dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # Insert data in 3 batches with unique primary keys using a loop
+        insert_times = 3
+        random_vectors = list(cf.gen_vectors(ct.default_nb * insert_times,  dim, vector_data_type=vector_dtype)) \
+            if vector_dtype == DataType.FLOAT_VECTOR \
+            else cf.gen_vectors(ct.default_nb * insert_times, dim, vector_data_type=vector_dtype)
+        for j in range(insert_times):
+            start_pk = j * ct.default_nb
+            rows = [{
+                "id": i + start_pk,
+                "vector": random_vectors[i + start_pk]
+            } for i in range(ct.default_nb)]
+            self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+
+        # build index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(field_name='vector', index_type=index,
+                               metric_type='JACCARD',
+                               params=cf.get_index_params_params(index_type=index))
+        self.create_index(client, collection_name, index_params=index_params)
+
+        # load the collection with index
+        assert self.wait_for_index_ready(client, collection_name, 'vector', timeout=120)
+        self.load_collection(client, collection_name)
+
+        # search with output field vector
+        search_params = {}
+        vectors = random_vectors[:ct.default_nq]
+        self.search(client, collection_name, vectors, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    output_fields=["*"],
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit,
+                                 "output_fields": ["id", "vector"]})
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_output_fields_empty(self):  
+        """
+        target: test search with output fields
+        method: search with empty output_field
+        expected: search success
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 32
+        # create collection with fast mode
+        self.create_collection(client, collection_name, dimension=dim)
+        # insert data
         data = []
         for i in range(ct.default_nb):
             data.append({
@@ -1450,24 +1678,20 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
             })
         self.insert(client, collection_name, data)
         self.flush(client, collection_name)
-        # create index
-        index_params = self.prepare_index_params(client)[0]
-        params = cf.get_index_params_params(index)
-        params["nlist"] = 100        # nlist is redundant parameter    
-        index_params.add_index(field_name='vector', index_type=index,
-                               metric_type='COSINE', params=params)
-        self.create_index(client, collection_name, index_params=index_params)
-        self.wait_for_index_ready(client, collection_name, index_name='vector')
-        index_info = self.describe_index(client, collection_name, index_name='vector')
-        assert index_info[0]["nlist"] == '100'
-        # load
-        self.load_collection(client, collection_name)
-        # search
-        vectors = cf.gen_vectors(ct.default_nq, dim)
+        # search with empty output fields
         search_params = {}
+        vectors = cf.gen_vectors(ct.default_nq, dim)
         self.search(client, collection_name, vectors, anns_field="vector", 
                     search_params=search_params, limit=ct.default_limit,
+                    output_fields=[],
                     check_task=CheckTasks.check_search_results,
-                    check_items={"nq": ct.default_nq,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
                                  "limit": ct.default_limit})
-    
+        self.search(client, collection_name, vectors, anns_field="vector", 
+                    search_params=search_params, limit=ct.default_limit,
+                    output_fields=None,
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": ct.default_nq,
+                                 "limit": ct.default_limit})

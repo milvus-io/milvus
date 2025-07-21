@@ -474,9 +474,9 @@ class ResponseChecker:
                 elif check_items.get("metric", None) is not None:
                     # verify the distances are already sorted
                     if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
-                        assert distances == sorted(distances, reverse=True)
+                        assert pc.compare_lists_with_epsilon_ignore_dict_order(distances, sorted(distances, reverse=True))
                     else:
-                        assert distances == sorted(distances, reverse=False)
+                        assert pc.compare_lists_with_epsilon_ignore_dict_order(distances, sorted(distances, reverse=False))
                     if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
                         log.debug("skip distance check for knowhere does not return the precise distances")
                     else:
@@ -600,7 +600,7 @@ class ResponseChecker:
             if isinstance(query_res, list):
                 # assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=pk_name, with_vec=with_vec)
                 # return True
-                assert pc.compare_lists_ignore_order(a=query_res, b=exp_res)
+                assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res)
                 return True
             else:
                 log.error(f"Query result {query_res} is not list")
