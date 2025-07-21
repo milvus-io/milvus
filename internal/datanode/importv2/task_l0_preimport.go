@@ -128,7 +128,9 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	log.Info("start to preimport l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("schema", t.GetSchema()))...)
+		zap.Any("files", t.GetFileStats()),
+		zap.Any("schema", t.GetSchema()),
+	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
