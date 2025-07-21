@@ -572,5 +572,8 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		pkstats:             stats,
 		bm25Stats:           bm25Stats,
 		storageConfig:       storageConfig,
+
+		tsFrom: typeutil.MaxTimestamp,
+		tsTo:   0,
 	}, nil
 }
