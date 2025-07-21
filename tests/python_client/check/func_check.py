@@ -247,17 +247,12 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         if check_items.get("collection_name", None) is not None:
             assert res["collection_name"] == check_items.get("collection_name")
-        if check_items.get("auto_id", False):
-            assert res["auto_id"] == check_items.get("auto_id")
-        if check_items.get("num_shards", 1):
-            assert res["num_shards"] == check_items.get("num_shards", 1)
-        if check_items.get("consistency_level", 2):
-            assert res["consistency_level"] == check_items.get("consistency_level", 2)
-        if check_items.get("enable_dynamic_field", True):
-            assert res["enable_dynamic_field"] == check_items.get("enable_dynamic_field", True)
-        if check_items.get("num_partitions", 1):
-            assert res["num_partitions"] == check_items.get("num_partitions", 1)
-        if check_items.get("id_name", "id"):
+        assert res["auto_id"] == check_items.get("auto_id", False)
+        assert res["num_shards"] == check_items.get("num_shards", 1)
+        assert res["consistency_level"] == check_items.get("consistency_level", 0)
+        assert res["enable_dynamic_field"] == check_items.get("enable_dynamic_field", True)
+        assert res["num_partitions"] == check_items.get("num_partitions", 1)
+        if check_items.get("id_name", None):
             assert res["fields"][0]["name"] == check_items.get("id_name", "id")
         if check_items.get("vector_name", "vector"):
             vector_name_list = []
@@ -484,9 +479,9 @@ class ResponseChecker:
                 else:
                     pass  # just check nq and topk, not specific ids need check
             nq_i += 1
+
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
-
         return True
 
     @staticmethod
