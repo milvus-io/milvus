@@ -10,7 +10,12 @@ use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 async fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, KoDicBuilder::new())
         .await
-        .map_err(|e| TantivyBindingError::InternalError(format!("fetch ko-dic failed with error: {}", e.to_string())))
+        .map_err(|e| {
+            TantivyBindingError::InternalError(format!(
+                "fetch ko-dic failed with error: {}",
+                e.to_string()
+            ))
+        })
 }
 
 #[cfg(not(feature = "lindera-ko-dic"))]
