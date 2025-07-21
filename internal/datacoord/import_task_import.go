@@ -160,12 +160,12 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskID: t.GetTaskID(),
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
-	if err != nil {
+	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
 		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update import task state to pending", WrapTaskLog(t, zap.Error(updateErr))...)
 		}
-		log.Info("reset import task state to pending due to error occurs", WrapTaskLog(t, zap.Error(err))...)
+		log.Info("reset import task state to pending due to error occurs", WrapTaskLog(t, zap.Error(err), zap.String("reason", resp.GetReason()))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
