@@ -560,7 +560,22 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 	case *DropIndexTask:
-		// TODO
+		index := replicaChannelIndex{task.ReplicaID(), task.Shard()}
+		if old, ok := scheduler.channelTasks.Get(index); ok {
+			if task.Priority() > old.Priority() {
+				log.Ctx(scheduler.ctx).Info("replace old task, the new one with higher priority",
+					zap.Int64("oldID", old.ID()),
+					zap.String("oldPriority", old.Priority().String()),
+					zap.Int64("newID", task.ID()),
+					zap.String("newPriority", task.Priority().String()),
+				)
+				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
+				scheduler.remove(old)
+				return nil
+			}
+
+			return merr.WrapErrServiceInternal("task with the same channel exists")
+		}
 
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
@@ -1188,6 +1203,16 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 }
 
 func (scheduler *taskScheduler) checkDropIndexTaskStale(task *DropIndexTask) error {
-	// TODO
+	for _, action := range task.Actions() {
+		if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+			log.Ctx(task.Context()).Warn("task stale due to node offline", WrapTaskLog(task, zap.String("channel", task.Shard()))...)
+			return merr.WrapErrNodeOffline(action.Node())
+		}
+		if scheduler.targetMgr.GetDmChannel(task.ctx, task.collectionID, task.Shard(), meta.NextTargetFirst) == nil {
+			log.Ctx(task.Context()).Warn("the task is stale, the channel to subscribe not exists in targets",
+				WrapTaskLog(task, zap.String("channel", task.Shard()))...)
+			return merr.WrapErrChannelReduplicate(task.Shard(), "target doesn't contain this channel")
+		}
+	}
 	return nil
 }
