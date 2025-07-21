@@ -1629,7 +1629,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         dim = 5
         # 1. create collection
         nullable_field_name = "nullable_field"
@@ -1651,7 +1651,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                      default_string_field_name: str(i), nullable_field_name: None} for i in range(default_nb)]
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in range(default_nb)]
+                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in
+                    range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. flush
         self.flush(client, collection_name)
@@ -1670,7 +1671,6 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, dim))
         insert_ids = [str(i) for i in range(default_nb)]
         null_expr = nullable_field_name + " " + null_expr_op
-        log.info(null_expr)
         if nullable:
             if "not" in null_expr or "NOT" in null_expr:
                 insert_ids = []
@@ -1686,12 +1686,13 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    output_fields = [nullable_field_name],
-                    consistency_level = "Strong",
+                    output_fields=[nullable_field_name],
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
+                                 "pk_name": default_primary_key_field_name,
                                  "limit": limit})
 
     @pytest.mark.tags(CaseLabel.L1)
