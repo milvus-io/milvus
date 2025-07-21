@@ -253,6 +253,7 @@ struct EvictionConfig {
     float overloaded_memory_threshold_percentage;
     // Max disk usage percentage - limits disk cache usage to this percentage of total disk space (not used yet)
     float max_disk_usage_percentage;
+    std::string disk_path;
     // Loading memory factor for estimating memory during loading
     float loading_memory_factor;
 
@@ -262,7 +263,8 @@ struct EvictionConfig {
           cache_cell_unaccessed_survival_time(std::chrono::seconds(0)),
           overloaded_memory_threshold_percentage(0.9),
           max_disk_usage_percentage(0.95),
-          loading_memory_factor(2.5f) {
+          loading_memory_factor(2.5f),
+          disk_path("") {
     }
 
     EvictionConfig(int64_t cache_touch_window_ms, int64_t eviction_interval_ms)
@@ -271,7 +273,8 @@ struct EvictionConfig {
           cache_cell_unaccessed_survival_time(std::chrono::seconds(0)),
           overloaded_memory_threshold_percentage(0.9),
           max_disk_usage_percentage(0.95),
-          loading_memory_factor(2.5f) {
+          loading_memory_factor(2.5f),
+          disk_path("") {
     }
 
     EvictionConfig(int64_t cache_touch_window_ms,
@@ -279,6 +282,7 @@ struct EvictionConfig {
                    int64_t cache_cell_unaccessed_survival_time,
                    float overloaded_memory_threshold_percentage,
                    float max_disk_usage_percentage,
+                   const std::string& disk_path,
                    float loading_memory_factor)
         : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
           eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
@@ -287,6 +291,7 @@ struct EvictionConfig {
           overloaded_memory_threshold_percentage(
               overloaded_memory_threshold_percentage),
           max_disk_usage_percentage(max_disk_usage_percentage),
+          disk_path(disk_path),
           loading_memory_factor(loading_memory_factor) {
     }
 };
@@ -452,10 +457,9 @@ cache_memory_overhead_bytes(StorageType storage_type) {
     }
 }
 
-struct SystemMemoryInfo {
-    int64_t total_memory_bytes{0};
-    int64_t available_memory_bytes{0};
-    int64_t used_memory_bytes{0};
+struct SystemResourceInfo {
+    int64_t total_bytes{0};
+    int64_t used_bytes{0};
 };
 
 int64_t
@@ -463,8 +467,15 @@ getHostTotalMemory();
 int64_t
 getContainerMemLimit();
 
-SystemMemoryInfo
+// Returns unlimited if failed to get memory info, or if the platform is not supported.
+SystemResourceInfo
 getSystemMemoryInfo();
+
+// Returns unlimited if failed to get disk info, or if the platform is not supported.
+SystemResourceInfo
+getSystemDiskInfo(const std::string& disk_path);
+
+// Returns 0 if failed to get memory usage, or if the platform is not supported.
 int64_t
 getCurrentProcessMemoryUsage();
 

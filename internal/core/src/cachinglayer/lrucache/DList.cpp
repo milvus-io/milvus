@@ -90,13 +90,12 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
 
     // Combined logical and physical memory limit check
     bool logical_limit_exceeded = !max_memory_.CanHold(used + size);
-    int64_t physical_eviction_needed =
-        size.memory_bytes > 0 ? checkPhysicalMemoryLimit(size) : 0;
+    auto physical_eviction_needed = checkPhysicalResourceLimit(size);
 
     // If either limit is exceeded, attempt unified eviction
     // we attempt eviction based on logical limit once, but multiple times on physical limit
     // because physical eviction may not be accurate.
-    while (logical_limit_exceeded || physical_eviction_needed > 0) {
+    while (logical_limit_exceeded || physical_eviction_needed.AnyGTZero()) {
         ResourceUsage eviction_target;
         ResourceUsage min_eviction;
 
@@ -106,12 +105,14 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
             min_eviction = used + size - max_memory_;
         }
 
-        if (physical_eviction_needed > 0) {
+        if (physical_eviction_needed.AnyGTZero()) {
             // Combine with logical eviction target (take the maximum)
-            eviction_target.memory_bytes = std::max(
-                eviction_target.memory_bytes, physical_eviction_needed);
+            eviction_target.memory_bytes =
+                std::max(eviction_target.memory_bytes,
+                         physical_eviction_needed.memory_bytes);
             min_eviction.memory_bytes =
-                std::max(min_eviction.memory_bytes, physical_eviction_needed);
+                std::max(min_eviction.memory_bytes,
+                         physical_eviction_needed.memory_bytes);
         }
 
         // Attempt unified eviction
@@ -128,13 +129,13 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
         // logical limit is accurate, thus we can guarantee after one successful eviction, logical limit is satisfied.
         logical_limit_exceeded = false;
 
-        if (physical_eviction_needed == 0) {
+        if (!physical_eviction_needed.AnyGTZero()) {
             // we only need to evict for logical limit and we have succeeded.
             break;
         }
 
-        if (physical_eviction_needed = checkPhysicalMemoryLimit(size);
-            physical_eviction_needed == 0) {
+        if (physical_eviction_needed = checkPhysicalResourceLimit(size);
+            !physical_eviction_needed.AnyGTZero()) {
             // if after eviction we no longer need to evict, we can break.
             break;
         }
@@ -144,12 +145,12 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
             "still need to evict {}",
             size.ToString(),
             evicted_size.ToString(),
-            FormatBytes(physical_eviction_needed));
+            physical_eviction_needed.ToString());
     }
 
     // Reserve resources (both checks passed)
     used_memory_ += size;
-    loading_memory_ += size * eviction_config_.loading_memory_factor;
+    loading_ += size * eviction_config_.loading_memory_factor;
     return true;
 }
 
@@ -212,7 +213,7 @@ DList::usageInfo(const ResourceUsage& actively_pinned) const {
             precision,
         static_cast<double>(actively_pinned.file_bytes) / used.file_bytes *
             precision,
-        loading_memory_.load().ToString());
+        loading_.load().ToString());
 }
 
 // this method is not thread safe, it does not attempt to lock each node, use for debug only.
@@ -445,7 +446,7 @@ DList::releaseMemory(const ResourceUsage& size) {
     // safe to substract on atomic without lock
     used_memory_ -= size;
     // this is called when a cell failed to load.
-    loading_memory_ -= size * eviction_config_.loading_memory_factor;
+    loading_ -= size * eviction_config_.loading_memory_factor;
 
     // Notify waiting requests that resources are available
     std::unique_lock<std::mutex> lock(list_mtx_);
@@ -526,7 +527,7 @@ DList::IsEmpty() const {
 
 void
 DList::removeLoadingResource(const ResourceUsage& size) {
-    loading_memory_ -= size * eviction_config_.loading_memory_factor;
+    loading_ -= size * eviction_config_.loading_memory_factor;
 }
 
 void
@@ -609,33 +610,48 @@ DList::clearWaitingQueue() {
     waiting_requests_map_.clear();
 }
 
-int64_t
-DList::checkPhysicalMemoryLimit(const ResourceUsage& original) const {
+ResourceUsage
+DList::checkPhysicalResourceLimit(const ResourceUsage& original) const {
+    static SystemResourceInfo infinity = {std::numeric_limits<int64_t>::max(),
+                                          0};
     auto size = original * eviction_config_.loading_memory_factor;
-    auto sys_mem = getSystemMemoryInfo();
-    auto current_loading = loading_memory_.load();
-    int64_t projected_usage = sys_mem.used_memory_bytes +
-                              current_loading.memory_bytes + size.memory_bytes;
-    int64_t limit = static_cast<int64_t>(
-        sys_mem.total_memory_bytes *
-        eviction_config_.overloaded_memory_threshold_percentage);
+    auto sys_mem = size.memory_bytes > 0 ? getSystemMemoryInfo() : infinity;
+    auto sys_disk = size.file_bytes > 0
+                        ? getSystemDiskInfo(eviction_config_.disk_path)
+                        : infinity;
 
-    int64_t eviction_needed =
-        std::max(static_cast<int64_t>(0), projected_usage - limit);
+    auto used = ResourceUsage{sys_mem.used_bytes, sys_disk.used_bytes};
+    auto current_loading = loading_.load();
+    auto projected_usage = current_loading + size + used;
+
+    auto limit = ResourceUsage{
+        static_cast<int64_t>(
+            sys_mem.total_bytes *
+            eviction_config_.overloaded_memory_threshold_percentage),
+        static_cast<int64_t>(sys_disk.total_bytes *
+                             eviction_config_.max_disk_usage_percentage)};
+
+    auto eviction_needed = projected_usage - limit;
+    if (eviction_needed.memory_bytes < 0) {
+        eviction_needed.memory_bytes = 0;
+    }
+    if (eviction_needed.file_bytes < 0) {
+        eviction_needed.file_bytes = 0;
+    }
 
     LOG_TRACE(
-        "[MCL] Physical memory check: "
-        "projected_usage={}(used={}, loading={}, requesting={}), limit={} ({}% "
-        "of {} "
-        "total), eviction_needed={}",
-        FormatBytes(projected_usage),
-        FormatBytes(sys_mem.used_memory_bytes),
-        FormatBytes(current_loading.memory_bytes),
-        FormatBytes(size.memory_bytes),
-        FormatBytes(limit),
+        "[MCL] Physical resource check: "
+        "projected_usage={}(used={}, loading={}, requesting={}), limit={} "
+        "(mem {}% disk {}% of total {}), eviction_needed={}",
+        projected_usage.ToString(),
+        used.ToString(),
+        current_loading.ToString(),
+        size.ToString(),
+        limit.ToString(),
         eviction_config_.overloaded_memory_threshold_percentage * 100,
-        FormatBytes(sys_mem.total_memory_bytes),
-        FormatBytes(eviction_needed));
+        eviction_config_.max_disk_usage_percentage * 100,
+        ResourceUsage{sys_mem.total_bytes, sys_disk.total_bytes}.ToString(),
+        eviction_needed.ToString());
 
     return eviction_needed;
 }

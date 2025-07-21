@@ -87,23 +87,29 @@ void
 SetThreadName(const char*);
 
 void
-ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
-                       const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
-                       const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
-                       const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
-                       const int64_t memory_low_watermark_bytes,
-                       const int64_t memory_high_watermark_bytes,
-                       const int64_t memory_max_bytes,
-                       const int64_t disk_low_watermark_bytes,
-                       const int64_t disk_high_watermark_bytes,
-                       const int64_t disk_max_bytes,
-                       const bool evictionEnabled,
-                       const int64_t cache_touch_window_ms,
-                       const int64_t eviction_interval_ms,
-                       const int64_t cache_cell_unaccessed_survival_time,
-                       const float loading_memory_factor,
-                       const float overloaded_memory_threshold_percentage,
-                       const float max_disk_usage_percentage);
+ConfigureTieredStorage(
+    // Cache warmup policies
+    const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
+    const CacheWarmupPolicy vectorFieldCacheWarmupPolicy,
+    const CacheWarmupPolicy scalarIndexCacheWarmupPolicy,
+    const CacheWarmupPolicy vectorIndexCacheWarmupPolicy,
+    // watermarks
+    const int64_t memory_low_watermark_bytes,
+    const int64_t memory_high_watermark_bytes,
+    const int64_t memory_max_bytes,
+    const int64_t disk_low_watermark_bytes,
+    const int64_t disk_high_watermark_bytes,
+    const int64_t disk_max_bytes,
+    // eviction enabled
+    const bool evictionEnabled,
+    // eviction configs
+    const int64_t cache_touch_window_ms,
+    const int64_t eviction_interval_ms,
+    const int64_t cache_cell_unaccessed_survival_time,
+    const float overloaded_memory_threshold_percentage,
+    const float loading_memory_factor,
+    const float max_disk_usage_percentage,
+    const char* disk_path);
 
 #ifdef __cplusplus
 }
