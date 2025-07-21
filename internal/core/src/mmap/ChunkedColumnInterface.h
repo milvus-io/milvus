@@ -130,7 +130,7 @@ class ChunkedColumnInterface {
     BulkRawStringAt(std::function<void(std::string_view, size_t, bool)> fn,
                     const int64_t* offsets = nullptr,
                     int64_t count = 0) const {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "BulkRawStringAt only supported for ChunkColumnInterface of "
                   "variable length type");
     }
@@ -139,7 +139,7 @@ class ChunkedColumnInterface {
     BulkRawJsonAt(std::function<void(Json, size_t, bool)> fn,
                   const int64_t* offsets,
                   int64_t count) const {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::Unsupported,
             "RawJsonAt only supported for ChunkColumnInterface of Json type");
     }
@@ -148,7 +148,7 @@ class ChunkedColumnInterface {
     BulkArrayAt(std::function<void(ScalarFieldProto&&, size_t)> fn,
                 const int64_t* offsets,
                 int64_t count) const {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "BulkArrayAt only supported for ChunkedArrayColumn");
     }
 
@@ -156,7 +156,7 @@ class ChunkedColumnInterface {
     BulkVectorArrayAt(std::function<void(VectorFieldProto&&, size_t)> fn,
                       const int64_t* offsets,
                       int64_t count) const {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::Unsupported,
             "BulkVectorArrayAt only supported for ChunkedVectorArrayColumn");
     }
@@ -199,7 +199,7 @@ class ChunkedColumnInterface {
         auto num_rows = NumRows();
         for (int64_t i = 0; i < count; i++) {
             if (offsets[i] < 0 || offsets[i] >= num_rows) {
-                PanicInfo(ErrorCode::OutOfRange,
+                ThrowInfo(ErrorCode::OutOfRange,
                           "offsets[{}] {} is out of range, num_rows: {}",
                           i,
                           offsets[i],

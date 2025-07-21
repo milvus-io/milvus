@@ -4179,6 +4179,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
         FieldBinlogInfo{lack_null_binlog_id.get(),
                         static_cast<int64_t>(ROW_COUNT),
                         std::vector<int64_t>{int64_t(0)},
+                        std::vector<int64_t>{0},
                         false,
                         std::vector<std::string>{}});
 
@@ -4187,6 +4188,7 @@ TEST(CApiTest, GrowingSegment_Load_Field_Data_Lack_Binlog_Rows) {
         FieldBinlogInfo{lack_default_value_binlog_id.get(),
                         static_cast<int64_t>(ROW_COUNT),
                         std::vector<int64_t>{int64_t(0)},
+                        std::vector<int64_t>{0},
                         false,
                         std::vector<std::string>{}});
 
@@ -4249,6 +4251,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
         FieldBinlogInfo{lack_null_binlog_id.get(),
                         static_cast<int64_t>(ROW_COUNT),
                         std::vector<int64_t>{int64_t(0)},
+                        std::vector<int64_t>{0},
                         false,
                         std::vector<std::string>{}});
 
@@ -4257,6 +4260,7 @@ TEST(CApiTest, DISABLED_SealedSegment_Load_Field_Data_Lack_Binlog_Rows) {
         FieldBinlogInfo{lack_default_value_binlog_id.get(),
                         static_cast<int64_t>(ROW_COUNT),
                         std::vector<int64_t>{int64_t(0)},
+                        std::vector<int64_t>{0},
                         false,
                         std::vector<std::string>{}});
 
@@ -4428,7 +4432,7 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid, "not supported type");
+                ThrowInfo(DataTypeInvalid, "not supported type");
             }
         }
     }

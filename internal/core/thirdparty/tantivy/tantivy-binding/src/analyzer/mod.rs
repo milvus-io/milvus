@@ -1,5 +1,6 @@
 mod analyzer;
 mod build_in_analyzer;
+mod dict;
 mod filter;
 
 pub mod tokenizers;

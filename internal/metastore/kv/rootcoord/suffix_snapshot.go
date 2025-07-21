@@ -526,6 +526,10 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(ctx context.Context, saves map[stri
 
 	// load each removal, change execution to adding tombstones
 	for _, removal := range removals {
+		// if save batch contains removal, skip remove op
+		if _, ok := execute[removal]; ok {
+			continue
+		}
 		value, err := ss.MetaKv.Load(ctx, removal)
 		if err != nil {
 			log.Warn("SuffixSnapshot MetaKv Load failed", zap.String("key", removal), zap.Error(err))

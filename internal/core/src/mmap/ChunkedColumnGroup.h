@@ -249,7 +249,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<SpanBase>
     Span(int64_t chunk_id) const override {
         if (!IsChunkedColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "Span only supported for ChunkedColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
@@ -263,7 +263,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "StringViews only supported for ChunkedVariableColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
@@ -279,7 +279,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "ArrayViews only supported for ChunkedArrayColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
@@ -292,7 +292,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<std::vector<VectorArrayView>>
     VectorArrayViews(int64_t chunk_id) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "VectorArrayViews only supported for ChunkedVectorArrayColumn");
         }
@@ -307,7 +307,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "ViewsByOffsets only supported for ChunkedVariableColumn");
         }
@@ -409,7 +409,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 break;
             }
             default: {
-                PanicInfo(
+                ThrowInfo(
                     ErrorCode::Unsupported,
                     "BulkScalarValueAt is not supported for unknown scalar "
                     "data type: {}",
@@ -440,7 +440,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     int64_t count = 0) const override {
         if (!IsChunkedVariableColumnDataType(data_type_) ||
             data_type_ == DataType::JSON) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkRawStringAt only supported for ProxyChunkColumn of "
                       "variable length type(except Json)");
         }
@@ -478,7 +478,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                   const int64_t* offsets,
                   int64_t count) const override {
         if (data_type_ != DataType::JSON) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "RawJsonAt only supported for ProxyChunkColumn of Json type");
         }
@@ -503,7 +503,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 const int64_t* offsets,
                 int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkArrayAt only supported for ChunkedArrayColumn");
         }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
@@ -523,7 +523,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t count) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkVectorArrayAt only supported for "
                       "ChunkedVectorArrayColumn");
         }

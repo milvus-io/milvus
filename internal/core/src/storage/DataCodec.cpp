@@ -109,7 +109,7 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             return index_data;
         }
         default:
-            PanicInfo(
+            ThrowInfo(
                 DataFormatBroken,
                 fmt::format("unsupported event type {}", header.event_type_));
     }

@@ -157,7 +157,7 @@ struct GeneratedData {
                             target_field_data.vectors().int8_vector().data());
                         std::copy_n(src_data, len, ret.data());
                     } else {
-                        PanicInfo(Unsupported, "unsupported");
+                        ThrowInfo(Unsupported, "unsupported");
                     }
 
                     return std::move(ret);
@@ -245,7 +245,7 @@ struct GeneratedData {
                             break;
                         }
                         default: {
-                            PanicInfo(Unsupported, "unsupported");
+                            ThrowInfo(Unsupported, "unsupported");
                         }
                     }
                 }
@@ -266,7 +266,7 @@ struct GeneratedData {
                 return ret;
             }
         }
-        PanicInfo(FieldIDInvalid, "field id not find");
+        ThrowInfo(FieldIDInvalid, "field id not find");
     }
 
     std::unique_ptr<DataArray>
@@ -277,7 +277,7 @@ struct GeneratedData {
             }
         }
 
-        PanicInfo(FieldIDInvalid, "field id not find");
+        ThrowInfo(FieldIDInvalid, "field id not find");
     }
 
     GeneratedData() = default;
@@ -597,7 +597,7 @@ DataGen(SchemaPtr schema,
                             break;
                         }
                         case DataType::VECTOR_SPARSE_FLOAT:
-                            PanicInfo(DataTypeInvalid, "not implemented");
+                            ThrowInfo(DataTypeInvalid, "not implemented");
                             break;
                         case DataType::VECTOR_BFLOAT16: {
                             auto length = array_len * dim;
@@ -620,7 +620,7 @@ DataGen(SchemaPtr schema,
                             break;
                         }
                         default: {
-                            PanicInfo(DataTypeInvalid, "not implemented");
+                            ThrowInfo(DataTypeInvalid, "not implemented");
                         }
                     }
 
@@ -1201,7 +1201,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicInfo(Unsupported, "unsupported");
+                ThrowInfo(Unsupported, "unsupported");
             }
         }
     } else {
@@ -1334,7 +1334,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicInfo(Unsupported, "unsupported");
+                ThrowInfo(Unsupported, "unsupported");
             }
         }
     }

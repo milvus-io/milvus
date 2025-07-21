@@ -48,7 +48,7 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
     rapidjson::Document doc;
     doc.Parse(json.c_str());
     if (doc.HasParseError()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "json parse failed, error:{}",
                   rapidjson::GetParseError_En(doc.GetParseError()));
     }

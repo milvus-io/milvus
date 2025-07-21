@@ -19,12 +19,12 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
@@ -394,12 +393,10 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		f3 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, testInt64Field, 20)
 		f3.FieldId = fieldNameId[testInt64Field]
 
-		qt.requeryFunc = func(t *searchTask, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error) {
-			return &milvuspb.QueryResults{
-				FieldsData:       []*schemapb.FieldData{f1, f2, f3},
-				PrimaryFieldName: testInt64Field,
-			}, nil
-		}
+		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
+			FieldsData: []*schemapb.FieldData{f1, f2, f3},
+		}, nil).Build()
+		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
@@ -436,12 +433,10 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		f3 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, testInt64Field, 20)
 		f3.FieldId = fieldNameId[testInt64Field]
 
-		qt.requeryFunc = func(t *searchTask, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error) {
-			return &milvuspb.QueryResults{
-				FieldsData:       []*schemapb.FieldData{f1, f2, f3},
-				PrimaryFieldName: testInt64Field,
-			}, nil
-		}
+		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
+			FieldsData: []*schemapb.FieldData{f1, f2, f3},
+		}, nil).Build()
+		defer mocker.UnPatch()
 
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
@@ -478,12 +473,11 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		f3.FieldId = fieldNameId[testInt64Field]
 		f4 := testutils.GenerateScalarFieldData(schemapb.DataType_Float, testFloatField, 20)
 		f4.FieldId = fieldNameId[testFloatField]
-		qt.requeryFunc = func(t *searchTask, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error) {
-			return &milvuspb.QueryResults{
-				FieldsData:       []*schemapb.FieldData{f1, f2, f3, f4},
-				PrimaryFieldName: testInt64Field,
-			}, nil
-		}
+		mocker := mockey.Mock((*requeryOperator).requery).Return(&milvuspb.QueryResults{
+			FieldsData: []*schemapb.FieldData{f1, f2, f3, f4},
+		}, nil).Build()
+		defer mocker.UnPatch()
+
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, []int64{10, 10}, qt.result.Results.Topks)
@@ -503,53 +497,6 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			case testInt64Field:
 				assert.True(t, len(field.GetScalars().GetLongData().Data) != 0)
 			}
-		}
-	})
-
-	t.Run("Test mergeIDs function", func(t *testing.T) {
-		{
-			ids1 := &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{1, 2, 3, 5},
-					},
-				},
-			}
-
-			ids2 := &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: []int64{1, 2, 4, 5, 6},
-					},
-				},
-			}
-			allIDs, count := mergeIDs([]*schemapb.IDs{ids1, ids2})
-			assert.Equal(t, count, 6)
-			sortedIds := allIDs.GetIntId().GetData()
-			slices.Sort(sortedIds)
-			assert.Equal(t, sortedIds, []int64{1, 2, 3, 4, 5, 6})
-		}
-		{
-			ids1 := &schemapb.IDs{
-				IdField: &schemapb.IDs_StrId{
-					StrId: &schemapb.StringArray{
-						Data: []string{"a", "b", "e"},
-					},
-				},
-			}
-
-			ids2 := &schemapb.IDs{
-				IdField: &schemapb.IDs_StrId{
-					StrId: &schemapb.StringArray{
-						Data: []string{"a", "b", "c", "d"},
-					},
-				},
-			}
-			allIDs, count := mergeIDs([]*schemapb.IDs{ids1, ids2})
-			assert.Equal(t, count, 5)
-			sortedIds := allIDs.GetStrId().GetData()
-			slices.Sort(sortedIds)
-			assert.Equal(t, sortedIds, []string{"a", "b", "c", "d", "e"})
 		}
 	})
 }
@@ -3743,9 +3690,10 @@ func TestSearchTask_Requery(t *testing.T) {
 			tr:                     timerecord.NewTimeRecorder("search"),
 			node:                   node,
 			translatedOutputFields: outputFields,
-			requeryFunc:            requeryImpl,
 		}
-		queryResult, err := qt.requeryFunc(qt, nil, qt.result.Results.Ids, outputFields)
+		op, err := newRequeryOperator(qt, nil)
+		assert.NoError(t, err)
+		queryResult, err := op.(*requeryOperator).requery(ctx, nil, qt.result.Results.Ids, outputFields)
 		assert.NoError(t, err)
 		assert.Len(t, queryResult.FieldsData, 2)
 		for _, field := range qt.result.Results.FieldsData {
@@ -3768,14 +3716,13 @@ func TestSearchTask_Requery(t *testing.T) {
 					SourceID: paramtable.GetNodeID(),
 				},
 			},
-			request:     &milvuspb.SearchRequest{},
-			schema:      schema,
-			tr:          timerecord.NewTimeRecorder("search"),
-			node:        node,
-			requeryFunc: requeryImpl,
+			request: &milvuspb.SearchRequest{},
+			schema:  schema,
+			tr:      timerecord.NewTimeRecorder("search"),
+			node:    node,
 		}
 
-		_, err := qt.requeryFunc(qt, nil, &schemapb.IDs{}, []string{})
+		_, err := newRequeryOperator(qt, nil)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})
@@ -3804,13 +3751,14 @@ func TestSearchTask_Requery(t *testing.T) {
 			request: &milvuspb.SearchRequest{
 				CollectionName: collectionName,
 			},
-			schema:      schema,
-			tr:          timerecord.NewTimeRecorder("search"),
-			node:        node,
-			requeryFunc: requeryImpl,
+			schema: schema,
+			tr:     timerecord.NewTimeRecorder("search"),
+			node:   node,
 		}
 
-		_, err := qt.requeryFunc(qt, nil, &schemapb.IDs{}, []string{})
+		op, err := newRequeryOperator(qt, nil)
+		assert.NoError(t, err)
+		_, err = op.(*requeryOperator).requery(ctx, nil, &schemapb.IDs{}, []string{})
 		t.Logf("err = %s", err)
 		assert.Error(t, err)
 	})

@@ -37,7 +37,8 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
 
         if (!evictionEnabled) {
             LOG_INFO(
-                "Tiered Storage manager is configured with disabled eviction");
+                "[MCL] Tiered Storage manager is configured "
+                "with disabled eviction");
             return;
         }
 
@@ -48,40 +49,27 @@ Manager::ConfigureTieredStorage(CacheWarmupPolicies warmup_policies,
         ResourceUsage high_watermark{cache_limit.memory_high_watermark_bytes,
                                      cache_limit.disk_high_watermark_bytes};
 
-        AssertInfo(
-            low_watermark.GEZero(),
-            "Milvus Caching Layer: low watermark must be greater than 0");
-        AssertInfo((high_watermark - low_watermark).GEZero(),
-                   "Milvus Caching Layer: high watermark must be greater than "
-                   "low watermark");
-        AssertInfo(
-            (max - high_watermark).GEZero(),
-            "Milvus Caching Layer: max must be greater than high watermark");
-
         manager.dlist_ = std::make_unique<internal::DList>(
             max, low_watermark, high_watermark, eviction_config);
 
         LOG_INFO(
-            "Configured Tiered Storage manager with memory watermark: low {} "
-            "bytes ({:.2} GB), high {} bytes ({:.2} GB), max {} bytes "
-            "({:.2} GB), disk watermark: low "
-            "{} bytes ({:.2} GB), high {} bytes ({:.2} GB), max {} bytes "
-            "({:.2} GB), cache touch "
-            "window: {} ms, eviction interval: {} ms",
-            low_watermark.memory_bytes,
-            low_watermark.memory_bytes / (1024.0 * 1024.0 * 1024.0),
-            high_watermark.memory_bytes,
-            high_watermark.memory_bytes / (1024.0 * 1024.0 * 1024.0),
-            max.memory_bytes,
-            max.memory_bytes / (1024.0 * 1024.0 * 1024.0),
-            low_watermark.file_bytes,
-            low_watermark.file_bytes / (1024.0 * 1024.0 * 1024.0),
-            high_watermark.file_bytes,
-            high_watermark.file_bytes / (1024.0 * 1024.0 * 1024.0),
-            max.file_bytes,
-            max.file_bytes / (1024.0 * 1024.0 * 1024.0),
+            "[MCL] Configured Tiered Storage manager with "
+            "memory watermark: low {}, high {}, max {}, "
+            "disk watermark: low {}, high {}, max {}, "
+            "cache touch window: {} ms, eviction interval: {} ms, "
+            "physical memory max ratio: {}, max disk usage percentage: {}, "
+            "loading memory factor: {}",
+            FormatBytes(low_watermark.memory_bytes),
+            FormatBytes(high_watermark.memory_bytes),
+            FormatBytes(max.memory_bytes),
+            FormatBytes(low_watermark.file_bytes),
+            FormatBytes(high_watermark.file_bytes),
+            FormatBytes(max.file_bytes),
             eviction_config.cache_touch_window.count(),
-            eviction_config.eviction_interval.count());
+            eviction_config.eviction_interval.count(),
+            eviction_config.overloaded_memory_threshold_percentage,
+            eviction_config.max_disk_usage_percentage,
+            eviction_config.loading_memory_factor);
     });
 }
 

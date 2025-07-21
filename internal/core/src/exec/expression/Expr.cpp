@@ -307,7 +307,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
     } else {
-        PanicInfo(ExprInvalid, "unsupport expr: ", expr->ToString());
+        ThrowInfo(ExprInvalid, "unsupport expr: ", expr->ToString());
     }
     return result;
 }

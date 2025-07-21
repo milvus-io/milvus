@@ -71,7 +71,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -99,7 +99,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContains<std::string>(context);
                     }
                     default:
-                        PanicInfo(
+                        ThrowInfo(
                             DataTypeInvalid,
                             fmt::format("unsupported data type {}", val_type));
                 }
@@ -123,7 +123,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                             return ExecJsonContainsArray(context);
                         }
                         default:
-                            PanicInfo(DataTypeInvalid,
+                            ThrowInfo(DataTypeInvalid,
                                       "unsupported data type:{}",
                                       val_type);
                     }
@@ -149,7 +149,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContainsAll<std::string>(context);
                     }
                     default:
-                        PanicInfo(
+                        ThrowInfo(
                             DataTypeInvalid,
                             fmt::format("unsupported data type {}", val_type));
                 }
@@ -173,7 +173,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                             return ExecJsonContainsAllArray(context);
                         }
                         default:
-                            PanicInfo(DataTypeInvalid,
+                            ThrowInfo(DataTypeInvalid,
                                       "unsupported data type:{}",
                                       val_type);
                     }
@@ -183,7 +183,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
             }
         }
         default:
-            PanicInfo(ExprInvalid,
+            ThrowInfo(ExprInvalid,
                       "unsupported json contains type {}",
                       proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));
     }
@@ -426,6 +426,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -437,6 +440,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
                     bitset[row_id] = false;
                 } else {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                 }
             }
             auto f = [&](const milvus::Json& json,
@@ -464,10 +470,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -637,6 +643,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -648,6 +657,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
                     bitset[row_id] = false;
                 } else {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                 }
             }
             auto f = [&](const milvus::Json& json,
@@ -677,10 +689,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -943,6 +955,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -954,6 +969,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
                     bitset[row_id] = false;
                 } else {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                 }
             }
             auto f = [&](const milvus::Json& json,
@@ -983,10 +1001,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1118,7 +1136,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1220,6 +1238,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -1231,6 +1252,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                     bitset[row_id] = false;
                 } else {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                 }
             }
             auto f = [&](const milvus::Json& json,
@@ -1302,7 +1326,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1320,10 +1344,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffTypeByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1499,6 +1523,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -1510,6 +1537,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
                     bitset[row_id] = false;
                 } else {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                 }
             }
             auto f = [&](const milvus::Json& json,
@@ -1543,10 +1573,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllArrayByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1676,7 +1706,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1764,6 +1794,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                                TargetBitmap& bitset,
                                const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -1775,6 +1808,9 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                     bitset[row_id] = false;
                 } else {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                 }
             }
             auto f = [&](const milvus::Json& json,
@@ -1844,7 +1880,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
                                 break;
                             }
                             default:
-                                PanicInfo(
+                                ThrowInfo(
                                     DataTypeInvalid,
                                     fmt::format("unsupported data type {}",
                                                 element.val_case()));
@@ -1856,10 +1892,10 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffTypeByKeyIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),
@@ -1914,7 +1950,7 @@ PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
             return ExecArrayContainsForIndexSegmentImpl<std::string>();
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type for "
                                   "ExecArrayContainsForIndexSegmentImpl: {}",
                                   expr_->column_.element_type_));
@@ -1957,7 +1993,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
                     return result;
                 }
                 default:
-                    PanicInfo(
+                    ThrowInfo(
                         ExprInvalid,
                         "unsupported array contains type {}",
                         proto::plan::JSONContainsExpr_JSONOp_Name(expr_->op_));

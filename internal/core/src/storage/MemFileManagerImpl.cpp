@@ -283,7 +283,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
     if (0 == num_of_fields) {
         return {};
     } else if (num_of_fields > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
     }
@@ -316,7 +316,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     if (0 == num_of_fields) {
         return {};
     } else if (num_of_fields > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
     }

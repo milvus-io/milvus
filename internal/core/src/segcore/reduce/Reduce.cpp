@@ -357,7 +357,7 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported primary key type {}", pk_type));
         }
     }
@@ -405,7 +405,7 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format("unsupported primary key type {}",
                                               pk_type));
                     }
@@ -440,7 +440,7 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
                 ->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-            PanicInfo(NotImplemented, "VECTOR_ARRAY is not implemented");
+            ThrowInfo(NotImplemented, "VECTOR_ARRAY is not implemented");
         }
         search_result_data->mutable_fields_data()->AddAllocated(
             field_data.release());

@@ -73,7 +73,7 @@ class GcpNativeChunkManager : public ChunkManager {
          uint64_t offset,
          void* buf,
          uint64_t len) override {
-        PanicInfo(NotImplemented, GetName() + "Read with offset not implement");
+        ThrowInfo(NotImplemented, GetName() + "Read with offset not implement");
     }
 
     void
@@ -81,7 +81,7 @@ class GcpNativeChunkManager : public ChunkManager {
           uint64_t offset,
           void* buf,
           uint64_t len) override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   GetName() + "Write with offset not implement");
     }
 

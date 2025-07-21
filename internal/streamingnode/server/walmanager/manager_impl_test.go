@@ -42,6 +42,7 @@ func TestManager(t *testing.T) {
 			l.EXPECT().IsAvailable().Return(true).Maybe()
 			l.EXPECT().Close().Return()
 			l.EXPECT().IsAvailable().Return(true).Maybe()
+			l.EXPECT().Metrics().Return(types.RWWALMetrics{})
 			return l, nil
 		})
 	opener.EXPECT().Close().Return()

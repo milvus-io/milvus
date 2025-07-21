@@ -158,7 +158,7 @@ class FieldBitsetImpl : public FieldDataBase {
     // no need to implement for bitset which used in runtime process.
     void
     FillFieldData(const void* source, ssize_t element_count) override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const void* source, ssize_t element_count)"
                   "not implemented for bitset");
     }
@@ -168,7 +168,7 @@ class FieldBitsetImpl : public FieldDataBase {
                   const uint8_t* valid_data,
                   ssize_t element_count,
                   ssize_t offset) override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const void* field_data, "
                   "const uint8_t* valid_data, ssize_t element_count)"
                   "not implemented for bitset");
@@ -176,14 +176,14 @@ class FieldBitsetImpl : public FieldDataBase {
 
     void
     FillFieldData(const std::shared_ptr<arrow::Array> array) override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::Array>& array) "
                   "not implemented for bitset");
     }
 
     void
     FillFieldData(const std::shared_ptr<arrow::ChunkedArray> arrays) override {
-        PanicInfo(
+        ThrowInfo(
             NotImplemented,
             "FillFieldData(const std::shared_ptr<arrow::ChunkedArray>& arrays) "
             "not implemented for bitset");
@@ -192,7 +192,7 @@ class FieldBitsetImpl : public FieldDataBase {
     void
     FillFieldData(const std::optional<DefaultValueType> default_value,
                   ssize_t element_count) override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const const std::optional<DefaultValueType> "
                   "default_value, "
                   "ssize_t element_count) not implemented for bitset");
@@ -200,14 +200,14 @@ class FieldBitsetImpl : public FieldDataBase {
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::StringArray>& array) {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::StringArray>& "
                   "array) not implemented for bitset");
     }
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::BinaryArray>& "
                   "array) not implemented for bitset");
     }
@@ -224,12 +224,12 @@ class FieldBitsetImpl : public FieldDataBase {
 
     uint8_t*
     ValidData() override {
-        PanicInfo(NotImplemented, "ValidData() not implemented for bitset");
+        ThrowInfo(NotImplemented, "ValidData() not implemented for bitset");
     }
 
     const void*
     RawValue(ssize_t offset) const override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "RawValue(ssize_t offset) not implemented for bitset");
     }
 
@@ -302,13 +302,13 @@ class FieldBitsetImpl : public FieldDataBase {
 
     int64_t
     get_null_count() const override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "get_null_count() not implemented for bitset");
     }
 
     bool
     is_valid(ssize_t offset) const override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "is_valid(ssize_t offset) not implemented for bitset");
     }
 
@@ -344,7 +344,7 @@ class FieldDataImpl : public FieldDataBase {
         data_.resize(num_rows_ * dim_);
         if (nullable) {
             if (IsVectorDataType(data_type)) {
-                PanicInfo(NotImplemented, "vector type not support null");
+                ThrowInfo(NotImplemented, "vector type not support null");
             }
             valid_data_.resize((num_rows_ + 7) / 8, 0xFF);
         }
@@ -396,14 +396,14 @@ class FieldDataImpl : public FieldDataBase {
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::StringArray>& array) {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::StringArray>& "
                   "array) not implemented by default");
     }
 
     virtual void
     FillFieldData(const std::shared_ptr<arrow::BinaryArray>& array) {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "FillFieldData(const std::shared_ptr<arrow::BinaryArray>& "
                   "array) not implemented by default");
     }

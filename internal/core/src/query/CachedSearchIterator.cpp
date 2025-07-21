@@ -23,7 +23,7 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const BitsetView& bitset) {
     if (query_ds == nullptr) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Query dataset is nullptr, cannot initialize iterator");
     }
     nq_ = query_ds->GetRows();
@@ -38,7 +38,7 @@ CachedSearchIterator::CachedSearchIterator(
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Failed to create iterators from index");
     }
 }
@@ -66,7 +66,7 @@ CachedSearchIterator::InitializeChunkedIterators(
                               std::make_move_iterator(chunk_iterators.begin()),
                               std::make_move_iterator(chunk_iterators.end()));
         } else {
-            PanicInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::UnexpectedError,
                       "Failed to create iterators from index");
         }
         offset += chunk_size;
@@ -83,12 +83,12 @@ CachedSearchIterator::CachedSearchIterator(
     const BitsetView& bitset,
     const milvus::DataType& data_type) {
     if (vec_data == nullptr) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Vector data is nullptr, cannot initialize iterator");
     }
 
     if (row_count <= 0) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Number of rows is 0, cannot initialize iterator");
     }
 
@@ -122,7 +122,7 @@ CachedSearchIterator::CachedSearchIterator(
     const BitsetView& bitset,
     const milvus::DataType& data_type) {
     if (column == nullptr) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
     }
 
@@ -158,7 +158,7 @@ CachedSearchIterator::NextBatch(const SearchInfo& search_info,
     }
 
     if (iterators_.size() != nq_ * num_chunks_) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Iterator size mismatch, expect %d, but got %d",
                   nq_ * num_chunks_,
                   iterators_.size());
@@ -181,13 +181,13 @@ CachedSearchIterator::NextBatch(const SearchInfo& search_info,
 void
 CachedSearchIterator::ValidateSearchInfo(const SearchInfo& search_info) {
     if (!search_info.iterator_v2_info_.has_value()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Iterator v2 SearchInfo is not set");
     }
 
     auto iterator_v2_info = search_info.iterator_v2_info_.value();
     if (iterator_v2_info.batch_size != batch_size_) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size mismatch, expect %d, but got %d",
                   batch_size_,
                   iterator_v2_info.batch_size);
@@ -314,19 +314,19 @@ CachedSearchIterator::WriteSingleQuerySearchResult(
 void
 CachedSearchIterator::Init(const SearchInfo& search_info) {
     if (!search_info.iterator_v2_info_.has_value()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Iterator v2 info is not set, cannot initialize iterator");
     }
 
     auto iterator_v2_info = search_info.iterator_v2_info_.value();
     if (iterator_v2_info.batch_size == 0) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Batch size is 0, cannot initialize iterator");
     }
     batch_size_ = iterator_v2_info.batch_size;
 
     if (search_info.metric_type_.empty()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Metric type is empty, cannot initialize iterator");
     }
     if (PositivelyRelated(search_info.metric_type_)) {
@@ -336,13 +336,13 @@ CachedSearchIterator::Init(const SearchInfo& search_info) {
     }
 
     if (nq_ == 0) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Number of queries is 0, cannot initialize iterator");
     }
 
     // disable multi-query for now
     if (nq_ > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::UnexpectedError,
             "Number of queries is greater than 1, cannot initialize iterator");
     }

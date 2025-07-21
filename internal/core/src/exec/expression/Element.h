@@ -80,7 +80,7 @@ class SingleElement : public BaseElement {
         try {
             return std::get<T>(value_);
         } catch (const std::bad_variant_access& e) {
-            PanicInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::UnexpectedError,
                       "SingleElement GetValue() failed: {}",
                       e.what());
         }

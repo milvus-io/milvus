@@ -70,7 +70,7 @@ NewSegment(CCollection collection,
                 break;
 
             default:
-                PanicInfo(milvus::UnexpectedError,
+                ThrowInfo(milvus::UnexpectedError,
                           "invalid segment type: {}",
                           seg_type);
         }
