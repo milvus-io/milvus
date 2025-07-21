@@ -188,7 +188,7 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2GB # Maximum size of a segment, default is 2GB
+      maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
@@ -196,14 +196,14 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
-      maxBytes: 128M # Maximum size of write buffer in bytes.
+      maxBytes: 256M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
-      maxFlushSize: 4M # Maximum size of a fragment in bytes to flush, default is 4M.
+      maxFlushSize: 2M # Maximum size of a fragment in bytes to flush.
       maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
-      maxSize: 8M # The maximum size of the merged files, default is 8M.
+      maxSize: 2M # The maximum size of the merged files.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
@@ -465,15 +465,13 @@ queryNode:
         vectorIndex: sync
       # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
       # eviction is necessary and the amount of data to evict from memory/disk.
-      # - The max ratio is the max amount of memory/disk that can be used for cache.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
+      # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
       memoryLowWatermarkRatio: 0.6
       memoryHighWatermarkRatio: 0.8
-      memoryMaxRatio: 0.9
       diskLowWatermarkRatio: 0.6
       diskHighWatermarkRatio: 0.8
-      diskMaxRatio: 0.9
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
@@ -960,7 +958,6 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    scheme: s3
     enablev2: false
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
@@ -1137,12 +1134,12 @@ quotaAndLimits:
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
     forceDeny: false
     ttProtection:
-      enabled: false
+      enabled: true
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
       # seconds
-      maxTimeTickDelay: 300
+      maxTimeTickDelay: 1200
     memProtection:
       # When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
       # When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
@@ -1197,6 +1194,7 @@ trace:
     endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
     method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
+    headers:  # otlp header that encoded in base64
   initTimeoutSeconds: 10 # segcore initialization timeout in seconds, preventing otlp grpc hangs forever
 
 #when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
@@ -1238,6 +1236,13 @@ streaming:
     operationTimeout: 30s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
+      # Whether to allow rebalance, true by default.
+      # If the rebalance is not allowed, only the lost wal recovery will be executed, the rebalance (move a pchannel from one node to another node) will be skipped.
+      allowRebalance: true
+      minRebalanceIntervalThreshold: 5m # The max interval of rebalance for each wal, 5m by default.
+      # The threshold of recovery lag for rebalance, 1s by default.
+      # If the recovery lag is greater than this threshold, the rebalance of current pchannel is not allowed.
+      allowRebalanceRecoveryLagThreshold: 1s
       vchannelFair:
         # The weight of pchannel count in vchannelFair balance policy,
         # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default

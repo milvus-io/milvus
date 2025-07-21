@@ -664,7 +664,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
     if (0 == num_of_fields) {
         return "";
     } else if (num_of_fields > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
     }

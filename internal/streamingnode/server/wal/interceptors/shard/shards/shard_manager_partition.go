@@ -9,39 +9,39 @@ import (
 )
 
 // CheckIfPartitionCanBeCreated checks if a partition can be created.
-func (m *shardManagerImpl) CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) CheckIfPartitionCanBeCreated(uniquePartitionKey PartitionUniqueKey) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.checkIfPartitionCanBeCreated(collectionID, partitionID)
+	return m.checkIfPartitionCanBeCreated(uniquePartitionKey)
 }
 
 // checkIfPartitionCanBeCreated checks if a partition can be created.
-func (m *shardManagerImpl) checkIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
-	if _, ok := m.collections[collectionID]; !ok {
+func (m *shardManagerImpl) checkIfPartitionCanBeCreated(uniquePartitionKey PartitionUniqueKey) error {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID]; !ok {
 		return ErrCollectionNotFound
 	}
 
-	if _, ok := m.collections[collectionID].PartitionIDs[partitionID]; ok {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID].PartitionIDs[uniquePartitionKey.PartitionID]; ok {
 		return ErrPartitionExists
 	}
 	return nil
 }
 
 // CheckIfPartitionExists checks if a partition can be dropped.
-func (m *shardManagerImpl) CheckIfPartitionExists(collectionID int64, partitionID int64) error {
+func (m *shardManagerImpl) CheckIfPartitionExists(uniquePartitionKey PartitionUniqueKey) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.checkIfPartitionExists(collectionID, partitionID)
+	return m.checkIfPartitionExists(uniquePartitionKey)
 }
 
 // checkIfPartitionExists checks if a partition can be dropped.
-func (m *shardManagerImpl) checkIfPartitionExists(collectionID int64, partitionID int64) error {
-	if _, ok := m.collections[collectionID]; !ok {
+func (m *shardManagerImpl) checkIfPartitionExists(uniquePartitionKey PartitionUniqueKey) error {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID]; !ok {
 		return ErrCollectionNotFound
 	}
-	if _, ok := m.collections[collectionID].PartitionIDs[partitionID]; !ok {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID].PartitionIDs[uniquePartitionKey.PartitionID]; !ok {
 		return ErrPartitionNotFound
 	}
 	return nil
@@ -58,17 +58,18 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.checkIfPartitionCanBeCreated(collectionID, partitionID); err != nil {
+	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+	if err := m.checkIfPartitionCanBeCreated(uniquePartitionKey); err != nil {
 		logger.Warn("partition can not be created", zap.Error(err))
 		return
 	}
 
 	m.collections[collectionID].PartitionIDs[partitionID] = struct{}{}
-	if _, ok := m.partitionManagers[partitionID]; ok {
+	if _, ok := m.partitionManagers[uniquePartitionKey]; ok {
 		logger.Warn("partition manager already exists")
 		return
 	}
-	m.partitionManagers[partitionID] = newPartitionSegmentManager(
+	m.partitionManagers[uniquePartitionKey] = newPartitionSegmentManager(
 		m.ctx,
 		m.Logger(),
 		m.wal,
@@ -95,19 +96,20 @@ func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.checkIfPartitionExists(collectionID, partitionID); err != nil {
+	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		logger.Warn("partition can not be dropped", zap.Error(err))
 		return
 	}
 	delete(m.collections[collectionID].PartitionIDs, partitionID)
 
-	pm, ok := m.partitionManagers[partitionID]
+	pm, ok := m.partitionManagers[uniquePartitionKey]
 	if !ok {
 		logger.Warn("partition not exists", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
 		return
 	}
 
-	delete(m.partitionManagers, partitionID)
+	delete(m.partitionManagers, uniquePartitionKey)
 	segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
 	m.Logger().Info("partition removed", zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()

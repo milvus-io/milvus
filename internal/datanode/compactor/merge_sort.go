@@ -54,8 +54,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 		return nil, err
 	}
 
-	bucketName := compactionParams.StorageConfig.GetBucketName()
-
 	segmentReaders := make([]storage.RecordReader, len(binlogs))
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
@@ -64,7 +62,6 @@ func mergeSortMultipleSegments(ctx context.Context,
 			plan.GetSchema(),
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithVersion(s.StorageVersion),
-			storage.WithBucketName(bucketName),
 			storage.WithStorageConfig(compactionParams.StorageConfig),
 		)
 		if err != nil {

@@ -79,6 +79,11 @@ type MutableMessage interface {
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmed(id MessageID) MutableMessage
 
+	// WithOldVersion sets the version of current message to be old version.
+	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+	// TODO: used for old version message compatibility, will be removed in the future.
+	WithOldVersion() MutableMessage
+
 	// WithLastConfirmedUseMessageID sets the last confirmed message id of current message to be the same as message id.
 	// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
 	WithLastConfirmedUseMessageID() MutableMessage

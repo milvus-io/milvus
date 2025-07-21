@@ -1,14 +1,6 @@
 use index_writer_v5::TantivyDocumentV5;
 use index_writer_v7::TantivyDocumentV7;
 use libc::c_char;
-use log::info;
-use tantivy::schema::{
-    Field, IndexRecordOption, OwnedValue, Schema, SchemaBuilder, TextFieldIndexing, TextOptions,
-    FAST, INDEXED, STRING,
-};
-use tantivy::{
-    doc, tokenizer, Document, Index, IndexWriter, SingleSegmentIndexWriter, TantivyDocument,
-};
 
 use crate::data_type::TantivyDataType;
 
@@ -347,10 +339,10 @@ mod tests {
         let mut rng = rand::thread_rng();
         let json_offsets = (0..100)
             .map(|_| {
-                let count = rng.gen_range(0, 1000);
+                let count = rng.random_range(0..1000);
                 total_count += count;
                 (0..count)
-                    .map(|_| rng.gen_range(0, i64::MAX))
+                    .map(|_| rng.random_range(0..i64::MAX))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();

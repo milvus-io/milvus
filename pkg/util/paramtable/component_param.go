@@ -271,7 +271,6 @@ type commonConfig struct {
 	LockSlowLogWarnThreshold    ParamItem `refreshable:"true"`
 	MaxWLockConditionalWaitTime ParamItem `refreshable:"true"`
 
-	StorageScheme             ParamItem `refreshable:"false"`
 	EnableStorageV2           ParamItem `refreshable:"false"`
 	StoragePathPrefix         ParamItem `refreshable:"false"`
 	StorageZstdConcurrency    ParamItem `refreshable:"false"`
@@ -850,14 +849,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	}
 	p.EnableStorageV2.Init(base.mgr)
 
-	p.StorageScheme = ParamItem{
-		Key:          "common.storage.scheme",
-		Version:      "2.3.4",
-		DefaultValue: "s3",
-		Export:       true,
-	}
-	p.StorageScheme.Init(base.mgr)
-
 	p.StoragePathPrefix = ParamItem{
 		Key:          "common.storage.pathPrefix",
 		Version:      "2.3.4",
@@ -1144,6 +1135,7 @@ type traceConfig struct {
 	OtlpEndpoint       ParamItem `refreshable:"false"`
 	OtlpMethod         ParamItem `refreshable:"false"`
 	OtlpSecure         ParamItem `refreshable:"false"`
+	OtlpHeaders        ParamItem `refreshable:"false"`
 	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
 
@@ -1201,6 +1193,15 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
+
+	t.OtlpHeaders = ParamItem{
+		Key:          "trace.otlp.headers",
+		Version:      "2.4.0",
+		DefaultValue: "",
+		Doc:          "otlp header that encoded in base64",
+		Export:       true,
+	}
+	t.OtlpHeaders.Init(base.mgr)
 
 	t.InitTimeoutSeconds = ParamItem{
 		Key:          "trace.initTimeoutSeconds",
@@ -1573,6 +1574,7 @@ type proxyConfig struct {
 	MaxVarCharLength             ParamItem `refreshable:"false"`
 	MaxTextLength                ParamItem `refreshable:"false"`
 	MaxResultEntries             ParamItem `refreshable:"true"`
+	EnableCachedServiceProvider  ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -2006,6 +2008,13 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.MaxResultEntries.Init(base.mgr)
 
+	p.EnableCachedServiceProvider = ParamItem{
+		Key:          "proxy.enableCachedServiceProvider",
+		Version:      "2.6.0",
+		DefaultValue: "true",
+		Doc:          "enable cached service provider",
+	}
+	p.EnableCachedServiceProvider.Init(base.mgr)
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -2827,13 +2836,12 @@ type queryNodeConfig struct {
 	TieredWarmupVectorIndex        ParamItem `refreshable:"false"`
 	TieredMemoryLowWatermarkRatio  ParamItem `refreshable:"false"`
 	TieredMemoryHighWatermarkRatio ParamItem `refreshable:"false"`
-	TieredMemoryMaxRatio           ParamItem `refreshable:"false"`
 	TieredDiskLowWatermarkRatio    ParamItem `refreshable:"false"`
 	TieredDiskHighWatermarkRatio   ParamItem `refreshable:"false"`
-	TieredDiskMaxRatio             ParamItem `refreshable:"false"`
 	TieredEvictionEnabled          ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs       ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs       ParamItem `refreshable:"false"`
+	TieredLoadingMemoryFactor      ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3052,9 +3060,9 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		},
 		Doc: `If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
 eviction is necessary and the amount of data to evict from memory/disk.
-- The max ratio is the max amount of memory/disk that can be used for cache.
 - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
-  until the memory/disk usage is below the low watermark.`,
+  until the memory/disk usage is below the low watermark.
+- The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.`,
 		Export: true,
 	}
 	p.TieredMemoryLowWatermarkRatio.Init(base.mgr)
@@ -3073,21 +3081,6 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: true,
 	}
 	p.TieredMemoryHighWatermarkRatio.Init(base.mgr)
-
-	p.TieredMemoryMaxRatio = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.memoryMaxRatio",
-		Version:      "2.6.0",
-		DefaultValue: "0.9",
-		Formatter: func(v string) string {
-			ratio := getAsFloat(v)
-			if ratio < 0 || ratio > 1 {
-				return "0.9"
-			}
-			return fmt.Sprintf("%f", ratio)
-		},
-		Export: true,
-	}
-	p.TieredMemoryMaxRatio.Init(base.mgr)
 
 	p.TieredDiskLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.diskLowWatermarkRatio",
@@ -3118,21 +3111,6 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: true,
 	}
 	p.TieredDiskHighWatermarkRatio.Init(base.mgr)
-
-	p.TieredDiskMaxRatio = ParamItem{
-		Key:          "queryNode.segcore.tieredStorage.diskMaxRatio",
-		Version:      "2.6.0",
-		DefaultValue: "0.9",
-		Formatter: func(v string) string {
-			ratio := getAsFloat(v)
-			if ratio < 0 || ratio > 1 {
-				return "0.9"
-			}
-			return fmt.Sprintf("%f", ratio)
-		},
-		Export: true,
-	}
-	p.TieredDiskMaxRatio.Init(base.mgr)
 
 	p.TieredCacheTouchWindowMs = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.cacheTouchWindowMs",
@@ -3165,6 +3143,22 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: false,
 	}
 	p.TieredEvictionIntervalMs.Init(base.mgr)
+
+	p.TieredLoadingMemoryFactor = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.loadingMemoryFactor",
+		Version:      "2.6.0",
+		DefaultValue: "2.5",
+		Formatter: func(v string) string {
+			factor := getAsFloat(v)
+			if factor < 1.0 {
+				return "2.5"
+			}
+			return fmt.Sprintf("%.2f", factor)
+		},
+		Doc:    "Loading memory factor for estimating memory during loading.",
+		Export: false,
+	}
+	p.TieredLoadingMemoryFactor.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
@@ -5714,12 +5708,15 @@ type streamingConfig struct {
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
 
 	// balancer Policy
-	WALBalancerPolicyName                           ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairPChannelWeight     ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairVChannelWeight     ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairAntiAffinityWeight ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairRebalanceTolerance ParamItem `refreshable:"true"`
-	WALBalancerPolicyVChannelFairRebalanceMaxStep   ParamItem `refreshable:"true"`
+	WALBalancerPolicyName                               ParamItem `refreshable:"true"`
+	WALBalancerPolicyAllowRebalance                     ParamItem `refreshable:"true"`
+	WALBalancerPolicyMinRebalanceIntervalThreshold      ParamItem `refreshable:"true"`
+	WALBalancerPolicyAllowRebalanceRecoveryLagThreshold ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairPChannelWeight         ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairVChannelWeight         ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairAntiAffinityWeight     ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairRebalanceTolerance     ParamItem `refreshable:"true"`
+	WALBalancerPolicyVChannelFairRebalanceMaxStep       ParamItem `refreshable:"true"`
 
 	// broadcaster
 	WALBroadcasterConcurrencyRatio ParamItem `refreshable:"false"`
@@ -5805,6 +5802,35 @@ If the operation exceeds this timeout, it will be canceled.`,
 		Export:       true,
 	}
 	p.WALBalancerPolicyName.Init(base.mgr)
+
+	p.WALBalancerPolicyAllowRebalance = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.allowRebalance",
+		Version: "2.6.0",
+		Doc: `Whether to allow rebalance, true by default.
+If the rebalance is not allowed, only the lost wal recovery will be executed, the rebalance (move a pchannel from one node to another node) will be skipped.`,
+		DefaultValue: "true",
+		Export:       true,
+	}
+	p.WALBalancerPolicyAllowRebalance.Init(base.mgr)
+
+	p.WALBalancerPolicyMinRebalanceIntervalThreshold = ParamItem{
+		Key:          "streaming.walBalancer.balancePolicy.minRebalanceIntervalThreshold",
+		Version:      "2.6.0",
+		Doc:          `The max interval of rebalance for each wal, 5m by default.`,
+		DefaultValue: "5m",
+		Export:       true,
+	}
+	p.WALBalancerPolicyMinRebalanceIntervalThreshold.Init(base.mgr)
+
+	p.WALBalancerPolicyAllowRebalanceRecoveryLagThreshold = ParamItem{
+		Key:     "streaming.walBalancer.balancePolicy.allowRebalanceRecoveryLagThreshold",
+		Version: "2.6.0",
+		Doc: `The threshold of recovery lag for rebalance, 1s by default.
+If the recovery lag is greater than this threshold, the rebalance of current pchannel is not allowed.`,
+		DefaultValue: "1s",
+		Export:       true,
+	}
+	p.WALBalancerPolicyAllowRebalanceRecoveryLagThreshold.Init(base.mgr)
 
 	p.WALBalancerPolicyVChannelFairPChannelWeight = ParamItem{
 		Key:     "streaming.walBalancer.balancePolicy.vchannelFair.pchannelWeight",

@@ -183,7 +183,7 @@ OpenDALChunkManager::Read(const std::string& filepath,
         }
     }
     if (buf_index != size) {
-        PanicInfo(
+        ThrowInfo(
             S3Error,
             fmt::format(
                 "Read size mismatch, target size is {}, actual size is {}",

@@ -289,6 +289,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.readableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.readableCollections).Maybe()
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
 
@@ -331,6 +332,7 @@ func TestQuotaCenter(t *testing.T) {
 			0: collectionIDToPartitionIDs,
 		}
 		quotaCenter.writableCollections[0][1] = append(quotaCenter.writableCollections[0][1], 1000)
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
@@ -396,6 +398,7 @@ func TestQuotaCenter(t *testing.T) {
 			0: collectionIDToPartitionIDs,
 		}
 		quotaCenter.writableCollections[0][1] = append(quotaCenter.writableCollections[0][1], 1000)
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
@@ -449,6 +452,7 @@ func TestQuotaCenter(t *testing.T) {
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{}, nil).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		quotaCenter.clearMetrics()
 		err = quotaCenter.calculateRates()
 		assert.NoError(t, err)
@@ -580,6 +584,7 @@ func TestQuotaCenter(t *testing.T) {
 			quotaCenter.writableCollections = map[int64]map[int64][]int64{
 				0: collectionIDToPartitionIDs,
 			}
+			meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 			quotaCenter.collectionIDToDBID = collectionIDToDBID
 			err = quotaCenter.resetAllCurrentRates()
 			assert.NoError(t, err)
@@ -619,6 +624,7 @@ func TestQuotaCenter(t *testing.T) {
 			0: {1: {}},
 			1: {2: {}},
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.readableCollections).Maybe()
 		quotaCenter.dbs.Insert("default", 0)
 		quotaCenter.dbs.Insert("db1", 1)
 
@@ -672,6 +678,7 @@ func TestQuotaCenter(t *testing.T) {
 			0: collectionIDToPartitionIDs,
 			1: {4: {}},
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.resetAllCurrentRates()
@@ -786,6 +793,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.writableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		for _, c := range memCases {
 			paramtable.Get().Save(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, fmt.Sprintf("%f", c.lowWater))
 			paramtable.Get().Save(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, fmt.Sprintf("%f", c.highWater))
@@ -842,6 +850,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.writableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		paramtable.Get().Save(Params.QuotaConfig.GrowingSegmentsSizeProtectionEnabled.Key, "true")
 		for _, test := range tests {
 			paramtable.Get().Save(Params.QuotaConfig.GrowingSegmentsSizeLowWaterLevel.Key, fmt.Sprintf("%f", test.low))
@@ -912,6 +921,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.writableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.resetAllCurrentRates()
 		quotaCenter.checkDiskQuota(nil)
@@ -946,6 +956,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.readableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		quotaCenter.resetAllCurrentRates()
 		collectionID := int64(1)
 		limitNode := quotaCenter.rateLimiter.GetCollectionLimiters(0, collectionID)
@@ -966,6 +977,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.readableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		quotaCenter.resetAllCurrentRates()
 		collectionID := int64(1)
 		limitNode := quotaCenter.rateLimiter.GetCollectionLimiters(0, collectionID)
@@ -981,6 +993,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.readableCollections = map[int64]map[int64][]int64{
 			0: collectionIDToPartitionIDs,
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.readableCollections).Maybe()
 		quotaCenter.resetAllCurrentRates()
 		minRate := Limit(100)
 		collectionID := int64(1)
@@ -1010,6 +1023,7 @@ func TestQuotaCenter(t *testing.T) {
 				collection := UniqueID(0)
 				meta := mockrootcoord.NewIMetaTable(t)
 				meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+				meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(nil).Maybe()
 				quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
 				quotaCenter.resetAllCurrentRates()
 				quotaBackup := Params.QuotaConfig.DiskQuota.GetValue()
@@ -1039,6 +1053,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.writableCollections = map[int64]map[int64][]int64{
 			0: {1: {}},
 		}
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		quotaCenter.collectionIDToDBID = collectionIDToDBID
 		quotaCenter.resetAllCurrentRates()
 
@@ -1057,6 +1072,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLQuery), Params.QuotaConfig.DQLMaxQueryRatePerCollection.GetAsFloat())
 
 		meta.ExpectedCalls = nil
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(quotaCenter.writableCollections).Maybe()
 		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(&model.Collection{
 			Properties: []*commonpb.KeyValuePair{
 				{
@@ -1562,6 +1578,12 @@ func TestResetAllCurrentRates(t *testing.T) {
 			100: []int64{},
 		},
 	}
+	meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(map[int64]map[int64][]int64{
+		1: {},
+		2: {
+			100: []int64{},
+		},
+	}).Maybe()
 	err := quotaCenter.resetAllCurrentRates()
 	assert.NoError(t, err)
 

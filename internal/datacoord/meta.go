@@ -1595,7 +1595,8 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 				return info.GetDmlPosition()
 			})),
 			// visible after stats and index
-			IsInvisible: true,
+			IsInvisible:    true,
+			StorageVersion: seg.GetStorageVersion(),
 		}
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
@@ -1659,8 +1660,10 @@ func (m *meta) completeMixCompactionMutation(
 	log = log.With(zap.Int64s("compactFrom", compactFromSegIDs))
 
 	resultInvisible := false
+	targetSegmentLevel := datapb.SegmentLevel_L1
 	if t.GetType() == datapb.CompactionType_SortCompaction {
 		resultInvisible = compactFromSegInfos[0].GetIsInvisible()
+		targetSegmentLevel = compactFromSegInfos[0].GetLevel()
 		if !compactFromSegInfos[0].GetCreatedByCompaction() {
 			resultInvisible = false
 		}
@@ -1686,7 +1689,7 @@ func (m *meta) completeMixCompactionMutation(
 				CreatedByCompaction: true,
 				CompactionFrom:      compactFromSegIDs,
 				LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0), 0),
-				Level:               datapb.SegmentLevel_L1,
+				Level:               targetSegmentLevel,
 				StorageVersion:      compactToSegment.GetStorageVersion(),
 				StartPosition: getMinPosition(lo.Map(compactFromSegInfos, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
 					return info.GetStartPosition()

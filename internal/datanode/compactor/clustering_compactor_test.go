@@ -63,6 +63,8 @@ func (s *ClusteringCompactionTaskSuite) SetupSuite() {
 }
 
 func (s *ClusteringCompactionTaskSuite) setupTest() {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -116,6 +118,7 @@ func (s *ClusteringCompactionTaskSuite) SetupSubTest() {
 
 func (s *ClusteringCompactionTaskSuite) TearDownTest() {
 	paramtable.Get().Reset(paramtable.Get().CommonCfg.EntityExpirationTTL.Key)
+	paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
 }
 
 func (s *ClusteringCompactionTaskSuite) TestWrongCompactionType() {
@@ -176,7 +179,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 	s.Require().NoError(err)
 	s.Equal(s.task.primaryKeyField, s.task.plan.Schema.Fields[2])
 	s.Equal(false, s.task.isVectorClusteringKey)
-	s.Equal(true, s.task.memoryBufferSize > 0)
+	s.Equal(true, s.task.memoryLimit > 0)
 	s.Equal(8, s.task.getWorkerPoolSize())
 	s.Equal(8, s.task.mappingPool.Cap())
 	s.Equal(8, s.task.flushPool.Cap())
@@ -302,7 +305,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 		func(ctx context.Context, strings []string) ([][]byte, error) {
 			// 32m, only two buffers can be generated
 			one.Do(func() {
-				s.task.memoryBufferSize = 32 * 1024 * 1024
+				s.task.memoryLimit = 32 * 1024 * 1024
 			})
 			return lo.Values(kvs), nil
 		})
@@ -421,6 +424,9 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.BinLogMaxSize.Key)
 	s.task.compactionParams = compaction.GenParams()
 	s.prepareCompactionWithBM25FunctionTask()
+
+	err := s.task.init()
+	s.Require().NoError(err)
 
 	compactionResult, err := s.task.Compact()
 	s.Require().NoError(err)

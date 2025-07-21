@@ -30,7 +30,7 @@ namespace function {
 void
 StartsWithVarchar(const RowVector& args, FilterFunctionReturn& result) {
     if (args.childrens().size() != 2) {
-        PanicInfo(ExprInvalid,
+        ThrowInfo(ExprInvalid,
                   "invalid argument count, expect 2, actual {}",
                   args.childrens().size());
     }

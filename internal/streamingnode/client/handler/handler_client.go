@@ -70,6 +70,10 @@ type HandlerClient interface {
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
 
+	// GetWALMetricsIfLocal gets the metrics of the local wal.
+	// It will only return the metrics of the local wal but not the remote wal.
+	GetWALMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error)
+
 	// CreateProducer creates a producer.
 	// Producer is a stream client without keep alive promise.
 	// It will be available until context canceled, active close, streaming error or remote server wal closing.

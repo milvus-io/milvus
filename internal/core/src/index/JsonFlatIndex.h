@@ -32,6 +32,10 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
         this->wrapper_ = wrapper;
     }
 
+    ~JsonFlatIndexQueryExecutor() {
+        this->wrapper_ = nullptr;
+    }
+
     const TargetBitmap
     In(size_t n, const T* values) override {
         TargetBitmap bitset(this->Count());
@@ -119,7 +123,7 @@ class JsonFlatIndexQueryExecutor : public InvertedIndexTantivy<T> {
                     json_path_, value, T(), false, true, true, false, &bitset);
             } break;
             default:
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType: {}", op));
         }
         return bitset;

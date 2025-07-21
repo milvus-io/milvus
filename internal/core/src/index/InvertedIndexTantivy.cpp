@@ -49,7 +49,7 @@ InvertedIndexTantivy<T>::InitForBuildIndex() {
     boost::filesystem::create_directories(path_);
     d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {
-        PanicInfo(IndexBuildError,
+        ThrowInfo(IndexBuildError,
                   "build inverted index temp dir:{} not empty",
                   path_);
     }
@@ -86,6 +86,9 @@ template <typename T>
 InvertedIndexTantivy<T>::~InvertedIndexTantivy() {
     if (wrapper_) {
         wrapper_->free();
+    }
+    if (path_.empty()) {
+        return;
     }
     auto local_chunk_manager =
         storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -275,9 +278,7 @@ template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
     TargetBitmap bitset(Count());
-    for (size_t i = 0; i < n; ++i) {
-        wrapper_->term_query(values[i], &bitset);
-    }
+    wrapper_->terms_query(values, n, &bitset);
     return bitset;
 }
 
@@ -334,11 +335,9 @@ const TargetBitmap
 InvertedIndexTantivy<T>::InApplyFilter(
     size_t n, const T* values, const std::function<bool(size_t)>& filter) {
     TargetBitmap bitset(Count());
-    for (size_t i = 0; i < n; ++i) {
-        wrapper_->term_query(values[i], &bitset);
-        // todo(SpadeA): could push-down the filter to tantivy query
-        apply_hits_with_filter(bitset, filter);
-    }
+    wrapper_->terms_query(values, n, &bitset);
+    // todo(SpadeA): could push-down the filter to tantivy query
+    apply_hits_with_filter(bitset, filter);
     return bitset;
 }
 
@@ -346,12 +345,10 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::InApplyCallback(
     size_t n, const T* values, const std::function<void(size_t)>& callback) {
-    for (size_t i = 0; i < n; ++i) {
-        TargetBitmap bitset(Count());
-        wrapper_->term_query(values[i], &bitset);
-        // todo(SpadeA): could push-down the callback to tantivy query
-        apply_hits_with_callback(bitset, callback);
-    }
+    TargetBitmap bitset(Count());
+    wrapper_->terms_query(values, n, &bitset);
+    // todo(SpadeA): could push-down the callback to tantivy query
+    apply_hits_with_callback(bitset, callback);
 }
 
 template <typename T>
@@ -359,9 +356,7 @@ const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
     int64_t count = Count();
     TargetBitmap bitset(count);
-    for (size_t i = 0; i < n; ++i) {
-        wrapper_->term_query(values[i], &bitset);
-    }
+    wrapper_->terms_query(values, n, &bitset);
     // The expression is "not" in, so we flip the bit.
     bitset.flip();
 
@@ -402,7 +397,7 @@ InvertedIndexTantivy<T>::Range(T value, OpType op) {
             wrapper_->lower_bound_range_query(value, true, &bitset);
         } break;
         default:
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
     }
 
@@ -618,7 +613,7 @@ InvertedIndexTantivy<T>::BuildWithFieldData(
         }
 
         default:
-            PanicInfo(ErrorCode::NotImplemented,
+            ThrowInfo(ErrorCode::NotImplemented,
                       fmt::format("Inverted index not supported on {}",
                                   schema_.data_type()));
     }

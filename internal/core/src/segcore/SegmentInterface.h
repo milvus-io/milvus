@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -211,7 +212,7 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t start_offset,
                     int64_t length) const {
         if (this->type() == SegmentType::Growing) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
         return chunk_view<ViewType>(
@@ -224,7 +225,7 @@ class SegmentInternalInterface : public SegmentInterface {
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const {
         if (this->type() == SegmentType::Growing) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
         auto pw = chunk_view_by_offsets(field_id, chunk_id, offsets);
@@ -517,7 +518,7 @@ class SegmentInternalInterface : public SegmentInterface {
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
                      int64_t chunk_id) const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     };
 
     virtual bool
@@ -546,6 +547,9 @@ class SegmentInternalInterface : public SegmentInterface {
     search_pk(const PkType& pk, Timestamp timestamp) const = 0;
 
  protected:
+    // mutex protecting rw options on schema_
+    std::shared_mutex sch_mutex_;
+
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>

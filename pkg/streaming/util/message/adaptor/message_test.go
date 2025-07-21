@@ -24,7 +24,7 @@ func TestNewMsgPackFromInsertMessage(t *testing.T) {
 	immutableMessages := make([]message.ImmutableMessage, 0, len(fieldCount))
 	for segmentID, rowNum := range fieldCount {
 		insertMsg := message.CreateTestInsertMessage(t, segmentID, rowNum, tt, id)
-		immutableMessage := insertMsg.IntoImmutableMessage(id)
+		immutableMessage := insertMsg.WithOldVersion().IntoImmutableMessage(id)
 		immutableMessages = append(immutableMessages, immutableMessage)
 	}
 

@@ -684,38 +684,67 @@ struct TantivyIndexWrapper {
  public:
     template <typename T>
     void
-    term_query(T term, void* bitset) {
+    terms_query(const T* terms, uintptr_t len, void* bitset) {
         auto array = [&]() {
             if constexpr (std::is_same_v<T, bool>) {
-                return tantivy_term_query_bool(reader_, term, bitset);
+                return tantivy_terms_query_bool(reader_, terms, len, bitset);
             }
 
             if constexpr (std::is_integral_v<T>) {
-                return tantivy_term_query_i64(
-                    reader_, static_cast<int64_t>(term), bitset);
+                if constexpr (sizeof(T) == sizeof(int64_t)) {
+                    return tantivy_terms_query_i64(
+                        reader_,
+                        reinterpret_cast<const int64_t*>(terms),
+                        len,
+                        bitset);
+                } else {
+                    // smaller integer should be converted first
+                    std::vector<int64_t> buf(len);
+                    for (uintptr_t i = 0; i < len; ++i) {
+                        buf[i] = static_cast<int64_t>(terms[i]);
+                    }
+                    return tantivy_terms_query_i64(
+                        reader_, buf.data(), len, bitset);
+                }
             }
 
             if constexpr (std::is_floating_point_v<T>) {
-                return tantivy_term_query_f64(
-                    reader_, static_cast<double>(term), bitset);
+                if constexpr (sizeof(T) == sizeof(double)) {
+                    return tantivy_terms_query_f64(
+                        reader_,
+                        reinterpret_cast<const double*>(terms),
+                        len,
+                        bitset);
+                } else {
+                    std::vector<double> buf(len);
+                    for (uintptr_t i = 0; i < len; ++i) {
+                        buf[i] = static_cast<double>(terms[i]);
+                    }
+                    return tantivy_terms_query_f64(
+                        reader_, buf.data(), len, bitset);
+                }
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_term_query_keyword(
-                    reader_, static_cast<std::string>(term).c_str(), bitset);
+                std::vector<const char*> views;
+                for (uintptr_t i = 0; i < len; i++) {
+                    views.push_back(terms[i].c_str());
+                }
+                return tantivy_terms_query_keyword(
+                    reader_, views.data(), len, bitset);
             }
 
             throw fmt::format(
-                "InvertedIndex.term_query: unsupported data type: {}",
+                "InvertedIndex.terms_query: unsupported data type: {}",
                 typeid(T).name());
         }();
 
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
-                   "TantivyIndexWrapper.term_query: {}",
+                   "TantivyIndexWrapper.terms_query: {}",
                    res.result_->error);
         AssertInfo(res.result_->value.tag == Value::Tag::None,
-                   "TantivyIndexWrapper.term_query: invalid result type");
+                   "TantivyIndexWrapper.terms_query: invalid result type");
     }
 
     RustArrayI64Wrapper
@@ -936,19 +965,19 @@ struct TantivyIndexWrapper {
     }
 
     void
-    inner_match_ngram(const std::string& literal,
+    ngram_match_query(const std::string& literal,
                       uintptr_t min_gram,
                       uintptr_t max_gram,
                       void* bitset) {
-        auto array = tantivy_inner_match_ngram(
+        auto array = tantivy_ngram_match_query(
             reader_, literal.c_str(), min_gram, max_gram, bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
-                   "TantivyIndexWrapper.inner_match_ngram: {}",
+                   "TantivyIndexWrapper.ngram_match_query: {}",
                    res.result_->error);
         AssertInfo(
             res.result_->value.tag == Value::Tag::None,
-            "TantivyIndexWrapper.inner_match_ngram: invalid result type");
+            "TantivyIndexWrapper.ngram_match_query: invalid result type");
     }
 
     // json query

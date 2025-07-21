@@ -82,7 +82,7 @@ class AzureChunkManager : public ChunkManager {
          uint64_t offset,
          void* buf,
          uint64_t len) {
-        PanicInfo(NotImplemented, GetName() + "Read with offset not implement");
+        ThrowInfo(NotImplemented, GetName() + "Read with offset not implement");
     }
 
     virtual void
@@ -90,7 +90,7 @@ class AzureChunkManager : public ChunkManager {
           uint64_t offset,
           void* buf,
           uint64_t len) {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   GetName() + "Write with offset not implement");
     }
 

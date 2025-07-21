@@ -150,7 +150,7 @@ FailureCStatus(const std::exception* ex) {
 
 #define Assert(expr) AssertInfo((expr), "")
 
-#define PanicInfo(errcode, info, args...)                       \
+#define ThrowInfo(errcode, info, args...)                       \
     do {                                                        \
         milvus::impl::EasyAssertInfo(false,                     \
                                      "",                        \
