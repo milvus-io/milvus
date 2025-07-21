@@ -1145,6 +1145,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w_2.aliases[0] == alias_1
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("move to test_milvus_client_v2_rename_back_old_collection")
     def test_rename_back_old_collection(self):
         """
         target: test rename collection function to single collection
@@ -1175,6 +1176,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_alias == collection_w.aliases
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("move to test_milvus_client_v2_rename_back_old_alias")
     def test_rename_back_old_alias(self):
         """
         target: test rename collection function to single collection
@@ -1190,6 +1192,7 @@ class TestUtilityBase(TestcaseBase):
         # 3. create an alias
         self.utility_wrap.create_alias(old_collection_name, alias)
         collection_alias = collection_w.aliases
+        log.info(collection_alias)
         # 4. drop the alias
         self.utility_wrap.drop_alias(collection_alias[0])
         # 5. rename collection to the dropped alias name
