@@ -2225,19 +2225,6 @@ def gen_data_by_collection_field(field, nb=None, start=0):
     return None
 
 
-def gen_data_by_collection_schema(schema, nb, r=0):
-    """
-    gen random data by collection schema, regardless of primary key or auto_id
-    vector type only support for DataType.FLOAT_VECTOR
-    """
-    data = []
-    start_uid = r * nb
-    fields = schema.fields
-    for field in fields:
-        data.append(gen_data_by_collection_field(field, nb, start_uid))
-    return data
-
-
 def gen_varchar_values(nb: int, length: int = 0):
     return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
