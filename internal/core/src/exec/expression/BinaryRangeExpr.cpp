@@ -95,7 +95,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format(
                                       "unsupported value type {} in expression",
                                       value_type));
@@ -117,7 +117,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                         break;
                     }
                     default: {
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   fmt::format(
                                       "unsupported value type {} in expression",
                                       value_type));
@@ -145,7 +145,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     break;
                 }
                 default: {
-                    PanicInfo(
+                    ThrowInfo(
                         DataTypeInvalid,
                         fmt::format("unsupported value type {} in expression",
                                     value_type));
@@ -154,7 +154,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -655,6 +655,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                                              TargetBitmap& bitset,
                                              const size_t n) {
             std::vector<int64_t> invalid_row_ids;
+            std::vector<int64_t> invalid_offset;
+            std::vector<int64_t> invalid_type;
+            std::vector<int64_t> invalid_size;
             for (size_t i = 0; i < n; i++) {
                 auto valid = valid_array[i];
                 auto type = type_array[i];
@@ -664,6 +667,9 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
                 auto value = value_array[i];
                 if (!valid) {
                     invalid_row_ids.push_back(row_id_array[i]);
+                    invalid_offset.push_back(offset_array[i]);
+                    invalid_type.push_back(type_array[i]);
+                    invalid_size.push_back(size_array[i]);
                     continue;
                 }
 
@@ -789,10 +795,10 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJsonForIndex() {
             segment->BulkGetJsonData(
                 field_id,
                 [&](const milvus::Json& json, size_t i, bool is_valid) {
-                    auto type = type_array[i];
                     auto row_id = invalid_row_ids[i];
-                    auto offset = offset_array[i];
-                    auto size = size_array[i];
+                    auto type = invalid_type[i];
+                    auto offset = invalid_offset[i];
+                    auto size = invalid_size[i];
                     bitset[row_id] = f(json, type, offset, size, is_valid);
                 },
                 invalid_row_ids.data(),

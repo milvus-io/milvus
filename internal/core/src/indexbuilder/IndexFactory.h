@@ -73,11 +73,11 @@ class IndexFactory {
                 return std::make_unique<VecIndexCreator>(type, config, context);
 
             case DataType::VECTOR_ARRAY:
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("VECTOR_ARRAY is not implemented"));
 
             default:
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("invalid type is {}", invalid_dtype_msg));
         }
     }

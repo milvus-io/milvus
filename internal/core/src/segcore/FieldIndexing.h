@@ -47,12 +47,6 @@ class FieldIndexing {
     operator=(const FieldIndexing&) = delete;
     virtual ~FieldIndexing() = default;
 
-    // Do this in parallel
-    virtual void
-    BuildIndexRange(int64_t ack_beg,
-                    int64_t ack_end,
-                    const VectorBase* vec_base) = 0;
-
     virtual void
     AppendSegmentIndexDense(int64_t reserved_offset,
                             int64_t size,
@@ -112,16 +106,11 @@ class ScalarFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     void
-    BuildIndexRange(int64_t ack_beg,
-                    int64_t ack_end,
-                    const VectorBase* vec_base) override;
-
-    void
     AppendSegmentIndexDense(int64_t reserved_offset,
                             int64_t size,
                             const VectorBase* vec_base,
                             const void* data_source) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index doesn't support append vector segment index");
     }
 
@@ -131,7 +120,7 @@ class ScalarFieldIndexing : public FieldIndexing {
                              int64_t new_data_dim,
                              const VectorBase* vec_base,
                              const void* data_source) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index doesn't support append vector segment index");
     }
 
@@ -140,7 +129,7 @@ class ScalarFieldIndexing : public FieldIndexing {
                      int64_t count,
                      int64_t element_size,
                      void* output) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index don't support get data from index");
     }
 
@@ -179,11 +168,6 @@ class VectorFieldIndexing : public FieldIndexing {
                                  int64_t segment_max_row_count,
                                  const SegcoreConfig& segcore_config,
                                  const VectorBase* field_raw_data);
-
-    void
-    BuildIndexRange(int64_t ack_beg,
-                    int64_t ack_end,
-                    const VectorBase* vec_base) override;
 
     void
     AppendSegmentIndexDense(int64_t reserved_offset,

@@ -90,7 +90,7 @@ class SealedDataGetter : public DataGetter<T> {
         : segment_(segment), field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
         if (!from_data_ && !segment_.HasIndex(field_id_)) {
-            PanicInfo(
+            ThrowInfo(
                 UnexpectedError,
                 "The segment:{} used to init data getter has no effective "
                 "data source, neither"
@@ -151,7 +151,7 @@ GetDataGetter(const segcore::SegmentInternalInterface& segment,
                    dynamic_cast<const segcore::SegmentSealed*>(&segment)) {
         return std::make_shared<SealedDataGetter<T>>(*sealed_segment, fieldId);
     } else {
-        PanicInfo(UnexpectedError,
+        ThrowInfo(UnexpectedError,
                   "The segment used to init data getter is neither growing or "
                   "sealed, wrong state");
     }

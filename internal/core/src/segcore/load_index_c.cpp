@@ -267,7 +267,7 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info) {
                 load_index_info->enable_mmap);
         return request;
     } catch (std::exception& e) {
-        PanicInfo(milvus::UnexpectedError,
+        ThrowInfo(milvus::UnexpectedError,
                   fmt::format("failed to estimate index load resource, "
                               "encounter exception : {}",
                               e.what()));

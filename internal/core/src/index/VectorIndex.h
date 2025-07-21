@@ -45,13 +45,13 @@ class VectorIndex : public IndexBase {
     BuildWithRawDataForUT(size_t n,
                           const void* values,
                           const Config& config = {}) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "vector index don't support build index with raw data");
     };
 
     virtual void
     AddWithDataset(const DatasetPtr& dataset, const Config& config) {
-        PanicInfo(Unsupported, "vector index don't support add with dataset");
+        ThrowInfo(Unsupported, "vector index don't support add with dataset");
     }
 
     virtual void
@@ -64,7 +64,7 @@ class VectorIndex : public IndexBase {
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "VectorIndex:" + this->GetIndexType() +
                       " didn't implement VectorIterator interface, "
                       "there must be sth wrong in the code");

@@ -86,6 +86,7 @@ func (s *MiniClusterSuite) SetupSuite() {
 	s.cancelFunc = cancel
 
 	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir()))
+	s.T().Log("Setup test success")
 }
 
 func (s *MiniClusterSuite) SetupTest() {

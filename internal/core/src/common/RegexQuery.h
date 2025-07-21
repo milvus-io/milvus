@@ -29,7 +29,7 @@ struct PatternMatchTranslator {
     template <typename T>
     inline std::string
     operator()(const T& pattern) {
-        PanicInfo(OpTypeInvalid,
+        ThrowInfo(OpTypeInvalid,
                   "pattern matching is only supported on string type");
     }
 };

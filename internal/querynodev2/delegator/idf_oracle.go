@@ -463,6 +463,9 @@ func (o *idfOracle) SyncDistribution() error {
 
 			if segment.TargetVersion == snapshot.targetVersion {
 				sealedMap[segment.SegmentID] = true
+				if !o.sealed.Contain(segment.SegmentID) {
+					log.Warn("idf oracle lack some sealed segment", zap.Int64("segment", segment.SegmentID))
+				}
 			} else if segment.TargetVersion == unreadableTargetVersion {
 				sealedMap[segment.SegmentID] = false
 			}

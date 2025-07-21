@@ -28,6 +28,13 @@ func TestHybridSearchDefault(t *testing.T) {
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
+	// add field (https://github.com/milvus-io/milvus/issues/43003)
+	if false { // Skip add field logic due to known bug
+		newField := entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeInt64).WithNullable(true).WithDefaultValueLong(100)
+		err := mc.AddCollectionField(ctx, client.NewAddCollectionFieldOption(schema.CollectionName, newField))
+		common.CheckErr(t, err, true)
+	}
+
 	// hybrid search
 	queryVec1 := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
 	queryVec2 := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
@@ -39,6 +46,16 @@ func TestHybridSearchDefault(t *testing.T) {
 	common.CheckErr(t, errSearch, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, searchRes[0].Fields)
+
+	// Skip add field search logic due to known bug
+	if false {
+		annReq1.WithFilter(common.DefaultNewField + "== 100")
+		annReq2.WithFilter(common.DefaultNewField + "== 100")
+		searchRes, errSearch = mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReq1, annReq2).WithOutputFields(common.DefaultNewField))
+		common.CheckErr(t, errSearch, true)
+		common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+		common.CheckOutputFields(t, []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName}, searchRes[0].Fields)
+	}
 
 	// ignore growing
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption().TWithStart(common.DefaultNb).TWithNb(500))

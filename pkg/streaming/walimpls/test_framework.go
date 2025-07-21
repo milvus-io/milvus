@@ -128,6 +128,7 @@ func (f *testOneWALImplsFramework) Run() {
 		assert.Panics(f.t, func() {
 			w.Truncate(ctx, nil)
 		})
+		w.Close()
 	}
 
 	// Test truncate on a wal that is not in read-write mode.

@@ -346,10 +346,10 @@ func (node *QueryNode) InitSegcore() error {
 
 	memoryLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryLowWatermarkRatio.GetAsFloat()
 	memoryHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredMemoryHighWatermarkRatio.GetAsFloat()
-	memoryMaxRatio := paramtable.Get().QueryNodeCfg.TieredMemoryMaxRatio.GetAsFloat()
+	memoryMaxRatio := paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()
 	diskLowWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskLowWatermarkRatio.GetAsFloat()
 	diskHighWatermarkRatio := paramtable.Get().QueryNodeCfg.TieredDiskHighWatermarkRatio.GetAsFloat()
-	diskMaxRatio := paramtable.Get().QueryNodeCfg.TieredDiskMaxRatio.GetAsFloat()
+	diskMaxRatio := paramtable.Get().QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()
 
 	if memoryLowWatermarkRatio > memoryHighWatermarkRatio {
 		return errors.New("memoryLowWatermarkRatio should not be greater than memoryHighWatermarkRatio")
@@ -382,6 +382,9 @@ func (node *QueryNode) InitSegcore() error {
 	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+	loadingMemoryFactor := C.float(paramtable.Get().QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
+	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
+	maxDiskUsagePercentage := C.float(diskMaxRatio)
 
 	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
 		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
@@ -389,7 +392,8 @@ func (node *QueryNode) InitSegcore() error {
 		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
-		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs)
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs,
+		loadingMemoryFactor, overloadedMemoryThresholdPercentage, maxDiskUsagePercentage)
 
 	err = initcore.InitInterminIndexConfig(paramtable.Get())
 	if err != nil {

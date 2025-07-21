@@ -32,11 +32,11 @@ struct FieldDataInfo {
     FieldDataInfo(int64_t field_id,
                   size_t row_count,
                   std::string mmap_dir_path = "",
-                  bool in_list = false)
+                  bool in_load_list = false)
         : field_id(field_id),
           row_count(row_count),
           mmap_dir_path(std::move(mmap_dir_path)),
-          in_load_list(in_list) {
+          in_load_list(in_load_list) {
         arrow_reader_channel = std::make_shared<ArrowReaderChannel>();
     }
 

@@ -172,6 +172,11 @@ func NewPriorityQueue[T any](less func(x, y *T) bool) *PriorityQueue[T] {
 func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool,
 ) (numRows int, err error) {
+	// Fast path: no readers provided
+	if len(rr) == 0 {
+		return 0, nil
+	}
+
 	type index struct {
 		ri int
 		i  int
@@ -181,10 +186,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	advanceRecord := func(i int) error {
 		rec, err := rr[i].Next()
 		recs[i] = rec // assign nil if err
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}
 
 	for i := range rr {
@@ -235,8 +237,12 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 		})
 	}
 
-	enqueueAll := func(ri int) {
+	endPositions := make([]int, len(recs))
+	var enqueueAll func(ri int) error
+	enqueueAll = func(ri int) error {
 		r := recs[ri]
+		hasValid := false
+		endPosition := 0
 		for j := 0; j < r.Len(); j++ {
 			if predicate(r, ri, j) {
 				pq.Enqueue(&index{
@@ -244,13 +250,29 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 					i:  j,
 				})
 				numRows++
+				hasValid = true
+				endPosition = j
 			}
 		}
+		if !hasValid {
+			err := advanceRecord(ri)
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return enqueueAll(ri)
+		}
+		endPositions[ri] = endPosition
+		return nil
 	}
 
 	for i, v := range recs {
 		if v != nil {
-			enqueueAll(i)
+			if err := enqueueAll(i); err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -276,8 +298,8 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			}
 		}
 
-		// If poped idx reaches end of segment, invalidate cache and advance to next record
-		if idx.i == recs[idx.ri].Len()-1 {
+		// If the popped idx reaches the last valid data of the segment, invalidate the cache and advance to the next record
+		if idx.i == endPositions[idx.ri] {
 			err := advanceRecord(idx.ri)
 			if err == io.EOF {
 				continue
@@ -285,7 +307,9 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			if err != nil {
 				return 0, err
 			}
-			enqueueAll(idx.ri)
+			if err := enqueueAll(idx.ri); err != nil {
+				return 0, err
+			}
 		}
 	}
 

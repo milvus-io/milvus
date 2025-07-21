@@ -53,6 +53,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
                       fileManagerContext.indexMeta) {
     rcm_ = fileManagerContext.chunkManagerPtr;
+    fs_ = fileManagerContext.fs;
 }
 
 DiskFileManagerImpl::~DiskFileManagerImpl() {
@@ -490,8 +491,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     uint32_t var_dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(var_dim);
 
-    auto field_datas = GetFieldDatasFromStorageV2(
-        all_remote_files, GetFieldDataMeta().field_id, data_type.value(), dim);
+    auto field_datas = GetFieldDatasFromStorageV2(all_remote_files,
+                                                  GetFieldDataMeta().field_id,
+                                                  data_type.value(),
+                                                  dim,
+                                                  fs_);
     for (auto& field_data : field_datas) {
         num_rows += uint32_t(field_data->get_num_rows());
         cache_raw_data_to_disk_common<T>(field_data,
@@ -660,7 +664,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
     if (0 == num_of_fields) {
         return "";
     } else if (num_of_fields > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
     }

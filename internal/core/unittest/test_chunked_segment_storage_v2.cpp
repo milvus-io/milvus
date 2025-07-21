@@ -166,25 +166,31 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         LoadFieldDataInfo load_info;
         load_info.field_infos.emplace(
             int64_t(0),
-            FieldBinlogInfo{int64_t(0),
-                            static_cast<int64_t>(row_count),
-                            std::vector<int64_t>(chunk_num * test_data_count),
-                            false,
-                            std::vector<std::string>({paths[0]})});
+            FieldBinlogInfo{
+                int64_t(0),
+                static_cast<int64_t>(row_count),
+                std::vector<int64_t>(chunk_num * test_data_count),
+                std::vector<int64_t>(chunk_num * test_data_count * 4),
+                false,
+                std::vector<std::string>({paths[0]})});
         load_info.field_infos.emplace(
             int64_t(102),
-            FieldBinlogInfo{int64_t(102),
-                            static_cast<int64_t>(row_count),
-                            std::vector<int64_t>(chunk_num * test_data_count),
-                            false,
-                            std::vector<std::string>({paths[1]})});
+            FieldBinlogInfo{
+                int64_t(102),
+                static_cast<int64_t>(row_count),
+                std::vector<int64_t>(chunk_num * test_data_count),
+                std::vector<int64_t>(chunk_num * test_data_count * 4),
+                false,
+                std::vector<std::string>({paths[1]})});
         load_info.field_infos.emplace(
             int64_t(103),
-            FieldBinlogInfo{int64_t(103),
-                            static_cast<int64_t>(row_count),
-                            std::vector<int64_t>(chunk_num * test_data_count),
-                            false,
-                            std::vector<std::string>({paths[2]})});
+            FieldBinlogInfo{
+                int64_t(103),
+                static_cast<int64_t>(row_count),
+                std::vector<int64_t>(chunk_num * test_data_count),
+                std::vector<int64_t>(chunk_num * test_data_count * 4),
+                false,
+                std::vector<std::string>({paths[2]})});
         load_info.mmap_dir_path = "";
         load_info.storage_version = 2;
         segment->AddFieldDataInfoForSealed(load_info);

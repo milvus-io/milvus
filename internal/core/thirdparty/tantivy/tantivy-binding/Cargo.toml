@@ -25,7 +25,8 @@ overflow-checks = false
 [dependencies]
 tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
 tantivy-5 = { package = "tantivy", git = "https://github.com/zilliztech/tantivy", tag = "0.21.1-fix4" }
-lindera = "0.40.1"
+lindera = "0.42.4"
+lindera-dictionary = "0.42.4"
 futures = "0.3.21"
 libc = "0.2"
 scopeguard = "1.2"
@@ -41,6 +42,22 @@ icu_segmenter = "2.0.0-beta2"
 whatlang = "0.16.4"
 lingua = "1.7.1"
 fancy-regex = "0.14.0"
+
+# lindera dependencies for fetch and prepare dictionary online.
+tokio = { version = "1.45.0", features = [
+    "rt",
+    "macros",
+    "time",
+    "sync",
+    "io-util",
+] }
+reqwest = { version = "0.12.15", features = [
+    "rustls-tls",
+], default-features = false }
+md5 = "0.7.0"
+rand = "0.9.1" 
+flate2 = "1.1.0"
+tar = "0.4.44"
 
 [dev-dependencies]
 rand = "0.3"

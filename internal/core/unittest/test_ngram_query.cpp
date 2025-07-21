@@ -28,84 +28,6 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 using namespace milvus::exec;
 
-TEST(ConvertToNgramLiteralTest, EmptyString) {
-    auto result = parse_ngram_pattern("");
-    ASSERT_FALSE(result.has_value());
-}
-
-TEST(ConvertToNgramLiteralTest, ExactMatchSimple) {
-    auto result = parse_ngram_pattern("abc");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "abc");
-    EXPECT_EQ(result->type, MatchType::ExactMatch);
-}
-
-TEST(ConvertToNgramLiteralTest, ExactMatchWithEscapedPercent) {
-    auto result = parse_ngram_pattern("ab\\%cd");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "ab%cd");
-    EXPECT_EQ(result->type, MatchType::ExactMatch);
-}
-
-TEST(ConvertToNgramLiteralTest, ExactMatchWithEscapedSpecialChar) {
-    auto result = parse_ngram_pattern("a.b");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "a\\.b");
-    EXPECT_EQ(result->type, MatchType::ExactMatch);
-}
-
-TEST(ConvertToNgramLiteralTest, PrefixMatchSimple) {
-    auto result = parse_ngram_pattern("%abc");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "abc");
-    EXPECT_EQ(result->type, MatchType::PrefixMatch);
-}
-
-TEST(ConvertToNgramLiteralTest, PostfixMatchSimple) {
-    auto result = parse_ngram_pattern("abc%");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "abc");
-    EXPECT_EQ(result->type, MatchType::PostfixMatch);
-}
-
-TEST(ConvertToNgramLiteralTest, InnerMatchSimple) {
-    auto result = parse_ngram_pattern("%abc%");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "abc");
-    EXPECT_EQ(result->type, MatchType::InnerMatch);
-}
-
-TEST(ConvertToNgramLiteralTest, MatchSinglePercentMiddle) {
-    auto result = parse_ngram_pattern("a%b");
-    ASSERT_FALSE(result.has_value());
-}
-
-TEST(ConvertToNgramLiteralTest, MatchTypeReturnsNullopt) {
-    EXPECT_FALSE(parse_ngram_pattern("%").has_value());
-    // %a%b (n=2, not %xxx%) -> Match -> nullopt
-    EXPECT_FALSE(parse_ngram_pattern("%a%b").has_value());
-    // a%b%c (n=2, not %xxx%) -> Match -> nullopt
-    EXPECT_FALSE(parse_ngram_pattern("a%b%c").has_value());
-    // %% (n=2, not %xxx% because length is not > 2) -> Match -> nullopt
-    EXPECT_FALSE(parse_ngram_pattern("%%").has_value());
-    // %a%b%c% (n=3) -> Match -> nullopt
-    EXPECT_FALSE(parse_ngram_pattern("%a%b%c%").has_value());
-}
-
-TEST(ConvertToNgramLiteralTest, UnescapedUnderscoreReturnsNullopt) {
-    EXPECT_FALSE(parse_ngram_pattern("a_b").has_value());
-    EXPECT_FALSE(parse_ngram_pattern("%a_b").has_value());
-    EXPECT_FALSE(parse_ngram_pattern("a_b%").has_value());
-    EXPECT_FALSE(parse_ngram_pattern("%a_b%").has_value());
-}
-
-TEST(ConvertToNgramLiteralTest, EscapedUnderscore) {
-    auto result = parse_ngram_pattern("a\\_b");
-    ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->literal, "a_b");
-    EXPECT_EQ(result->type, MatchType::ExactMatch);
-}
-
 auto
 generate_field_meta(int64_t collection_id = 1,
                     int64_t partition_id = 2,
@@ -153,7 +75,9 @@ generate_local_storage_config(const std::string& root_path)
 void
 test_ngram_with_data(const boost::container::vector<std::string>& data,
                      const std::string& literal,
-                     const std::vector<bool>& expected_result) {
+                     proto::plan::OpType op_type,
+                     const std::vector<bool>& expected_result,
+                     bool forward_to_br = false) {
     int64_t collection_id = 1;
     int64_t partition_id = 2;
     int64_t segment_id = 3;
@@ -275,9 +199,15 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
                                        8192,
                                        0);
 
-        auto bitset = index->InnerMatchQuery(literal, &segment_expr).value();
-        for (size_t i = 0; i < nb; i++) {
-            ASSERT_EQ(bitset[i], expected_result[i]);
+        std::optional<TargetBitmap> bitset_opt =
+            index->ExecuteQuery(literal, op_type, &segment_expr);
+        if (forward_to_br) {
+            ASSERT_TRUE(!bitset_opt.has_value());
+        } else {
+            auto bitset = std::move(bitset_opt.value());
+            for (size_t i = 0; i < nb; i++) {
+                ASSERT_EQ(bitset[i], expected_result[i]);
+            }
         }
     }
 
@@ -318,8 +248,7 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         AppendIndexV2(trace, cload_index_info);
         UpdateSealedSegmentIndex(segment.get(), cload_index_info);
 
-        auto unary_range_expr =
-            test::GenUnaryRangeExpr(OpType::InnerMatch, literal);
+        auto unary_range_expr = test::GenUnaryRangeExpr(op_type, literal);
         auto column_info = test::GenColumnInfo(
             field_id.get(), proto::schema::DataType::VarChar, false, false);
         unary_range_expr->set_allocated_column_info(column_info);
@@ -339,39 +268,116 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
 
 TEST(NgramIndex, TestNgramWikiEpisode) {
     boost::container::vector<std::string> data;
-    // not hit
     data.push_back(
         "'Indira Davelba Murillo Alvarado (Tegucigalpa, "
         "the youngest of eight siblings. She attended primary school at the "
         "Escuela 14 de Julio, and her secondary studies at the Instituto "
         "school called \"Indi del Bosque\", where she taught the children of "
         "Honduran women'");
-    // hit
     data.push_back(
         "Richmond Green Secondary School is a public secondary school in "
         "Richmond Hill, Ontario, Canada.");
-    // hit
     data.push_back(
         "The Gymnasium in 2002 Gymnasium Philippinum or Philippinum High "
         "School is an almost 500-year-old secondary school in Marburg, Hesse, "
         "Germany.");
-    // hit
     data.push_back(
         "Sir Winston Churchill Secondary School is a Canadian secondary school "
         "located in St. Catharines, Ontario.");
-    // not hit
     data.push_back("Sir Winston Churchill Secondary School");
 
-    std::vector<bool> expected_result{false, true, true, true, false};
+    // within min-max_gram
+    {
+        // inner match
+        std::vector<bool> expected_result{true, true, true, true, true};
+        test_ngram_with_data(
+            data, "ary", proto::plan::OpType::InnerMatch, expected_result);
 
-    test_ngram_with_data(data, "secondary school", expected_result);
+        expected_result = {false, true, false, true, true};
+        test_ngram_with_data(
+            data, "y S", proto::plan::OpType::InnerMatch, expected_result);
+
+        expected_result = {true, true, true, true, false};
+        test_ngram_with_data(
+            data, "y s", proto::plan::OpType::InnerMatch, expected_result);
+
+        // prefix
+        expected_result = {false, false, false, true, true};
+        test_ngram_with_data(
+            data, "Sir", proto::plan::OpType::PrefixMatch, expected_result);
+
+        // postfix
+        expected_result = {false, false, false, false, true};
+        test_ngram_with_data(
+            data, "ool", proto::plan::OpType::PostfixMatch, expected_result);
+
+        // match
+        expected_result = {true, false, false, false, false};
+        test_ngram_with_data(
+            data, "%Alv%y s%", proto::plan::OpType::Match, expected_result);
+    }
+
+    // exceeds max_gram
+    {
+        // inner match
+        std::vector<bool> expected_result{false, true, true, true, false};
+        test_ngram_with_data(data,
+                             "secondary school",
+                             proto::plan::OpType::InnerMatch,
+                             expected_result);
+
+        // prefix
+        expected_result = {false, false, false, true, true};
+        test_ngram_with_data(data,
+                             "Sir Winston",
+                             proto::plan::OpType::PrefixMatch,
+                             expected_result);
+
+        // postfix
+        expected_result = {false, false, true, false, false};
+        test_ngram_with_data(data,
+                             "Germany.",
+                             proto::plan::OpType::PostfixMatch,
+                             expected_result);
+
+        // match
+        expected_result = {true, true, true, true, false};
+        test_ngram_with_data(data,
+                             "%secondary%school%",
+                             proto::plan::OpType::Match,
+                             expected_result);
+    }
 }
 
-TEST(NgramIndex, TestNgramAllFalse) {
+TEST(NgramIndex, TestNgramSimple) {
     boost::container::vector<std::string> data(10000,
                                                "elementary school secondary");
 
     // all can be hit by ngram tantivy but will be filterred out by the second phase
-    test_ngram_with_data(
-        data, "secondary school", std::vector<bool>(10000, false));
+    test_ngram_with_data(data,
+                         "secondary school",
+                         proto::plan::OpType::InnerMatch,
+                         std::vector<bool>(10000, false));
+
+    test_ngram_with_data(data,
+                         "ele",
+                         proto::plan::OpType::PrefixMatch,
+                         std::vector<bool>(10000, true));
+
+    test_ngram_with_data(data,
+                         "%ary%sec%",
+                         proto::plan::OpType::Match,
+                         std::vector<bool>(10000, true));
+
+    // should be forwarded to brute force
+    test_ngram_with_data(data,
+                         "%ary%s%",
+                         proto::plan::OpType::Match,
+                         std::vector<bool>(10000, true),
+                         true);
+
+    test_ngram_with_data(data,
+                         "ary",
+                         proto::plan::OpType::PostfixMatch,
+                         std::vector<bool>(10000, true));
 }

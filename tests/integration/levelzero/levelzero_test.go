@@ -41,10 +41,15 @@ type LevelZeroSuite struct {
 }
 
 func (s *LevelZeroSuite) SetupSuite() {
-	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableStatsTask.Key, "false")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key, "false")
 
 	s.MiniClusterSuite.SetupSuite()
 	s.dim = 768
+}
+
+func (s *LevelZeroSuite) TearDownSuite() {
+	s.MiniClusterSuite.TearDownSuite()
+	paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableSortCompaction.Key)
 }
 
 func TestLevelZero(t *testing.T) {

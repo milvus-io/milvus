@@ -48,6 +48,8 @@ type ReplicaTestSuit struct {
 func (s *ReplicaTestSuit) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.Key, "1ms")
+
 	s.MiniClusterSuite.SetupSuite()
 }
 

@@ -37,10 +37,12 @@ func TestManager(t *testing.T) {
 	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
 			l := mock_wal.NewMockWAL(t)
+			l.EXPECT().Metrics().Return(types.RWWALMetrics{}).Maybe()
 			l.EXPECT().Channel().Return(oo.Channel)
 			l.EXPECT().IsAvailable().Return(true).Maybe()
 			l.EXPECT().Close().Return()
 			l.EXPECT().IsAvailable().Return(true).Maybe()
+			l.EXPECT().Metrics().Return(types.RWWALMetrics{})
 			return l, nil
 		})
 	opener.EXPECT().Close().Return()
@@ -52,9 +54,9 @@ func TestManager(t *testing.T) {
 	assertErrorChannelNotExist(t, err)
 	assert.Nil(t, l)
 
-	h, err := m.GetAllAvailableChannels()
+	h, err := m.Metrics()
 	assert.NoError(t, err)
-	assert.Len(t, h, 0)
+	assert.Len(t, h.WALMetrics, 0)
 
 	err = m.Remove(context.Background(), types.PChannelInfo{Name: channelName, Term: 1})
 	assert.NoError(t, err)
@@ -86,9 +88,9 @@ func TestManager(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, l)
 
-	h, err = m.GetAllAvailableChannels()
+	h, err = m.Metrics()
 	assert.NoError(t, err)
-	assert.Len(t, h, 1)
+	assert.Len(t, h.WALMetrics, 1)
 
 	err = m.Open(context.Background(), types.PChannelInfo{
 		Name: "term2",
@@ -96,15 +98,15 @@ func TestManager(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	h, err = m.GetAllAvailableChannels()
+	h, err = m.Metrics()
 	assert.NoError(t, err)
-	assert.Len(t, h, 2)
+	assert.Len(t, h.WALMetrics, 2)
 
 	m.Close()
 
-	h, err = m.GetAllAvailableChannels()
+	h, err = m.Metrics()
 	assertShutdownError(t, err)
-	assert.Len(t, h, 0)
+	assert.Nil(t, h)
 
 	err = m.Open(context.Background(), types.PChannelInfo{
 		Name: "term2",

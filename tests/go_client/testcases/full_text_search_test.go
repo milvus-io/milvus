@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -206,6 +207,11 @@ func TestSearchFullTextWithPartitionKey(t *testing.T) {
 			prepare.CreateIndex(ctx, t, mc, indexparams)
 			prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
+			// add field
+			newField := entity.NewField().WithName(common.DefaultNewField).WithDataType(entity.FieldTypeInt64).WithNullable(true).WithDefaultValueLong(100)
+			err := mc.AddCollectionField(ctx, milvusclient.NewAddCollectionFieldOption(schema.CollectionName, newField))
+			common.CheckErr(t, err, true)
+
 			// search
 			queries := []string{tc.query}
 			vectors := make([]entity.Vector, 0, len(queries))
@@ -213,6 +219,12 @@ func TestSearchFullTextWithPartitionKey(t *testing.T) {
 				vectors = append(vectors, entity.Text(query))
 			}
 			resSearch, err := mc.Search(ctx, milvusclient.NewSearchOption(schema.CollectionName, tc.topK, vectors).WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			common.CheckSearchResult(t, resSearch, len(queries), tc.topK)
+
+			// search with new field filter
+			resSearch, err = mc.Search(ctx, milvusclient.NewSearchOption(schema.CollectionName, tc.topK, vectors).WithConsistencyLevel(entity.ClStrong).
+				WithFilter(fmt.Sprintf("%s == 100", common.DefaultNewField)))
 			common.CheckErr(t, err, true)
 			common.CheckSearchResult(t, resSearch, len(queries), tc.topK)
 		})
