@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/tecbot/gorocksdb"
 
 	"github.com/milvus-io/milvus/pkg/v2/kv"
@@ -401,12 +402,18 @@ func (kv *RocksdbKV) MultiSaveAndRemove(ctx context.Context, saves map[string]st
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
-	for k, v := range saves {
-		writeBatch.Put([]byte(k), []byte(v))
-	}
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+
 	for _, key := range removals {
 		writeBatch.Delete([]byte(key))
 	}
+	for k, v := range saves {
+		writeBatch.Put([]byte(k), []byte(v))
+	}
+
 	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err
 }
@@ -436,10 +443,10 @@ func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map
 	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
+	kv.prepareRemovePrefix(removals, writeBatch)
 	for k, v := range saves {
 		writeBatch.Put([]byte(k), []byte(v))
 	}
-	kv.prepareRemovePrefix(removals, writeBatch)
 	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err
 }

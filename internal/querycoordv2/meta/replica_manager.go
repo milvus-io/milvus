@@ -133,7 +133,10 @@ func (m *ReplicaManager) Recover(ctx context.Context, collections []int64) error
 			log.Info("recover replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("nodes", replica.GetNodes()),
+				zap.Int64s("rwNodes", replica.GetNodes()),
+				zap.Int64s("roNodes", replica.GetRoNodes()),
+				zap.Int64s("rwSQNodes", replica.GetRwSqNodes()),
+				zap.Int64s("roSQNodes", replica.GetRoNodes()),
 			)
 		} else {
 			err := m.catalog.ReleaseReplica(ctx, replica.GetCollectionID(), replica.GetID())
@@ -477,6 +480,10 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 				zap.Int64s("newIncomingNodes", incomingNode),
 				zap.Bool("enableChannelExclusiveMode", mutableReplica.IsChannelExclusiveModeEnabled()),
 				zap.Any("channelNodeInfos", mutableReplica.replicaPB.GetChannelNodeInfos()),
+				zap.Int64s("rwNodes", mutableReplica.GetRWNodes()),
+				zap.Int64s("roNodes", mutableReplica.GetRONodes()),
+				zap.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
+				zap.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
 			)
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
@@ -636,7 +643,12 @@ func (m *ReplicaManager) RecoverSQNodesInCollection(ctx context.Context, collect
 			zap.Int64("replicaID", assignment.GetReplicaID()),
 			zap.Int64s("newRONodes", roNodes),
 			zap.Int64s("roToRWNodes", recoverableNodes),
-			zap.Int64s("newIncomingNodes", incomingNode))
+			zap.Int64s("newIncomingNodes", incomingNode),
+			zap.Int64s("rwNodes", mutableReplica.GetRWNodes()),
+			zap.Int64s("roNodes", mutableReplica.GetRONodes()),
+			zap.Int64s("rwSQNodes", mutableReplica.GetRWSQNodes()),
+			zap.Int64s("roSQNodes", mutableReplica.GetROSQNodes()),
+		)
 		modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 	})
 	return m.put(ctx, modifiedReplicas...)

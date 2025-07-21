@@ -324,6 +324,13 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         T* dst_raw);
 
+    static void
+    bulk_subscript_impl(int64_t element_sizeof,
+                        ChunkedColumnInterface* field,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* dst_raw);
+
     template <typename S>
     static void
     bulk_subscript_ptr_impl(
@@ -346,13 +353,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const int64_t* seg_offsets,
         int64_t count,
         google::protobuf::RepeatedPtrField<T>* dst);
-
-    static void
-    bulk_subscript_impl(int64_t element_sizeof,
-                        ChunkedColumnInterface* field,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        void* dst_raw);
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id, int64_t count) const;

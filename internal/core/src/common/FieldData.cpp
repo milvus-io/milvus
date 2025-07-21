@@ -303,7 +303,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             for (size_t index = 0; index < element_count; ++index) {
                 VectorFieldProto field_data;
                 if (array_array->GetString(index) == "") {
-                    PanicInfo(DataTypeInvalid, "empty vector array");
+                    ThrowInfo(DataTypeInvalid, "empty vector array");
                 }
                 auto success =
                     field_data.ParseFromString(array_array->GetString(index));
@@ -313,7 +313,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       GetName() + "::FillFieldData" +
                           " not support data type " +
                           GetDataTypeName(data_type_));
@@ -434,7 +434,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       GetName() + "::FillFieldData" +
                           " not support data type " +
                           GetDataTypeName(data_type_));
@@ -493,7 +493,7 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "InitScalarFieldData not support data type " +
                           GetDataTypeName(type));
     }

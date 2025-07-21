@@ -54,7 +54,7 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
         }
 
         default:
-            PanicInfo(ErrorCode::NotImplemented,
+            ThrowInfo(ErrorCode::NotImplemented,
                       fmt::format("not implemented data type: {}", data_type));
     }
 }
@@ -89,7 +89,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     void
     Load(const BinarySet& binary_set, const Config& config = {}) override {
-        PanicInfo(ErrorCode::NotImplemented, "load v1 should be deprecated");
+        ThrowInfo(ErrorCode::NotImplemented, "load v1 should be deprecated");
     }
 
     void
@@ -102,7 +102,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override {
-        PanicInfo(ErrorCode::NotImplemented,
+        ThrowInfo(ErrorCode::NotImplemented,
                   "BuildWithDataset should be deprecated");
     }
 
@@ -136,7 +136,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     void
     Build(size_t n, const T* values, const bool* valid_data) override {
-        PanicInfo(ErrorCode::NotImplemented, "Build should not be called");
+        ThrowInfo(ErrorCode::NotImplemented, "Build should not be called");
     }
 
     const TargetBitmap
@@ -179,7 +179,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     std::optional<T>
     Reverse_Lookup(size_t offset) const override {
-        PanicInfo(ErrorCode::NotImplemented,
+        ThrowInfo(ErrorCode::NotImplemented,
                   "Reverse_Lookup should not be handled by inverted index");
     }
 
@@ -216,7 +216,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 return RegexQuery(regex_pattern);
             }
             default:
-                PanicInfo(
+                ThrowInfo(
                     ErrorCode::OpTypeInvalid,
                     "not supported op type: {} for inverted index PatternMatch",
                     op);
@@ -261,7 +261,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual void
     build_index_for_json(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-        PanicInfo(ErrorCode::NotImplemented,
+        ThrowInfo(ErrorCode::NotImplemented,
                   "build_index_for_json not implemented");
     }
 

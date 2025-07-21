@@ -91,7 +91,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
-    PanicInfo(Unsupported, "unsupported platform");
+    ThrowInfo(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -349,7 +349,7 @@ IndexFactory::CreatePrimitiveScalarIndex(
                 create_index_info, file_manager_context);
         }
         default:
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("invalid data type to build index: {}", data_type));
     }
@@ -367,7 +367,7 @@ IndexFactory::CreateCompositeScalarIndex(
         return CreatePrimitiveScalarIndex(
             element_type, create_index_info, file_manager_context);
     } else {
-        PanicInfo(
+        ThrowInfo(
             Unsupported,
             fmt::format("index type: {} for composite scalar not supported now",
                         index_type));
@@ -378,7 +378,7 @@ IndexBasePtr
 IndexFactory::CreateComplexScalarIndex(
     IndexType index_type,
     const storage::FileManagerContext& file_manager_context) {
-    PanicInfo(Unsupported, "Complex index not supported now");
+    ThrowInfo(Unsupported, "Complex index not supported now");
 }
 
 IndexBasePtr
@@ -421,7 +421,7 @@ IndexFactory::CreateJsonIndex(
             return std::make_unique<JsonFlatIndex>(file_manager_context,
                                                    nested_path);
         default:
-            PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
 }
 
@@ -450,7 +450,7 @@ IndexFactory::CreateScalarIndex(
             return CreateJsonIndex(create_index_info, file_manager_context);
         }
         default:
-            PanicInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
     }
 }
 
@@ -490,7 +490,7 @@ IndexFactory::CreateVectorIndex(
                 // TODO caiyd, not support yet
             }
             default:
-                PanicInfo(
+                ThrowInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
@@ -539,7 +539,7 @@ IndexFactory::CreateVectorIndex(
                     file_manager_context);
             }
             default:
-                PanicInfo(
+                ThrowInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build mem index: {}",
                                 data_type));

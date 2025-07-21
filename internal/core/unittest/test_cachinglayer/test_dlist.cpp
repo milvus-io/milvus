@@ -104,6 +104,8 @@ TEST_F(DListTest, UpdateLimitDecreaseNoEviction) {
     ASSERT_EQ(get_used_memory(), current_usage);
 
     ResourceUsage new_limit{50, 25};
+    dlist->UpdateLowWatermark({40, 20});
+    dlist->UpdateHighWatermark({50, 25});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
 
     EXPECT_EQ(get_used_memory(), current_usage);
@@ -124,6 +126,8 @@ TEST_F(DListTest, UpdateLimitDecreaseWithEvictionLRU) {
     EXPECT_CALL(*node2, clear_data()).Times(0);
 
     ResourceUsage new_limit{70, 40};
+    dlist->UpdateLowWatermark({56, 32});
+    dlist->UpdateHighWatermark({70, 40});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
 
     EXPECT_EQ(get_used_memory(), usage_node2);
@@ -146,6 +150,8 @@ TEST_F(DListTest, UpdateLimitDecreaseWithEvictionMultiple) {
     EXPECT_CALL(*node3, clear_data()).Times(0);
 
     ResourceUsage new_limit{40, 15};
+    dlist->UpdateLowWatermark({32, 12});
+    dlist->UpdateHighWatermark({40, 15});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
 
     EXPECT_EQ(get_used_memory(), usage_node3);
@@ -164,6 +170,8 @@ TEST_F(DListTest, UpdateLimitSkipsPinned) {
     EXPECT_CALL(*node2, clear_data()).Times(1);
 
     ResourceUsage new_limit{70, 40};
+    dlist->UpdateLowWatermark({56, 32});
+    dlist->UpdateHighWatermark({70, 40});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
 
     EXPECT_EQ(get_used_memory(), usage_node1);
@@ -176,6 +184,8 @@ TEST_F(DListTest, UpdateLimitToZero) {
     EXPECT_CALL(*node1, clear_data()).Times(1);
     EXPECT_CALL(*node2, clear_data()).Times(1);
 
+    dlist->UpdateLowWatermark({0, 0});
+    dlist->UpdateHighWatermark({1, 1});
     EXPECT_TRUE(dlist->UpdateLimit({1, 1}));
 
     EXPECT_EQ(get_used_memory(), ResourceUsage{});
@@ -585,6 +595,8 @@ TEST_F(DListTest, UpdateLimitIncreaseMemDecreaseDisk) {
     EXPECT_CALL(*node2, clear_data()).Times(0);
 
     ResourceUsage new_limit{200, 35};
+    dlist->UpdateLowWatermark({90, 34});
+    dlist->UpdateHighWatermark({90, 34});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
 
     EXPECT_EQ(get_used_memory(), usage2);
@@ -604,6 +616,8 @@ TEST_F(DListTest, EvictedNodeDestroyed) {
     EXPECT_CALL(*node1, clear_data()).Times(1);
     EXPECT_CALL(*node2, clear_data()).Times(0);
     ResourceUsage new_limit{70, 40};
+    dlist->UpdateLowWatermark({56, 32});
+    dlist->UpdateHighWatermark({70, 40});
     EXPECT_TRUE(dlist->UpdateLimit(new_limit));
     DLF::verify_list(dlist.get(), {node2});
     ResourceUsage memory_after_eviction = get_used_memory();
@@ -677,8 +691,8 @@ TEST_F(DListTest, ReserveMemoryUsesLowWatermark) {
     low_watermark = {80, 80};
     high_watermark = {90, 90};
     EXPECT_TRUE(dlist->UpdateLimit(initial_limit));
-    dlist->UpdateLowWatermark(low_watermark);
     dlist->UpdateHighWatermark(high_watermark);
+    dlist->UpdateLowWatermark(low_watermark);
 
     // Add nodes totaling 95/95 usage (above high watermark)
     MockListNode* node1 = add_and_load_node({45, 45}, "node1");  // Tail

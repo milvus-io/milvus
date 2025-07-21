@@ -1257,7 +1257,7 @@ GetValueFromProto(const milvus::proto::plan::GenericValue& value_proto) {
     } else if constexpr (std::is_same_v<T, milvus::proto::plan::GenericValue>) {
         return static_cast<T>(value_proto);
     } else {
-        PanicInfo(milvus::ErrorCode::UnexpectedError,
+        ThrowInfo(milvus::ErrorCode::UnexpectedError,
                   "unsupported generic value type");
     }
 };
@@ -1338,7 +1338,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                     break;
                 }
                 default: {
-                    PanicInfo(Unsupported, "unsupported range node");
+                    ThrowInfo(Unsupported, "unsupported range node");
                 }
             }
 
@@ -1477,7 +1477,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                         break;
                     }
                     default: {
-                        PanicInfo(Unsupported, "unsupported range node");
+                        ThrowInfo(Unsupported, "unsupported range node");
                     }
                 }
 
@@ -1616,7 +1616,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                         break;
                     }
                     default: {
-                        PanicInfo(Unsupported, "unsupported range node");
+                        ThrowInfo(Unsupported, "unsupported range node");
                     }
                 }
 
@@ -1850,7 +1850,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                     break;
                 }
                 default: {
-                    PanicInfo(Unsupported, "unsupported range node");
+                    ThrowInfo(Unsupported, "unsupported range node");
                 }
             }
 
@@ -3788,7 +3788,7 @@ TEST_P(ExprTest, TestReorder) {
                 return expr3;
             };
             default:
-                PanicInfo(ErrorCode::UnexpectedError, "not implement");
+                ThrowInfo(ErrorCode::UnexpectedError, "not implement");
         }
     };
     BitsetType final;
@@ -4226,7 +4226,7 @@ TEST_P(ExprTest, TestMutiInConvert) {
                     expr::LogicalBinaryExpr::OpType::Or, expr3, expr4);
             };
             default:
-                PanicInfo(ErrorCode::UnexpectedError, "not implement");
+                ThrowInfo(ErrorCode::UnexpectedError, "not implement");
         }
     };
 
@@ -6125,7 +6125,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMaris) {
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
-    auto str1_index = milvus::index::CreateScalarIndexSort<std::string>();
+    auto str1_index = milvus::index::CreateStringIndexMarisa();
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
@@ -6281,7 +6281,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable) {
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
-    auto str1_index = milvus::index::CreateScalarIndexSort<std::string>();
+    auto str1_index = milvus::index::CreateStringIndexMarisa();
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;
@@ -6438,7 +6438,7 @@ TEST_P(ExprTest, TestCompareWithScalarIndexMarisNullable2) {
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
-    auto str1_index = milvus::index::CreateScalarIndexSort<std::string>();
+    auto str1_index = milvus::index::CreateStringIndexMarisa();
     str1_index->Build(N, str1_col.data());
     load_index_info.field_id = str1_fid.get();
     load_index_info.field_type = DataType::VARCHAR;

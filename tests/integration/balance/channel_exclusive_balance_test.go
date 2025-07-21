@@ -53,6 +53,7 @@ func (s *ChannelExclusiveBalanceSuit) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.Balancer.Key, meta.ChannelLevelScoreBalancerName)
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.Key, "2")
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.Key, "1ms")
 
 	s.MiniClusterSuite.SetupSuite()
 }

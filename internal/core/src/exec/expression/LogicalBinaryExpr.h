@@ -41,7 +41,7 @@ struct LogicalElementFunc {
             } else if constexpr (op == LogicalOpType::Or) {
                 left[i] |= right[i];
             } else {
-                PanicInfo(
+                ThrowInfo(
                     OpTypeInvalid, "unsupported logical operator: {}", op);
             }
         }
@@ -56,7 +56,7 @@ struct LogicalElementFunc {
         } else if constexpr (op == LogicalOpType::Minus) {
             left.inplace_sub(right, n);
         } else {
-            PanicInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
+            ThrowInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
         }
     }
 };

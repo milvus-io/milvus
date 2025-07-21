@@ -120,7 +120,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        PanicInfo(
+        ThrowInfo(
             RetrieveError,
             fmt::format("query results exceed the limit size ", limit_size));
     }
@@ -240,7 +240,7 @@ SegmentInternalInterface::FillTargetEntry(
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported datatype {}",
                                           field_meta.get_data_type()));
                 }
@@ -322,7 +322,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
             return sizeof(int64_t);
         }
 
-        PanicInfo(FieldIDInvalid, "unsupported system field id");
+        ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
     auto schema = get_schema();
@@ -433,7 +433,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     const milvus::FieldMeta& field_meta, int64_t count) const {
     auto data_type = field_meta.get_data_type();
     if (IsVectorDataType(data_type)) {
-        PanicInfo(DataTypeInvalid,
+        ThrowInfo(DataTypeInvalid,
                   fmt::format("unsupported added field type {}",
                               field_meta.get_data_type()));
     }
@@ -512,7 +512,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported default value type {}",
                                       field_meta.get_data_type()));
             }

@@ -1676,7 +1676,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.using_database(client, "default")
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         self.describe_collection(client, collection_name,

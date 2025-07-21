@@ -295,7 +295,7 @@ func TestSchema(t *testing.T) {
 	})
 }
 
-func TestSchema_GetVectorFieldSchema(t *testing.T) {
+func TestSchema_GetVectorFieldSchemas(t *testing.T) {
 	schemaNormal := &schemapb.CollectionSchema{
 		Name:        "testColl",
 		Description: "",
@@ -324,7 +324,7 @@ func TestSchema_GetVectorFieldSchema(t *testing.T) {
 		},
 	}
 
-	t.Run("GetVectorFieldSchema", func(t *testing.T) {
+	t.Run("GetVectorFieldSchemas", func(t *testing.T) {
 		fieldSchema := GetVectorFieldSchemas(schemaNormal)
 		assert.Equal(t, 1, len(fieldSchema))
 		assert.Equal(t, "field_float_vector", fieldSchema[0].Name)

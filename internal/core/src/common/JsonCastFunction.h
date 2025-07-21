@@ -30,7 +30,7 @@ class JsonCastFunction {
     template <typename T, typename F>
     std::optional<T>
     cast(const F& t) const {
-        PanicInfo(Unsupported, "Not implemented");
+        ThrowInfo(Unsupported, "Not implemented");
     }
 
     template <typename T>

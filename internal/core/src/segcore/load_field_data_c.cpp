@@ -53,7 +53,7 @@ AppendLoadFieldInfo(CLoadFieldDataInfo c_load_field_data_info,
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
         auto iter = load_field_data_info->field_infos.find(field_id);
         if (iter != load_field_data_info->field_infos.end()) {
-            PanicInfo(milvus::ErrorCode::FieldAlreadyExist,
+            ThrowInfo(milvus::ErrorCode::FieldAlreadyExist,
                       "append same field info multi times");
         }
         FieldBinlogInfo binlog_info;
@@ -70,6 +70,7 @@ CStatus
 AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
                         int64_t field_id,
                         int64_t entries_num,
+                        int64_t memory_size,
                         const char* c_file_path) {
     SCOPE_CGO_CALL_METRIC();
 
@@ -78,7 +79,7 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
             static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
         auto iter = load_field_data_info->field_infos.find(field_id);
         if (iter == load_field_data_info->field_infos.end()) {
-            PanicInfo(milvus::ErrorCode::FieldIDInvalid,
+            ThrowInfo(milvus::ErrorCode::FieldIDInvalid,
                       "please append field info first");
         }
         std::string file_path(c_file_path);
@@ -86,6 +87,8 @@ AppendLoadFieldDataPath(CLoadFieldDataInfo c_load_field_data_info,
             file_path);
         load_field_data_info->field_infos[field_id].entries_nums.emplace_back(
             entries_num);
+        load_field_data_info->field_infos[field_id].memory_sizes.emplace_back(
+            memory_size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
