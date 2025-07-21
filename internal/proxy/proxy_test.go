@@ -424,7 +424,7 @@ func TestProxy(t *testing.T) {
 	floatVecField := "fVec"
 	binaryVecField := "bVec"
 	dim := 128
-	rowNum := 100
+	rowNum := 500
 	floatIndexName := "float_index"
 	binaryIndexName := "binary_index"
 	structId := "structI32"
@@ -1126,7 +1126,7 @@ func TestProxy(t *testing.T) {
 				break
 			}
 			// avoid too frequent rpc call
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			counter++
 		}
 	})
