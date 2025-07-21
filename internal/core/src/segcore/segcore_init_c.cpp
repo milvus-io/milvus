@@ -187,9 +187,11 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
                        const int64_t cache_touch_window_ms,
                        const int64_t eviction_interval_ms,
                        const int64_t cache_cell_unaccessed_survival_time,
-                       const float loading_memory_factor,
                        const float overloaded_memory_threshold_percentage,
-                       const float max_disk_usage_percentage) {
+                       const float loading_memory_factor,
+                       const float max_disk_usage_percentage,
+                       const char* disk_path) {
+    std::string disk_path_str(disk_path);
     milvus::cachinglayer::Manager::ConfigureTieredStorage(
         {scalarFieldCacheWarmupPolicy,
          vectorFieldCacheWarmupPolicy,
@@ -207,6 +209,7 @@ ConfigureTieredStorage(const CacheWarmupPolicy scalarFieldCacheWarmupPolicy,
          cache_cell_unaccessed_survival_time,
          overloaded_memory_threshold_percentage,
          max_disk_usage_percentage,
+         disk_path_str,
          loading_memory_factor});
 }
 

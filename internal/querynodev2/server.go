@@ -386,6 +386,8 @@ func (node *QueryNode) InitSegcore() error {
 	loadingMemoryFactor := C.float(paramtable.Get().QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
+	diskPath := C.CString(localDataRootPath)
+	defer C.free(unsafe.Pointer(diskPath))
 
 	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
 		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
@@ -394,7 +396,7 @@ func (node *QueryNode) InitSegcore() error {
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
 		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
-		loadingMemoryFactor, overloadedMemoryThresholdPercentage, maxDiskUsagePercentage)
+		overloadedMemoryThresholdPercentage, loadingMemoryFactor, maxDiskUsagePercentage, diskPath)
 
 	err = initcore.InitInterminIndexConfig(paramtable.Get())
 	if err != nil {

@@ -115,8 +115,8 @@ class DList {
     //    we don't update used_memory_ here.
     // 2. when a cell is loaded as a bonus, we need to touch it to insert into the LRU and update
     //    used_memory_ to track the memory usage(usage of such cell is not counted during reservation).
-    // 
-    // Returns the time point when the item was last touched. This methods always acquires the 
+    //
+    // Returns the time point when the item was last touched. This methods always acquires the
     // global list_mtx_, thus the returned time point is guaranteed to be monotonically increasing.
     std::chrono::high_resolution_clock::time_point
     touchItem(ListNode* list_node,
@@ -217,11 +217,14 @@ class DList {
     std::string
     usageInfo(const ResourceUsage& actively_pinned) const;
 
-    // Physical memory protection methods
-    // Returns the amount of memory that needs to be evicted to satisfy physical memory limit
+    // Physical resource protection methods
+    // Returns the amount of memory/disk that needs to be evicted to satisfy physical resource limit
     // Returns 0 if no eviction needed, positive value if eviction needed.
-    int64_t
-    checkPhysicalMemoryLimit(const ResourceUsage& size) const;
+    // For disk, it only checks whether the usage will exceed the disk capacity to avoid using up all disk space.
+    // Does not obey the configured disk capacity limit. Reason is: we can't easily determine the amount of disk space
+    // that is used by the cache(there may be other processes using the disk).
+    ResourceUsage
+    checkPhysicalResourceLimit(const ResourceUsage& size) const;
 
     // not thread safe, use for debug only
     std::string
@@ -238,7 +241,7 @@ class DList {
     // access to used_memory_ and max_memory_ must be done under the lock of list_mtx_
     std::atomic<ResourceUsage> used_memory_{};
     // Track estimated resources currently being loaded
-    std::atomic<ResourceUsage> loading_memory_{};
+    std::atomic<ResourceUsage> loading_{};
     ResourceUsage low_watermark_;
     ResourceUsage high_watermark_;
     ResourceUsage max_memory_;

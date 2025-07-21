@@ -16,11 +16,22 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <cstring>
 
 #include "log/Log.h"
 
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/statvfs.h>
+#endif
+
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#include <mach/mach.h>
+#endif
+
 namespace milvus::cachinglayer::internal {
 
+// Returns 0 if failed to get memory info, or if the platform is not supported.
 int64_t
 getHostTotalMemory() {
     static int64_t cached_total_memory = []() -> int64_t {
@@ -49,6 +60,16 @@ getHostTotalMemory() {
             }
         }
         return 0;
+#elif defined(__APPLE__)
+        int mib[2];
+        mib[0] = CTL_HW;
+        mib[1] = HW_MEMSIZE;
+        int64_t size = 0;
+        size_t len = sizeof(size);
+        if (sysctl(mib, 2, &size, &len, NULL, 0) == 0) {
+            return size;
+        }
+        return 0;
 #else
         LOG_WARN(
             "[MCL] Host memory detection not implemented for this platform");
@@ -59,6 +80,7 @@ getHostTotalMemory() {
 }
 
 // Impl based on pkg/util/hardware/container_linux.go::getContainerMemLimit()
+// Returns 0 if failed to get memory limit, or if the platform is not supported.
 int64_t
 getContainerMemLimit() {
 #ifdef __linux__
@@ -158,20 +180,27 @@ getContainerMemLimit() {
     return 0;
 }
 
-SystemMemoryInfo
+SystemResourceInfo
 getSystemMemoryInfo() {
-    SystemMemoryInfo info;
+    SystemResourceInfo info;
 
     // Get total memory (host vs container)
     int64_t host_memory = getHostTotalMemory();
     int64_t container_limit = getContainerMemLimit();
 
+    if (host_memory == 0 && container_limit == 0) {
+        // This indicates an error or unsupported platform, assume unlimited.
+        info.total_bytes = std::numeric_limits<int64_t>::max();
+        info.used_bytes = 0;
+        return info;
+    }
+
     if (container_limit > 0 && container_limit < host_memory) {
-        info.total_memory_bytes = container_limit;
+        info.total_bytes = container_limit;
         LOG_DEBUG("[MCL] Using container memory limit: {}",
                   FormatBytes(container_limit));
     } else {
-        info.total_memory_bytes = host_memory;
+        info.total_bytes = host_memory;
         if (container_limit > host_memory) {
             LOG_WARN(
                 "[MCL] Container limit ({}) exceeds host memory ({}), using "
@@ -182,10 +211,40 @@ getSystemMemoryInfo() {
     }
 
     // Get current process memory usage (RSS - Shared)
-    info.used_memory_bytes = getCurrentProcessMemoryUsage();
-    info.available_memory_bytes =
-        info.total_memory_bytes - info.used_memory_bytes;
+    info.used_bytes = getCurrentProcessMemoryUsage();
 
+    return info;
+}
+
+SystemResourceInfo
+getSystemDiskInfo(const std::string& disk_path) {
+    SystemResourceInfo info;
+    // if we can't get disk info, return infinity and abandon disk protection.
+    info.total_bytes = std::numeric_limits<int64_t>::max();
+    info.used_bytes = 0;
+    if (disk_path.empty()) {
+        LOG_WARN("[MCL] Disk path is empty, returning 0");
+        return info;
+    }
+
+#if defined(__linux__) || defined(__APPLE__)
+    struct statvfs stat;
+    if (statvfs(disk_path.c_str(), &stat) != 0) {
+        LOG_WARN("[MCL] Failed to statvfs({}): {}", disk_path, strerror(errno));
+        return info;
+    }
+    // Total bytes = f_blocks * f_frsize
+    info.total_bytes = static_cast<int64_t>(stat.f_blocks) *
+                       static_cast<int64_t>(stat.f_frsize);
+    // Used bytes = (f_blocks - f_bfree) * f_frsize
+    info.used_bytes = (static_cast<int64_t>(stat.f_blocks) -
+                       static_cast<int64_t>(stat.f_bfree)) *
+                      static_cast<int64_t>(stat.f_frsize);
+#else
+    LOG_WARN(
+        "[MCL] Disk info not implemented for this platform, returning "
+        "unlimited capacity");
+#endif
     return info;
 }
 
@@ -234,6 +293,16 @@ getCurrentProcessMemoryUsage() {
 
     // Return RSS - Shared (file-backed memory) to match Go implementation
     return rss - shared;
+#elif defined(__APPLE__)
+    task_vm_info_data_t vm_info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(
+            mach_task_self(), TASK_VM_INFO, (task_info_t)&vm_info, &count) !=
+        KERN_SUCCESS) {
+        LOG_WARN("[MCL] Failed to get task info for current process");
+        return 0;
+    }
+    return vm_info.internal;
 #else
     LOG_WARN(
         "[MCL] Process memory monitoring not implemented for this platform");
