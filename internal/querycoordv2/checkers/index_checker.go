@@ -192,7 +192,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	})
 	tasks = append(tasks, tasksStats...)
 
-	dropTasks := c.createSegmentDropTasks(ctx, replica, redundant.Collect())
+	dropTasks := c.createSegmentIndexDropTasks(ctx, replica, redundant.Collect())
 	tasks = append(tasks, dropTasks...)
 
 	return tasks
@@ -313,7 +313,7 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 	return t, true
 }
 
-func (c *IndexChecker) createSegmentDropTasks(ctx context.Context, replica *meta.Replica, fieldIDs []int64) []task.Task {
+func (c *IndexChecker) createSegmentIndexDropTasks(ctx context.Context, replica *meta.Replica, fieldIDs []int64) []task.Task {
 	if len(fieldIDs) == 0 {
 		return nil
 	}
@@ -322,6 +322,8 @@ func (c *IndexChecker) createSegmentDropTasks(ctx context.Context, replica *meta
 	for _, channel := range channels {
 		action := task.NewDropIndexAction(channel.Node, task.ActionTypeDropIndex, channel.ChannelName, fieldIDs)
 		t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, action)
+		t.SetPriority(task.TaskPriorityLow)
+		t.SetReason("drop index")
 		tasks = append(tasks, t)
 	}
 	return tasks

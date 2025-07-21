@@ -132,8 +132,6 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
             info.enable_mmap);
 
     if (request.has_raw_data && get_bit(field_data_ready_bitset_, field_id)) {
-        // fields_.erase(field_id);
-        // set_bit(field_data_ready_bitset_, field_id, false);
         fields_.at(field_id)->ManualEvictCache();
     }
     if (get_bit(binlog_index_bitset_, field_id)) {
@@ -220,8 +218,6 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
         !is_pk) {
         // We do not erase the primary key field: if insert record is evicted from memory, when reloading it'll
         // need the pk field again.
-        // fields_.erase(field_id);
-        // set_bit(field_data_ready_bitset_, field_id, false);
         fields_.at(field_id)->ManualEvictCache();
     }
 }
