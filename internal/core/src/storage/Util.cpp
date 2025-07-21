@@ -206,13 +206,13 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             break;
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "Sparse Float Vector payload should be added by calling "
                       "add_one_binary_payload",
                       data_type);
         }
         default: {
-            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type {}", data_type);
         }
     }
 }
@@ -290,7 +290,7 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
@@ -325,7 +325,7 @@ CreateArrowBuilder(DataType data_type, int dim) {
                 arrow::fixed_size_binary(dim * sizeof(int8)));
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
     }
@@ -365,7 +365,7 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
             return std::make_shared<arrow::StringScalar>(
                 default_value.string_data());
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported default value data type {}",
                       field_meta.get_data_type());
     }
@@ -420,7 +420,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::binary(), nullable)});
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
@@ -467,7 +467,7 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
                               nullable)});
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
     }
@@ -490,7 +490,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(bfloat16);
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("GetDimensionFromFileMetaData should not be "
                                   "called for sparse vector"));
         }
@@ -498,7 +498,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(int8);
         }
         default:
-            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -552,7 +552,7 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
             return array->byte_width() / sizeof(int8);
         }
         default:
-            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -879,7 +879,7 @@ CreateChunkManager(const StorageConfig& storage_config) {
         }
 #endif
         default: {
-            PanicInfo(ConfigInvalid,
+            ThrowInfo(ConfigInvalid,
                       "unsupported storage_config.storage_type {}",
                       fmt::underlying(storage_type));
         }
@@ -980,7 +980,7 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<VectorArray>>(type,
                                                             total_num_rows);
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
                           GetDataTypeName(type));
     }

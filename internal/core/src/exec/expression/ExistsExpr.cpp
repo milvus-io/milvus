@@ -39,7 +39,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported data type: {}",
                       expr_->column_.data_type_);
     }
@@ -91,7 +91,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
             }
 
             default:
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           "unsupported data type: {}",
                           index->GetCastType());
         }

@@ -63,7 +63,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     if (is_built_)
         return;
     if (n == 0) {
-        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
     data_.reserve(n);
     total_num_rows_ = n;
@@ -95,7 +95,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
         length += data->get_num_rows() - data->get_null_count();
     }
     if (total_num_rows_ == 0) {
-        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(length);
@@ -306,7 +306,7 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
                 data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
     }
     for (; lb < ub; ++lb) {
@@ -398,7 +398,7 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType for "
                                       "checking scalar index optimization: {}",
                                       op));
@@ -415,5 +415,4 @@ template class ScalarIndexSort<int32_t>;
 template class ScalarIndexSort<int64_t>;
 template class ScalarIndexSort<float>;
 template class ScalarIndexSort<double>;
-template class ScalarIndexSort<std::string>;
 }  // namespace milvus::index

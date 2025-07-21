@@ -23,6 +23,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -467,14 +469,18 @@ func (kv *etcdKV) MultiSaveAndRemove(ctx context.Context, saves map[string]strin
 
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+	}
+
 	var keys []string
 	for key, value := range saves {
 		keys = append(keys, key)
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
-	}
-
-	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
@@ -503,13 +509,13 @@ func (kv *etcdKV) MultiSaveBytesAndRemove(ctx context.Context, saves map[string]
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	var keys []string
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+	}
+
 	for key, value := range saves {
 		keys = append(keys, key)
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
-	}
-
-	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)
@@ -564,14 +570,14 @@ func (kv *etcdKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[st
 
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves))
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
+	}
+
 	var keys []string
 	for key, value := range saves {
 		keys = append(keys, key)
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
-	}
-
-	for _, keyDelete := range removals {
-		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, kv.requestTimeout)

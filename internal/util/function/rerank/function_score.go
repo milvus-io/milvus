@@ -234,7 +234,7 @@ func (fScore *FunctionScore) Process(ctx context.Context, searchParams *SearchPa
 				FieldsData: make([]*schemapb.FieldData, 0),
 				Scores:     []float32{},
 				Ids:        &schemapb.IDs{},
-				Topks:      []int64{},
+				Topks:      make([]int64, searchParams.nq),
 			},
 		}, nil
 	}
@@ -279,4 +279,11 @@ func (fScore *FunctionScore) IsSupportGroup() bool {
 		return true
 	}
 	return fScore.reranker.IsSupportGroup()
+}
+
+func (fScore *FunctionScore) RerankName() string {
+	if fScore == nil {
+		return ""
+	}
+	return fScore.reranker.GetRankName()
 }

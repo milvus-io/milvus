@@ -212,7 +212,7 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t start_offset,
                     int64_t length) const {
         if (this->type() == SegmentType::Growing) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
         return chunk_view<ViewType>(
@@ -225,7 +225,7 @@ class SegmentInternalInterface : public SegmentInterface {
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const {
         if (this->type() == SegmentType::Growing) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
         auto pw = chunk_view_by_offsets(field_id, chunk_id, offsets);
@@ -518,7 +518,7 @@ class SegmentInternalInterface : public SegmentInterface {
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
                      int64_t chunk_id) const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     };
 
     virtual bool

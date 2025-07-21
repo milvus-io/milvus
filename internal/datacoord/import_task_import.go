@@ -221,6 +221,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(t, zap.String("err", err.Error()))...)
 				return
 			}
+			log.Info("update import segment info done", WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Any("segmentInfo", info))...)
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))

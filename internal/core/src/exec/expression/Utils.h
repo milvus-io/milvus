@@ -39,12 +39,12 @@ GetColumnVector(const VectorPtr& result) {
                 convert_vector->child(0))) {
             res = convert_flat_vector;
         } else {
-            PanicInfo(
+            ThrowInfo(
                 UnexpectedError,
                 "RowVector result must have a first ColumnVector children");
         }
     } else {
-        PanicInfo(UnexpectedError,
+        ThrowInfo(UnexpectedError,
                   "expr result must have a ColumnVector or RowVector result");
     }
     return res;
@@ -109,7 +109,7 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           "unsupported data type {}",
                           arr2.array(i).val_case());
         }
@@ -152,7 +152,7 @@ GetValueFromProtoInternal(const milvus::proto::plan::GenericValue& value_proto,
     } else if constexpr (std::is_same_v<T, milvus::proto::plan::GenericValue>) {
         return static_cast<T>(value_proto);
     } else {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "unsupported generic value {}",
                   value_proto.DebugString());
     }

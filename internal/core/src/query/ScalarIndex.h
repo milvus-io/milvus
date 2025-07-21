@@ -14,7 +14,6 @@
 #include <memory>
 #include <string>
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
@@ -26,14 +25,6 @@ template <typename T>
 inline index::ScalarIndexPtr<T>
 generate_scalar_index(Span<T> data) {
     auto indexing = std::make_unique<index::ScalarIndexSort<T>>();
-    indexing->Build(data.row_count(), data.data(), data.valid_data());
-    return indexing;
-}
-
-template <>
-inline index::ScalarIndexPtr<std::string>
-generate_scalar_index(Span<std::string> data) {
-    auto indexing = index::CreateStringIndexSort();
     indexing->Build(data.row_count(), data.data(), data.valid_data());
     return indexing;
 }
@@ -59,7 +50,7 @@ generate_scalar_index(SpanBase data, DataType data_type) {
         case DataType::VARCHAR:
             return generate_scalar_index(Span<std::string>(data));
         default:
-            PanicInfo(DataTypeInvalid, "unsupported type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported type {}", data_type);
     }
 }
 

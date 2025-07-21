@@ -117,7 +117,7 @@ class SegcoreConfig {
         } else if (refine_type == "UINT8") {
             refine_type_ = knowhere::RefineType::UINT8_QUANT;
         } else {
-            PanicInfo(Unsupported,
+            ThrowInfo(Unsupported,
                       "unsupported refine type for intermin index.");
         }
     }

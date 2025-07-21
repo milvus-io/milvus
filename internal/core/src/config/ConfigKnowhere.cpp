@@ -63,13 +63,13 @@ KnowhereSetSimdType(const char* value) {
     } else if (strcmp(value, "avx") == 0 || strcmp(value, "sse4_2") == 0) {
         simd_type = knowhere::KnowhereConfig::SimdType::SSE4_2;
     } else {
-        PanicInfo(ConfigInvalid, "invalid SIMD type: " + std::string(value));
+        ThrowInfo(ConfigInvalid, "invalid SIMD type: " + std::string(value));
     }
     try {
         return knowhere::KnowhereConfig::SetSimdType(simd_type);
     } catch (std::exception& e) {
         LOG_ERROR(e.what());
-        PanicInfo(ConfigInvalid, e.what());
+        ThrowInfo(ConfigInvalid, e.what());
     }
 }
 
@@ -87,7 +87,7 @@ void
 KnowhereInitSearchThreadPool(const uint32_t num_threads) {
     knowhere::KnowhereConfig::SetSearchThreadPoolSize(num_threads);
     if (!knowhere::KnowhereConfig::SetAioContextPool(num_threads)) {
-        PanicInfo(ConfigInvalid,
+        ThrowInfo(ConfigInvalid,
                   "Failed to set aio context pool with num_threads " +
                       std::to_string(num_threads));
     }
@@ -99,7 +99,7 @@ KnowhereInitGPUMemoryPool(const uint32_t init_size, const uint32_t max_size) {
         knowhere::KnowhereConfig::SetRaftMemPool();
         return;
     } else if (init_size > max_size) {
-        PanicInfo(ConfigInvalid,
+        ThrowInfo(ConfigInvalid,
                   "Error Gpu memory pool params: init_size {} can't not large "
                   "than max_size {}.",
                   init_size,

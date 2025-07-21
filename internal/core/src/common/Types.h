@@ -143,7 +143,7 @@ GetDataTypeSize(DataType data_type, int dim = 1) {
         // them. Caller of this method must handle this case themselves and must
         // not pass variable length types to this method.
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("failed to get data type size, invalid type {}",
                             data_type));
@@ -188,7 +188,7 @@ GetArrowDataType(DataType data_type, int dim = 1) {
         case DataType::VECTOR_INT8:
             return arrow::fixed_size_binary(dim);
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("failed to get data type, invalid type {}",
                                   data_type));
         }
@@ -250,7 +250,7 @@ GetDataTypeName(DataType data_type) {
         case DataType::VECTOR_ARRAY:
             return "vector_array";
         default:
-            PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
+            ThrowInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
     }
 }
 

@@ -26,7 +26,6 @@
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
 #include "index/VectorMemIndex.h"
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -158,7 +157,7 @@ struct GeneratedData {
                             target_field_data.vectors().int8_vector().data());
                         std::copy_n(src_data, len, ret.data());
                     } else {
-                        PanicInfo(Unsupported, "unsupported");
+                        ThrowInfo(Unsupported, "unsupported");
                     }
 
                     return std::move(ret);
@@ -246,7 +245,7 @@ struct GeneratedData {
                             break;
                         }
                         default: {
-                            PanicInfo(Unsupported, "unsupported");
+                            ThrowInfo(Unsupported, "unsupported");
                         }
                     }
                 }
@@ -267,7 +266,7 @@ struct GeneratedData {
                 return ret;
             }
         }
-        PanicInfo(FieldIDInvalid, "field id not find");
+        ThrowInfo(FieldIDInvalid, "field id not find");
     }
 
     std::unique_ptr<DataArray>
@@ -278,7 +277,7 @@ struct GeneratedData {
             }
         }
 
-        PanicInfo(FieldIDInvalid, "field id not find");
+        ThrowInfo(FieldIDInvalid, "field id not find");
     }
 
     GeneratedData() = default;
@@ -357,7 +356,8 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr CreateTestSchema() {
+inline SchemaPtr
+CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     auto bool_field =
         schema->AddDebugField("bool", milvus::DataType::BOOL, true);
@@ -597,7 +597,7 @@ DataGen(SchemaPtr schema,
                             break;
                         }
                         case DataType::VECTOR_SPARSE_FLOAT:
-                            PanicInfo(DataTypeInvalid, "not implemented");
+                            ThrowInfo(DataTypeInvalid, "not implemented");
                             break;
                         case DataType::VECTOR_BFLOAT16: {
                             auto length = array_len * dim;
@@ -620,7 +620,7 @@ DataGen(SchemaPtr schema,
                             break;
                         }
                         default: {
-                            PanicInfo(DataTypeInvalid, "not implemented");
+                            ThrowInfo(DataTypeInvalid, "not implemented");
                         }
                     }
 
@@ -1201,7 +1201,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicInfo(Unsupported, "unsupported");
+                ThrowInfo(Unsupported, "unsupported");
             }
         }
     } else {
@@ -1334,7 +1334,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             default: {
-                PanicInfo(Unsupported, "unsupported");
+                ThrowInfo(Unsupported, "unsupported");
             }
         }
     }
@@ -1382,15 +1382,11 @@ GenVecIndexing(int64_t N,
 template <typename T>
 inline index::IndexBasePtr
 GenScalarIndexing(int64_t N, const T* data) {
-    if constexpr (std::is_same_v<T, std::string>) {
-        auto indexing = index::CreateStringIndexSort();
-        indexing->Build(N, data);
-        return indexing;
-    } else {
-        auto indexing = index::CreateScalarIndexSort<T>();
-        indexing->Build(N, data);
-        return indexing;
-    }
+    static_assert(std::is_arithmetic_v<T>,
+                  "ScalarIndexSort only supports arithmetic types");
+    auto indexing = index::CreateScalarIndexSort<T>();
+    indexing->Build(N, data);
+    return indexing;
 }
 
 inline std::vector<char>

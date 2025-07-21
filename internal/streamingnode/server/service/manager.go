@@ -50,8 +50,11 @@ func (ms *managerServiceImpl) Remove(ctx context.Context, req *streamingpb.Strea
 
 // CollectStatus collects the status of all wal instances in these streamingnode.
 func (ms *managerServiceImpl) CollectStatus(ctx context.Context, req *streamingpb.StreamingNodeManagerCollectStatusRequest) (*streamingpb.StreamingNodeManagerCollectStatusResponse, error) {
-	// TODO: collect traffic metric for load balance.
+	metrics, err := ms.walManager.Metrics()
+	if err != nil {
+		return nil, err
+	}
 	return &streamingpb.StreamingNodeManagerCollectStatusResponse{
-		BalanceAttributes: &streamingpb.StreamingNodeBalanceAttributes{},
+		Metrics: types.NewProtoFromStreamingNodeMetrics(*metrics),
 	}, nil
 }
