@@ -138,6 +138,18 @@ struct ColumnInfo {
           nullable_(nullable) {
     }
 
+    ColumnInfo(FieldId field_id,
+               DataType data_type,
+               DataType element_type,
+               std::vector<std::string> nested_path = {},
+               bool nullable = false)
+        : field_id_(field_id),
+          data_type_(data_type),
+          element_type_(element_type),
+          nested_path_(std::move(nested_path)),
+          nullable_(nullable) {
+    }
+
     bool
     operator==(const ColumnInfo& other) {
         if (field_id_ != other.field_id_) {
