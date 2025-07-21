@@ -17,14 +17,21 @@
 package meta
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ChannelDistManagerSuite struct {
@@ -278,7 +285,7 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	replicaPB := &querypb.Replica{
 		ID:           1,
 		CollectionID: suite.collection,
-		Nodes:        []int64{0, 2},
+		Nodes:        []int64{0, 2, 4},
 	}
 	replica := NewReplica(replicaPB)
 
@@ -338,6 +345,42 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	// Test nonexistent channel
 	leader = dist.GetShardLeader("nonexistent", replica)
 	suite.Nil(leader)
+
+	// Test streaming node
+	balancer := mock_balancer.NewMockBalancer(suite.T())
+	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+		versions := []typeutil.VersionInt64Pair{
+			{Global: 1, Local: 2},
+		}
+		pchans := [][]types.PChannelInfoAssigned{
+			{
+				types.PChannelInfoAssigned{
+					Channel: types.PChannelInfo{Name: "pchannel3", Term: 1},
+					Node:    types.StreamingNodeInfo{ServerID: 4, Address: "localhost:1"},
+				},
+			},
+		}
+		for i := 0; i < len(versions); i++ {
+			cb(versions[i], pchans[i])
+		}
+		<-ctx.Done()
+		return context.Cause(ctx)
+	})
+	defer snmanager.ResetStreamingNodeManager()
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	time.Sleep(50 * time.Millisecond)
+
+	channel1Node4 := suite.channels["dmc0"].Clone()
+	channel1Node4.Node = 4
+	channel1Node4.Version = 3
+	channel1Node4.View.Status.Serviceable = false
+	dist.Update(4, channel1Node4)
+
+	leader = dist.GetShardLeader("dmc0", replica)
+	suite.NotNil(leader)
+	suite.Equal(int64(4), leader.Node)
+	suite.Equal(int64(3), leader.Version)
+	suite.False(leader.IsServiceable())
 }
 
 func TestGetChannelDistJSON(t *testing.T) {
