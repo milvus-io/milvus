@@ -262,6 +262,31 @@ func TestValidateDimension(t *testing.T) {
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
+
+	fieldSchema.DataType = schemapb.DataType_Int8Vector
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "200",
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "201",
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension.GetAsInt32() + 1)),
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
 }
 
 func TestValidateVectorFieldMetricType(t *testing.T) {
