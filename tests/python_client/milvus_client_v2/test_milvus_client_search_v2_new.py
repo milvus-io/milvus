@@ -1020,7 +1020,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
 
         # fast create collection
-        self.create_collection(client, collection_name, dimension=ct.default_dim, index_params=index_params)
+        self.create_collection(client, collection_name, dimension=ct.default_dim)
 
         # create 2 more partitions
         partition_names = ["partition_1", "partition_2"]
@@ -1164,6 +1164,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         # release the partition again and load the collection
         self.release_partitions(client, collection_name, [to_be_released_partition])
         self.load_collection(client, collection_name)
+        self.refresh_load(client, collection_name)    # workaround for #43386, remove this line after it was fixed
 
         # search again
         search_res5, _ = self.search(

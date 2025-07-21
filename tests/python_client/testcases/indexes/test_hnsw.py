@@ -100,9 +100,9 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
 
         # Insert data in 2 batches with unique primary keys
         insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_data_type)) \
+        random_vectors = list(cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=vector_data_type)) \
             if vector_data_type == DataType.FLOAT_VECTOR \
-            else cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=vector_data_type)
+            else cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=vector_data_type)
         for j in range(insert_times):
             start_pk = j * default_nb
             rows = [{
@@ -157,7 +157,7 @@ class TestHnswBuildParams(TestMilvusClientV2Base):
 
         # insert data
         insert_times = 2
-        random_vectors = list(cf.gen_vectors(default_nb*insert_times, default_dim, vector_data_type=DataType.FLOAT_VECTOR))
+        random_vectors = list(cf.gen_vectors(default_nb*insert_times, dim, vector_data_type=DataType.FLOAT_VECTOR))
         for j in range(insert_times):
             start_pk = j * default_nb
             rows = [{
