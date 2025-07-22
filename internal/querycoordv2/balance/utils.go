@@ -22,12 +22,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -229,17 +227,4 @@ func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
 		return weighter(channels[i]) < weighter(channels[j])
 	})
 	return channels
-}
-
-// filterNodeLessThan260 filter the query nodes that version is less than 2.6.0
-func filterNodeLessThan260(nodes []int64, nodeManager *session.NodeManager) []int64 {
-	checker := semver.MustParseRange(">=2.6.0-dev")
-	filteredNodes := make([]int64, 0)
-	for _, nodeID := range nodes {
-		if session := nodeManager.Get(nodeID); session != nil && checker(session.Version()) {
-			continue
-		}
-		filteredNodes = append(filteredNodes, nodeID)
-	}
-	return filteredNodes
 }
