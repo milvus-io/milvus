@@ -34,12 +34,6 @@ ParseTokenizerParams(const TypeParams& params);
 class FieldMeta {
  public:
     static const FieldMeta RowIdMeta;
-    FieldMeta(const FieldMeta&) = default;
-    FieldMeta(FieldMeta&&) = default;
-    FieldMeta&
-    operator=(const FieldMeta&) = delete;
-    FieldMeta&
-    operator=(FieldMeta&&) = default;
 
     FieldMeta(FieldName name,
               FieldId id,
@@ -142,6 +136,32 @@ class FieldMeta {
         Assert(type_ == DataType::VECTOR_ARRAY);
         Assert(IsVectorDataType(element_type_));
     }
+
+    FieldMeta(const FieldMeta& other)
+       : name_(other.name_),
+         id_(other.id_),
+         type_(other.type_),
+         element_type_(other.element_type_),
+         nullable_(other.nullable_),
+         default_value_(other.default_value_),
+         vector_info_(other.vector_info_),
+         string_info_(other.string_info_) {
+   }
+
+   FieldMeta& operator=(const FieldMeta& other) {
+       if (this != &other) {
+           name_ = other.name_;
+           id_ = other.id_;
+           type_ = other.type_;
+           element_type_ = other.element_type_;
+           nullable_ = other.nullable_;
+           default_value_ = other.default_value_;
+           vector_info_ = other.vector_info_;
+           string_info_ = other.string_info_;
+       }
+       return *this;
+   }
+
 
     int64_t
     get_dim() const {
