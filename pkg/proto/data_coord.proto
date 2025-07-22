@@ -949,6 +949,7 @@ enum ImportTaskStateV2 {
   InProgress = 2;
   Failed = 3;
   Completed = 4;
+  Retry = 5;
 }
 
 enum ImportTaskSourceV2 {

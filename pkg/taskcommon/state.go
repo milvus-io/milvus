@@ -42,6 +42,8 @@ func FromImportState(s datapb.ImportTaskStateV2) State {
 		return Failed
 	case datapb.ImportTaskStateV2_Completed:
 		return Finished
+	case datapb.ImportTaskStateV2_Retry:
+		return Retry
 	}
 	return None
 }
@@ -56,6 +58,8 @@ func ToImportState(s State) datapb.ImportTaskStateV2 {
 		return datapb.ImportTaskStateV2_Failed
 	case Finished:
 		return datapb.ImportTaskStateV2_Completed
+	case Retry:
+		return datapb.ImportTaskStateV2_Retry
 	}
 	return datapb.ImportTaskStateV2_None
 }

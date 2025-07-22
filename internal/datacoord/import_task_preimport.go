@@ -135,12 +135,12 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskID: p.GetTaskID(),
 	}
 	resp, err := cluster.QueryPreImport(p.GetNodeID(), req)
-	if err != nil {
+	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
 		updateErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update preimport task state to pending", WrapTaskLog(p, zap.Error(updateErr))...)
 		}
-		log.Info("reset preimport task state to pending due to error occurs", WrapTaskLog(p, zap.Error(err))...)
+		log.Info("reset preimport task state to pending due to error occurs", WrapTaskLog(p, zap.Error(err), zap.String("reason", resp.GetReason()))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
