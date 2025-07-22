@@ -183,23 +183,26 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		dbName = collInfo.DatabaseName
 	}
 
-	for _, info := range resp.GetImportSegmentsInfo() {
-		segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
-		if info.GetImportedRows() <= segment.GetNumOfRows() {
-			continue // rows not changed, no need to update
-		}
-		diff := info.GetImportedRows() - segment.GetNumOfRows()
-		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
-		err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
-		if err != nil {
-			log.Warn("update import segment rows failed", WrapTaskLog(t, zap.Error(err))...)
-			return
-		}
+	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		for _, info := range resp.GetImportSegmentsInfo() {
+			segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
+			if info.GetImportedRows() <= segment.GetNumOfRows() {
+				continue // rows not changed, no need to update
+			}
+			diff := info.GetImportedRows() - segment.GetNumOfRows()
+			op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
+			if err != nil {
+				log.Warn("update import segment rows failed", WrapTaskLog(t, zap.Error(err))...)
+				return
+			}
+			log.Info("update import segment rows done", WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Int64("importedRows", info.GetImportedRows()))...)
 
-		metrics.DataCoordBulkVectors.WithLabelValues(
-			dbName,
-			strconv.FormatInt(t.GetCollectionID(), 10),
-		).Add(float64(diff))
+			metrics.DataCoordBulkVectors.WithLabelValues(
+				dbName,
+				strconv.FormatInt(t.GetCollectionID(), 10),
+			).Add(float64(diff))
+		}
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {

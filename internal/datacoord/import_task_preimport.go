@@ -152,14 +152,19 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 		log.Warn("preimport failed", WrapTaskLog(p, zap.String("reason", resp.GetReason()))...)
 		return
 	}
-	actions := []UpdateAction{UpdateFileStats(resp.GetFileStats())}
+	actions := []UpdateAction{}
+	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		actions = append(actions, UpdateFileStats(resp.GetFileStats()))
+	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		actions = append(actions, UpdateState(datapb.ImportTaskStateV2_Completed))
 	}
-	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), actions...)
-	if err != nil {
-		log.Warn("update preimport task failed", WrapTaskLog(p, zap.Error(err))...)
-		return
+	if len(actions) > 0 {
+		err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), actions...)
+		if err != nil {
+			log.Warn("update preimport task failed", WrapTaskLog(p, zap.Error(err))...)
+			return
+		}
 	}
 	log.Info("query preimport", WrapTaskLog(p, zap.String("respState", resp.GetState().String()),
 		zap.Any("fileStats", resp.GetFileStats()))...)
