@@ -56,8 +56,9 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
+	fileReaderBufferSize := int64(32 * 1024 * 1024)
 	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            int64(bufferSize),
+		BufferSize:            fileReaderBufferSize,
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {

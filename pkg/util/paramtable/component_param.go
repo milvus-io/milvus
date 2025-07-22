@@ -5217,7 +5217,6 @@ type dataNodeConfig struct {
 	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
 	ImportBaseBufferSize        ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
-	MaxTaskSlotNum              ParamItem `refreshable:"true"`
 	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
 
 	// Compaction
@@ -5551,16 +5550,6 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.ImportDeleteBufferSize.Init(base.mgr)
-
-	p.MaxTaskSlotNum = ParamItem{
-		Key:          "dataNode.import.maxTaskSlotNum",
-		Version:      "2.4.13",
-		Doc:          "The maximum number of slots occupied by each import/pre-import task.",
-		DefaultValue: "16",
-		PanicIfEmpty: false,
-		Export:       true,
-	}
-	p.MaxTaskSlotNum.Init(base.mgr)
 
 	p.ImportMemoryLimitPercentage = ParamItem{
 		Key:          "dataNode.import.memoryLimitPercentage",
