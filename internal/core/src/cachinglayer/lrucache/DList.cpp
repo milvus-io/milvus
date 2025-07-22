@@ -187,14 +187,15 @@ DList::usageInfo(const ResourceUsage& actively_pinned) const {
     auto used = used_memory_.load();
     static double precision = 100.0;
     return fmt::format(
-        "low_watermark_: {}, "
-        "high_watermark_: {} , "
-        "max_memory_: {} , "
+        "low_watermark_: {}; "
+        "high_watermark_: {}; "
+        "max_memory_: {}; "
         "used_memory_: {} {:.2}% of max, {:.2}% of "
         "high_watermark memory, {:.2}% of max, {:.2}% of "
-        "high_watermark disk, "
-        "evictable_size_: {}, "
-        "actively_pinned: {} {:.2}% of used memory, {:.2}% of used disk",
+        "high_watermark disk; "
+        "evictable_size_: {}; "
+        "actively_pinned: {} {:.2}% of used memory, {:.2}% of used disk; "
+        "loading: {}; ",
         low_watermark_.ToString(),
         high_watermark_.ToString(),
         max_memory_.ToString(),
@@ -212,7 +213,8 @@ DList::usageInfo(const ResourceUsage& actively_pinned) const {
         static_cast<double>(actively_pinned.memory_bytes) / used.memory_bytes *
             precision,
         static_cast<double>(actively_pinned.file_bytes) / used.file_bytes *
-            precision);
+            precision,
+        loading_memory_.load().ToString());
 }
 
 // this method is not thread safe, it does not attempt to lock each node, use for debug only.
@@ -497,11 +499,6 @@ DList::IsEmpty() const {
 }
 
 void
-DList::addLoadingResource(const ResourceUsage& size) {
-    loading_memory_ += size * eviction_config_.loading_memory_factor;
-}
-
-void
 DList::removeLoadingResource(const ResourceUsage& size) {
     loading_memory_ -= size * eviction_config_.loading_memory_factor;
 }
@@ -587,7 +584,8 @@ DList::clearWaitingQueue() {
 }
 
 int64_t
-DList::checkPhysicalMemoryLimit(const ResourceUsage& size) const {
+DList::checkPhysicalMemoryLimit(const ResourceUsage& original) const {
+    auto size = original * eviction_config_.loading_memory_factor;
     auto sys_mem = getSystemMemoryInfo();
     auto current_loading = loading_memory_.load();
     int64_t projected_usage = sys_mem.used_memory_bytes +
