@@ -79,6 +79,18 @@ type SingleUpsertReq struct {
 	Data           map[string]interface{} `json:"data" validate:"required"`
 }
 
+type UpdateReq struct {
+	DbName         string                   `json:"dbName"`
+	CollectionName string                   `json:"collectionName" validate:"required"`
+	Data           []map[string]interface{} `json:"data" validate:"required"`
+}
+
+type SingleUpdateReq struct {
+	DbName         string                 `json:"dbName"`
+	CollectionName string                 `json:"collectionName" validate:"required"`
+	Data           map[string]interface{} `json:"data" validate:"required"`
+}
+
 type SearchReq struct {
 	DbName         string             `json:"dbName"`
 	CollectionName string             `json:"collectionName" validate:"required"`

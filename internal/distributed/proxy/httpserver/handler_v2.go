@@ -123,6 +123,10 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
+	// Update
+	router.POST(EntityCategory+UpdateAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+		return &CollectionDataReq{}
+	}, wrapperTraceLog(h.update))), false))
 	// Search
 	router.POST(EntityCategory+SearchAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
@@ -1097,6 +1101,80 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+				HTTPReturnCost: cost,
+			})
+		default:
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
+				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
+			})
+		}
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) update(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CollectionDataReq)
+	req := &milvuspb.UpdateRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		PartitionName:  httpReq.PartitionName,
+		// PartitionName:  "_default",
+	}
+	c.Set(ContextRequest, req)
+
+	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := c.Get(gin.BodyBytesKey)
+	var validDataMap map[string][]bool
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, fail to deal with update data", zap.Any("body", body), zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
+			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
+		})
+		return nil, err
+	}
+
+	req.NumRows = uint32(len(httpReq.Data))
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false)
+	if err != nil {
+		log.Ctx(ctx).Warn("high level restful api, fail to deal with update data", zap.Any("data", httpReq.Data), zap.Error(err))
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
+			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
+		})
+		return nil, err
+	}
+	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Update", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.Update(reqCtx, req.(*milvuspb.UpdateRequest))
+	})
+	if err == nil {
+		updateResp := resp.(*milvuspb.MutationResult)
+		cost := proxy.GetCostValue(updateResp.GetStatus())
+		switch updateResp.IDs.GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+			if allowJS {
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode: merr.Code(nil),
+					HTTPReturnData: gin.H{"updateCount": updateResp.UpsertCnt, "updateIds": updateResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+					HTTPReturnCost: cost,
+				})
+			} else {
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode: merr.Code(nil),
+					HTTPReturnData: gin.H{"updateCount": updateResp.UpsertCnt, "updateIds": formatInt64(updateResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+					HTTPReturnCost: cost,
+				})
+			}
+		case *schemapb.IDs_StrId:
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
+				HTTPReturnData: gin.H{"updateCount": updateResp.UpsertCnt, "updateIds": updateResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
 				HTTPReturnCost: cost,
 			})
 		default:

@@ -16,16 +16,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 )
 
-var (
-	letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	r           *rand.Rand
-)
-
-func init() {
-	r = rand.New(rand.NewSource(time.Now().UnixNano()))
-}
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 func GenRandomString(prefix string, n int) string {
+	// Create a new random source for each call to avoid data race
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	b := make([]rune, n)
 	for i := range b {
 		b[i] = letterRunes[r.Intn(len(letterRunes))]
@@ -76,9 +71,11 @@ func GenInvalidNames() []string {
 }
 
 func GenFloatVector(dim int) []float32 {
+	// Create a new random source for each call to avoid data race
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	vector := make([]float32, 0, dim)
 	for j := 0; j < dim; j++ {
-		vector = append(vector, rand.Float32())
+		vector = append(vector, r.Float32())
 	}
 	return vector
 }

@@ -285,6 +285,12 @@ func (mc *MilvusClient) Upsert(ctx context.Context, option client.UpsertOption, 
 	return upsertRes, err
 }
 
+// Update update data
+func (mc *MilvusClient) Update(ctx context.Context, option client.UpdateOption, callOptions ...grpc.CallOption) (client.UpdateResult, error) {
+	updateRes, err := mc.mClient.Update(ctx, option, callOptions...)
+	return updateRes, err
+}
+
 // -- read --
 
 // LoadCollection Load Collection

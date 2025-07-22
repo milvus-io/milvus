@@ -118,3 +118,37 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 	})
 	return result, err
 }
+
+type UpdateResult struct {
+	UpdateCount int64
+	IDs         column.Column
+}
+
+func (c *Client) Update(ctx context.Context, option UpdateOption, callOptions ...grpc.CallOption) (UpdateResult, error) {
+	result := UpdateResult{}
+	err := c.retryIfSchemaError(ctx, option.CollectionName(), func(ctx context.Context) (uint64, error) {
+		collection, err := c.getCollection(ctx, option.CollectionName())
+		if err != nil {
+			return math.MaxUint64, err
+		}
+		req, err := option.UpdateRequest(collection)
+		if err != nil {
+			// return schema mismatch err to retry with newer schema
+			return collection.UpdateTimestamp, merr.WrapErrCollectionSchemaMisMatch(err)
+		}
+		return collection.UpdateTimestamp, c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+			// Use the dedicated Update service method
+			resp, err := milvusService.Update(ctx, req, callOptions...)
+			if err = merr.CheckRPCCall(resp, err); err != nil {
+				return err
+			}
+			result.UpdateCount = resp.GetUpsertCnt()
+			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	})
+	return result, err
+}
