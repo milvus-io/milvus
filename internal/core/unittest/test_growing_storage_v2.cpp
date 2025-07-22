@@ -227,7 +227,7 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
         int64_t current_row_group = 0;
 
         while (channel->pop(wrapper)) {
-            for (const auto& table : wrapper->arrow_tables) {
+            for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
                 // Verify batch size matches row group metadata
                 EXPECT_EQ(table->num_rows(),
                           row_group_metadata.Get(current_row_group).row_num());
@@ -257,15 +257,13 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
 
         std::shared_ptr<milvus::ArrowDataWrapper> wrapper;
         int64_t total_rows = 0;
-        int64_t current_row_group = 0;
 
         while (channel->pop(wrapper)) {
-            for (const auto& table : wrapper->arrow_tables) {
+            for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
                 // Verify batch size matches row group metadata
                 EXPECT_EQ(table->num_rows(),
-                          row_group_metadata.Get(current_row_group).row_num());
+                          row_group_metadata.Get(row_group_id).row_num());
                 total_rows += table->num_rows();
-                current_row_group++;
             }
         }
 
@@ -288,17 +286,15 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
                                           row_group_lists);
 
         total_rows = 0;
-        current_row_group = 0;
         std::vector<int64_t> selected_row_groups = {0, 2};
 
         while (channel->pop(wrapper)) {
-            for (const auto& table : wrapper->arrow_tables) {
+            for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
                 EXPECT_EQ(table->num_rows(),
                           row_group_metadata
-                              .Get(selected_row_groups[current_row_group])
+                              .Get(selected_row_groups[row_group_id])
                               .row_num());
                 total_rows += table->num_rows();
-                current_row_group++;
             }
         }
 

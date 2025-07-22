@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <flat_hash_map/flat_hash_map.hpp>
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise.h>
 #include <folly/Synchronized.h>
