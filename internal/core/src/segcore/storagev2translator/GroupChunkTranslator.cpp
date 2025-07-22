@@ -191,6 +191,7 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
 
     std::shared_ptr<milvus::ArrowDataWrapper> r;
     std::unordered_set<cachinglayer::cid_t> filled_cids;
+    filled_cids.reserve(cids.size());
     while (column_group_info_.arrow_reader_channel->pop(r)) {
         for (const auto& [row_group_id, table] : r->arrow_tables) {
             auto cid = static_cast<cachinglayer::cid_t>(row_group_id);
