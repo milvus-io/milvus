@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -114,7 +115,12 @@ func (b *BalanceChecker) getReplicaForStoppingBalance(ctx context.Context) []int
 			replicas := b.meta.ReplicaManager.GetByCollection(ctx, cid)
 			stoppingReplicas := make([]int64, 0)
 			for _, replica := range replicas {
-				if replica.RONodesCount()+replica.ROSQNodesCount() > 0 {
+				// If there are some delegator work on query node, we need to balance channel to streamingnode forcely.
+				channelRONodes := make([]int64, 0)
+				if streamingutil.IsStreamingServiceEnabled() {
+					_, channelRONodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
+				}
+				if replica.RONodesCount()+replica.ROSQNodesCount() > 0 || len(channelRONodes) > 0 {
 					stoppingReplicas = append(stoppingReplicas, replica.GetID())
 				}
 			}

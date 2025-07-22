@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -480,13 +481,7 @@ func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceRep
 	var rwNodes []int64
 	var roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
-		if rwQueryNodesLessThan260 := filterNodeLessThan260(rwNodes, b.nodeManager); len(rwQueryNodesLessThan260) > 0 {
-			// Add rwNodes to roNodes to balance channels from querynode to streamingnode forcely.
-			roNodes = append(roNodes, rwQueryNodesLessThan260...)
-			log.Info("force to balance channels from querynode to streamingnode", zap.Int64s("rwQueryNodesLessThan260", rwQueryNodesLessThan260))
-		}
-		roNodes = append(roNodes, replica.GetRONodes()...)
+		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
