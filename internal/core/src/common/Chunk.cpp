@@ -32,7 +32,7 @@ StringChunk::StringViews(
             start_offset,
             len);
         AssertInfo(
-            len > 0 && len <= row_nums_,
+            len >= 0 && len <= row_nums_,
             "Retrieve string views with out-of-bound offset:{}, len:{}, wrong",
             start_offset,
             len);
