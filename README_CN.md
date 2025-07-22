@@ -183,8 +183,9 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-408-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-414-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
+<a href="https://github.com/9Eurydice9"><img src="https://avatars.githubusercontent.com/u/220225099?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Abhijnan-Bajpai"><img src="https://avatars.githubusercontent.com/u/57059194?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -296,7 +297,6 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/Yukikaze-CZR"><img src="https://avatars.githubusercontent.com/u/48198922?v=4" width="30px" /></a>
 <a href="https://github.com/Zach41"><img src="https://avatars.githubusercontent.com/u/3941604?v=4" width="30px" /></a>
 <a href="https://github.com/ZhaoBQ"><img src="https://avatars.githubusercontent.com/u/35092554?v=4" width="30px" /></a>
-<a href="https://github.com/aakejiang"><img src="https://avatars.githubusercontent.com/u/68629395?v=4" width="30px" /></a>
 <a href="https://github.com/aaronjin2010"><img src="https://avatars.githubusercontent.com/u/48044391?v=4" width="30px" /></a>
 <a href="https://github.com/abd-770"><img src="https://avatars.githubusercontent.com/u/92085834?v=4" width="30px" /></a>
 <a href="https://github.com/akihoni"><img src="https://avatars.githubusercontent.com/u/36330442?v=4" width="30px" /></a>
@@ -405,8 +405,10 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/jaelgu"><img src="https://avatars.githubusercontent.com/u/86251631?v=4" width="30px" /></a>
 <a href="https://github.com/jaime0815"><img src="https://avatars.githubusercontent.com/u/4024711?v=4" width="30px" /></a>
 <a href="https://github.com/jeffoverflow"><img src="https://avatars.githubusercontent.com/u/24581746?v=4" width="30px" /></a>
+<a href="https://github.com/jenkoon"><img src="https://avatars.githubusercontent.com/u/27683687?v=4" width="30px" /></a>
 <a href="https://github.com/jennyli-z"><img src="https://avatars.githubusercontent.com/u/93511422?v=4" width="30px" /></a>
 <a href="https://github.com/jhonroxton"><img src="https://avatars.githubusercontent.com/u/105436184?v=4" width="30px" /></a>
+<a href="https://github.com/jiangke-sr"><img src="https://avatars.githubusercontent.com/u/68629395?v=4" width="30px" /></a>
 <a href="https://github.com/jiangyinzuo"><img src="https://avatars.githubusercontent.com/u/40995042?v=4" width="30px" /></a>
 <a href="https://github.com/jiaoew1991"><img src="https://avatars.githubusercontent.com/u/2297455?v=4" width="30px" /></a>
 <a href="https://github.com/jielinxu"><img src="https://avatars.githubusercontent.com/u/52057195?v=4" width="30px" /></a>
@@ -467,6 +469,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/pengjeck"><img src="https://avatars.githubusercontent.com/u/14035577?v=4" width="30px" /></a>
 <a href="https://github.com/phantom8548"><img src="https://avatars.githubusercontent.com/u/11576622?v=4" width="30px" /></a>
 <a href="https://github.com/pingliu"><img src="https://avatars.githubusercontent.com/u/6415493?v=4" width="30px" /></a>
+<a href="https://github.com/pj1987111"><img src="https://avatars.githubusercontent.com/u/6268414?v=4" width="30px" /></a>
 <a href="https://github.com/ponponon"><img src="https://avatars.githubusercontent.com/u/38725104?v=4" width="30px" /></a>
 <a href="https://github.com/preetham"><img src="https://avatars.githubusercontent.com/u/9149028?v=4" width="30px" /></a>
 <a href="https://github.com/presburger"><img src="https://avatars.githubusercontent.com/u/49336176?v=4" width="30px" /></a>
@@ -501,6 +504,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/simonwei97"><img src="https://avatars.githubusercontent.com/u/119845914?v=4" width="30px" /></a>
 <a href="https://github.com/siriusctrl"><img src="https://avatars.githubusercontent.com/u/26541600?v=4" width="30px" /></a>
 <a href="https://github.com/slobentanzer"><img src="https://avatars.githubusercontent.com/u/13223629?v=4" width="30px" /></a>
+<a href="https://github.com/smackfu"><img src="https://avatars.githubusercontent.com/u/1723952?v=4" width="30px" /></a>
 <a href="https://github.com/smellthemoon"><img src="https://avatars.githubusercontent.com/u/64083300?v=4" width="30px" /></a>
 <a href="https://github.com/snyk-bot"><img src="https://avatars.githubusercontent.com/u/19733683?v=4" width="30px" /></a>
 <a href="https://github.com/songxianj"><img src="https://avatars.githubusercontent.com/u/107831450?v=4" width="30px" /></a>
@@ -511,6 +515,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/sre-ro"><img src="https://avatars.githubusercontent.com/u/93502486?v=4" width="30px" /></a>
 <a href="https://github.com/sreyan-ghosh"><img src="https://avatars.githubusercontent.com/u/60854658?v=4" width="30px" /></a>
 <a href="https://github.com/ss892714028"><img src="https://avatars.githubusercontent.com/u/34635663?v=4" width="30px" /></a>
+<a href="https://github.com/stacyli-0601"><img src="https://avatars.githubusercontent.com/u/218570478?v=4" width="30px" /></a>
 <a href="https://github.com/stephen37"><img src="https://avatars.githubusercontent.com/u/6506810?v=4" width="30px" /></a>
 <a href="https://github.com/stevetracvc"><img src="https://avatars.githubusercontent.com/u/70416691?v=4" width="30px" /></a>
 <a href="https://github.com/stuartjing"><img src="https://avatars.githubusercontent.com/u/3454260?v=4" width="30px" /></a>
@@ -528,6 +533,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/timothycarambat"><img src="https://avatars.githubusercontent.com/u/16845892?v=4" width="30px" /></a>
 <a href="https://github.com/tinkerlin"><img src="https://avatars.githubusercontent.com/u/13817362?v=4" width="30px" /></a>
 <a href="https://github.com/tinswzy"><img src="https://avatars.githubusercontent.com/u/30112657?v=4" width="30px" /></a>
+<a href="https://github.com/topikachu"><img src="https://avatars.githubusercontent.com/u/1520380?v=4" width="30px" /></a>
 <a href="https://github.com/trovwu"><img src="https://avatars.githubusercontent.com/u/89676996?v=4" width="30px" /></a>
 <a href="https://github.com/tuwchia"><img src="https://avatars.githubusercontent.com/u/13282807?v=4" width="30px" /></a>
 <a href="https://github.com/ulovecode"><img src="https://avatars.githubusercontent.com/u/30142181?v=4" width="30px" /></a>
@@ -539,7 +545,6 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/wangting0128"><img src="https://avatars.githubusercontent.com/u/26307815?v=4" width="30px" /></a>
 <a href="https://github.com/water32"><img src="https://avatars.githubusercontent.com/u/13234561?v=4" width="30px" /></a>
 <a href="https://github.com/wayblink"><img src="https://avatars.githubusercontent.com/u/18096561?v=4" width="30px" /></a>
-<a href="https://github.com/weiZhenkun"><img src="https://avatars.githubusercontent.com/u/27683687?v=4" width="30px" /></a>
 <a href="https://github.com/weiliu1031"><img src="https://avatars.githubusercontent.com/u/108661493?v=4" width="30px" /></a>
 <a href="https://github.com/weishuo2"><img src="https://avatars.githubusercontent.com/u/27938020?v=4" width="30px" /></a>
 <a href="https://github.com/wg1026688210"><img src="https://avatars.githubusercontent.com/u/14267759?v=4" width="30px" /></a>
@@ -558,6 +563,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/xiedeyantu"><img src="https://avatars.githubusercontent.com/u/49781471?v=4" width="30px" /></a>
 <a href="https://github.com/xige-16"><img src="https://avatars.githubusercontent.com/u/20124155?v=4" width="30px" /></a>
 <a href="https://github.com/xiyichan"><img src="https://avatars.githubusercontent.com/u/34647972?v=4" width="30px" /></a>
+<a href="https://github.com/xlyslr"><img src="https://avatars.githubusercontent.com/u/14070517?v=4" width="30px" /></a>
 <a href="https://github.com/xudalin0609"><img src="https://avatars.githubusercontent.com/u/35444753?v=4" width="30px" /></a>
 <a href="https://github.com/xuqiwe"><img src="https://avatars.githubusercontent.com/u/57252655?v=4" width="30px" /></a>
 <a href="https://github.com/xzshinan"><img src="https://avatars.githubusercontent.com/u/7299894?v=4" width="30px" /></a>

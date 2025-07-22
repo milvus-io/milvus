@@ -270,19 +270,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
             column_group_id, insert_files[0], arrow_schema, fs);
 
-        std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-        for (const auto& file : insert_files) {
-            auto reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
-            row_group_meta_list.push_back(
-                reader->file_metadata()->GetRowGroupMetadataVector());
-            auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "failed to close file reader when get row group "
-                       "metadata from file: " +
-                           file + " with error: " + status.ToString());
-        }
-
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
         // warmup will be disabled only when all columns are not in load list
@@ -316,7 +303,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 column_group_info,
                 insert_files,
                 info.enable_mmap,
-                row_group_meta_list,
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
