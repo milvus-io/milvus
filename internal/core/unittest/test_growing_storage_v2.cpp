@@ -290,10 +290,12 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
 
         while (channel->pop(wrapper)) {
             for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
+                // row_group_id is the actual row group ID (0 or 2), not an index
+                // We need to find its position in selected_row_groups
+                auto it = std::find(selected_row_groups.begin(), selected_row_groups.end(), row_group_id);
+                ASSERT_NE(it, selected_row_groups.end()) << "Row group " << row_group_id << " not found in selected_row_groups";
                 EXPECT_EQ(table->num_rows(),
-                          row_group_metadata
-                              .Get(selected_row_groups[row_group_id])
-                              .row_num());
+                          row_group_metadata.Get(row_group_id).row_num());
                 total_rows += table->num_rows();
             }
         }
