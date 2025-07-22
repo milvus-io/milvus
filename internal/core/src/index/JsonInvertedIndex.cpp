@@ -161,6 +161,7 @@ JsonInvertedIndex<T>::RetainTantivyIndexFiles(
                        std::string::npos;
             }),
         index_files.end());
+    InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
 }
 
 template class JsonInvertedIndex<bool>;
