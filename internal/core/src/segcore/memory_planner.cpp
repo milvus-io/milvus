@@ -207,7 +207,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                        std::to_string(block.offset + i) +
                                        " from file " + file + " with error " +
                                        status.ToString());
-                        ret->arrow_tables.push_back(table);
+                        ret->arrow_tables.push_back(std::make_pair(block.offset + i, table));
                     }
                     auto close_status = row_group_reader->Close();
                     AssertInfo(close_status.ok(),
