@@ -188,12 +188,12 @@ class SourceOperator : public Operator {
 
     void
     AddInput(RowVectorPtr& /* unused */) override {
-        PanicInfo(NotImplemented, "SourceOperator does not support addInput()");
+        ThrowInfo(NotImplemented, "SourceOperator does not support addInput()");
     }
 
     void
     NoMoreInput() override {
-        PanicInfo(NotImplemented,
+        ThrowInfo(NotImplemented,
                   "SourceOperator does not support noMoreInput()");
     }
 

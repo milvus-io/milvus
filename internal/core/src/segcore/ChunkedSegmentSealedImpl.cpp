@@ -95,7 +95,7 @@ ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     auto& field_meta = schema_->operator[](field_id);
 
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+        ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
     }
 
     if (field_meta.is_vector()) {
@@ -270,19 +270,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
         milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
             column_group_id, insert_files[0], arrow_schema, fs);
 
-        std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-        for (const auto& file : insert_files) {
-            auto reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
-            row_group_meta_list.push_back(
-                reader->file_metadata()->GetRowGroupMetadataVector());
-            auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "failed to close file reader when get row group "
-                       "metadata from file: " +
-                           file + " with error: " + status.ToString());
-        }
-
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
         // warmup will be disabled only when all columns are not in load list
@@ -316,7 +303,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 column_group_info,
                 insert_files,
                 info.enable_mmap,
-                row_group_meta_list,
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
@@ -388,13 +374,18 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                      this->get_segment_id(),
                      field_id.get());
         } else {
-            std::vector<std::pair<std::string, int64_t>>
-                insert_files_with_entries_nums;
+            std::vector<storagev1translator::ChunkTranslator::FileInfo>
+                file_infos;
+            file_infos.reserve(info.insert_files.size());
             for (int i = 0; i < info.insert_files.size(); i++) {
-                insert_files_with_entries_nums.emplace_back(
-                    info.insert_files[i], info.entries_nums[i]);
+                file_infos.emplace_back(
+                    storagev1translator::ChunkTranslator::FileInfo{
+                        info.insert_files[i],
+                        info.entries_nums[i],
+                        info.memory_sizes[i]});
             }
-            storage::SortByPath(insert_files_with_entries_nums);
+
+            storage::SortByPath(file_infos);
 
             auto field_meta = schema_->operator[](field_id);
             std::unique_ptr<Translator<milvus::Chunk>> translator =
@@ -402,7 +393,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     this->get_segment_id(),
                     field_meta,
                     field_data_info,
-                    std::move(insert_files_with_entries_nums),
+                    std::move(file_infos),
                     info.enable_mmap,
                     load_info.load_priority);
 
@@ -492,7 +483,7 @@ ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
 
     if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+        ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
     }
 
     if (field_meta.is_vector()) {
@@ -561,7 +552,7 @@ ChunkedSegmentSealedImpl::chunk_data_impl(FieldId field_id,
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         return it->second->Span(chunk_id);
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_data_impl only used for chunk column field ");
 }
 
@@ -577,7 +568,7 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         return it->second->ArrayViews(chunk_id, offset_len);
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_array_view_impl only used for chunk column field ");
 }
 
@@ -594,7 +585,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
         auto column = it->second;
         return column->StringViews(chunk_id, offset_len);
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_string_view_impl only used for variable column field ");
 }
 
@@ -609,7 +600,7 @@ ChunkedSegmentSealedImpl::chunk_view_by_offsets(
     if (auto it = fields_.find(field_id); it != fields_.end()) {
         return it->second->ViewsByOffsets(chunk_id, offsets);
     }
-    PanicInfo(ErrorCode::UnexpectedError,
+    ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_view_by_offsets only used for variable column field ");
 }
 
@@ -827,7 +818,7 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
                "Extra info of search plan doesn't have value");
 
     if (!is_system_field_ready()) {
-        PanicInfo(FieldNotLoaded,
+        ThrowInfo(FieldNotLoaded,
                   "failed to load row ID or timestamp, potential missing "
                   "bin logs or "
                   "empty segments. Segment ID = " +
@@ -852,7 +843,7 @@ ChunkedSegmentSealedImpl::check_search(const query::Plan* plan) const {
         auto& field_meta = plan->schema_->operator[](field_id);
         // request field may has added field
         if (!field_meta.is_nullable()) {
-            PanicInfo(FieldNotLoaded,
+            ThrowInfo(FieldNotLoaded,
                       "User Field(" + field_meta.get_name().get() +
                           ") is not loaded");
         }
@@ -930,7 +921,7 @@ ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
             break;
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format(
                     "unsupported type {}",
@@ -1029,10 +1020,10 @@ ChunkedSegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                 static_cast<Timestamp*>(output));
             break;
         case SystemFieldType::RowId:
-            PanicInfo(ErrorCode::Unsupported, "RowId retrieve not supported");
+            ThrowInfo(ErrorCode::Unsupported, "RowId retrieve not supported");
             break;
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unknown subscript fields", system_type));
     }
 }
@@ -1437,7 +1428,7 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported data type {}",
                                   field_meta.get_data_type()));
         }
@@ -1619,7 +1610,7 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported type {}", data_type));
                 }
             }
@@ -1692,7 +1683,7 @@ ChunkedSegmentSealedImpl::LoadSegmentMeta(
         slice_lengths.push_back(info.row_count());
     }
     insert_record_.timestamp_index_.set_length_meta(std::move(slice_lengths));
-    PanicInfo(NotImplemented, "unimplemented");
+    ThrowInfo(NotImplemented, "unimplemented");
 }
 
 int64_t

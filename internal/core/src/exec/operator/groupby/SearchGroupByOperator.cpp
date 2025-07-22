@@ -127,7 +127,7 @@ SearchGroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
             break;
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 Unsupported,
                 fmt::format("unsupported data type {} for group by operator",
                             data_type));

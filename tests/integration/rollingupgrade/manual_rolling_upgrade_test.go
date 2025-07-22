@@ -45,6 +45,8 @@ type ManualRollingUpgradeSuite struct {
 func (s *ManualRollingUpgradeSuite) SetupSuite() {
 	rand.Seed(time.Now().UnixNano())
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "100")
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.Key, "1ms")
+
 	s.MiniClusterSuite.SetupSuite()
 }
 

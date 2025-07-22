@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -576,4 +577,12 @@ func convertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		ret.SubReqs = append(ret.SubReqs, subReq)
 	}
 	return ret
+}
+
+func getMetricType(toReduceResults []*internalpb.SearchResults) string {
+	metricType := ""
+	if len(toReduceResults) >= 1 {
+		metricType = toReduceResults[0].GetMetricType()
+	}
+	return metricType
 }

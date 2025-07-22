@@ -23,7 +23,7 @@
 namespace milvus {
 
 #define THROW_FILE_WRITE_ERROR(path)                                     \
-    PanicInfo(ErrorCode::FileWriteFailed,                                \
+    ThrowInfo(ErrorCode::FileWriteFailed,                                \
               fmt::format("write data to file {} failed, error code {}", \
                           path,                                          \
                           strerror(errno)));

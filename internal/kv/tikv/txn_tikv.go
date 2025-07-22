@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	tikverr "github.com/tikv/client-go/v2/error"
 	tikv "github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // A quick note is that we are using loggingErr at our outermost scope in order to perform logging
@@ -466,6 +468,19 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 		}
 	}
 
+	// use complement to remove keys that are not in saves
+	saveKeys := typeutil.NewSet(lo.Keys(saves)...)
+	removeKeys := typeutil.NewSet(removals...)
+	removals = removeKeys.Complement(saveKeys).Collect()
+
+	for _, key := range removals {
+		key = path.Join(kv.rootPath, key)
+		if err = txn.Delete([]byte(key)); err != nil {
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key))
+			return loggingErr
+		}
+	}
+
 	for key, value := range saves {
 		key = path.Join(kv.rootPath, key)
 		// Check if value is empty or taking reserved EmptyValue
@@ -477,14 +492,6 @@ func (kv *txnTiKV) MultiSaveAndRemove(ctx context.Context, saves map[string]stri
 		err = txn.Set([]byte(key), byteValue)
 		if err != nil {
 			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemove", key, value))
-			return loggingErr
-		}
-	}
-
-	for _, key := range removals {
-		key = path.Join(kv.rootPath, key)
-		if err = txn.Delete([]byte(key)); err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to delete %s for MultiSaveAndRemove", key))
 			return loggingErr
 		}
 	}
@@ -529,21 +536,6 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 		}
 	}
 
-	// Save key-value pairs
-	for key, value := range saves {
-		key = path.Join(kv.rootPath, key)
-		// Check if value is empty or taking reserved EmptyValue
-		byteValue, err := convertEmptyStringToByte(value)
-		if err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
-			return loggingErr
-		}
-		err = txn.Set([]byte(key), byteValue)
-		if err != nil {
-			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
-			return loggingErr
-		}
-	}
 	// Remove keys with prefix
 	for _, prefix := range removals {
 		prefix = path.Join(kv.rootPath, prefix)
@@ -575,6 +567,23 @@ func (kv *txnTiKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[s
 			}
 		}
 	}
+
+	// Save key-value pairs
+	for key, value := range saves {
+		key = path.Join(kv.rootPath, key)
+		// Check if value is empty or taking reserved EmptyValue
+		byteValue, err := convertEmptyStringToByte(value)
+		if err != nil {
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to cast to byte (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
+			return loggingErr
+		}
+		err = txn.Set([]byte(key), byteValue)
+		if err != nil {
+			loggingErr = errors.Wrap(err, fmt.Sprintf("Failed to set (%s:%s) for MultiSaveAndRemoveWithPrefix()", key, value))
+			return loggingErr
+		}
+	}
+
 	err = kv.executeTxn(ctx, txn)
 	if err != nil {
 		loggingErr = errors.Wrap(err, "Failed to commit for MultiSaveAndRemoveWithPrefix")

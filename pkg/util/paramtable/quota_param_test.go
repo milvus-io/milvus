@@ -207,7 +207,7 @@ func TestQuotaParam(t *testing.T) {
 	t.Run("test limit writing", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyWriting.GetAsBool())
 		assert.Equal(t, true, qc.TtProtectionEnabled.GetAsBool())
-		assert.Equal(t, 300, qc.MaxTimeTickDelay.GetAsInt())
+		assert.Equal(t, 1200, qc.MaxTimeTickDelay.GetAsInt())
 		assert.Equal(t, defaultLowWaterLevel, qc.DataNodeMemoryLowWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultHighWaterLevel, qc.DataNodeMemoryHighWaterLevel.GetAsFloat())
 		assert.Equal(t, defaultLowWaterLevel, qc.QueryNodeMemoryLowWaterLevel.GetAsFloat())

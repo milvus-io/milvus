@@ -296,7 +296,7 @@ TEST_P(JsonKeyStatsIndexTest, TestUnaryRangeInFunc) {
                     break;
                 }
                 default: {
-                    PanicInfo(Unsupported, "unsupported range node");
+                    ThrowInfo(Unsupported, "unsupported range node");
                 }
             }
 

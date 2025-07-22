@@ -36,6 +36,7 @@ func (s *PartialSearchTestSuit) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key, "10000")
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "10000")
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.TaskExecutionCap.Key, "1")
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.Key, "1ms")
 
 	s.WithOptions(integration.WithDropAllCollectionsWhenTestTearDown())
 	s.MiniClusterSuite.SetupSuite()

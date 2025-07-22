@@ -103,19 +103,19 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, wpCfg.AppendQueueSize.GetAsInt(), 10000)
 		assert.Equal(t, wpCfg.AppendMaxRetries.GetAsInt(), 3)
-		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsSize(), int64(2*1024*1024*1024))
+		assert.Equal(t, wpCfg.SegmentRollingMaxSize.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
 
 		assert.Equal(t, wpCfg.SyncMaxInterval.GetAsDurationByParse().Milliseconds(), int64(200))
 		assert.Equal(t, wpCfg.SyncMaxIntervalForLocalStorage.GetAsDurationByParse().Milliseconds(), int64(10))
 		assert.Equal(t, wpCfg.SyncMaxEntries.GetAsInt(), 10000)
-		assert.Equal(t, wpCfg.SyncMaxBytes.GetAsSize(), int64(128*1024*1024))
+		assert.Equal(t, wpCfg.SyncMaxBytes.GetAsSize(), int64(256*1024*1024))
 		assert.Equal(t, wpCfg.FlushMaxRetries.GetAsInt(), 5)
-		assert.Equal(t, wpCfg.FlushMaxSize.GetAsSize(), int64(4*1024*1024))
+		assert.Equal(t, wpCfg.FlushMaxSize.GetAsSize(), int64(2*1024*1024))
 		assert.Equal(t, wpCfg.FlushMaxThreads.GetAsInt(), 32)
 		assert.Equal(t, wpCfg.RetryInterval.GetAsDurationByParse().Milliseconds(), int64(1000))
-		assert.Equal(t, wpCfg.CompactionSize.GetAsSize(), int64(8*1024*1024))
+		assert.Equal(t, wpCfg.CompactionSize.GetAsSize(), int64(2*1024*1024))
 
 		assert.Equal(t, wpCfg.StorageType.GetValue(), "minio")
 		assert.Equal(t, wpCfg.RootPath.GetValue(), "/var/lib/milvus/woodpecker")

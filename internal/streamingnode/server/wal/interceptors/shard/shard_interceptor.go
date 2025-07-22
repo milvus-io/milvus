@@ -100,7 +100,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 func (impl *shardInterceptor) handleCreatePartition(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createPartitionMessage := message.MustAsMutableCreatePartitionMessageV1(msg)
 	h := createPartitionMessage.Header()
-	if err := impl.shardManager.CheckIfPartitionCanBeCreated(h.GetCollectionId(), h.GetPartitionId()); err != nil {
+	if err := impl.shardManager.CheckIfPartitionCanBeCreated(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}); err != nil {
 		impl.shardManager.Logger().Warn("partition already exists when creating partition", zap.Int64("collectionID", h.GetCollectionId()), zap.Int64("partitionID", h.GetPartitionId()))
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
 		// return nil, status.NewUnrecoverableError(err.Error())
@@ -118,7 +118,7 @@ func (impl *shardInterceptor) handleCreatePartition(ctx context.Context, msg mes
 func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	dropPartitionMessage := message.MustAsMutableDropPartitionMessageV1(msg)
 	h := dropPartitionMessage.Header()
-	if err := impl.shardManager.CheckIfPartitionExists(h.GetCollectionId(), h.GetPartitionId()); err != nil {
+	if err := impl.shardManager.CheckIfPartitionExists(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}); err != nil {
 		impl.shardManager.Logger().Warn("partition not found when dropping partition", zap.Int64("collectionID", h.GetCollectionId()), zap.Int64("partitionID", h.GetPartitionId()))
 		// The partition can not be dropped at current shard, ignored
 		// TODO: idompotent for wal is required in future, but current milvus state is not recovered from wal.
@@ -245,7 +245,7 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 func (impl *shardInterceptor) handleCreateSegment(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	createSegmentMsg := message.MustAsMutableCreateSegmentMessageV2(msg)
 	h := createSegmentMsg.Header()
-	if err := impl.shardManager.CheckIfSegmentCanBeCreated(h.GetCollectionId(), h.GetPartitionId(), h.GetSegmentId()); err != nil {
+	if err := impl.shardManager.CheckIfSegmentCanBeCreated(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}, h.GetSegmentId()); err != nil {
 		// The segment can not be created at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
@@ -268,7 +268,7 @@ func (impl *shardInterceptor) handleFlushSegment(ctx context.Context, msg messag
 		return appendOp(ctx, msg)
 	}
 
-	if err := impl.shardManager.CheckIfSegmentCanBeFlushed(h.GetCollectionId(), h.GetPartitionId(), h.GetSegmentId()); err != nil {
+	if err := impl.shardManager.CheckIfSegmentCanBeFlushed(shards.PartitionUniqueKey{CollectionID: h.GetCollectionId(), PartitionID: h.GetPartitionId()}, h.GetSegmentId()); err != nil {
 		// The segment can not be flushed at current shard, ignored
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
