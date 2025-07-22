@@ -299,9 +299,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	rankInputs := []*milvuspb.SearchResults{}
 	rankMetrics := []string{}
 	for idx, ret := range reducedResults {
-		if typeutil.GetSizeOfIDs(ret.Results.Ids) == 0 {
-			continue
-		}
 		rankInputs = append(rankInputs, ret)
 		rankMetrics = append(rankMetrics, metrics[idx])
 	}
