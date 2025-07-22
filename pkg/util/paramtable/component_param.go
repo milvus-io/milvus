@@ -3147,11 +3147,11 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	p.TieredLoadingMemoryFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingMemoryFactor",
 		Version:      "2.6.0",
-		DefaultValue: "2.5",
+		DefaultValue: "3.5",
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor < 1.0 {
-				return "2.5"
+				return "3.5"
 			}
 			return fmt.Sprintf("%.2f", factor)
 		},

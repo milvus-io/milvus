@@ -750,11 +750,8 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
-    auto vec_index = dynamic_cast<index::VectorIndex*>(
-        cache_index->PinCells({0})
-            .via(&folly::InlineExecutor::instance())
-            .get()
-            ->get_cell_of(0));
+    auto ca = SemiInlineGet(cache_index->PinCells({0}));
+    auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
     auto index_type = vec_index->GetIndexType();
