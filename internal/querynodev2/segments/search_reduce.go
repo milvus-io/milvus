@@ -24,7 +24,6 @@ type SearchCommonReduce struct{}
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
-	log := log.Ctx(ctx)
 
 	if len(searchResultData) == 0 {
 		return &schemapb.SearchResultData{
@@ -54,14 +53,12 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
 	}
 
-	var skipDupCnt int64
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for i := int64(0); i < info.GetNq(); i++ {
 		offsets := make([]int64, len(searchResultData))
-		idSet := make(map[interface{}]struct{})
 		var j int64
-		for j = 0; j < info.GetTopK(); {
+		for j = 0; j < info.GetTopK(); j++ {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
 			if sel == -1 {
 				break
@@ -71,17 +68,9 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			score := searchResultData[sel].Scores[idx]
 
-			// remove duplicates
-			if _, ok := idSet[id]; !ok {
-				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
-				typeutil.AppendPKs(ret.Ids, id)
-				ret.Scores = append(ret.Scores, score)
-				idSet[id] = struct{}{}
-				j++
-			} else {
-				// skip entity with same id
-				skipDupCnt++
-			}
+			retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+			typeutil.AppendPKs(ret.Ids, id)
+			ret.Scores = append(ret.Scores, score)
 			offsets[sel]++
 		}
 
@@ -96,7 +85,6 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	return ret, nil
 }
 
@@ -154,11 +142,10 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	for i := int64(0); i < info.GetNq(); i++ {
 		offsets := make([]int64, len(searchResultData))
 
-		idSet := make(map[interface{}]struct{})
 		groupByValueMap := make(map[interface{}]int64)
 
 		var j int64
-		for j = 0; j < groupBound; {
+		for j = 0; j < groupBound; j++ {
 			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
 			if sel == -1 {
 				break
@@ -168,26 +155,20 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			groupByVal := groupByValIterator[sel](int(idx))
 			score := searchResultData[sel].Scores[idx]
-			if _, ok := idSet[id]; !ok {
-				groupCount := groupByValueMap[groupByVal]
-				if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
-					// exceed the limit for group count, filter this entity
-					filteredCount++
-				} else if groupCount >= groupSize {
-					// exceed the limit for each group, filter this entity
-					filteredCount++
-				} else {
-					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
-					typeutil.AppendPKs(ret.Ids, id)
-					ret.Scores = append(ret.Scores, score)
-					gpFieldBuilder.Add(groupByVal)
-					groupByValueMap[groupByVal] += 1
-					idSet[id] = struct{}{}
-					j++
-				}
-			} else {
-				// skip entity with same pk
+
+			groupCount := groupByValueMap[groupByVal]
+			if groupCount == 0 && int64(len(groupByValueMap)) >= info.GetTopK() {
+				// exceed the limit for group count, filter this entity
 				filteredCount++
+			} else if groupCount >= groupSize {
+				// exceed the limit for each group, filter this entity
+				filteredCount++
+			} else {
+				retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
+				typeutil.AppendPKs(ret.Ids, id)
+				ret.Scores = append(ret.Scores, score)
+				gpFieldBuilder.Add(groupByVal)
+				groupByValueMap[groupByVal] += 1
 			}
 			offsets[sel]++
 		}
@@ -205,7 +186,6 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			zap.Int64("filteredCount", filteredCount),
 			zap.Int64("groupBound", groupBound))
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", filteredCount))
 	return ret, nil
 }
 

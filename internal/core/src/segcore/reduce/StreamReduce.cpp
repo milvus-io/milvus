@@ -328,7 +328,7 @@ StreamReducerHelper::StreamReduceSearchResultForOneNQ(int64_t qi,
     while (!heap_.empty()) {
         heap_.pop();
     }
-    pk_set_.clear();
+    // Remove pk_set_.clear() since we're not doing deduplication anymore
     group_by_val_set_.clear();
 
     //2. push new search results into sort-heap
@@ -411,27 +411,25 @@ StreamReducerHelper::StreamReduceSearchResultForOneNQ(int64_t qi,
         if (pk == INVALID_PK) {
             break;  // valid search result for this nq has been run out, break to next
         }
-        if (pk_set_.count(pk) == 0) {
-            bool skip_for_group_by = false;
+        // Remove primary key deduplication - accept all results including duplicates
+        bool skip_for_group_by = false;
+        if (pilot->group_by_value_.has_value()) {
+            if (group_by_val_set_.count(pilot->group_by_value_.value()) > 0) {
+                skip_for_group_by = true;
+            }
+        }
+        if (!skip_for_group_by) {
+            final_search_records_[seg_index][qi].push_back(pilot->offset_);
+            if (pilot->search_result_ != nullptr) {
+                pilot->search_result_->result_offsets_.push_back(offset++);
+            } else {
+                merged_search_result->reduced_offsets_.push_back(offset++);
+            }
+            // Remove pk_set_.insert(pk) since we're not tracking duplicates anymore
             if (pilot->group_by_value_.has_value()) {
-                if (group_by_val_set_.count(pilot->group_by_value_.value()) >
-                    0) {
-                    skip_for_group_by = true;
-                }
+                group_by_val_set_.insert(pilot->group_by_value_.value());
             }
-            if (!skip_for_group_by) {
-                final_search_records_[seg_index][qi].push_back(pilot->offset_);
-                if (pilot->search_result_ != nullptr) {
-                    pilot->search_result_->result_offsets_.push_back(offset++);
-                } else {
-                    merged_search_result->reduced_offsets_.push_back(offset++);
-                }
-                pk_set_.insert(pk);
-                if (pilot->group_by_value_.has_value()) {
-                    group_by_val_set_.insert(pilot->group_by_value_.value());
-                }
-                count++;
-            }
+            count++;
         }
         pilot->advance();
         if (pilot->primary_key_ != INVALID_PK) {

@@ -212,7 +212,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                         std::vector<SearchResultPair*>,
                         SearchResultPairComparator>
         heap;
-    pk_set_.clear();
+    // Remove pk_set_.clear() since we're not doing deduplication anymore
     pairs_.clear();
 
     pairs_.reserve(num_segments_);
@@ -235,7 +235,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         return 0;
     }
 
-    int64_t dup_cnt = 0;
+    // Remove duplicate counting since we're not filtering duplicates
     auto start = offset;
     while (offset - start < topk && !heap.empty()) {
         auto pilot = heap.top();
@@ -247,21 +247,16 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         if (pk == INVALID_PK) {
             break;
         }
-        // remove duplicates
-        if (pk_set_.count(pk) == 0) {
-            pilot->search_result_->result_offsets_.push_back(offset++);
-            final_search_records_[index][qi].push_back(pilot->offset_);
-            pk_set_.insert(pk);
-        } else {
-            // skip entity with same primary key
-            dup_cnt++;
-        }
+        // Remove primary key deduplication - accept all results including duplicates
+        pilot->search_result_->result_offsets_.push_back(offset++);
+        final_search_records_[index][qi].push_back(pilot->offset_);
+        // Remove pk_set_.insert(pk) since we're not tracking duplicates anymore
         pilot->advance();
         if (pilot->primary_key_ != INVALID_PK) {
             heap.push(pilot);
         }
     }
-    return dup_cnt;
+    return 0;  // No duplicates filtered since we accept all results
 }
 
 void

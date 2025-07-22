@@ -107,7 +107,7 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
                         std::vector<SearchResultPair*>,
                         SearchResultPairComparator>
         heap;
-    pk_set_.clear();
+    // Remove pk_set_.clear() since we're not doing primary key deduplication anymore
     pairs_.clear();
     pairs_.reserve(num_segments_);
     for (int i = 0; i < num_segments_; i++) {
@@ -148,10 +148,10 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
     auto start = offset;
     std::unordered_map<GroupByValueType, int64_t> group_by_map;
 
+    // Remove primary key deduplication, only filter based on group by constraints
     auto should_filtered = [&](const PkType& pk,
                                const GroupByValueType& group_by_val) {
-        if (pk_set_.count(pk) != 0)
-            return true;
+        // Remove primary key deduplication check: if (pk_set_.count(pk) != 0) return true;
         if (group_by_map.size() >= topk &&
             group_by_map.count(group_by_val) == 0)
             return true;
@@ -175,7 +175,7 @@ GroupReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
         if (!should_filtered(pk, group_by_val)) {
             pilot->search_result_->result_offsets_.push_back(offset++);
             final_search_records_[index][qi].push_back(pilot->offset_);
-            pk_set_.insert(pk);
+            // Remove pk_set_.insert(pk) since we're not tracking primary key duplicates anymore
             group_by_map[group_by_val] += 1;
         } else {
             filtered_count++;
