@@ -71,6 +71,7 @@ enum ErrorCode {
     GcpNativeError = 2040,
     TextIndexNotFound = 2041,
     InvalidParameter = 2042,
+    PluginLoadFailed = 2043,
 
     KnowhereError = 2099
 };
