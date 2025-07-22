@@ -6,6 +6,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
 import "messages.proto";
 import "milvus.proto";
+import "schema.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
 
@@ -528,6 +529,14 @@ message VChannelMeta {
 message CollectionInfoOfVChannel {
     int64 collection_id = 1; // collection id.
     repeated PartitionInfoOfVChannel partitions  = 2; // partitions.
+    repeated CollectionSchemaOfVChannel schemas = 3; // The schemas of the vchannel.
+}
+
+// CollectionSchemaOfVChannel is the collection schema in vchannel.
+message CollectionSchemaOfVChannel {
+    schema.CollectionSchema schema = 1; // The schemas of the vchannel.
+    uint64 checkpoint_time_tick = 2; // The timetick of the schema changed, also the version of the schema.
+    VChannelSchemaState state = 3; // The state of the schema.
 }
 
 // PartitionInfoOfVChannel is the partition info in vchannel.
@@ -541,6 +550,13 @@ enum VChannelState {
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
     // VCHANNEL_STATE_SPLITTED = 3; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+}
+
+// VChannelSchemaState is the state of vchannel schema.
+enum VChannelSchemaState {
+    VCHANNEL_SCHEMA_STATE_UNKNOWN = 0; // should never used.
+    VCHANNEL_SCHEMA_STATE_NORMAL = 1; // vchannel schema is normal.
+    VCHANNEL_SCHEMA_STATE_DROPPED = 2; // vchannel schema is dropped.
 }
 
 ///

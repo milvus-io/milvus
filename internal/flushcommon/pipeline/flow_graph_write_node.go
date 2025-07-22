@@ -82,7 +82,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	start, end := fgMsg.StartPositions[0], fgMsg.EndPositions[0]
 
 	if fgMsg.InsertData == nil {
-		insertData, err := writebuffer.PrepareInsert(wNode.metacache.Schema(), wNode.pkField, fgMsg.InsertMessages)
+		insertData, err := writebuffer.PrepareInsert(wNode.metacache.GetSchema(fgMsg.TimeTick()), wNode.pkField, fgMsg.InsertMessages)
 		if err != nil {
 			log.Error("failed to prepare data", zap.Error(err))
 			panic(err)
@@ -114,11 +114,6 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		wNode.updater.Update(wNode.channelName, end.GetTimestamp(), stats)
 	}
 
-	// update schema after all data processed
-	if fgMsg.updatedSchema != nil {
-		wNode.metacache.UpdateSchema(fgMsg.updatedSchema, fgMsg.schemaVersion)
-	}
-
 	res := FlowGraphMsg{
 		TimeRange:      fgMsg.TimeRange,
 		StartPositions: fgMsg.StartPositions,
@@ -148,7 +143,8 @@ func newWriteNode(
 	baseNode.SetMaxQueueLength(paramtable.Get().DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(paramtable.Get().DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
-	collSchema := config.metacache.Schema()
+	// pkfield is a immutable property of the collection, so we can get it from any schema
+	collSchema := config.metacache.GetSchema(0)
 	pkField, err := typeutil.GetPrimaryFieldSchema(collSchema)
 	if err != nil {
 		return nil, err

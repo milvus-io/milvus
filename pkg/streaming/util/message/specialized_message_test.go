@@ -36,6 +36,9 @@ func TestAsSpecializedMessage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), body.CollectionID)
 
+	_, err = message.AsMutableInsertMessageV1(insertMsg)
+	assert.NoError(t, err)
+
 	h := insertMsg.Header()
 	h.Partitions[0].SegmentAssignment = &message.SegmentAssignment{
 		SegmentId: 1,
@@ -63,6 +66,10 @@ func TestAsSpecializedMessage(t *testing.T) {
 	body, err = insertMsg2.Body()
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), body.CollectionID)
+
+	// double as is ok.
+	_, err = message.AsImmutableInsertMessageV1(insertMsg2)
+	assert.NoError(t, err)
 
 	insertMsg2 = message.MustAsImmutableInsertMessageV1(m2)
 	assert.NotNil(t, insertMsg2)

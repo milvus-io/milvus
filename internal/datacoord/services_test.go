@@ -1522,13 +1522,7 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 
 	// get collection failed
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
 	s.broker = broker
-	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
-		Vchannel: "ch-1",
-	})
-	assert.NoError(t, err)
-	assert.Error(t, merr.Error(resp.GetStatus()))
 
 	// normal case
 	channelInfo := &datapb.VchannelInfo{
@@ -1541,12 +1535,6 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 		IndexedSegmentIds:   []int64{4},
 	}
 
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Unset()
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Schema: &schemapb.CollectionSchema{},
-		}, nil)
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
@@ -1567,7 +1555,7 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-	assert.NotNil(t, resp.GetSchema())
+	assert.Nil(t, resp.GetSchema())
 	assert.Equal(t, channelInfo, resp.GetInfo())
 }
 

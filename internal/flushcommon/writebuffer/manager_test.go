@@ -61,7 +61,7 @@ func (s *ManagerSuite) SetupTest() {
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
-	s.metacache.EXPECT().Schema().Return(s.collSchema).Maybe()
+	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.collSchema).Maybe()
 	s.allocator = allocator.NewMockAllocator(s.T())
 
 	mgr := NewManager(s.syncMgr)
