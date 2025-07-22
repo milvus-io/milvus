@@ -1270,13 +1270,16 @@ void
 SegmentGrowingImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(sch_mutex_);
 
-    auto absent_fields = sch->AbsentFields(*schema_);
+    // double check condition, avoid multiple assignment
+    if (sch->get_schema_version() > schema_->get_schema_version()) {
+        auto absent_fields = sch->AbsentFields(*schema_);
 
-    for (const auto& field_meta : *absent_fields) {
-        fill_empty_field(field_meta);
+        for (const auto& field_meta : *absent_fields) {
+            fill_empty_field(field_meta);
+        }
+
+        schema_ = sch;
     }
-
-    schema_ = sch;
 }
 
 void
