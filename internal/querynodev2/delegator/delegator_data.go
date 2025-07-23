@@ -100,6 +100,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			growing, err = segments.NewSegment(
 				context.Background(),
 				sd.collection,
+				sd.segmentManager,
 				segments.SegmentTypeGrowing,
 				0,
 				&querypb.SegmentLoadInfo{

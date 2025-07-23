@@ -229,6 +229,7 @@ func (suite *QueryNodeSuite) TestStop() {
 	segment, err := segments.NewSegment(
 		context.Background(),
 		collection,
+		suite.node.manager.Segment,
 		segments.SegmentTypeSealed,
 		1,
 		&querypb.SegmentLoadInfo{
