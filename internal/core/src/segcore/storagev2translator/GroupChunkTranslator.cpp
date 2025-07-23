@@ -26,8 +26,11 @@
 #include "segcore/memory_planner.h"
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include <unordered_map>
+#include <set>
+#include <algorithm>
 
 #include "arrow/type.h"
 #include "arrow/type_fwd.h"
@@ -187,22 +190,22 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
              column_group_info_.field_id);
 
     std::shared_ptr<milvus::ArrowDataWrapper> r;
-    int64_t cid_idx = 0;
-    int64_t total_tables = 0;
+    std::unordered_set<cachinglayer::cid_t> filled_cids;
+    filled_cids.reserve(cids.size());
     while (column_group_info_.arrow_reader_channel->pop(r)) {
-        for (const auto& table : r->arrow_tables) {
-            AssertInfo(cid_idx < cids.size(),
-                       "Number of tables exceed number of cids ({})",
-                       cids.size());
-            auto cid = cids[cid_idx++];
+        for (const auto& [row_group_id, table] : r->arrow_tables) {
+            auto cid = static_cast<cachinglayer::cid_t>(row_group_id);
             cells.emplace_back(cid, load_group_chunk(table, cid));
-            total_tables++;
+            filled_cids.insert(cid);
         }
     }
-    AssertInfo(total_tables == cids.size(),
-               "Number of tables ({}) does not match number of cids ({})",
-               total_tables,
-               cids.size());
+    
+    // Verify all requested cids have been filled
+    for (auto cid : cids) {
+        AssertInfo(filled_cids.find(cid) != filled_cids.end(),
+                   "Cid {} was not filled, missing row group id {}",
+                   cid, cid);
+    }
     return cells;
 }
 
@@ -270,3 +273,4 @@ GroupChunkTranslator::load_group_chunk(
 }
 
 }  // namespace milvus::segcore::storagev2translator
+

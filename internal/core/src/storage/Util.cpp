@@ -1159,7 +1159,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         while (field_data_info.arrow_reader_channel->pop(r)) {
             size_t num_rows = 0;
             std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
-            for (const auto& table : r->arrow_tables) {
+            for (const auto& [row_group_id, table] : r->arrow_tables) {
                 num_rows += table->num_rows();
                 chunked_arrays.push_back(table->column(col_offset));
             }

@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <flat_hash_map/flat_hash_map.hpp>
 #include <folly/futures/Future.h>
 #include <folly/futures/SharedPromise.h>
 #include <folly/Synchronized.h>
@@ -110,7 +111,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             [this, uids = std::vector<uid_t>(uids), timeout](
                 auto&&) -> std::shared_ptr<CellAccessor<CellT>> {
                 auto count = std::min(uids.size(), cells_.size());
-                std::unordered_set<cid_t> involved_cids;
+                ska::flat_hash_set<cid_t> involved_cids;
                 involved_cids.reserve(count);
                 switch (cell_id_mapping_mode_) {
                     case CellIdMappingMode::IDENTICAL: {
