@@ -140,4 +140,23 @@ class File {
     FILE* fs_;
     std::string filepath_;
 };
+
+class MmapFileRAII {
+ public:
+    MmapFileRAII(const std::string& filepath) : file_path_(filepath) {
+    }
+    ~MmapFileRAII() {
+        if (!file_path_.empty()) {
+            auto ok = unlink(file_path_.c_str());
+            AssertInfo(
+                ok == 0,
+                fmt::format("failed to unlink mmap data file {}, err: {}",
+                            file_path_.c_str(),
+                            strerror(errno)));
+        }
+    }
+
+ private:
+    const std::string file_path_;
+};
 }  // namespace milvus

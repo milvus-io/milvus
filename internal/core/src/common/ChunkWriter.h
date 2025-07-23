@@ -98,7 +98,7 @@ class ChunkWriter final : public ChunkWriterBase {
     }
 
     ChunkWriter(int dim, std::string file_path, bool nullable)
-        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim){};
+        : ChunkWriterBase(std::move(file_path), nullable), dim_(dim) {};
 
     void
     write(const arrow::ArrayVector& array_vec) override {
@@ -148,8 +148,14 @@ class ChunkWriter final : public ChunkWriterBase {
     std::unique_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        return std::make_unique<FixedWidthChunk>(
-            row_nums_, dim_, data, size, sizeof(T), nullable_);
+        auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
+        return std::make_unique<FixedWidthChunk>(row_nums_,
+                                                 dim_,
+                                                 data,
+                                                 size,
+                                                 sizeof(T),
+                                                 nullable_,
+                                                 std::move(mmap_file_raii));
     }
 
  private:
