@@ -237,6 +237,7 @@ class SingleChunkColumnBase : public ColumnBase {
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
         madvise(data_, size, MADV_WILLNEED);
+        mmap_file_raii_ = std::make_unique<MmapFileRAII>(file.Path());
 
         // valid_data store in memory
         if (nullable_) {
@@ -518,6 +519,7 @@ class SingleChunkColumnBase : public ColumnBase {
     }
 
     storage::MmapChunkManagerPtr mcm_ = nullptr;
+    std::unique_ptr<MmapFileRAII> mmap_file_raii_ = nullptr;
 };
 
 class SingleChunkColumn : public SingleChunkColumnBase {

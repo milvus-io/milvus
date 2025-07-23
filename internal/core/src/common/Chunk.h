@@ -20,6 +20,7 @@
 #include "arrow/array/array_base.h"
 #include "arrow/record_batch.h"
 #include "common/Array.h"
+#include "common/File.h"
 #include "common/ChunkTarget.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
@@ -36,8 +37,16 @@ constexpr uint64_t MMAP_ARRAY_PADDING = 1;
 class Chunk {
  public:
     Chunk() = default;
-    Chunk(int64_t row_nums, char* data, uint64_t size, bool nullable)
-        : row_nums_(row_nums), data_(data), size_(size), nullable_(nullable) {
+    Chunk(int64_t row_nums,
+          char* data,
+          uint64_t size,
+          bool nullable,
+          std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
+        : data_(data),
+          row_nums_(row_nums),
+          size_(size),
+          nullable_(nullable),
+          mmap_file_raii_(std::move(mmap_file_raii)) {
         if (nullable) {
             valid_.reserve(row_nums);
             for (int i = 0; i < row_nums; i++) {
@@ -87,6 +96,8 @@ class Chunk {
     bool nullable_;
     FixedVector<bool>
         valid_;  // parse null bitmap to valid_ to be compatible with SpanBase
+
+    std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 };
 
 // for fixed size data, includes fixed size array
@@ -97,8 +108,9 @@ class FixedWidthChunk : public Chunk {
                     char* data,
                     uint64_t size,
                     uint64_t element_size,
-                    bool nullable)
-        : Chunk(row_nums, data, size, nullable),
+                    bool nullable,
+                    std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
+        : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)),
           dim_(dim),
           element_size_(element_size){};
 
@@ -131,8 +143,9 @@ class FixedWidthChunk : public Chunk {
 class StringChunk : public Chunk {
  public:
     StringChunk() = default;
-    StringChunk(int32_t row_nums, char* data, uint64_t size, bool nullable)
-        : Chunk(row_nums, data, size, nullable) {
+    StringChunk(int32_t row_nums, char* data, uint64_t size, bool nullable,
+                std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
+        : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)) {
         auto null_bitmap_bytes_num = 0;
         if (nullable) {
             null_bitmap_bytes_num = (row_nums + 7) / 8;
@@ -202,8 +215,10 @@ class ArrayChunk : public Chunk {
                char* data,
                uint64_t size,
                milvus::DataType element_type,
-               bool nullable)
-        : Chunk(row_nums, data, size, nullable), element_type_(element_type) {
+               bool nullable,
+               std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
+        : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)),
+          element_type_(element_type) {
         auto null_bitmap_bytes_num = 0;
         if (nullable) {
             null_bitmap_bytes_num = (row_nums + 7) / 8;
@@ -284,11 +299,13 @@ class ArrayChunk : public Chunk {
 
 class SparseFloatVectorChunk : public Chunk {
  public:
-    SparseFloatVectorChunk(int32_t row_nums,
-                           char* data,
-                           uint64_t size,
-                           bool nullable)
-        : Chunk(row_nums, data, size, nullable) {
+    SparseFloatVectorChunk(
+        int32_t row_nums,
+        char* data,
+        uint64_t size,
+        bool nullable,
+        std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
+        : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)) {
         vec_.resize(row_nums);
         auto null_bitmap_bytes_num = (row_nums + 7) / 8;
         auto offsets_ptr =
