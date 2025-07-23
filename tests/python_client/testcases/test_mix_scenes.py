@@ -1381,6 +1381,8 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         # prepare data (> 1024 triggering index building)
         self.insert_data = cf.gen_field_values(self.collection_wrap.schema, nb=self.nb, default_values={
             'VARCHAR': cf.gen_varchar_data(3, self.nb),
+            # narrow the value of int64 to workaround #36054
+            'INT64': [random.randint(-2147483648, 2147483647) for _ in range(self.nb)],
             'VARCHAR_1': cf.gen_varchar_data(1, self.nb),
             'ARRAY_VARCHAR': [cf.gen_varchar_data(length=2, nb=random.randint(0, 10)) for _ in range(self.nb)]
         })
