@@ -368,7 +368,10 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	})
 	defer snmanager.ResetStreamingNodeManager()
 	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
-	time.Sleep(50 * time.Millisecond)
+	suite.Eventually(func() bool {
+		nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+		return nodeIDs.Contain(4)
+	}, 10*time.Second, 100*time.Millisecond)
 
 	channel1Node4 := suite.channels["dmc0"].Clone()
 	channel1Node4.Node = 4

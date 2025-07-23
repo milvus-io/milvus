@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -126,6 +127,9 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		for _, partition := range collection.Partitions {
 			partitions = append(partitions, &streamingpb.PartitionInfoOfVChannel{PartitionId: partition.PartitionId})
 		}
+		if schemas[collection.CollectionId] == nil {
+			panic(fmt.Sprintf("schema not found for collection, %d", collection.CollectionId))
+		}
 		vchannels[collection.Vchannel] = &streamingpb.VChannelMeta{
 			Vchannel: collection.Vchannel,
 			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
@@ -136,11 +140,13 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 					{
 						Schema:             schemas[collection.CollectionId].Schema,
 						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
-						CheckpointTimeTick: untilMessage.TimeTick(),
+						CheckpointTimeTick: 0, // The recovery info from old arch should be set as zero.
+						// because we don't have the version before streaming service is enabled.
+						// all message will happen after the recovery info is initialized.
 					},
 				},
 			},
-			CheckpointTimeTick: untilMessage.TimeTick(),
+			CheckpointTimeTick: 0, // same as schema above.
 		}
 	}
 
@@ -175,9 +181,12 @@ func (r *recoveryStorageImpl) fetchLatestSchemaFromCoord(ctx context.Context, re
 		return nil, errors.Wrap(err, "failed to get coord client")
 	}
 
-	futures := make([]*conc.Future[*milvuspb.DescribeCollectionResponse], len(resp.GetCollections()))
-	for idx, collection := range resp.GetCollections() {
-		futures[idx] = conc.Go(func() (*milvuspb.DescribeCollectionResponse, error) {
+	futures := make([]*conc.Future[*milvuspb.DescribeCollectionResponse], 0, len(resp.GetCollections()))
+	for _, collection := range resp.GetCollections() {
+		if collection.State == etcdpb.CollectionState_CollectionDropping {
+			continue
+		}
+		future := conc.Go(func() (*milvuspb.DescribeCollectionResponse, error) {
 			resp, err := rc.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
@@ -190,6 +199,7 @@ func (r *recoveryStorageImpl) fetchLatestSchemaFromCoord(ctx context.Context, re
 			}
 			return resp, nil
 		})
+		futures = append(futures, future)
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
 		return nil, errors.Wrap(err, "failed to describe collection")

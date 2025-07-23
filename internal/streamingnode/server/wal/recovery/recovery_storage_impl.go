@@ -129,9 +129,12 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 
 	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
 		_, schema := vchannelInfo.GetSchema(timetick)
+		if schema == nil {
+			return nil, errors.Errorf("critical error: schema not found, vchannel: %s, timetick: %d", vchannel, timetick)
+		}
 		return schema, nil
 	}
-	return nil, errors.Errorf("critical error: schema not found, vchannel: %s, timetick: %d", vchannel, timetick)
+	return nil, errors.Errorf("critical error: vchannel not found, vchannel: %s, timetick: %d", vchannel, timetick)
 }
 
 // ObserveMessage is called when a new message is observed.

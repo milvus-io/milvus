@@ -149,7 +149,7 @@ func (impl *flusherComponents) addNewDataSyncService(
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
 ) {
-	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds)
+	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds, createCollectionMsg.TimeTick())
 	newDS.Start()
 	impl.dataServices[createCollectionMsg.VChannel()] = newDS
 	impl.logger.Info("create data sync service done", zap.String("vchannel", createCollectionMsg.VChannel()))
@@ -281,5 +281,5 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 	if err != nil {
 		return nil, err
 	}
-	return newDataSyncServiceWrapper(recoverInfo.Info.ChannelName, input, ds), nil
+	return newDataSyncServiceWrapper(recoverInfo.Info.ChannelName, input, ds, recoverInfo.Info.GetSeekPosition().GetTimestamp()), nil
 }
