@@ -230,7 +230,8 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 	switch rwOptions.version {
 	case StorageV1:
-		blobsReader, err := makeBlobsReader(ctx, binlogs, rwOptions.downloader)
+		var blobsReader ChunkedBlobsReader
+		blobsReader, err = makeBlobsReader(ctx, binlogs, rwOptions.downloader)
 		if err != nil {
 			return nil, err
 		}
