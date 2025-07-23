@@ -106,6 +106,7 @@ func mergeSortMultipleSegments(ctx context.Context,
 	}
 
 	if _, err = storage.MergeSort(compactionParams.BinLogMaxSize, plan.GetSchema(), segmentReaders, writer, predicate); err != nil {
+		writer.Close()
 		return nil, err
 	}
 

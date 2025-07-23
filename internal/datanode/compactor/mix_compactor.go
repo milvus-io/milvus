@@ -164,6 +164,7 @@ func (t *mixCompactionTask) mergeSplit(
 	for _, seg := range t.plan.GetSegmentBinlogs() {
 		del, exp, err := t.writeSegment(ctx, seg, mWriter, pkField)
 		if err != nil {
+			mWriter.Close()
 			return nil, err
 		}
 		deletedRowCount += del
