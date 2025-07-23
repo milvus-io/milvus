@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+const fileReaderBufferSize = int64(32 * 1024 * 1024)
+
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
@@ -56,7 +58,6 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
-	fileReaderBufferSize := int64(32 * 1024 * 1024)
 	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
 		BufferSize:            fileReaderBufferSize,
 		BufferedStreamEnabled: true,
