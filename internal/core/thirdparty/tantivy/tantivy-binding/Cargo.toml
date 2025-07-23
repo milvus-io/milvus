@@ -23,8 +23,8 @@ panic = "unwind"
 overflow-checks = false
 
 [dependencies]
-tantivy = { git = "https://github.com/zilliztech/tantivy", tag = "0.21.2-fix3" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
-lindera = "0.40.1"
+tantivy = { git = "https://github.com/zilliztech/tantivy", tag = "0.21.2-fix4" } # we have make a private fix for milvus, should be removed in future after milvus fixing the bug.
+lindera = "0.42.2"
 futures = "0.3.21"
 libc = "0.2"
 scopeguard = "1.2"

@@ -45,38 +45,17 @@ class ChunkWriterBase {
 
     void
     write_null_bit_maps(
-        const std::vector<std::tuple<const uint8_t*, int64_t, int64_t>>&
-            null_bitmaps) {
+        const std::vector<std::pair<const uint8_t*, int64_t>>& null_bitmaps) {
         if (nullable_) {
-            // merge all null bitmaps in case of multiple chunk null bitmap dislocation
-            // say [0xFF, 0x00] with size [7, 8] cannot be treated as [0xFF, 0x00] after merged but
-            // [0x7F, 0x00], othersize the null index will be dislocated
-            std::vector<uint8_t> merged_null_bitmap;
-            int64_t size_total_bit = 0;
-            for (auto [data, size_bits, offset_bits] : null_bitmaps) {
-                // resize in byte
-                merged_null_bitmap.resize((size_total_bit + size_bits + 7) / 8,
-                                          0xFF);
+            for (auto [data, size] : null_bitmaps) {
                 if (data != nullptr) {
-                    bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
-                        data,
-                        offset_bits,
-                        merged_null_bitmap.data(),
-                        size_total_bit,
-                        size_bits);
+                    target_->write(data, size);
                 } else {
                     // have to append always-true bitmap due to arrow optimize this
-                    std::vector<uint8_t> null_bitmap(size_bits, 0xff);
-                    bitset::detail::ElementWiseBitsetPolicy<uint8_t>::op_copy(
-                        null_bitmap.data(),
-                        0,
-                        merged_null_bitmap.data(),
-                        size_total_bit,
-                        size_bits);
+                    std::vector<uint8_t> null_bitmap(size, 0xff);
+                    target_->write(null_bitmap.data(), size);
                 }
-                size_total_bit += size_bits;
             }
-            target_->write(merged_null_bitmap.data(), (size_total_bit + 7) / 8);
         }
     }
 

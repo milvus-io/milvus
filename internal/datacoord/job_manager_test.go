@@ -112,7 +112,7 @@ func (s *jobManagerSuite) TestJobManager_triggerStatsTaskLoop() {
 		mt:     mt,
 		scheduler: &taskScheduler{
 			allocator:    alloc,
-			pendingTasks: newFairQueuePolicy(),
+			pendingTasks: newPriorityQueuePolicy(),
 			runningTasks: typeutil.NewConcurrentMap[UniqueID, Task](),
 			meta:         mt,
 			taskStats:    expirable.NewLRU[UniqueID, Task](512, nil, time.Minute*5),

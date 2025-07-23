@@ -374,7 +374,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		expectedSize := getExpectedSegmentSize(t.meta, coll)
+		expectedSize := getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, plan := range plans {
 			if !signal.isForce && t.compactionHandler.isFull() {
