@@ -393,6 +393,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 1, Params.QueryNodeTaskParallelismFactor.GetAsInt())
 		params.Save("queryCoord.queryNodeTaskParallelismFactor", "2")
 		assert.Equal(t, 2, Params.QueryNodeTaskParallelismFactor.GetAsInt())
+		assert.Equal(t, 60000, Params.CheckLoadConfigInterval.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

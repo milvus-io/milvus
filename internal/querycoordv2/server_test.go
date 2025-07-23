@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/client-go/v2/txnkv"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -437,72 +438,6 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 	})
 }
 
-func TestCheckLoadConfigChanges(t *testing.T) {
-	mockey.PatchConvey("TestCheckLoadConfigChanges", t, func() {
-		ctx := context.Background()
-
-		// Create mock server
-		testServer := &Server{}
-		testServer.meta = &meta.Meta{}
-		testServer.ctx = ctx
-
-		// Create mock collection with IsUserSpecifiedReplicaMode = false
-		mockCollection1 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1001,
-				UserSpecifiedReplicaMode: false,
-			},
-		}
-
-		// Create mock collection with IsUserSpecifiedReplicaMode = true
-		mockCollection2 := &meta.Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:             1002,
-				UserSpecifiedReplicaMode: true,
-			},
-		}
-
-		// Mock meta.CollectionManager.GetAll to return collection IDs
-		mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1001, 1002}).Build()
-
-		// Mock meta.CollectionManager.GetCollection to return different collections
-		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(m *meta.CollectionManager, ctx context.Context, collectionID int64) *meta.Collection {
-			if collectionID == 1001 {
-				return mockCollection1
-			} else if collectionID == 1002 {
-				return mockCollection2
-			}
-			return nil
-		}).Build()
-
-		// Mock paramtable.ParamItem.GetAsUint32() for ClusterLevelLoadReplicaNumber
-		mockey.Mock((*paramtable.ParamItem).GetAsUint32).Return(uint32(2)).Build()
-
-		// Mock paramtable.ParamItem.GetAsStrings() for ClusterLevelLoadResourceGroups
-		mockey.Mock((*paramtable.ParamItem).GetAsStrings).Return([]string{"default"}).Build()
-
-		// Mock UpdateLoadConfig to capture the call
-		var updateLoadConfigCalled bool
-		var capturedRequest *querypb.UpdateLoadConfigRequest
-		mockey.Mock((*Server).UpdateLoadConfig).To(func(s *Server, ctx context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
-			updateLoadConfigCalled = true
-			capturedRequest = req
-			return merr.Success(), nil
-		}).Build()
-
-		// Call checkLoadConfigChanges
-		testServer.checkLoadConfigChanges(ctx)
-
-		// Verify UpdateLoadConfig was called
-		assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
-
-		// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
-		assert.Equal(t, []int64{1001}, capturedRequest.CollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
-		assert.Equal(t, int32(2), capturedRequest.ReplicaNumber, "ReplicaNumber should match cluster level config")
-		assert.Equal(t, []string{"default"}, capturedRequest.ResourceGroups, "ResourceGroups should match cluster level config")
-	})
-}
-
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {
 	start := time.Now()
 	for time.Since(start) < timeout {
@@ -748,4 +683,95 @@ func TestServer(t *testing.T) {
 		testMeta = v
 		suite.Run(t, new(ServerSuite))
 	}
+}
+
+func TestCheckLoadConfig(t *testing.T) {
+	mockey.PatchConvey("checkLoadConfigChanges", t, func() {
+		paramtable.Init()
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "2")
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg1,rg2")
+
+		s := &Server{
+			meta: &meta.Meta{},
+		}
+		var replicaNumberInRequest int32
+		var resourceGroupsInRequest []string
+		var collectionIDsInRequest []int64
+		mockey.Mock((*Server).updateLoadConfig).To(func(ctx context.Context, req *querypb.UpdateLoadConfigRequest) error {
+			replicaNumberInRequest = req.ReplicaNumber
+			resourceGroupsInRequest = req.ResourceGroups
+			collectionIDsInRequest = req.CollectionIDs
+			return nil
+		}).Build()
+		mockey.Mock((*meta.CollectionManager).GetAll).To(func(ctx context.Context) []int64 {
+			return []int64{1, 2, 3}
+		}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(ctx context.Context, collectionID int64) *meta.Collection {
+			if collectionID == 1 {
+				return &meta.Collection{
+					CollectionLoadInfo: &querypb.CollectionLoadInfo{
+						CollectionID: 1,
+					},
+				}
+			} else {
+				return &meta.Collection{
+					CollectionLoadInfo: &querypb.CollectionLoadInfo{
+						CollectionID:             2,
+						UserSpecifiedReplicaMode: true,
+					},
+				}
+			}
+		}).Build()
+		s.checkLoadConfigChanges()
+
+		assert.Equal(t, replicaNumberInRequest, int32(2))
+		assert.Equal(t, resourceGroupsInRequest, []string{"rg1", "rg2"})
+		assert.Equal(t, collectionIDsInRequest, []int64{1})
+	})
+}
+
+func TestWatchLoadConfigChanges(t *testing.T) {
+	mockey.PatchConvey("watchLoadConfigChanges", t, func() {
+		paramtable.Init()
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.CheckLoadConfigInterval.Key, "100")
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "1")
+		paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "default")
+
+		triggerCounter := atomic.NewInt32(0)
+		mockey.Mock((*Server).checkLoadConfigChanges).To(func() {
+			triggerCounter.Add(1)
+		}).Build()
+
+		mockey.Mock((*meta.CollectionManager).GetAll).To(func(ctx context.Context) []int64 {
+			return []int64{1, 2, 3}
+		}).Build()
+		mockey.Mock((*meta.CollectionManager).GetCollection).To(func(ctx context.Context, collectionID int64) *meta.Collection {
+			if collectionID == 1 {
+				return &meta.Collection{
+					CollectionLoadInfo: &querypb.CollectionLoadInfo{
+						CollectionID: 1,
+					},
+				}
+			} else {
+				return &meta.Collection{
+					CollectionLoadInfo: &querypb.CollectionLoadInfo{
+						CollectionID:             2,
+						UserSpecifiedReplicaMode: true,
+					},
+				}
+			}
+		}).Build()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s := &Server{
+			meta: &meta.Meta{},
+			ctx:  ctx,
+		}
+
+		s.watchLoadConfigChanges()
+
+		time.Sleep(500 * time.Millisecond)
+		assert.True(t, triggerCounter.Load() > 0)
+	})
 }
