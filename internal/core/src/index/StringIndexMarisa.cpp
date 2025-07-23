@@ -230,6 +230,8 @@ StringIndexMarisa::Load(milvus::tracer::TraceContext ctx,
         index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
+    // clear index_datas to free memory early
+    index_datas.clear();
     LoadWithoutAssemble(binary_set, config);
 }
 

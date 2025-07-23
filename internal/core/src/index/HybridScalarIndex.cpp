@@ -369,6 +369,8 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
         config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
+    // clear index_datas to free memory early
+    index_datas.clear();
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();
