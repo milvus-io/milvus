@@ -94,7 +94,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-
+		suite.catalog.EXPECT().ListGlobalStatsTask(mock.Anything).Return([]*datapb.GlobalStatsTask{}, nil)
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
 	})
@@ -111,6 +111,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListGlobalStatsTask(mock.Anything).Return([]*datapb.GlobalStatsTask{}, nil)
 
 		_, err := newMeta(ctx, suite.catalog, nil, brk)
 		suite.Error(err)
@@ -136,6 +137,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListGlobalStatsTask(mock.Anything).Return([]*datapb.GlobalStatsTask{}, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{
 			{
 				ID:           1,
@@ -182,6 +184,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+		suite.catalog.EXPECT().ListGlobalStatsTask(mock.Anything).Return([]*datapb.GlobalStatsTask{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).RunAndReturn(
