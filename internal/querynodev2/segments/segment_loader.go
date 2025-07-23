@@ -315,6 +315,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		segment, err := NewSegment(
 			ctx,
 			collection,
+			loader.manager.Segment,
 			segmentType,
 			version,
 			loadInfo,
@@ -477,6 +478,18 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		return requestResourceResult{}, errors.Wrap(err, "get local used size failed")
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
+		// After introducing the caching layer's lazy loading and eviction mechanisms, most parts of a segment won't be
+		// loaded into memory or disk immediately, even if the segment is marked as LOADED. This means physical resource
+		// usage may be very low.
+		// However, we still need to reserve enough resources for the segments marked as LOADED. For now, we calculate the
+		// current used resource usage as the maximum value between the reserved resource size and the current physical
+		// resource usage.
+		reservedResourceUsage := loader.manager.Segment.GetReservedResource()
+		memoryUsage = max(memoryUsage, reservedResourceUsage.MemorySize)
+		diskUsage = max(diskUsage, int64(reservedResourceUsage.DiskSize))
+	}
 
 	loader.mut.Lock()
 	defer loader.mut.Unlock()

@@ -228,7 +228,7 @@ func (s *baseSegment) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
 	return s.bloomFilterSet.BatchPkExist(lc)
 }
 
-// ResourceUsageEstimate returns the estimated resource usage of the segment.
+// ResourceUsageEstimate returns the final estimated resource usage of the segment.
 func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	if s.segmentType == SegmentTypeGrowing {
 		// Growing segment cannot do resource usage estimate.
@@ -243,7 +243,11 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		memoryUsageFactor:          1.0,
 		memoryIndexUsageFactor:     1.0,
 		EnableInterminSegmentIndex: false,
+		tempSegmentIndexFactor:     0.0,
 		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:      paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredMemoryEvictionFactor: paramtable.Get().QueryNodeCfg.TieredMemoryEvictionFactor.GetAsFloat(),
+		TieredDiskEvictionFactor:   paramtable.Get().QueryNodeCfg.TieredDiskEvictionFactor.GetAsFloat(),
 	})
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
@@ -280,6 +284,7 @@ var _ Segment = (*LocalSegment)(nil)
 // Segment is a wrapper of the underlying C-structure segment.
 type LocalSegment struct {
 	baseSegment
+	manager SegmentManager
 	ptrLock *state.LoadStateLock
 	ptr     C.CSegmentInterface // TODO: Remove in future, after move load index into segcore package.
 	// always keep same with csegment.RawPtr(), for eaiser to access,
@@ -298,6 +303,7 @@ type LocalSegment struct {
 
 func NewSegment(ctx context.Context,
 	collection *Collection,
+	manager SegmentManager,
 	segmentType SegmentType,
 	version int64,
 	loadInfo *querypb.SegmentLoadInfo,
@@ -352,6 +358,7 @@ func NewSegment(ctx context.Context,
 
 	segment := &LocalSegment{
 		baseSegment:        base,
+		manager:            manager,
 		ptrLock:            locker,
 		ptr:                C.CSegmentInterface(csegment.RawPointer()),
 		csegment:           csegment,
@@ -1249,6 +1256,8 @@ func (s *LocalSegment) CreateTextIndex(ctx context.Context, fieldID int64) error
 }
 
 func (s *LocalSegment) FinishLoad() error {
+	usage := s.ResourceUsageEstimate()
+	s.manager.AddReservedResource(usage)
 	return s.csegment.FinishLoad()
 }
 
@@ -1304,10 +1313,15 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
+	usage := s.ResourceUsageEstimate()
+
 	GetDynamicPool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
 		return nil, nil
 	}).Await()
+
+	// release reserved resource after the segment resource is really released.
+	s.manager.SubReservedResource(usage)
 
 	log.Info("delete segment from memory")
 }

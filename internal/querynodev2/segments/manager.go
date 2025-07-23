@@ -27,6 +27,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -197,6 +198,10 @@ type SegmentManager interface {
 	// Deprecated: quick fix critical issue: #30857
 	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
 	Exist(segmentID typeutil.UniqueID, typ SegmentType) bool
+
+	AddReservedResource(usage ResourceUsage)
+	SubReservedResource(usage ResourceUsage)
+	GetReservedResource() ResourceUsage
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -366,6 +371,12 @@ type segmentManager struct {
 
 	growingOnReleasingSegments *typeutil.ConcurrentSet[int64]
 	sealedOnReleasingSegments  *typeutil.ConcurrentSet[int64]
+
+	// reservedSegmentsResource is the reserved resource for all loaded segments of this querynode segment manager,
+	// which is to avoid memory and disk pressure when loading too many segments after eviction is enabled.
+	// only MemorySize and DiskSize are used, other fields are ignored.
+	reservedSegmentsResource ResourceUsage
+	reservedSegmentsLock     sync.RWMutex
 }
 
 func NewSegmentManager() *segmentManager {
@@ -374,7 +385,43 @@ func NewSegmentManager() *segmentManager {
 		secondaryIndex:             newSecondarySegmentIndex(),
 		growingOnReleasingSegments: typeutil.NewConcurrentSet[int64](),
 		sealedOnReleasingSegments:  typeutil.NewConcurrentSet[int64](),
+		reservedSegmentsLock:       sync.RWMutex{},
 	}
+}
+
+func (mgr *segmentManager) AddReservedResource(usage ResourceUsage) {
+	mgr.reservedSegmentsLock.Lock()
+	defer mgr.reservedSegmentsLock.Unlock()
+
+	mgr.reservedSegmentsResource.MemorySize += usage.MemorySize
+	mgr.reservedSegmentsResource.DiskSize += usage.DiskSize
+}
+
+func (mgr *segmentManager) SubReservedResource(usage ResourceUsage) {
+	mgr.reservedSegmentsLock.Lock()
+	defer mgr.reservedSegmentsLock.Unlock()
+
+	// avoid overflow of memory and disk size
+	if mgr.reservedSegmentsResource.MemorySize < usage.MemorySize {
+		mgr.reservedSegmentsResource.MemorySize = 0
+		log.Warn("Reserved memory size would be negative, setting to 0")
+	} else {
+		mgr.reservedSegmentsResource.MemorySize -= usage.MemorySize
+	}
+
+	if mgr.reservedSegmentsResource.DiskSize < usage.DiskSize {
+		mgr.reservedSegmentsResource.DiskSize = 0
+		log.Warn("Reserved disk size would be negative, setting to 0")
+	} else {
+		mgr.reservedSegmentsResource.DiskSize -= usage.DiskSize
+	}
+}
+
+func (mgr *segmentManager) GetReservedResource() ResourceUsage {
+	mgr.reservedSegmentsLock.RLock()
+	defer mgr.reservedSegmentsLock.RUnlock()
+
+	return mgr.reservedSegmentsResource
 }
 
 // put is the internal put method updating both global segments and secondary index.
