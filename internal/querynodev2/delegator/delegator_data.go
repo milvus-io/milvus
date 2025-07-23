@@ -414,6 +414,18 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return merr.WrapErrServiceInternal("load L0 segment is not supported, l0 segment should only be loaded by watchChannel")
 	}
 
+	// pin all segments to prevent delete buffer has been cleaned up during worker load segments
+	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
+	// which means after segment is loaded, then delete buffer will be cleaned up by next SyncTargetVersion call
+	for _, info := range req.GetInfos() {
+		sd.deleteBuffer.Pin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+	}
+	defer func() {
+		for _, info := range req.GetInfos() {
+			sd.deleteBuffer.Unpin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+		}
+	}()
+
 	worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 	if err != nil {
 		log.Warn("delegator failed to find worker", zap.Error(err))
