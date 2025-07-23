@@ -899,6 +899,85 @@ func (kc *Catalog) DropPartitionStatsInfo(ctx context.Context, info *datapb.Part
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) ListGlobalStatsTask(ctx context.Context) ([]*datapb.GlobalStatsTask, error) {
+	tasks := make([]*datapb.GlobalStatsTask, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.GlobalStatsTask{}
+		err := proto.Unmarshal(value, task)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, GlobalStatsTaskPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveGlobalStatsTask(ctx context.Context, task *datapb.GlobalStatsTask) error {
+	key := buildGlobalStatsTaskKey(task.TaskID)
+
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+
+	err = kc.MetaKv.Save(ctx, key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropGlobalStatsTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildGlobalStatsTaskKey(taskID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) ListGlobalStatsInfos(ctx context.Context) ([]*datapb.GlobalStatsTask, error) {
+	infos := make([]*datapb.GlobalStatsTask, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		info := &datapb.GlobalStatsTask{}
+		err := proto.Unmarshal(value, info)
+		if err != nil {
+			return err
+		}
+		infos = append(infos, info)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, GlobalStatsTaskPrefix, kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return infos, nil
+}
+
+func (kc *Catalog) SaveGlobalStatsInfo(ctx context.Context, coll *datapb.GlobalStatsTask) error {
+	if coll == nil {
+		return nil
+	}
+	cloned := proto.Clone(coll).(*datapb.GlobalStatsTask)
+	k, v, err := buildGlobalStatsTaskKv(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := make(map[string]string)
+	kvs[k] = v
+	return kc.SaveByBatch(ctx, kvs)
+}
+
+func (kc *Catalog) DropGlobalStatsInfo(ctx context.Context, info *datapb.GlobalStatsTask) error {
+	key := buildGlobalStatsTaskPath(info)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error {
 	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
 	value := strconv.FormatInt(currentVersion, 10)

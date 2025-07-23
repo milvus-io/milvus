@@ -159,10 +159,11 @@ type Server struct {
 	// segReferManager  *SegmentReferenceManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	statsInspector   *statsInspector
-	indexInspector   *indexInspector
-	analyzeInspector *analyzeInspector
-	globalScheduler  task.GlobalScheduler
+	statsInspector       *statsInspector
+	indexInspector       *indexInspector
+	analyzeInspector     *analyzeInspector
+	globalStatsInspector *globalStatsInspector
+	globalScheduler      task.GlobalScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -330,6 +331,9 @@ func (s *Server) initDataCoord() error {
 
 	s.initStatsInspector()
 	log.Info("init statsJobManager done")
+
+	s.initGlobalStatsInspector()
+	log.Info("init globalStats inspector done")
 
 	if err = s.initSegmentManager(); err != nil {
 		return err
@@ -757,6 +761,7 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.meta.statsTaskMeta.updateMetrics()
+			s.meta.globalStatsMeta.updateMetrics()
 			s.meta.indexMeta.updateIndexTasksMetrics()
 		}
 	}
@@ -766,6 +771,7 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
+	s.globalStatsInspector.Start()
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
 
@@ -1082,6 +1088,9 @@ func (s *Server) Stop() error {
 	s.analyzeInspector.Stop()
 	log.Info("datacoord analyze inspector stopped")
 
+	s.globalStatsInspector.Stop()
+	log.Info("datacoord globalStats inspector stopped")
+
 	s.cluster.Close()
 	log.Info("datacoord cluster stopped")
 
@@ -1264,4 +1273,10 @@ func (s *Server) listLoadedSegments(ctx context.Context) ([]int64, error) {
 	}
 
 	return resp.SegmentIDs, nil
+}
+
+func (s *Server) initGlobalStatsInspector() {
+	if s.globalStatsInspector == nil {
+		s.globalStatsInspector = newGlobalStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler)
+	}
 }

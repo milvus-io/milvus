@@ -590,6 +590,13 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)
+	case taskcommon.GlobalStats:
+		req := &datapb.GlobalStatsTask{}
+		err := proto.Unmarshal(request.GetPayload(), req)
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return node.createGlobalStatsTask(ctx, req)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("CreateTask failed", zap.Error(err))
@@ -700,6 +707,18 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			resProperties.AppendReason(results[0].GetFailReason())
 		}
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.GlobalStats:
+		resp, err := node.queryGlobalStatsTask(ctx, &workerpb.QueryJobsRequest{ClusterID: clusterID, TaskIDs: []int64{taskID}})
+		if err != nil {
+			return nil, err
+		}
+		resProperties := taskcommon.NewProperties(nil)
+		results := resp.GetGlobalStatsResults().GetResults()
+		if len(results) > 0 {
+			resProperties.AppendTaskState(results[0].GetState())
+			resProperties.AppendReason(results[0].GetFailReason())
+		}
+		return wrapQueryTaskResult(resp, resProperties)
 	default:
 		err := fmt.Errorf("unrecognized task type '%s', properties=%v", taskType, request.GetProperties())
 		log.Ctx(ctx).Warn("QueryTask failed", zap.Error(err))
@@ -729,6 +748,12 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
 	case taskcommon.Compaction:
 		return node.DropCompactionPlan(ctx, &datapb.DropCompactionPlanRequest{PlanID: taskID})
+	case taskcommon.GlobalStats:
+		clusterID, err := properties.GetClusterID()
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		return node.dropGlobalStatsTask(ctx, clusterID, taskID)
 	case taskcommon.Index, taskcommon.Stats, taskcommon.Analyze:
 		jobType, err := properties.GetJobType()
 		if err != nil {

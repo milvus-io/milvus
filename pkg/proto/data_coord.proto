@@ -1088,6 +1088,23 @@ message PartitionStatsInfo {
   int64 commitTime = 7;
 }
 
+message GlobalStatsTask {
+  string clusterID = 1;
+  int64 jobID = 2;
+  int64 taskID = 3;
+  int64 collectionID = 4;
+  int64 partitionID = 5;
+  string vChannel = 6;
+  int64 version = 7;
+  repeated SegmentInfo segmentInfos = 8;
+  int64 nodeID = 9;
+  index.StorageConfig storage_config = 10;
+  schema.CollectionSchema schema = 11;
+  index.JobState state = 12;
+  string fail_reason = 13;
+  int64 task_slot = 14;
+}
+
 message DropCompactionPlanRequest {
   int64 planID = 1;
 }

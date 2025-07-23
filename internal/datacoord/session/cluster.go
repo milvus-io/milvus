@@ -83,6 +83,13 @@ type Cluster interface {
 	QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.AnalyzeResults, error)
 	// DropAnalyze drops an analysis task
 	DropAnalyze(nodeID int64, taskID int64) error
+
+	// CreateGlobalStats creates a global statistics task
+	CreateGlobalStats(nodeID int64, in *datapb.GlobalStatsTask, taskSlot int64) error
+	// QueryGlobalStats queries the status of global statistics tasks
+	QueryGlobalStats(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.GlobalStatsResults, error)
+	// DropGlobalStats drops a global statistics task
+	DropGlobalStats(nodeID int64, taskID int64) error
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -610,5 +617,62 @@ func (c *cluster) DropAnalyze(nodeID int64, taskID int64) error {
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(taskID)
 	properties.AppendType(taskcommon.Analyze)
+	return c.dropTask(nodeID, properties)
+}
+
+func (c *cluster) CreateGlobalStats(nodeID int64, in *datapb.GlobalStatsTask, taskSlot int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskID())
+	properties.AppendType(taskcommon.GlobalStats)
+	properties.AppendTaskSlot(taskSlot)
+	properties.AppendTaskVersion(in.GetVersion())
+	return c.createTask(nodeID, in, properties)
+}
+
+func (c *cluster) QueryGlobalStats(nodeID int64, in *workerpb.QueryJobsRequest) (*workerpb.GlobalStatsResults, error) {
+	reqProperties := taskcommon.NewProperties(nil)
+	reqProperties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	reqProperties.AppendTaskID(in.GetTaskIDs()[0])
+	reqProperties.AppendType(taskcommon.GlobalStats)
+	resp, err := c.queryTask(nodeID, reqProperties)
+	if err != nil {
+		return nil, err
+	}
+
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+	switch state {
+	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+		return &workerpb.GlobalStatsResults{
+			Results: []*workerpb.GlobalStatsResult{
+				{
+					TaskID:     in.GetTaskIDs()[0],
+					State:      state,
+					FailReason: reason,
+				},
+			},
+		}, nil
+	case taskcommon.Finished, taskcommon.Failed:
+		result := &workerpb.QueryJobsV2Response{}
+		err = proto.Unmarshal(resp.GetPayload(), result)
+		if err != nil {
+			return nil, err
+		}
+		return result.GetGlobalStatsResults(), nil
+	default:
+		panic("should not happen")
+	}
+}
+
+func (c *cluster) DropGlobalStats(nodeID int64, taskID int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskcommon.GlobalStats)
 	return c.dropTask(nodeID, properties)
 }

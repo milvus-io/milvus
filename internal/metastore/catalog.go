@@ -173,6 +173,14 @@ type DataCoordCatalog interface {
 	SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
 	DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
 
+	ListGlobalStatsTask(ctx context.Context) ([]*datapb.GlobalStatsTask, error)
+	SaveGlobalStatsTask(ctx context.Context, task *datapb.GlobalStatsTask) error
+	DropGlobalStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	ListGlobalStatsInfos(ctx context.Context) ([]*datapb.GlobalStatsTask, error)
+	SaveGlobalStatsInfo(ctx context.Context, info *datapb.GlobalStatsTask) error
+	DropGlobalStatsInfo(ctx context.Context, info *datapb.GlobalStatsTask) error
+
 	SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error
 	GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error)
 	DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error

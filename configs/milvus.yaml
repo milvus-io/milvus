@@ -740,6 +740,7 @@ dataCoord:
   jsonStatsMaxShreddingColumns: 1024 # the max number of columns to shred
   jsonStatsShreddingRatioThreshold: 0.3 # the ratio threshold to shred
   jsonStatsWriteBatchSize: 819200 # the batch size to write
+  globalStatsTriggerInterval: 120 # global stats task interval per trigger
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
