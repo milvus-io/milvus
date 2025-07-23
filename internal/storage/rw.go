@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -61,6 +62,7 @@ type rwOptions struct {
 	multiPartUploadSize int64
 	columnGroups        []storagecommon.ColumnGroup
 	storageConfig       *indexpb.StorageConfig
+	neededFields        typeutil.Set[int64]
 }
 
 func (o *rwOptions) validate() error {
@@ -141,6 +143,12 @@ func WithStorageConfig(storageConfig *indexpb.StorageConfig) RwOption {
 	}
 }
 
+func WithNeededFields(neededFields typeutil.Set[int64]) RwOption {
+	return func(options *rwOptions) {
+		options.neededFields = neededFields
+	}
+}
+
 func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloader downloaderFn) (ChunkedBlobsReader, error) {
 	if len(binlogs) == 0 {
 		return func() ([]*Blob, error) {
@@ -212,7 +220,7 @@ func makeBlobsReader(ctx context.Context, binlogs []*datapb.FieldBinlog, downloa
 	}, nil
 }
 
-func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (RecordReader, error) {
+func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, schema *schemapb.CollectionSchema, option ...RwOption) (rr RecordReader, err error) {
 	rwOptions := DefaultReaderOptions()
 	for _, opt := range option {
 		opt(rwOptions)
@@ -222,11 +230,13 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 	switch rwOptions.version {
 	case StorageV1:
-		blobsReader, err := makeBlobsReader(ctx, binlogs, rwOptions.downloader)
+		var blobsReader ChunkedBlobsReader
+		blobsReader, err = makeBlobsReader(ctx, binlogs, rwOptions.downloader)
 		if err != nil {
 			return nil, err
 		}
-		return newCompositeBinlogRecordReader(schema, blobsReader)
+
+		rr, err = newCompositeBinlogRecordReader(schema, blobsReader)
 	case StorageV2:
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
@@ -245,9 +255,17 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		return newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig)
+		rr, err = newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig)
+	default:
+		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
-	return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
+	if err != nil {
+		return nil, err
+	}
+	if rwOptions.neededFields != nil {
+		rr.SetNeededFields(rwOptions.neededFields)
+	}
+	return rr, nil
 }
 
 func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segmentID UniqueID,
