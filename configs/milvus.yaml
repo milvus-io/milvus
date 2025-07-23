@@ -729,6 +729,7 @@ dataCoord:
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
   jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
+  globalStatsTriggerInterval: 120 # global stats task interval per trigger
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
   grpc:
