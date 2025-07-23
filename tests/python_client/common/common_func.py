@@ -1718,7 +1718,7 @@ def gen_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return get_column_data_by_schema(nb=nb, schema=schema, skip_vectors=skip_vectors, start=start)
 
 
-def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=0):
+def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False, start=0, random_pk=False):
     """
     Generates column data based on the given schema.
     
@@ -1727,6 +1727,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
         schema (Schema): Collection schema. If None, uses default schema.
         skip_vectors (bool): Whether to skip vector fields. Defaults to False.
         start (int): Starting value for primary key fields (default: 0)
+        random_pk (bool, optional): Whether to generate random primary key values (default: False)
     
     Returns:
         list: List of column data arrays matching the schema fields (excluding auto_id fields).
@@ -1743,12 +1744,12 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
         if field.dtype in ct.all_vector_types and skip_vectors is True:
             tmp = []
         else:
-            tmp = gen_data_by_collection_field(field, nb=nb, start=start)
+            tmp = gen_data_by_collection_field(field, nb=nb, start=start, random_pk=random_pk)
         data.append(tmp)
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False):
     """
     Generates row data based on the given schema.
     
@@ -1756,7 +1757,8 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0):
         nb (int): Number of rows to generate. Defaults to ct.default_nb.
         schema (Schema): Collection schema or collection info. If None, uses default schema.
         start (int): Starting value for primary key fields. Defaults to 0.
-    
+        random_pk (bool, optional): Whether to generate random primary key values (default: False)
+
     Returns:
         list[dict]: List of dictionaries where each dictionary represents a row,
                     with field names as keys and generated data as values.
@@ -1791,7 +1793,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0):
         for i in range(nb):
             tmp = {}
             for field in fields_needs_data:
-                tmp[field.get('name', None)] = gen_data_by_collection_field(field)
+                tmp[field.get('name', None)] = gen_data_by_collection_field(field, random_pk=random_pk)
                 if field.get('is_primary', False) is True and field.get('type', None) == DataType.INT64:
                     tmp[field.get('name', None)] = start
                     start += 1
@@ -1820,7 +1822,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0):
         for i in range(nb):
             tmp = {}
             for field in fields_needs_data:
-                tmp[field.name] = gen_data_by_collection_field(field)
+                tmp[field.name] = gen_data_by_collection_field(field, random_pk=random_pk)
                 if field.is_primary is True and field.dtype == DataType.INT64:
                     tmp[field.name] = start
                     start += 1
@@ -2007,6 +2009,7 @@ def get_dense_anns_field_name_list(schema=None):
             anns_fields.append(item)
     return anns_fields
 
+
 def gen_varchar_data(length: int, nb: int, text_mode=False):
     if text_mode:
         return [fake.text() for _ in range(nb)]
@@ -2014,7 +2017,7 @@ def gen_varchar_data(length: int, nb: int, text_mode=False):
         return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
 
-def gen_data_by_collection_field(field, nb=None, start=0):
+def gen_data_by_collection_field(field, nb=None, start=0, random_pk=False):
     """
     Generates test data for a given collection field based on its data type and properties.
     
@@ -2022,7 +2025,7 @@ def gen_data_by_collection_field(field, nb=None, start=0):
         field (dict or Field): Field information, either as a dictionary (v2 client) or Field object (ORM client)
         nb (int, optional): Bumber of data batch to generate. If None, returns a single value which usually used by row data generation
         start (int, optional): Starting value for primary key fields (default: 0)
-    
+        random_pk (bool, optional): Whether to generate random primary key values (default: False)
     Returns:
         Single value if nb is None, otherwise returns a list of generated values
     
@@ -2085,7 +2088,7 @@ def gen_data_by_collection_field(field, nb=None, start=0):
         if nb is None:
             return random.randint(-9223372036854775808, 9223372036854775807) if random.random() < 0.8 or nullable is False else None
         if nullable is False:
-            if is_primary is True: 
+            if is_primary is True and random_pk is False: 
                 return [i for i in range(start, start+nb)]
             else:
                 return [random.randint(-9223372036854775808, 9223372036854775807) for _ in range(nb)]
@@ -2118,7 +2121,7 @@ def gen_data_by_collection_field(field, nb=None, start=0):
         if nb is None:
             return gen_varchar_data(length=length, nb=1, text_mode=enable_analyzer)[0] if random.random() < 0.8 or nullable is False else None
         if nullable is False:
-            if is_primary is True:
+            if is_primary is True and random_pk is False:
                 return [str(i) for i in range(start, start+nb)]
             else:
                 return gen_varchar_data(length=length, nb=nb, text_mode=enable_analyzer)
@@ -2229,7 +2232,7 @@ def gen_varchar_values(nb: int, length: int = 0):
     return ["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(nb)]
 
 
-def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}):
+def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}, random_pk=False):
     """
     generate default value according to the collection fields,
     which can replace the value of the specified field
@@ -2240,11 +2243,11 @@ def gen_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = 
         if default_value is not None:
             data.append(default_value)
         elif field.auto_id is False:
-            data.append(gen_data_by_collection_field(field, nb, start_id))
+            data.append(gen_data_by_collection_field(field, nb, start_id, random_pk=random_pk))
     return data
 
 
-def gen_field_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}) -> dict:
+def gen_field_values(schema: CollectionSchema, nb, start_id=0, default_values: dict = {}, random_pk=False) -> dict:
     """
     generate default value according to the collection fields,
     which can replace the value of the specified field
@@ -2258,7 +2261,7 @@ def gen_field_values(schema: CollectionSchema, nb, start_id=0, default_values: d
         if default_value is not None:
             data[field.name] = default_value
         elif field.auto_id is False:
-            data[field.name] = gen_data_by_collection_field(field, nb, start_id * nb)
+            data[field.name] = gen_data_by_collection_field(field, nb, start_id * nb, random_pk=random_pk)
     return data
 
 
@@ -3875,3 +3878,34 @@ def gen_collection_name_by_testcase_name(module_index=1):
     if calling from the testcase, module_index=1
     """
     return inspect.stack()[module_index][3] + gen_unique_str("_")
+
+
+def parse_fmod(x: int, y: int) -> int:
+    """
+    Computes the floating-point remainder of x/y with the same sign as x.
+    
+    This function mimics the behavior of the C fmod() function for integer inputs,
+    where the result has the same sign as the dividend (x).
+    
+    Args:
+        x (int): The dividend
+        y (int): The divisor
+        
+    Returns:
+        int: The remainder of x/y with the same sign as x
+        
+    Raises:
+        ValueError: If y is 0 (division by zero)
+        
+    Examples:
+        parse_fmod(5, 3) -> 2
+        parse_fmod(-5, 3) -> -2
+        parse_fmod(5, -3) -> 2
+        parse_fmod(-5, -3) -> -2
+    """
+    if y == 0:
+        raise ValueError(f'[parse_fmod] Math domain error, `y` can not bt `0`')
+
+    v = abs(x) % abs(y)
+
+    return v if x >= 0 else -v

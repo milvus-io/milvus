@@ -1387,8 +1387,8 @@ class TestUtilityAdvanced(TestcaseBase):
         )
 
         for _ in range(segment_num):
-            # insert random pks, ***start=None will generate random data***
-            data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+            # insert random pks
+            data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
             self.collection_wrap.insert(data)
             self.collection_wrap.flush()
 
@@ -1443,14 +1443,13 @@ class TestUtilityAdvanced(TestcaseBase):
         self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(ct.default_float_vec_field_name))
         self.collection_wrap.load()
 
-        # insert random pks, ***start=None will generate random data***
-        data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+        # insert random pks ***
+        data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
         self.collection_wrap.insert(data)
 
         # get_query_segment_info and verify results
         res_sealed, _ = self.utility_wrap.get_query_segment_info(collection_name)
         assert len(res_sealed) == 0
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_sealed_query_segment_info_after_create_index(self):
