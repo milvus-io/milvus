@@ -55,6 +55,12 @@ func TestWALFlusher(t *testing.T) {
 	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
 	fMixcoord.Set(mixcoord)
 	rs := mock_recovery.NewMockRecoveryStorage(t)
+	rs.EXPECT().GetSchema(mock.Anything, mock.Anything, mock.Anything).Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "ID", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "Vector", DataType: schemapb.DataType_FloatVector},
+		},
+	}, nil)
 	rs.EXPECT().ObserveMessage(mock.Anything, mock.Anything).Return(nil)
 	rs.EXPECT().Close().Return()
 	resource.InitForTest(

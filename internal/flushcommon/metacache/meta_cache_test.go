@@ -101,7 +101,7 @@ func (s *MetaCacheSuite) SetupTest() {
 
 func (s *MetaCacheSuite) TestMetaInfo() {
 	s.Equal(s.collectionID, s.cache.Collection())
-	s.Equal(s.collSchema, s.cache.Schema())
+	s.Equal(s.collSchema, s.cache.GetSchema(0))
 }
 
 func (s *MetaCacheSuite) TestAddSegment() {

@@ -362,6 +362,10 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 					// When upgrading from 2.5 to 2.6, the delegator leader may not locate at streaming node.
 					// We always use the streaming node as the delegator leader to avoid the delete data lost when loading segment.
 					candidates = channel
+				} else if !channelIsStreamingNode && candidateIsStreamingNode {
+					// When downgrading from 2.6 to 2.5, the delegator leader may locate at non-streaming node.
+					// We always use the non-streaming node as the delegator leader to avoid the delete data lost when loading segment.
+					continue
 				} else {
 					updateNeeded := false
 					switch {

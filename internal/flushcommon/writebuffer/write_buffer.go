@@ -144,7 +144,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 	flushTsPolicy := GetFlushTsPolicy(flushTs, metacache)
 	option.syncPolicies = append(option.syncPolicies, flushTsPolicy)
 
-	schema := metacache.Schema()
+	schema := metacache.GetSchema(0)
 	estSize, err := typeutil.EstimateSizePerRecord(schema)
 	if err != nil {
 		return nil, err
@@ -356,11 +356,11 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 	return segments.Collect()
 }
 
-func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64) *segmentBuffer {
+func (wb *writeBufferBase) getOrCreateBuffer(segmentID int64, timetick uint64) *segmentBuffer {
 	buffer, ok := wb.buffers[segmentID]
 	if !ok {
 		var err error
-		buffer, err = newSegmentBuffer(segmentID, wb.metaCache.Schema())
+		buffer, err = newSegmentBuffer(segmentID, wb.metaCache.GetSchema(timetick))
 		if err != nil {
 			// TODO avoid panic here
 			panic(err)
@@ -525,7 +525,7 @@ func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID 
 
 // bufferDelete buffers DeleteMsg into DeleteData.
 func (wb *writeBufferBase) bufferDelete(segmentID int64, pks []storage.PrimaryKey, tss []typeutil.Timestamp, startPos, endPos *msgpb.MsgPosition) {
-	segBuf := wb.getOrCreateBuffer(segmentID)
+	segBuf := wb.getOrCreateBuffer(segmentID, tss[0])
 	bufSize := segBuf.deltaBuffer.Buffer(pks, tss, startPos, endPos)
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Add(float64(bufSize))
 }

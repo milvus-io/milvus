@@ -31,9 +31,7 @@ type PriorityQueue interface {
 	TaskIDs() []int64
 }
 
-var (
-	_ PriorityQueue = &priorityQueuePolicy{}
-)
+var _ PriorityQueue = &priorityQueuePolicy{}
 
 // priorityQueuePolicy implements a priority queue that sorts tasks by taskID (smaller taskID has higher priority)
 type priorityQueuePolicy struct {
