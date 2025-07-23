@@ -193,11 +193,7 @@ func InitOnceCipher() {
 	initCipherOnce.Do(func() {
 		err := initCipher()
 		if err != nil {
-			logFunc := log.Warn
-			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
-				logFunc = log.Panic
-			}
-			logFunc("fail to init cipher plugin",
+			log.Panic("fail to init cipher plugin",
 				zap.String("Go so path", paramtable.GetCipherParams().SoPathGo.GetValue()),
 				zap.String("Cpp so path", paramtable.GetCipherParams().SoPathCpp.GetValue()),
 				zap.Error(err))
