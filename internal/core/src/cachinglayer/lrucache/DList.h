@@ -125,9 +125,6 @@ class DList {
     removeItem(ListNode* list_node, ResourceUsage size);
 
     void
-    addLoadingResource(const ResourceUsage& size);
-
-    void
     removeLoadingResource(const ResourceUsage& size);
 
     const EvictionConfig&

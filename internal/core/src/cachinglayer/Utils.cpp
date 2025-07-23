@@ -70,8 +70,8 @@ getContainerMemLimit() {
         try {
             int64_t env_limit = std::stoll(mem_limit_env);
             limits.push_back(env_limit);
-            LOG_DEBUG("[MCL] Found MEM_LIMIT environment variable: {} bytes",
-                      env_limit);
+            LOG_DEBUG("[MCL] Found MEM_LIMIT environment variable: {}",
+                      FormatBytes(env_limit));
         } catch (...) {
             LOG_WARN("[MCL] Invalid MEM_LIMIT environment variable: {}",
                      mem_limit_env);
@@ -103,8 +103,8 @@ getContainerMemLimit() {
                                 limits.push_back(proc_limit);
                                 LOG_DEBUG(
                                     "[MCL] Found process-specific cgroups v2 "
-                                    "limit: {} bytes",
-                                    proc_limit);
+                                    "limit: {}",
+                                    FormatBytes(proc_limit));
                             } catch (...) {
                                 // Ignore parse errors
                             }
@@ -127,8 +127,8 @@ getContainerMemLimit() {
                                     limits.push_back(proc_limit);
                                     LOG_DEBUG(
                                         "[MCL] Found process-specific cgroups "
-                                        "v1 limit: {} bytes",
-                                        proc_limit);
+                                        "v1 limit: {}",
+                                        FormatBytes(proc_limit));
                                 }
                             } catch (...) {
                                 // Ignore parse errors
@@ -144,8 +144,8 @@ getContainerMemLimit() {
     // Return the minimum of all found limits
     if (!limits.empty()) {
         int64_t min_limit = *std::min_element(limits.begin(), limits.end());
-        LOG_DEBUG("[MCL] Using minimum memory limit: {} bytes from {} sources",
-                  min_limit,
+        LOG_DEBUG("[MCL] Using minimum memory limit: {} from {} sources",
+                  FormatBytes(min_limit),
                   limits.size());
         return min_limit;
     }
@@ -168,16 +168,16 @@ getSystemMemoryInfo() {
 
     if (container_limit > 0 && container_limit < host_memory) {
         info.total_memory_bytes = container_limit;
-        LOG_DEBUG("[MCL] Using container memory limit: {} bytes",
-                  container_limit);
+        LOG_DEBUG("[MCL] Using container memory limit: {}",
+                  FormatBytes(container_limit));
     } else {
         info.total_memory_bytes = host_memory;
         if (container_limit > host_memory) {
             LOG_WARN(
-                "[MCL] Container limit ({} bytes) exceeds host memory ({} "
-                "bytes), using host memory",
-                container_limit,
-                host_memory);
+                "[MCL] Container limit ({}) exceeds host memory ({}), using "
+                "host memory",
+                FormatBytes(container_limit),
+                FormatBytes(host_memory));
         }
     }
 
