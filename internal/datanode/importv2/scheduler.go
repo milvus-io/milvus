@@ -94,13 +94,13 @@ func (s *scheduler) scheduleTasks() {
 		}
 	}
 
-	log.Info("processing selected tasks",
-		zap.Int("pending", len(pendingTasks)),
-		zap.Int("selected", len(selectedTasks)))
-
 	if len(selectedTasks) == 0 {
 		return
 	}
+
+	log.Info("processing selected tasks",
+		zap.Int("pending", len(pendingTasks)),
+		zap.Int("selected", len(selectedTasks)))
 
 	futures := make(map[int64][]*conc.Future[any])
 	for _, task := range selectedTasks {
