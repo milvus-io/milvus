@@ -288,6 +288,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": dim,
+                                              "auto_id": auto_id,
                                               "consistency_level": 0})
         index = self.list_indexes(client, collection_name)[0]
         assert index == ['vector']
