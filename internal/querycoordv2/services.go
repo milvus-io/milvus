@@ -1193,7 +1193,18 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		log.Warn(msg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
+	err := s.updateLoadConfig(ctx, req)
+	if err != nil {
+		log.Warn("failed to update load config", zap.Error(err))
+		return merr.Status(err), nil
+	}
 
+	log.Info("update load config request finished")
+
+	return merr.Success(), nil
+}
+
+func (s *Server) updateLoadConfig(ctx context.Context, req *querypb.UpdateLoadConfigRequest) error {
 	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
 	for _, collectionID := range req.GetCollectionIDs() {
 		collection := s.meta.GetCollection(ctx, collectionID)
@@ -1221,7 +1232,6 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		}
 
 		if !replicaChanged && !rgChanged {
-			log.Info("no need to update load config", zap.Int64("collectionID", collectionID))
 			continue
 		}
 
@@ -1247,12 +1257,5 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		}
 	}
 
-	if err != nil {
-		msg := "failed to update load config"
-		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
-	}
-	log.Info("update load config request finished")
-
-	return merr.Success(), nil
+	return err
 }

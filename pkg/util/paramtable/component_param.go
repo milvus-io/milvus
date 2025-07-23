@@ -1966,6 +1966,8 @@ type queryCoordConfig struct {
 	BalanceSegmentBatchSize            ParamItem `refreshable:"true"`
 	BalanceChannelBatchSize            ParamItem `refreshable:"true"`
 	EnableBalanceOnMultipleCollections ParamItem `refreshable:"true"`
+
+	CheckLoadConfigInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -2589,6 +2591,15 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       false,
 	}
 	p.EnableBalanceOnMultipleCollections.Init(base.mgr)
+
+	p.CheckLoadConfigInterval = ParamItem{
+		Key:          "queryCoord.checkLoadConfigInterval",
+		Version:      "2.5.16",
+		DefaultValue: "60000",
+		Doc:          "the interval of check load config, in milliseconds",
+		Export:       false,
+	}
+	p.CheckLoadConfigInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

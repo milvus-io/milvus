@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -57,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
-	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -558,8 +555,6 @@ func (s *Server) startQueryCoord() error {
 	go s.handleNodeUpLoop()
 	go s.watchNodes(revision)
 
-	// check replica changes after restart
-	s.checkLoadConfigChanges(s.ctx)
 	// watch load config changes
 	s.watchLoadConfigChanges()
 
@@ -953,102 +948,58 @@ func (s *Server) updateBalanceConfig() bool {
 	return false
 }
 
-func (s *Server) checkLoadConfigChanges(ctx context.Context) {
-	// try to check load config changes after restart, and try to update replicas
-	collectionIDs := s.meta.GetAll(ctx)
+func (s *Server) watchLoadConfigChanges() {
+	log := log.Ctx(s.ctx)
+	ticker := time.NewTicker(Params.QueryCoordCfg.CheckLoadConfigInterval.GetAsDuration(time.Millisecond))
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				log.Info("watch load config changes loop exit due to context done")
+				return
+			case <-ticker.C:
+				s.checkLoadConfigChanges()
+			}
+		}
+	}()
+}
+
+func (s *Server) checkLoadConfigChanges() {
+	log := log.Ctx(s.ctx)
+
+	collectionIDs := s.meta.GetAll(s.ctx)
+	if len(collectionIDs) == 0 {
+		log.Warn("no collection loaded, skip to trigger update load config")
+		return
+	}
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
-		collection := s.meta.GetCollection(ctx, collectionID)
+		collection := s.meta.GetCollection(s.ctx, collectionID)
 		if collection.UserSpecifiedReplicaMode {
 			log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
 			return false
 		}
 		return true
 	})
-	replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
+
 	rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-	log.Info("apply load config changes",
-		zap.Int64s("collectionIDs", collectionIDs),
-		zap.Int32("replicaNum", int32(replicaNum)),
-		zap.Strings("resourceGroups", rgs))
-	s.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
+	if len(rgs) == 0 {
+		log.Info("invalid cluster level load config, skip it", zap.Strings("resource_groups", rgs))
+		return
+	}
+	replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
+	if replicaNum <= 0 {
+		log.Info("invalid cluster level load config, skip it", zap.Int64("replica_num", replicaNum))
+		return
+	}
+
+	err := s.updateLoadConfig(s.ctx, &querypb.UpdateLoadConfigRequest{
 		CollectionIDs:  collectionIDs,
 		ReplicaNumber:  int32(replicaNum),
 		ResourceGroups: rgs,
 	})
-}
-
-func (s *Server) watchLoadConfigChanges() {
-	log := log.Ctx(s.ctx)
-	replicaNumHandler := config.NewHandler("watchReplicaNumberChanges", func(e *config.Event) {
-		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
-
-		collectionIDs := s.meta.GetAll(s.ctx)
-		if len(collectionIDs) == 0 {
-			log.Warn("no collection loaded, skip to trigger update load config")
-			return
-		}
-		collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
-			collection := s.meta.GetCollection(s.ctx, collectionID)
-			if collection.UserSpecifiedReplicaMode {
-				log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
-				return false
-			}
-			return true
-		})
-
-		replicaNum, err := strconv.ParseInt(e.Value, 10, 64)
-		if err != nil {
-			log.Warn("invalid cluster level load config, skip it", zap.String("key", e.Key), zap.String("value", e.Value))
-			return
-		}
-		if replicaNum <= 0 {
-			log.Info("invalid cluster level load config, skip it", zap.Int64("replica_num", replicaNum))
-			return
-		}
-		rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
-
-		s.UpdateLoadConfig(s.ctx, &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  collectionIDs,
-			ReplicaNumber:  int32(replicaNum),
-			ResourceGroups: rgs,
-		})
-	})
-	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, replicaNumHandler)
-
-	rgHandler := config.NewHandler("watchResourceGroupChanges", func(e *config.Event) {
-		log.Info("watch load config changes", zap.String("key", e.Key), zap.String("value", e.Value), zap.String("type", e.EventType))
-		collectionIDs := s.meta.GetAll(s.ctx)
-		if len(collectionIDs) == 0 {
-			log.Warn("no collection loaded, skip to trigger update load config")
-			return
-		}
-		collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
-			collection := s.meta.GetCollection(s.ctx, collectionID)
-			if collection.UserSpecifiedReplicaMode {
-				log.Info("collection is user specified replica mode, skip update load config", zap.Int64("collectionID", collectionID))
-				return false
-			}
-			return true
-		})
-
-		if len(e.Value) == 0 {
-			log.Warn("invalid cluster level load config, skip it", zap.String("key", e.Key), zap.String("value", e.Value))
-			return
-		}
-
-		rgs := strings.Split(e.Value, ",")
-		rgs = lo.Map(rgs, func(rg string, _ int) string { return strings.TrimSpace(rg) })
-		if len(rgs) == 0 {
-			log.Info("invalid cluster level load config, skip it", zap.Strings("resource_groups", rgs))
-			return
-		}
-
-		replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
-		s.UpdateLoadConfig(s.ctx, &querypb.UpdateLoadConfigRequest{
-			CollectionIDs:  collectionIDs,
-			ReplicaNumber:  int32(replicaNum),
-			ResourceGroups: rgs,
-		})
-	})
-	paramtable.Get().Watch(paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, rgHandler)
+	if err != nil {
+		log.Warn("failed to update load config", zap.Error(err))
+	}
 }
