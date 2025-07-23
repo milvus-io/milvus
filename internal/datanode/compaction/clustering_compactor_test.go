@@ -173,6 +173,8 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionInit() {
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
+	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+
 	dblobs, err := getInt64DeltaBlobs(
 		1,
 		[]int64{100},
@@ -199,7 +201,24 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
+	var ml sync.RWMutex
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string][]byte) error {
+		ml.Lock()
+		defer ml.Unlock()
+		for k, v := range m {
+			kvs[k] = v
+		}
+		return nil
+	})
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, strings []string) ([][]byte, error) {
+		result := make([][]byte, 0, len(strings))
+		ml.RLock()
+		defer ml.RUnlock()
+		for _, path := range strings {
+			result = append(result, kvs[path])
+		}
+		return result, nil
+	})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
@@ -211,6 +230,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
 		},
 	}
 
+	s.task.binlogIO = s.mockBinlogIO
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 2048
@@ -281,6 +301,16 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.NoError(err)
+	var ml sync.RWMutex
+	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string][]byte) error {
+		ml.Lock()
+		defer ml.Unlock()
+		for k, v := range m {
+			kvs[k] = v
+		}
+		return nil
+	})
 	var one sync.Once
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, strings []string) ([][]byte, error) {
@@ -288,7 +318,13 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 			one.Do(func() {
 				s.task.memoryBufferSize = 32 * 1024 * 1024
 			})
-			return lo.Values(kvs), nil
+			result := make([][]byte, 0, len(strings))
+			ml.RLock()
+			defer ml.RUnlock()
+			for _, path := range strings {
+				result = append(result, kvs[path])
+			}
+			return result, nil
 		})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
@@ -298,6 +334,7 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit(
 		},
 	}
 
+	s.task.binlogIO = s.mockBinlogIO
 	s.task.plan.Schema = genCollectionSchema()
 	s.task.plan.ClusteringKeyField = 100
 	s.task.plan.PreferSegmentRows = 3000
@@ -365,7 +402,26 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
+	var ml sync.RWMutex
+	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, m map[string][]byte) error {
+		ml.Lock()
+		defer ml.Unlock()
+		for k, v := range m {
+			kvs[k] = v
+		}
+		return nil
+	})
+
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, strings []string) ([][]byte, error) {
+		result := make([][]byte, 0, len(strings))
+		ml.RLock()
+		defer ml.RUnlock()
+		for _, path := range strings {
+			result = append(result, kvs[path])
+		}
+		return result, nil
+	})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
@@ -374,6 +430,7 @@ func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
 		},
 	}
 
+	s.task.binlogIO = s.mockBinlogIO
 	s.task.bm25FieldIds = []int64{102}
 	s.task.plan.Schema = schema
 	s.task.plan.ClusteringKeyField = 100
