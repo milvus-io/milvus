@@ -254,20 +254,20 @@ func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 
 type DropIndexAction struct {
 	*BaseAction
-	fieldIDs    []int64
+	indexIDs    []int64
 	rpcReturned atomic.Bool
 }
 
-func NewDropIndexAction(nodeID typeutil.UniqueID, typ ActionType, shard string, fieldIDs []int64) *DropIndexAction {
+func NewDropIndexAction(nodeID typeutil.UniqueID, typ ActionType, shard string, indexIDs []int64) *DropIndexAction {
 	return &DropIndexAction{
 		BaseAction:  NewBaseAction(nodeID, typ, shard, 0),
-		fieldIDs:    fieldIDs,
+		indexIDs:    indexIDs,
 		rpcReturned: *atomic.NewBool(false),
 	}
 }
 
-func (action *DropIndexAction) FieldIDs() []int64 {
-	return action.fieldIDs
+func (action *DropIndexAction) IndexIDs() []int64 {
+	return action.indexIDs
 }
 
 func (action *DropIndexAction) IsFinished(distMgr *meta.DistributionManager) bool {
@@ -275,9 +275,9 @@ func (action *DropIndexAction) IsFinished(distMgr *meta.DistributionManager) boo
 }
 
 func (action *DropIndexAction) Desc() string {
-	return fmt.Sprintf("type:%s, node id: %d, field ids: %v", action.Type().String(), action.Node(), action.FieldIDs())
+	return fmt.Sprintf("type:%s, node id: %d, index ids: %v", action.Type().String(), action.Node(), action.IndexIDs())
 }
 
 func (action *DropIndexAction) String() string {
-	return action.BaseAction.String() + fmt.Sprintf(`{[fieldIDs=%v]}`, action.FieldIDs())
+	return action.BaseAction.String() + fmt.Sprintf(`{[indexIDs=%v]}`, action.IndexIDs())
 }

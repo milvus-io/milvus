@@ -504,23 +504,19 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	return s.csegment.HasRawData(fieldID)
 }
 
-func (s *LocalSegment) DropIndex(ctx context.Context, fieldID int64) error {
+func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.Unpin()
 
-	err := s.csegment.DropIndex(ctx, fieldID)
-	if err != nil {
-		return err
-	}
-
-	s.fieldIndexes.Range(func(key int64, value *IndexedFieldInfo) bool {
-		if value.IndexInfo.FieldID == fieldID {
-			s.fieldIndexes.Remove(key)
+	if indexInfo, ok := s.fieldIndexes.Get(indexID); ok {
+		err := s.csegment.DropIndex(ctx, indexInfo.IndexInfo.FieldID)
+		if err != nil {
+			return err
 		}
-		return true
-	})
+		s.fieldIndexes.Remove(indexID)
+	}
 	return nil
 }
 

@@ -566,7 +566,7 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 		zap.String("shard", task.Shard()),
 		zap.Int64("node", action.Node()),
 		zap.String("source", task.Source().String()),
-		zap.Int64s("fieldIDs", action.fieldIDs),
+		zap.Int64s("indexIDs", action.indexIDs),
 	)
 
 	var err error
@@ -589,8 +589,9 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 			commonpbutil.WithMsgType(commonpb.MsgType_DropIndex),
 			commonpbutil.WithMsgID(task.ID()),
 		),
+		SegmentID:    task.SegmentID(),
+		IndexIDs:     action.indexIDs,
 		Channel:      task.Shard(),
-		FieldIDs:     action.fieldIDs,
 		NeedTransfer: true,
 	}
 

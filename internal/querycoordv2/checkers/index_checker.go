@@ -126,7 +126,8 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 
 	idSegmentsStats := make(map[int64]*meta.Segment)
 	targetsStats := make(map[int64][]int64) // segmentID => FieldID
-	redundant := typeutil.NewConcurrentSet[int64]()
+	redundant := make(map[int64][]int64)    // segmentID => indexIDs
+	redundantSegments := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
 		// skip update index in read only node
 		if roNodeSet.Contain(segment.Node) {
@@ -142,7 +143,11 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			idSegmentsStats[segment.GetID()] = segment
 		}
 
-		redundant.Upsert(c.checkRedundant(segment, indexInfos)...)
+		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
+		if len(redundantIndices) > 0 {
+			redundant[segment.GetID()] = redundantIndices
+			redundantSegments[segment.GetID()] = segment
+		}
 	}
 
 	segmentsToUpdate := typeutil.NewSet[int64]()
@@ -192,7 +197,9 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	})
 	tasks = append(tasks, tasksStats...)
 
-	dropTasks := c.createSegmentIndexDropTasks(ctx, replica, redundant.Collect())
+	dropTasks := lo.FilterMap(lo.Values(redundantSegments), func(segment *meta.Segment, _ int) (task.Task, bool) {
+		return c.createSegmentIndexDropTasks(ctx, replica, segment, redundant[segment.GetID()]), true
+	})
 	tasks = append(tasks, dropTasks...)
 
 	return tasks
@@ -214,7 +221,8 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 	return result
 }
 
-func (c *IndexChecker) checkRedundant(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
+// checkRedundantIndices returns redundant indexIDs for each segment
+func (c *IndexChecker) checkRedundantIndices(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) []int64 {
 	var redundant []int64
 	indexInfoMap := typeutil.NewConcurrentSet[int64]()
 
@@ -222,9 +230,9 @@ func (c *IndexChecker) checkRedundant(segment *meta.Segment, indexInfos []*index
 		indexInfoMap.Insert(indexInfo.IndexID)
 	}
 
-	for indexID, fieldIndexInfo := range segment.IndexInfo {
+	for indexID := range segment.IndexInfo {
 		if !indexInfoMap.Contain(indexID) {
-			redundant = append(redundant, fieldIndexInfo.GetFieldID())
+			redundant = append(redundant, indexID)
 		}
 	}
 
@@ -313,18 +321,13 @@ func (c *IndexChecker) createSegmentStatsUpdateTask(ctx context.Context, segment
 	return t, true
 }
 
-func (c *IndexChecker) createSegmentIndexDropTasks(ctx context.Context, replica *meta.Replica, fieldIDs []int64) []task.Task {
-	if len(fieldIDs) == 0 {
+func (c *IndexChecker) createSegmentIndexDropTasks(ctx context.Context, replica *meta.Replica, segment *meta.Segment, indexIDs []int64) task.Task {
+	if len(indexIDs) == 0 {
 		return nil
 	}
-	channels := c.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
-	tasks := make([]task.Task, 0)
-	for _, channel := range channels {
-		action := task.NewDropIndexAction(channel.Node, task.ActionTypeDropIndex, channel.ChannelName, fieldIDs)
-		t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, action)
-		t.SetPriority(task.TaskPriorityLow)
-		t.SetReason("drop index")
-		tasks = append(tasks, t)
-	}
-	return tasks
+	action := task.NewDropIndexAction(segment.Node, task.ActionTypeDropIndex, segment.GetInsertChannel(), indexIDs)
+	t := task.NewDropIndexTask(ctx, c.ID(), replica.GetCollectionID(), replica, segment.GetID(), action)
+	t.SetPriority(task.TaskPriorityLow)
+	t.SetReason("drop index")
+	return t
 }

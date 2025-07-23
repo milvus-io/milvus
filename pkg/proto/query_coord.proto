@@ -995,7 +995,8 @@ message ListLoadedSegmentsResponse {
 }
 message DropIndexRequest {
     common.MsgBase base = 1;
-    string channel = 2;
-    repeated int64 fieldIDs = 3;
-    bool need_transfer = 4;
+    int64 segmentID = 2;
+    repeated int64 indexIDs = 3;
+    string channel = 4;
+    bool need_transfer = 5;
 }

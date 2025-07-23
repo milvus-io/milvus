@@ -1641,16 +1641,20 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 			return merr.Status(err), nil
 		}
 	}
-	segments, err := node.manager.Segment.GetAndPinBy(segments.WithChannel(req.GetChannel()))
+	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()))
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	defer node.manager.Segment.Unpin(segments)
-	fieldIDs := req.GetFieldIDs()
-	for _, segment := range segments {
-		for _, fieldID := range fieldIDs {
-			segment.DropIndex(ctx, fieldID)
-		}
+	if len(segments) == 0 {
+		return merr.Success(), nil
 	}
+	defer node.manager.Segment.Unpin(segments)
+
+	segment := segments[0]
+	indexIDs := req.GetIndexIDs()
+	for _, indexID := range indexIDs {
+		segment.DropIndex(ctx, indexID)
+	}
+
 	return merr.Success(), nil
 }
