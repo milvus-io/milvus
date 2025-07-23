@@ -20,6 +20,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include "common/FieldData.h"
 #include "common/EasyAssert.h"
+#include "common/File.h"
 #include "common/JsonCastType.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -89,6 +90,8 @@ class IndexBase {
     }
 
     IndexType index_type_ = "";
+
+    std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 };
 
 using IndexBasePtr = std::unique_ptr<IndexBase>;

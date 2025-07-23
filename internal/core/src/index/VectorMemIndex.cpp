@@ -518,7 +518,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto filepath = GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 
@@ -654,11 +655,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
-    auto ok = unlink(filepath->data());
-    AssertInfo(ok == 0,
-               "failed to unlink mmap index file {}: {}",
-               filepath.value(),
-               strerror(errno));
+    this->mmap_file_raii_ = std::make_unique<MmapFileRAII>(filepath.value());
     LOG_INFO(
         "load vector index done, mmap_file_path:{}, download_duration:{}, "
         "write_files_duration:{}, deserialize_duration:{}",

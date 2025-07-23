@@ -74,7 +74,7 @@ class ChunkWriter : public ChunkWriterBase {
     }
 
     ChunkWriter(int dim, File& file, size_t offset, bool nullable)
-        : ChunkWriterBase(file, offset, nullable), dim_(dim){};
+        : ChunkWriterBase(file, offset, nullable), dim_(dim) {};
 
     void
     write(std::shared_ptr<arrow::RecordBatchReader> data) override {
@@ -122,8 +122,15 @@ class ChunkWriter : public ChunkWriterBase {
     std::shared_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        return std::make_shared<FixedWidthChunk>(
-            row_nums_, dim_, data, size, sizeof(T), nullable_);
+        auto mmap_file_raii =
+            file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
+        return std::make_unique<FixedWidthChunk>(row_nums_,
+                                                 dim_,
+                                                 data,
+                                                 size,
+                                                 sizeof(T),
+                                                 nullable_,
+                                                 std::move(mmap_file_raii));
     }
 
  private:
