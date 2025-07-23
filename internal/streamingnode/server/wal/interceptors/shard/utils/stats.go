@@ -2,9 +2,11 @@ package utils
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
@@ -37,15 +39,16 @@ func (s *SegmentBelongs) PartitionUniqueKey() PartitionUniqueKey {
 }
 
 // SegmentStats is the usage stats of a segment.
-// The SegmentStats is imprecise, so it is not promised to be recoverable for performance.
 type SegmentStats struct {
-	Insert            InsertMetrics
+	Modified          ModifiedMetrics
+	MaxRows           uint64    // MaxRows of current segment should be assigned, it's a fixed value when segment is transfer int growing.
 	MaxBinarySize     uint64    // MaxBinarySize of current segment should be assigned, it's a fixed value when segment is transfer int growing.
 	CreateTime        time.Time // created timestamp of this segment, it's a fixed value when segment is created, not a tso.
 	LastModifiedTime  time.Time // LastWriteTime is the last write time of this segment, it's not a tso, just a local time.
 	BinLogCounter     uint64    // BinLogCounter is the counter of binlog (equal to the binlog file count of primary key), it's an async stat not real time.
 	BinLogFileCounter uint64    // BinLogFileCounter is the counter of binlog files, it's an async stat not real time.
 	ReachLimit        bool      // ReachLimit is a flag to indicate the segment reach the limit once.
+	Level             datapb.SegmentLevel
 }
 
 // NewSegmentStatFromProto creates a new segment assignment stat from proto.
@@ -53,15 +56,28 @@ func NewSegmentStatFromProto(statProto *streamingpb.SegmentAssignmentStat) *Segm
 	if statProto == nil {
 		return nil
 	}
+	lv := datapb.SegmentLevel_L1
+	if statProto.Level != datapb.SegmentLevel_Legacy {
+		lv = statProto.Level
+	}
+	if lv != datapb.SegmentLevel_L0 && lv != datapb.SegmentLevel_L1 {
+		panic(fmt.Sprintf("invalid level: %s", lv))
+	}
+	maxRows := uint64(math.MaxUint64)
+	if statProto.MaxRows != 0 {
+		maxRows = statProto.MaxRows
+	}
 	return &SegmentStats{
-		Insert: InsertMetrics{
-			Rows:       statProto.InsertedRows,
-			BinarySize: statProto.InsertedBinarySize,
+		Modified: ModifiedMetrics{
+			Rows:       statProto.ModifiedRows,
+			BinarySize: statProto.ModifiedBinarySize,
 		},
+		MaxRows:          maxRows,
 		MaxBinarySize:    statProto.MaxBinarySize,
 		CreateTime:       time.Unix(statProto.CreateTimestamp, 0),
 		BinLogCounter:    statProto.BinlogCounter,
 		LastModifiedTime: time.Unix(statProto.LastModifiedTimestamp, 0),
+		Level:            lv,
 	}
 }
 
@@ -71,34 +87,41 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 		return nil
 	}
 	return &streamingpb.SegmentAssignmentStat{
+		MaxRows:               stat.MaxRows,
 		MaxBinarySize:         stat.MaxBinarySize,
-		InsertedRows:          stat.Insert.Rows,
-		InsertedBinarySize:    stat.Insert.BinarySize,
+		ModifiedRows:          stat.Modified.Rows,
+		ModifiedBinarySize:    stat.Modified.BinarySize,
 		CreateTimestamp:       stat.CreateTime.Unix(),
 		BinlogCounter:         stat.BinLogCounter,
 		LastModifiedTimestamp: stat.LastModifiedTime.Unix(),
+		Level:                 stat.Level,
 	}
 }
 
 // AllocRows alloc space of rows on current segment.
 // Return true if the segment is assigned.
-func (s *SegmentStats) AllocRows(m InsertMetrics) bool {
-	if m.BinarySize > s.BinaryCanBeAssign() {
-		if s.Insert.BinarySize > 0 {
+func (s *SegmentStats) AllocRows(m ModifiedMetrics) bool {
+	if m.BinarySize > s.BinaryCanBeAssign() || m.Rows > s.RowsCanBeAssign() {
+		if s.Modified.BinarySize > 0 {
 			// if the binary size is not empty, it means the segment cannot hold more data, mark it as reach limit.
 			s.ReachLimit = true
 		}
 		return false
 	}
 
-	s.Insert.Collect(m)
+	s.Modified.Collect(m)
 	s.LastModifiedTime = time.Now()
 	return true
 }
 
 // BinaryCanBeAssign returns the capacity of binary size can be inserted.
 func (s *SegmentStats) BinaryCanBeAssign() uint64 {
-	return s.MaxBinarySize - s.Insert.BinarySize
+	return s.MaxBinarySize - s.Modified.BinarySize
+}
+
+// RowsCanBeAssign returns the capacity of rows can be inserted.
+func (s *SegmentStats) RowsCanBeAssign() uint64 {
+	return s.MaxRows - s.Modified.Rows
 }
 
 // ShouldBeSealed returns if the segment should be sealed.
@@ -108,7 +131,7 @@ func (s *SegmentStats) ShouldBeSealed() bool {
 
 // IsEmpty returns if the segment is empty.
 func (s *SegmentStats) IsEmpty() bool {
-	return s.Insert.Rows == 0
+	return s.Modified.Rows == 0
 }
 
 // UpdateOnSync updates the stats of segment on sync.
@@ -123,25 +146,25 @@ func (s *SegmentStats) Copy() *SegmentStats {
 	return &s2
 }
 
-// InsertMetrics is the metrics of insert operation.
-type InsertMetrics struct {
+// ModifiedMetrics is the metrics of insert/delete operation.
+type ModifiedMetrics struct {
 	Rows       uint64
 	BinarySize uint64
 }
 
-// IsZero return true if InsertMetrics is zero.
-func (m *InsertMetrics) IsZero() bool {
+// IsZero return true if ModifiedMetrics is zero.
+func (m *ModifiedMetrics) IsZero() bool {
 	return m.Rows == 0 && m.BinarySize == 0
 }
 
 // Collect collects other metrics.
-func (m *InsertMetrics) Collect(other InsertMetrics) {
+func (m *ModifiedMetrics) Collect(other ModifiedMetrics) {
 	m.Rows += other.Rows
 	m.BinarySize += other.BinarySize
 }
 
 // Subtract subtract by other metrics.
-func (m *InsertMetrics) Subtract(other InsertMetrics) {
+func (m *ModifiedMetrics) Subtract(other ModifiedMetrics) {
 	if m.Rows < other.Rows {
 		panic(fmt.Sprintf("rows cannot be less than zero, current: %d, target: %d", m.Rows, other.Rows))
 	}
