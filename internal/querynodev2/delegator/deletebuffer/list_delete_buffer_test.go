@@ -17,8 +17,10 @@
 package deletebuffer
 
 import (
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -199,4 +201,300 @@ func (s *ListDeleteBufferSuite) TestL0SegmentOperations() {
 
 func TestListDeleteBuffer(t *testing.T) {
 	suite.Run(t, new(ListDeleteBufferSuite))
+}
+
+func TestListDeleteBuffer_PinUnpinBasic(t *testing.T) {
+	// Create a new list delete buffer
+	buffer := NewListDeleteBuffer[*Item](1000, 1, []string{"test1", "test2"})
+
+	// Add some test data
+	item1 := &Item{Ts: 1000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+				Tss:      []uint64{1000},
+				RowCount: 1,
+			},
+		},
+	}}
+	item2 := &Item{Ts: 2000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(2)},
+				Tss:      []uint64{2000},
+				RowCount: 1,
+			},
+		},
+	}}
+	item3 := &Item{Ts: 3000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(3)},
+				Tss:      []uint64{3000},
+				RowCount: 1,
+			},
+		},
+	}}
+
+	buffer.Put(item1)
+	buffer.Put(item2)
+	buffer.Put(item3)
+
+	// Verify initial state
+	entryNum, _ := buffer.Size()
+	assert.Equal(t, int64(3), entryNum)
+
+	// Pin timestamp 1500 for segment 123
+	buffer.Pin(1500, 123)
+
+	// Try to discard data before timestamp 2000
+	// This should be skipped because there's a pinned timestamp (1500) before cleanTs (2000)
+	buffer.TryDiscard(2000)
+
+	// Verify that all data is still there (cleanup was skipped)
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(3), entryNum)
+
+	// Unpin timestamp 1500 for segment 123
+	buffer.Unpin(1500, 123)
+
+	// Try to discard data before timestamp 2000 again
+	// Now cleanup should proceed normally
+	buffer.TryDiscard(2000)
+
+	// Verify that data before 2000 is cleaned up
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(2), entryNum)
+}
+
+func TestListDeleteBuffer_MultipleSegmentsPinSameTimestamp(t *testing.T) {
+	// Create a new list delete buffer
+	buffer := NewListDeleteBuffer[*Item](1000, 1, []string{"test1", "test2"})
+
+	// Add test data
+	item1 := &Item{Ts: 1000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+				Tss:      []uint64{1000},
+				RowCount: 1,
+			},
+		},
+	}}
+	item2 := &Item{Ts: 2000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(2)},
+				Tss:      []uint64{2000},
+				RowCount: 1,
+			},
+		},
+	}}
+
+	buffer.Put(item1)
+	buffer.Put(item2)
+
+	// Multiple segments pin the same timestamp
+	buffer.Pin(1500, 123) // Protects data after 1500
+	buffer.Pin(1500, 456) // Also protects data after 1500
+
+	// Try to discard data before timestamp 2000
+	// This should be skipped because there's a pinned timestamp (1500) before cleanTs (2000)
+	buffer.TryDiscard(2000)
+
+	// Verify that all data is still there (cleanup was skipped)
+	entryNum, _ := buffer.Size()
+	assert.Equal(t, int64(2), entryNum) // All data should still be there
+
+	// Unpin one segment
+	buffer.Unpin(1500, 123)
+
+	// Try to discard data before timestamp 2000
+	// This should still be skipped because the other segment still has it pinned
+	buffer.TryDiscard(2000)
+
+	// Verify that data is still there (other segment still has it pinned)
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(2), entryNum) // Data should still be there
+
+	// Unpin the other segment
+	buffer.Unpin(1500, 456)
+
+	// Try to discard data before timestamp 2000
+	// Now cleanup should proceed normally
+	buffer.TryDiscard(2000)
+
+	// Verify that data is now cleaned up
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(1), entryNum) // Only data with ts >= 2000 should remain
+}
+
+func TestListDeleteBuffer_PinAfterCleanTs(t *testing.T) {
+	// Create a new list delete buffer
+	buffer := NewListDeleteBuffer[*Item](1000, 1, []string{"test1", "test2"})
+
+	// Add test data
+	item1 := &Item{Ts: 1000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+				Tss:      []uint64{1000},
+				RowCount: 1,
+			},
+		},
+	}}
+	item2 := &Item{Ts: 2000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(2)},
+				Tss:      []uint64{2000},
+				RowCount: 1,
+			},
+		},
+	}}
+	item3 := &Item{Ts: 3000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(3)},
+				Tss:      []uint64{3000},
+				RowCount: 1,
+			},
+		},
+	}}
+
+	buffer.Put(item1)
+	buffer.Put(item2)
+	buffer.Put(item3)
+
+	// Pin a timestamp that is AFTER the cleanTs
+	buffer.Pin(2500, 123) // Protects data after 2500
+
+	// Try to discard data before timestamp 2000
+	// This should proceed normally because the pinned timestamp (2500) is AFTER cleanTs (2000)
+	buffer.TryDiscard(2000)
+
+	// Verify that data before 2000 is cleaned up
+	entryNum, _ := buffer.Size()
+	assert.Equal(t, int64(2), entryNum) // Data with ts 2000 and 3000 should remain
+}
+
+// TestListDeleteBuffer_EdgeCases tests edge cases for the pinned functionality
+func TestListDeleteBuffer_EdgeCases(t *testing.T) {
+	// Create a new list delete buffer
+	buffer := NewListDeleteBuffer[*Item](1000, 1, []string{"test1", "test2"})
+
+	// Test with empty buffer - TryDiscard should proceed normally
+	buffer.TryDiscard(2000)
+	entryNum, _ := buffer.Size()
+	assert.Equal(t, int64(0), entryNum) // No data to clean
+
+	// Add some data
+	item1 := &Item{Ts: 1000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+				Tss:      []uint64{1000},
+				RowCount: 1,
+			},
+		},
+	}}
+
+	buffer.Put(item1)
+
+	// Pin timestamp equal to data timestamp
+	buffer.Pin(1000, 123)
+
+	// Try to discard with timestamp equal to pinned timestamp
+	// This should be skipped because 1000 == 1000 (not < 1000)
+	buffer.TryDiscard(1000)
+
+	// Verify that data is still there
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(1), entryNum) // Data should still be there
+
+	// Try to discard with timestamp greater than pinned timestamp
+	// This should be skipped because 1000 < 2000
+	buffer.TryDiscard(2000)
+
+	// Verify that data is still there
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(1), entryNum) // Data should still be there
+
+	// Try to discard with timestamp less than pinned timestamp
+	// This should proceed normally because 1000 > 500
+	buffer.TryDiscard(500)
+
+	// Verify that data is still there (because 500 < 1000, no data to clean)
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(1), entryNum) // Data should still be there
+}
+
+// TestListDeleteBuffer_PinUnpinConcurrent tests concurrent pin and unpin operations
+func TestListDeleteBuffer_PinUnpinConcurrent(t *testing.T) {
+	// Create a new list delete buffer
+	buffer := NewListDeleteBuffer[*Item](1000, 1, []string{"test1", "test2"})
+
+	// Add test data
+	item1 := &Item{Ts: 1000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(1)},
+				Tss:      []uint64{1000},
+				RowCount: 1,
+			},
+		},
+	}}
+	item2 := &Item{Ts: 2000, Data: []BufferItem{
+		{
+			PartitionID: 200,
+			DeleteData: storage.DeleteData{
+				Pks:      []storage.PrimaryKey{storage.NewInt64PrimaryKey(2)},
+				Tss:      []uint64{2000},
+				RowCount: 1,
+			},
+		},
+	}}
+	buffer.Put(item1)
+	buffer.Put(item2)
+
+	// Test concurrent pin operations
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(segmentID int64) {
+			defer wg.Done()
+			buffer.Pin(1500, segmentID)
+		}(int64(i))
+	}
+	wg.Wait()
+
+	// Try to discard - should be skipped due to pinned timestamp
+	buffer.TryDiscard(2000)
+	entryNum, _ := buffer.Size()
+	assert.Equal(t, int64(2), entryNum) // All data should remain
+
+	// Test concurrent unpin operations
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(segmentID int64) {
+			defer wg.Done()
+			buffer.Unpin(1500, segmentID)
+		}(int64(i))
+	}
+	wg.Wait()
+
+	// Try to discard again - should proceed normally
+	buffer.TryDiscard(2000)
+	entryNum, _ = buffer.Size()
+	assert.Equal(t, int64(1), entryNum) // Only data with ts >= 2000 should remain
 }
