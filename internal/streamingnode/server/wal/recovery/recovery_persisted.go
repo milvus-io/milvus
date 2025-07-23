@@ -6,6 +6,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -178,7 +179,10 @@ func (r *recoveryStorageImpl) fetchLatestSchemaFromCoord(ctx context.Context, re
 	for idx, collection := range resp.GetCollections() {
 		futures[idx] = conc.Go(func() (*milvuspb.DescribeCollectionResponse, error) {
 			resp, err := rc.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
-				Base:         commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
 				CollectionID: collection.CollectionId,
 			})
 			if err = merr.CheckRPCCall(resp, err); err != nil {
