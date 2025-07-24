@@ -44,6 +44,7 @@ class DataField:
     array_int_field = "array_int"
     array_float_field = "array_float"
     array_string_field = "array_string"
+    new_field = "new_field"
 
 
 class DataErrorType:
