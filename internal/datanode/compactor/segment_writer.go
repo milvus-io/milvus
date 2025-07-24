@@ -212,6 +212,16 @@ func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
 	return w.writer.WriteValue(v)
 }
 
+// Flush calls storage.SerializeWriter.Flush(), it is used for serialize the value buffer to record and write to binlog.
+// Note: the record is not written to binlog immediately, it will be written when the buffer is full or the writer is closed.
+// Call this function before record iteration to avoid the underlying record be released.
+func (w *MultiSegmentWriter) Flush() error {
+	if w.writer == nil {
+		return nil
+	}
+	return w.writer.Flush()
+}
+
 func (w *MultiSegmentWriter) FlushChunk() error {
 	if w.writer == nil {
 		return nil
