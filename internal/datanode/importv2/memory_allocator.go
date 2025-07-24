@@ -18,21 +18,36 @@ package importv2
 
 import (
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+var (
+	globalMemoryAllocator     MemoryAllocator
+	globalMemoryAllocatorOnce sync.Once
+)
+
+// GetMemoryAllocator returns the global memory allocator instance
+func GetMemoryAllocator() MemoryAllocator {
+	globalMemoryAllocatorOnce.Do(func() {
+		globalMemoryAllocator = NewMemoryAllocator(int64(hardware.GetMemoryCount()))
+	})
+	return globalMemoryAllocator
+}
+
 // MemoryAllocator handles memory allocation and deallocation for import tasks
 type MemoryAllocator interface {
-	// TryAllocate attempts to allocate memory of the specified size
-	// Returns true if allocation is successful, false if insufficient memory
-	TryAllocate(taskID int64, size int64) bool
-
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
+
+	// BlockingAllocate blocks until memory is available and then allocates
+	// This method will block until memory becomes available
+	BlockingAllocate(taskID int64, size int64)
 }
 
 type memoryAllocator struct {
@@ -51,8 +66,8 @@ func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	return ma
 }
 
-// TryAllocate attempts to allocate memory of the specified size
-func (ma *memoryAllocator) TryAllocate(taskID int64, size int64) bool {
+// tryAllocate attempts to allocate memory of the specified size
+func (ma *memoryAllocator) tryAllocate(taskID int64, size int64) bool {
 	ma.mutex.Lock()
 	defer ma.mutex.Unlock()
 
@@ -95,4 +110,24 @@ func (ma *memoryAllocator) Release(taskID int64, size int64) {
 		zap.Int64("taskID", taskID),
 		zap.Int64("releasedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory))
+}
+
+// BlockingAllocate blocks until memory is available and then allocates
+func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
+	// First try to allocate immediately
+	if ma.tryAllocate(taskID, size) {
+		return
+	}
+
+	log.Info("task waiting for memory allocation",
+		zap.Int64("taskID", taskID),
+		zap.Int64("requestedSize", size))
+
+	// Keep trying until allocation succeeds
+	for {
+		time.Sleep(5 * time.Second)
+		if ma.tryAllocate(taskID, size) {
+			return
+		}
+	}
 }

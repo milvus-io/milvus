@@ -31,12 +31,12 @@ func TestMemoryAllocatorBasicOperations(t *testing.T) {
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 1
-	success := ma.TryAllocate(1, 50*1024*1024) // 50MB for task 1
+	success := ma.(*memoryAllocator).tryAllocate(1, 50*1024*1024) // 50MB for task 1
 	assert.True(t, success)
 	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 2
-	success = ma.TryAllocate(2, 50*1024*1024) // 50MB for task 2
+	success = ma.(*memoryAllocator).tryAllocate(2, 50*1024*1024) // 50MB for task 2
 	assert.True(t, success)
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
@@ -60,12 +60,12 @@ func TestMemoryAllocatorMemoryLimit(t *testing.T) {
 	testSize := memoryLimit / 10 // Use 10% of available memory
 
 	// Allocate memory up to the limit
-	success := ma.TryAllocate(1, testSize)
+	success := ma.(*memoryAllocator).tryAllocate(1, testSize)
 	assert.True(t, success)
 	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory)
 
 	// Try to allocate more memory than available (should fail)
-	success = ma.TryAllocate(2, memoryLimit)
+	success = ma.(*memoryAllocator).tryAllocate(2, memoryLimit)
 	assert.False(t, success)
 	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory) // Should remain unchanged
 
@@ -84,7 +84,7 @@ func TestMemoryAllocatorConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		taskID := int64(i + 1)
 		go func() {
-			success := ma.TryAllocate(taskID, 50*1024*1024) // 50MB each
+			success := ma.(*memoryAllocator).tryAllocate(taskID, 50*1024*1024) // 50MB each
 			if success {
 				ma.Release(taskID, 50*1024*1024)
 			}
@@ -109,7 +109,7 @@ func TestMemoryAllocatorNegativeRelease(t *testing.T) {
 	ma := NewMemoryAllocator(1024 * 1024 * 1024)
 
 	// Allocate some memory
-	success := ma.TryAllocate(1, 100*1024*1024) // 100MB
+	success := ma.(*memoryAllocator).tryAllocate(1, 100*1024*1024) // 100MB
 	assert.True(t, success)
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
@@ -128,7 +128,7 @@ func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 	sizes := []int64{20, 30, 25, 15, 35} // Total: 125MB
 
 	for i, taskID := range taskIDs {
-		success := ma.TryAllocate(taskID, sizes[i]*1024*1024)
+		success := ma.(*memoryAllocator).tryAllocate(taskID, sizes[i]*1024*1024)
 		assert.True(t, success)
 	}
 
@@ -153,5 +153,38 @@ func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 	ma.Release(5, 35*1024*1024)
 
 	// Verify final state
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorZeroSize tests handling of zero size allocations
+func TestMemoryAllocatorZeroSize(t *testing.T) {
+	// Create memory allocator
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+
+	// Test zero size allocation
+	success := ma.(*memoryAllocator).tryAllocate(1, 0)
+	assert.True(t, success) // Should succeed
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+
+	// Test zero size release
+	ma.Release(1, 0)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorSimple tests basic functionality without external dependencies
+func TestMemoryAllocatorSimple(t *testing.T) {
+	// Create memory allocator with 1GB system memory
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+
+	// Test initial state
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+
+	// Test memory allocation
+	success := ma.(*memoryAllocator).tryAllocate(1, 50*1024*1024) // 50MB
+	assert.True(t, success)
+	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
+
+	// Test memory release
+	ma.Release(1, 50*1024*1024)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 }
