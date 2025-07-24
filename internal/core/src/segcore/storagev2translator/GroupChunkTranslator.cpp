@@ -273,7 +273,7 @@ GroupChunkTranslator::load_group_chunk(
             it != field_metas_.end(),
             "[StorageV2] translator {} field id {} not found in field_metas",
             key_,
-            fid);
+            fid.get());
         const auto& field_meta = it->second;
         const arrow::ArrayVector& array_vec = table->column(i)->chunks();
         std::unique_ptr<Chunk> chunk;
