@@ -1280,8 +1280,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit,
                             expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
-                                         "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
+                            check_items={"err_code": 1100,
+                                         "err_msg": "error: two column comparison with JSON type is not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ef_less_than_limit(self):
