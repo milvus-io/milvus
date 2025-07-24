@@ -143,7 +143,10 @@ class FixedWidthChunk : public Chunk {
 class StringChunk : public Chunk {
  public:
     StringChunk() = default;
-    StringChunk(int32_t row_nums, char* data, uint64_t size, bool nullable,
+    StringChunk(int32_t row_nums,
+                char* data,
+                uint64_t size,
+                bool nullable,
                 std::unique_ptr<MmapFileRAII> mmap_file_raii = nullptr)
         : Chunk(row_nums, data, size, nullable, std::move(mmap_file_raii)) {
         auto null_bitmap_bytes_num = 0;
