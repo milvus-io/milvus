@@ -134,6 +134,12 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
+		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
+		if err != nil {
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+			return
+		}
+
 		if err = t.saveSegmentMeta(result); err != nil {
 			log.Warn("l0CompactionTask failed to save segment meta", zap.Error(err))
 			return
