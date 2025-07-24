@@ -271,7 +271,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
