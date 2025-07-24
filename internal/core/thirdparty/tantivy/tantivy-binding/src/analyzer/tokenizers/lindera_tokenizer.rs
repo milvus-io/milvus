@@ -16,6 +16,7 @@ use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
 use crate::analyzer::dict::lindera::load_dictionary_from_kind;
+use crate::analyzer::filter::get_string_list;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 
@@ -25,6 +26,8 @@ pub struct LinderaTokenStream<'a> {
 }
 
 const DICTKINDKEY: &str = "dict_kind";
+const DICTBUILDDIRKEY: &str = "dict_build_dir";
+const DICTDOWNLOADURLKEY: &str = "download_urls";
 const FILTERKEY: &str = "filter";
 
 impl<'a> TokenStream for LinderaTokenStream<'a> {
@@ -62,8 +65,12 @@ impl LinderaTokenizer {
     /// This function will create a new `LinderaTokenizer` with json parameters.
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<LinderaTokenizer> {
         let kind: DictionaryKind = fetch_lindera_kind(params)?;
-        let dictionary =
-            load_dictionary_from_kind(&kind, "/var/lib/milvus/dict/lindera".to_string(), vec![])?;
+
+        // for download dict online
+        let build_dir = fetch_dict_build_dir(params)?;
+        let download_urls = fetch_dict_download_urls(params)?;
+
+        let dictionary = load_dictionary_from_kind(&kind, build_dir, download_urls)?;
 
         let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
         let mut tokenizer = LinderaTokenizer::from_segmenter(segmenter);
@@ -126,16 +133,32 @@ impl DictionaryKindParser for &str {
 fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<DictionaryKind> {
     params
         .get(DICTKINDKEY)
-        .ok_or_else(|| {
-            TantivyBindingError::InvalidArgument(format!("lindera tokenizer dict_kind must be set"))
-        })?
+        .ok_or(TantivyBindingError::InvalidArgument(format!(
+            "lindera tokenizer dict_kind must be set"
+        )))?
         .as_str()
-        .ok_or_else(|| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera tokenizer dict kind should be string"
-            ))
-        })?
+        .ok_or(TantivyBindingError::InvalidArgument(format!(
+            "lindera tokenizer dict kind should be string"
+        )))?
         .into_dict_kind()
+}
+
+fn fetch_dict_build_dir(params: &json::Map<String, json::Value>) -> Result<String> {
+    params
+        .get(DICTBUILDDIRKEY)
+        .map_or(Ok("/var/lib/milvus/dict/lindera".to_string()), |v| {
+            v.as_str()
+                .ok_or(TantivyBindingError::InvalidArgument(format!(
+                    "dict build dir must be string"
+                )))
+                .map(|s| s.to_string())
+        })
+}
+
+fn fetch_dict_download_urls(params: &json::Map<String, json::Value>) -> Result<Vec<String>> {
+    params.get(DICTDOWNLOADURLKEY).map_or(Ok(vec![]), |v| {
+        get_string_list(v, "lindera dict download urls")
+    })
 }
 
 fn fetch_lindera_tags_from_params(
@@ -330,7 +353,6 @@ mod tests {
     use tantivy::tokenizer::Tokenizer;
 
     #[test]
-    #[cfg(feature = "lindera-ipadic")]
     fn test_lindera_tokenizer() {
         let params = r#"{
             "type": "lindera",
@@ -358,7 +380,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "lindera-cc-cedict")]
     fn test_lindera_tokenizer_cc() {
         let params = r#"{
             "type": "lindera",

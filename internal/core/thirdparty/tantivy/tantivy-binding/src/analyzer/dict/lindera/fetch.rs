@@ -1,11 +1,20 @@
+use std::env;
 use std::error::Error;
-use std::path::Path;
+use std::fs;
+use std::io::{self, Cursor, Read, Write};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use flate2::read::GzDecoder;
+use fs2::FileExt;
+use tar::Archive;
 
 use lindera::dictionary::Dictionary;
 use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
 use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
 use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
 use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
+use lindera_dictionary::dictionary_builder::DictionaryBuilder;
 use log::{error, info, warn};
 use md5::Context;
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
@@ -13,13 +22,8 @@ use reqwest::Client;
 use tokio::time::sleep;
 use tokio::time::Duration;
 
-use serde_json as json;
-use std::fs;
-use std::path::PathBuf;
-
 use super::common;
 use crate::error::TantivyBindingError;
-use lindera_dictionary::dictionary_builder::DictionaryBuilder;
 
 const MAX_ROUND: usize = 3;
 
@@ -138,35 +142,20 @@ async fn download_with_retry(
     Err("Failed to download a valid file from all sources".into())
 }
 
-/// Fetch the necessary assets and then build the dictionary using `builder`
-pub async fn fetch(
+pub async fn build(
     params: &FetchParams,
     builder: impl DictionaryBuilder,
+    build_dir: &PathBuf,
+    input_dir: &PathBuf,
+    output_dir: &PathBuf,
+    tmp_dir: &PathBuf,
 ) -> Result<(), Box<dyn Error>> {
-    use std::env;
-    use std::fs::{rename, File};
-    use std::io::{self, Cursor, Read, Write};
-    use std::path::{Path, PathBuf};
-    use std::time::Instant;
-
-    use flate2::read::GzDecoder;
-    use tar::Archive;
-
     let start = Instant::now();
     info!(
-        "start fetch lindera dictionary name: {}\n",
-        params.file_name.as_str()
+        "start donwload and build lindera dictionary. name: {} to {:?}\n",
+        params.file_name.as_str(),
+        output_dir,
     );
-    let build_dir = PathBuf::from(params.lindera_dir.as_str());
-    std::fs::create_dir_all(&build_dir)?;
-
-    let input_dir = build_dir.join(params.input_dir.as_str());
-    let output_dir = build_dir.join(params.output_dir.as_str());
-
-    // Fast path where the data is already in cache
-    if output_dir.is_dir() {
-        return Ok(());
-    }
 
     // Source file path for build package
     let source_path_for_build = &build_dir.join(params.file_name.as_str());
@@ -179,7 +168,7 @@ pub async fn fetch(
         .user_agent(format!("Lindera/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    let mut dest = File::create(tmp_path.as_path())?;
+    let mut dest = fs::File::create(tmp_path.as_path())?;
     let content = download_with_retry(
         &client,
         params.download_urls.iter().map(|s| s.as_str()).collect(),
@@ -191,21 +180,19 @@ pub async fn fetch(
     io::copy(&mut Cursor::new(content.as_slice()), &mut dest)?;
     dest.flush()?;
 
-    rename(tmp_path.clone(), source_path_for_build)?;
+    fs::rename(tmp_path.clone(), source_path_for_build)?;
 
-    // Decompress a tar.gz file
-    let tmp_extract_path = Path::new(&build_dir).join(format!("tmp-archive-{}", params.input_dir));
-    let tmp_extracted_path = tmp_extract_path.join(params.input_dir.as_str());
-    let _ = std::fs::remove_dir_all(&tmp_extract_path);
-    std::fs::create_dir_all(&tmp_extract_path)?;
+    let tmp_extracted_path = tmp_dir.join(params.input_dir.as_str());
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir)?;
 
-    let mut tar_gz = File::open(source_path_for_build)?;
+    let mut tar_gz = fs::File::open(source_path_for_build)?;
     let mut buffer = Vec::new();
     tar_gz.read_to_end(&mut buffer)?;
     let cursor = Cursor::new(buffer);
     let decoder = GzDecoder::new(cursor);
     let mut archive = Archive::new(decoder);
-    archive.unpack(&tmp_extract_path)?;
+    archive.unpack(&tmp_dir)?;
 
     #[cfg(target_os = "windows")]
     {
@@ -229,10 +216,9 @@ pub async fn fetch(
     {
         // Empty the input directory first to avoid conflicts when renaming the directory later on Linux and macOS systems (which do not support overwriting directories).
         empty_directory(&input_dir)?;
-        rename(tmp_extracted_path, &input_dir)?;
+        fs::rename(tmp_extracted_path, &input_dir)?;
     }
 
-    let _ = std::fs::remove_dir_all(&tmp_extract_path);
     drop(dest);
     let _ = std::fs::remove_file(source_path_for_build);
 
@@ -265,17 +251,62 @@ pub async fn fetch(
         empty_directory(&output_dir)?;
 
         // Rename tmp_path to output_dir
-        rename(tmp_path, &output_dir)?;
+        fs::rename(tmp_path, &output_dir)?;
     }
-
-    let _ = std::fs::remove_dir_all(&input_dir);
-
     info!(
-        "finish fetch lindera dictionary name: {} duration: {} ms\n",
+        "finish donwload and build lindera dictionary. name: {} duration: {} ms\n",
         params.file_name.as_str(),
         start.elapsed().as_millis()
     );
     Ok(())
+}
+
+/// Fetch the necessary assets and then build the dictionary using `builder`
+pub async fn fetch(
+    params: &FetchParams,
+    builder: impl DictionaryBuilder,
+) -> Result<(), Box<dyn Error>> {
+    let build_dir = PathBuf::from(params.lindera_dir.as_str());
+    std::fs::create_dir_all(&build_dir)?;
+
+    let input_dir = build_dir.join(params.input_dir.as_str());
+    let output_dir = build_dir.join(params.output_dir.as_str());
+    let lock_path = build_dir.join(format!("lindera-{}.lock", params.file_name.as_str()));
+
+    // Skip create fs lock if already in cache
+    if output_dir.is_dir() {
+        return Ok(());
+    }
+
+    let flock = fs::File::create(&lock_path)?;
+    flock.lock_exclusive()?;
+
+    // Fast path where the data is already
+    if output_dir.is_dir() {
+        return Ok(());
+    }
+
+    // Decompress a tar.gz file
+    let tmp_dir = Path::new(&build_dir).join(format!("tmp-archive-{}", params.input_dir));
+
+    let build_result = build(
+        params,
+        builder,
+        &build_dir,
+        &input_dir,
+        &output_dir,
+        &tmp_dir,
+    )
+    .await;
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let _ = std::fs::remove_dir_all(&input_dir);
+
+    // unlock file lock and remove lock file.
+    flock.unlock()?;
+    drop(flock);
+    let _ = fs::remove_file(&lock_path);
+
+    build_result
 }
 
 pub fn load(params: &FetchParams) -> Result<lindera::dictionary::Dictionary, TantivyBindingError> {
@@ -286,7 +317,7 @@ pub fn load(params: &FetchParams) -> Result<lindera::dictionary::Dictionary, Tan
     let words_data = fs::read(dict_dir.join(common::WORDS_DATA))?;
     let connection_data = fs::read(dict_dir.join(common::CONNECTION_DATA))?;
     let char_definition_data = fs::read(dict_dir.join(common::CHAR_DEFINITION_DATA))?;
-    let unkonwn_data = fs::read(dict_dir.join(common::UNKNOWN_DATA))?;
+    let unknown_data = fs::read(dict_dir.join(common::UNKNOWN_DATA))?;
 
     let dict = Dictionary {
         prefix_dictionary: PrefixDictionary::load(
@@ -305,7 +336,7 @@ pub fn load(params: &FetchParams) -> Result<lindera::dictionary::Dictionary, Tan
                 ))
             },
         )?,
-        unknown_dictionary: UnknownDictionary::load(unkonwn_data.as_slice()).map_err(|e| {
+        unknown_dictionary: UnknownDictionary::load(unknown_data.as_slice()).map_err(|e| {
             TantivyBindingError::InternalError(format!(
                 "lindera load unknown dictionary failed, err:{}",
                 e
