@@ -272,6 +272,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
     AssembleIndexDatas(index_data_codecs, binary_set);
+    // clear index_data_codecs to free memory early
+    index_data_codecs.clear();
 
     // start engine load index span
     auto span_load_engine =
