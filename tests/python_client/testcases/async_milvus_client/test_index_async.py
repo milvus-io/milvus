@@ -192,7 +192,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         """
         target: test drop index when collection are not released
         method: drop index when collection are not released
-        expected: raise exception
+        expected: drop index successfully
         """
         client = self._client()
         self.init_async_milvus_client()
@@ -204,7 +204,7 @@ class TestAsyncMilvusClientIndexInvalid(TestMilvusClientV2Base):
         # 2. drop index
         error = {ct.err_code: 65535, ct.err_msg: f"index cannot be dropped, collection is loaded, "
                                                  f"please release it first"}
-        await async_client.drop_index(collection_name, "vector", check_task=CheckTasks.err_res, check_items=error)
+        await async_client.drop_index(collection_name, "vector")
         # 3. drop action
         await async_client.drop_collection(collection_name)
 
