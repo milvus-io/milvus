@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -167,6 +168,14 @@ func (p *ProxyWatcher) handlePutEvent(e *clientv3.Event) error {
 		return err
 	}
 	log.Ctx(context.TODO()).Debug("received proxy put event with session", zap.Any("session", session))
+	rangeChecker := semver.MustParseRange(">=2.6.0-dev")
+	if rangeChecker(session.Version) {
+		log.Info("new proxy with no timetick join, ignored",
+			zap.String("version", session.Version.String()),
+			zap.Int64("serverID", session.ServerID),
+			zap.String("address", session.Address))
+		return nil
+	}
 	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
