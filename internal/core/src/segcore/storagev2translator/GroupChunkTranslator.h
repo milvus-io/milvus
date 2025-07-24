@@ -65,6 +65,10 @@ class GroupChunkTranslator
     std::pair<size_t, size_t>
     get_file_and_row_group_index(milvus::cachinglayer::cid_t cid) const;
 
+    milvus::cachinglayer::cid_t
+    get_cid_from_file_and_row_group_index(size_t file_idx,
+                                          size_t row_group_idx) const;
+
     milvus::cachinglayer::Meta*
     meta() override {
         return &meta_;

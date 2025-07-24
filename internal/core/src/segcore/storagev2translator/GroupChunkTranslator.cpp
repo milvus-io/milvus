@@ -67,13 +67,16 @@ GroupChunkTranslator::GroupChunkTranslator(
           /* support_eviction */ true) {
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
-    
+
     // Get row group metadata from files
     for (const auto& file : insert_files_) {
         auto reader =
             std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
+        LOG_INFO("insert file {} has {} row groups",
+                 file,
+                 row_group_meta_list_.back().size());
         auto status = reader->Close();
         AssertInfo(status.ok(),
                    "failed to close file reader when get row group "
@@ -142,18 +145,48 @@ GroupChunkTranslator::get_file_and_row_group_index(
     }
 
     // cid is out of range, this should not happen
-    AssertInfo(false, 
-               fmt::format("cid {} is out of range. Total row groups across all files: {}", 
-                          cid, 
-                          [this]() {
-                              size_t total = 0;
-                              for (const auto& file_metas : row_group_meta_list_) {
-                                  total += file_metas.size();
-                              }
-                              return total;
-                          }()));
+    AssertInfo(
+        false,
+        fmt::format(
+            "cid {} is out of range. Total row groups across all files: {}",
+            cid,
+            [this]() {
+                size_t total = 0;
+                for (const auto& file_metas : row_group_meta_list_) {
+                    total += file_metas.size();
+                }
+                return total;
+            }()));
 }
 
+milvus::cachinglayer::cid_t
+GroupChunkTranslator::get_cid_from_file_and_row_group_index(
+    size_t file_idx, size_t row_group_idx) const {
+    AssertInfo(file_idx < row_group_meta_list_.size(),
+               fmt::format("file_idx {} is out of range. Total files: {}",
+                           file_idx,
+                           row_group_meta_list_.size()));
+
+    const auto& file_metas = row_group_meta_list_[file_idx];
+    AssertInfo(row_group_idx < file_metas.size(),
+               fmt::format("row_group_idx {} is out of range for file {}. "
+                           "Total row groups in file: {}",
+                           row_group_idx,
+                           file_idx,
+                           file_metas.size()));
+
+    milvus::cachinglayer::cid_t cid = 0;
+
+    for (size_t i = 0; i < file_idx; ++i) {
+        cid += row_group_meta_list_[i].size();
+    }
+
+    cid += row_group_idx;
+
+    return cid;
+}
+
+// the returned cids are sorted. It may not follow the order of cids.
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
 GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     std::vector<std::pair<milvus::cachinglayer::cid_t,
@@ -193,18 +226,21 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     std::unordered_set<cachinglayer::cid_t> filled_cids;
     filled_cids.reserve(cids.size());
     while (column_group_info_.arrow_reader_channel->pop(r)) {
-        for (const auto& [row_group_id, table] : r->arrow_tables) {
-            auto cid = static_cast<cachinglayer::cid_t>(row_group_id);
+        for (const auto& [file_index, row_group_index, table] :
+             r->arrow_tables) {
+            // Convert file_index and row_group_index to global cid
+            auto cid = get_cid_from_file_and_row_group_index(file_index,
+                                                             row_group_index);
             cells.emplace_back(cid, load_group_chunk(table, cid));
             filled_cids.insert(cid);
         }
     }
-    
     // Verify all requested cids have been filled
     for (auto cid : cids) {
         AssertInfo(filled_cids.find(cid) != filled_cids.end(),
                    "Cid {} was not filled, missing row group id {}",
-                   cid, cid);
+                   cid,
+                   cid);
     }
     return cells;
 }
@@ -273,4 +309,3 @@ GroupChunkTranslator::load_group_chunk(
 }
 
 }  // namespace milvus::segcore::storagev2translator
-

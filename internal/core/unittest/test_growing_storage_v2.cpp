@@ -227,7 +227,8 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
         int64_t current_row_group = 0;
 
         while (channel->pop(wrapper)) {
-            for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
+            for (const auto& [file_index, row_group_index, table] :
+                 wrapper->arrow_tables) {
                 // Verify batch size matches row group metadata
                 EXPECT_EQ(table->num_rows(),
                           row_group_metadata.Get(current_row_group).row_num());
@@ -259,10 +260,11 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
         int64_t total_rows = 0;
 
         while (channel->pop(wrapper)) {
-            for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
+            for (const auto& [file_index, row_group_index, table] :
+                 wrapper->arrow_tables) {
                 // Verify batch size matches row group metadata
                 EXPECT_EQ(table->num_rows(),
-                          row_group_metadata.Get(row_group_id).row_num());
+                          row_group_metadata.Get(row_group_index).row_num());
                 total_rows += table->num_rows();
             }
         }
@@ -289,13 +291,18 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
         std::vector<int64_t> selected_row_groups = {0, 2};
 
         while (channel->pop(wrapper)) {
-            for (const auto& [row_group_id, table] : wrapper->arrow_tables) {
-                // row_group_id is the actual row group ID (0 or 2), not an index
+            for (const auto& [file_index, row_group_index, table] :
+                 wrapper->arrow_tables) {
+                // row_group_index is the actual row group ID (0 or 2), not an index
                 // We need to find its position in selected_row_groups
-                auto it = std::find(selected_row_groups.begin(), selected_row_groups.end(), row_group_id);
-                ASSERT_NE(it, selected_row_groups.end()) << "Row group " << row_group_id << " not found in selected_row_groups";
+                auto it = std::find(selected_row_groups.begin(),
+                                    selected_row_groups.end(),
+                                    row_group_index);
+                ASSERT_NE(it, selected_row_groups.end())
+                    << "Row group " << row_group_index
+                    << " not found in selected_row_groups";
                 EXPECT_EQ(table->num_rows(),
-                          row_group_metadata.Get(row_group_id).row_num());
+                          row_group_metadata.Get(row_group_index).row_num());
                 total_rows += table->num_rows();
             }
         }

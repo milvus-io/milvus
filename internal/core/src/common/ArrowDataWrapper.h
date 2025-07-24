@@ -33,7 +33,8 @@ struct ArrowDataWrapper {
     std::shared_ptr<parquet::arrow::FileReader> arrow_reader;
     // underlying file data memory, must outlive the arrow reader
     std::shared_ptr<uint8_t[]> file_data;
-    std::vector<std::pair<int64_t, std::shared_ptr<arrow::Table>>> arrow_tables;
+    std::vector<std::tuple<size_t, size_t, std::shared_ptr<arrow::Table>>>
+        arrow_tables;
 };
 using ArrowReaderChannel = Channel<std::shared_ptr<milvus::ArrowDataWrapper>>;
 

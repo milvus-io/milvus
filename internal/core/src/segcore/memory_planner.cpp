@@ -171,7 +171,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             auto blocks = strategy->split(row_groups);
 
             LOG_INFO("split row groups into blocks: {} for file {}",
-                     blocks.size(), file);
+                     blocks.size(),
+                     file);
 
             // Create and submit tasks for each block
             std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
@@ -185,6 +186,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                 futures.emplace_back(pool.Submit([block,
                                                   fs,
                                                   file,
+                                                  file_idx,
                                                   schema,
                                                   reader_memory_limit]() {
                     AssertInfo(fs != nullptr, "file system is nullptr");
@@ -195,8 +197,12 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                "row group reader is nullptr");
                     row_group_reader->SetRowGroupOffsetAndCount(block.offset,
                                                                 block.count);
-                    LOG_INFO("read row groups from file {} with offset {} and count {}",
-                             file, block.offset, block.count);
+                    LOG_INFO(
+                        "read row groups from file {} with offset {} and count "
+                        "{}",
+                        file,
+                        block.offset,
+                        block.count);
                     auto ret = std::make_shared<ArrowDataWrapper>();
                     for (int64_t i = 0; i < block.count; ++i) {
                         std::shared_ptr<arrow::Table> table;
@@ -207,7 +213,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                        std::to_string(block.offset + i) +
                                        " from file " + file + " with error " +
                                        status.ToString());
-                        ret->arrow_tables.push_back(std::make_pair(block.offset + i, table));
+                        ret->arrow_tables.push_back(
+                            std::make_tuple(file_idx, block.offset + i, table));
                     }
                     auto close_status = row_group_reader->Close();
                     AssertInfo(close_status.ok(),

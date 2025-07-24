@@ -497,7 +497,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
 
         std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
         while (column_group_info.arrow_reader_channel->pop(r)) {
-            for (const auto& [row_group_id, table] : r->arrow_tables) {
+            for (const auto& [file_index, row_group_index, table] :
+                 r->arrow_tables) {
                 size_t batch_num_rows = table->num_rows();
                 for (int i = 0; i < table->schema()->num_fields(); ++i) {
                     AssertInfo(table->schema()->field(i)->metadata()->Contains(
