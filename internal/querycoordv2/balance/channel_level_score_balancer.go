@@ -60,8 +60,9 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	br := NewBalanceReport()
 	defer func() {
 		if len(segmentPlans) == 0 && len(channelPlans) == 0 {
-			log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
-				RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+			// log.WithRateGroup(fmt.Sprintf("scorebasedbalance-noplan-%d", replica.GetID()), 1, 60).
+			// RatedDebug(60, "no plan generated, balance report", zap.Stringers("records", br.detailRecords))
+			log.Info("no plan generated, balance report", zap.Stringers("records", br.detailRecords))
 		} else {
 			log.Info("balance plan generated", zap.Stringers("report details", br.records))
 		}

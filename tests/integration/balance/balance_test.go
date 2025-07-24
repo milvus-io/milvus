@@ -251,8 +251,8 @@ func (s *BalanceTestSuit) TestNodeDown() {
 	// disable balance channel
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "false")
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key)
-	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key)
+	// defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key)
+	// defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key)
 
 	// init collection with 3 channel, each channel has 15 segment, each segment has 2000 row
 	// and load it with 2 replicas on 2 nodes.
