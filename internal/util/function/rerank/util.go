@@ -54,7 +54,7 @@ func organizeFieldIdData(multipSearchResultData []*schemapb.SearchResultData, in
 	multipIdField := []map[int64]*schemapb.FieldData{}
 	for _, searchData := range multipSearchResultData {
 		idField := map[int64]*schemapb.FieldData{}
-		if len(searchData.FieldsData) != 0 {
+		if searchData != nil && typeutil.GetSizeOfIDs(searchData.Ids) != 0 && len(searchData.FieldsData) != 0 {
 			for _, field := range searchData.FieldsData {
 				for _, fieldid := range inputFieldIds {
 					if fieldid == field.FieldId {
@@ -96,7 +96,10 @@ func newRerankInputs(multipSearchResultData []*schemapb.SearchResultData, inputF
 				cols[i][retIdx].scores = searchResult.Scores[start : start+size]
 			}
 			for _, fieldId := range inputFieldIds {
-				fieldData := multipIdField[retIdx][fieldId]
+				fieldData, exist := multipIdField[retIdx][fieldId]
+				if !exist {
+					continue
+				}
 				d, err := getField(fieldData, start, size)
 				if err != nil {
 					return nil, err

@@ -69,7 +69,7 @@ def deep_approx_compare(x, y, epsilon=epsilon):
     return x == y
 
 
-def compare_lists_ignore_order(a, b, epsilon=epsilon):
+def compare_lists_with_epsilon_ignore_dict_order(a, b, epsilon=epsilon):
     """
     Compares two lists of dictionaries for equality (order-insensitive) with floating-point tolerance.
     

@@ -406,3 +406,7 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 	}
 	return max(defaultSlots/8, 1)
 }
+
+func enableSortCompaction() bool {
+	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
+}

@@ -47,7 +47,8 @@ class ChunkedColumnGroup {
  public:
     explicit ChunkedColumnGroup(
         std::unique_ptr<Translator<GroupChunk>> translator)
-        : slot_(Manager::GetInstance().CreateCacheSlot(std::move(translator))) {
+        : slot_(Manager::GetInstance().CreateCacheSlot(
+              std::move(translator))) {
         num_chunks_ = slot_->num_cells();
         num_rows_ = GetNumRowsUntilChunk().back();
     }
@@ -97,12 +98,58 @@ class ChunkedColumnGroup {
         return meta->num_rows_until_chunk_;
     }
 
+    std::pair<size_t, size_t>
+    GetChunkIDByOffset(int64_t offset) const {
+        const auto& num_rows_until_chunk = GetNumRowsUntilChunk();
+        auto iter = std::lower_bound(num_rows_until_chunk.begin(),
+                                     num_rows_until_chunk.end(),
+                                     offset + 1);
+        size_t chunk_idx = std::distance(num_rows_until_chunk.begin(), iter) - 1;
+        size_t offset_in_chunk = offset - num_rows_until_chunk[chunk_idx];
+        return {chunk_idx, offset_in_chunk};
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) {
+        const auto& num_rows_until_chunk = GetNumRowsUntilChunk();
+        std::vector<milvus::cachinglayer::cid_t> cids(count, 1);
+        std::vector<int64_t> offsets_in_chunk(count);
+        int64_t len = num_rows_until_chunk.size() - 1;
+        while (len > 1) {
+            const int64_t half = len / 2;
+            len -= half;
+            for (size_t i = 0; i < count; ++i) {
+                const bool cmp =
+                    num_rows_until_chunk[cids[i] + half - 1] < offsets[i] + 1;
+                cids[i] += static_cast<int64_t>(cmp) * half;
+            }
+        }
+
+        for (size_t i = 0; i < count; ++i) {
+            offsets_in_chunk[i] = offsets[i] - num_rows_until_chunk[--cids[i]];
+        }
+
+        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    }
+
     size_t
     NumFieldsInGroup() const {
         auto meta =
             static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
                 slot_->meta());
         return meta->num_fields_;
+    }
+
+    size_t
+    memory_size() const {
+        auto meta =
+            static_cast<milvus::segcore::storagev2translator::GroupCTMeta*>(
+                slot_->meta());
+        size_t memory_size = 0;
+        for (auto& size : meta->chunk_memory_size_) {
+            memory_size += size;
+        }
+        return memory_size;
     }
 
  protected:
@@ -138,7 +185,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     bool
     IsValid(size_t offset) const override {
-        auto [chunk_id, offset_in_chunk] = GetChunkIDByOffset(offset);
+        auto [chunk_id, offset_in_chunk] = group_->GetChunkIDByOffset(offset);
         auto group_chunk = group_->GetGroupChunk(chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
         return chunk->isValid(offset_in_chunk);
@@ -160,27 +207,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             }
         }
         // nullable:
-        if (offsets == nullptr) {
-            int64_t current_offset = 0;
-            for (cid_t cid = 0; cid < num_chunks(); ++cid) {
-                auto group_chunk = group_->GetGroupChunk(cid);
-                auto chunk = group_chunk.get()->GetChunk(field_id_);
-                auto chunk_rows = chunk->RowNums();
-                for (int64_t i = 0; i < chunk_rows; ++i) {
-                    auto valid = chunk->isValid(i);
-                    fn(valid, current_offset + i);
-                }
-                current_offset += chunk_rows;
-            }
-        } else {
-            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-            auto ca = group_->GetGroupChunks(cids);
-            for (int64_t i = 0; i < count; i++) {
-                auto* group_chunk = ca->get_cell_of(cids[i]);
-                auto chunk = group_chunk->GetChunk(field_id_);
-                auto valid = chunk->isValid(offsets_in_chunk[i]);
-                fn(valid, i);
-            }
+        if (count == 0) {
+            return;
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto valid = chunk->isValid(offsets_in_chunk[i]);
+            fn(valid, i);
         }
     }
 
@@ -201,13 +237,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     size_t
     DataByteSize() const override {
-        size_t total_size = 0;
-        for (int64_t i = 0; i < num_chunks(); ++i) {
-            auto group_chunk = group_->GetGroupChunk(i);
-            auto chunk = group_chunk.get()->GetChunk(field_id_);
-            total_size += chunk->Size();
-        }
-        return total_size;
+        return group_->memory_size();
     }
 
     int64_t
@@ -219,7 +249,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<SpanBase>
     Span(int64_t chunk_id) const override {
         if (!IsChunkedColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "Span only supported for ChunkedColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
@@ -233,7 +263,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 std::optional<std::pair<int64_t, int64_t>> offset_len =
                     std::nullopt) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "StringViews only supported for ChunkedVariableColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
@@ -249,7 +279,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "ArrayViews only supported for ChunkedArrayColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
@@ -262,7 +292,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<std::vector<VectorArrayView>>
     VectorArrayViews(int64_t chunk_id) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "VectorArrayViews only supported for ChunkedVectorArrayColumn");
         }
@@ -277,7 +307,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "ViewsByOffsets only supported for ChunkedVariableColumn");
         }
@@ -291,15 +321,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
 
     std::pair<size_t, size_t>
     GetChunkIDByOffset(int64_t offset) const override {
-        int64_t current_offset = 0;
-        for (int64_t i = 0; i < num_chunks(); ++i) {
-            auto rows = chunk_row_nums(i);
-            if (current_offset + rows > offset) {
-                return {i, offset - current_offset};
-            }
-            current_offset += rows;
-        }
-        return {num_chunks() - 1, chunk_row_nums(num_chunks() - 1) - 1};
+        return group_->GetChunkIDByOffset(offset);
+    }
+
+    std::pair<std::vector<milvus::cachinglayer::cid_t>, std::vector<int64_t>>
+    GetChunkIDsByOffsets(const int64_t* offsets, int64_t count) const override {
+        return group_->GetChunkIDsByOffsets(offsets, count);
     }
 
     PinWrapper<Chunk*>
@@ -332,13 +359,88 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
     }
 
+    template <typename S, typename T>
+    void
+    BulkPrimitiveValueAtImpl(void* dst, const int64_t* offsets, int64_t count) {
+        static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        auto typed_dst = static_cast<T*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            typed_dst[i] =
+                *static_cast<const S*>(static_cast<const void*>(value));
+        }
+    }
+
+    void
+    BulkPrimitiveValueAt(void* dst,
+                         const int64_t* offsets,
+                         int64_t count) override {
+        switch (data_type_) {
+            case DataType::INT8: {
+                BulkPrimitiveValueAtImpl<int8_t, int32_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT16: {
+                BulkPrimitiveValueAtImpl<int16_t, int32_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT32: {
+                BulkPrimitiveValueAtImpl<int32_t, int32_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::INT64: {
+                BulkPrimitiveValueAtImpl<int64_t, int64_t>(dst, offsets, count);
+                break;
+            }
+            case DataType::FLOAT: {
+                BulkPrimitiveValueAtImpl<float, float>(dst, offsets, count);
+                break;
+            }
+            case DataType::DOUBLE: {
+                BulkPrimitiveValueAtImpl<double, double>(dst, offsets, count);
+                break;
+            }
+            case DataType::BOOL: {
+                BulkPrimitiveValueAtImpl<bool, bool>(dst, offsets, count);
+                break;
+            }
+            default: {
+                ThrowInfo(
+                    ErrorCode::Unsupported,
+                    "BulkScalarValueAt is not supported for unknown scalar "
+                    "data type: {}",
+                    data_type_);
+            }
+        }
+    }
+
+    void
+    BulkVectorValueAt(void* dst,
+                      const int64_t* offsets,
+                      int64_t element_sizeof,
+                      int64_t count) override {
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
+        auto dst_vec = reinterpret_cast<char*>(dst);
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto value = chunk->ValueAt(offsets_in_chunk[i]);
+            memcpy(dst_vec + i * element_sizeof, value, element_sizeof);
+        }
+    }
+
     void
     BulkRawStringAt(std::function<void(std::string_view, size_t, bool)> fn,
                     const int64_t* offsets = nullptr,
                     int64_t count = 0) const override {
         if (!IsChunkedVariableColumnDataType(data_type_) ||
             data_type_ == DataType::JSON) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkRawStringAt only supported for ProxyChunkColumn of "
                       "variable length type(except Json)");
         }
@@ -364,8 +466,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 auto chunk = group_chunk->GetChunk(field_id_);
                 auto valid = chunk->isValid(offsets_in_chunk[i]);
                 auto value = static_cast<StringChunk*>(chunk.get())
-                                 ->
-                                 operator[](offsets_in_chunk[i]);
+                                 ->operator[](offsets_in_chunk[i]);
                 fn(value, i, valid);
             }
         }
@@ -377,39 +478,23 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                   const int64_t* offsets,
                   int64_t count) const override {
         if (data_type_ != DataType::JSON) {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "RawJsonAt only supported for ProxyChunkColumn of Json type");
         }
-        if (offsets == nullptr) {
-            int64_t current_offset = 0;
-            for (cid_t cid = 0; cid < num_chunks(); ++cid) {
-                auto group_chunk = group_->GetGroupChunk(cid);
-                auto chunk = group_chunk.get()->GetChunk(field_id_);
-                auto chunk_rows = chunk->RowNums();
-                for (int64_t i = 0; i < chunk_rows; ++i) {
-                    auto valid = chunk->isValid(i);
-                    auto str_view =
-                        static_cast<StringChunk*>(chunk.get())->operator[](i);
-                    fn(Json(str_view.data(), str_view.size()),
-                       current_offset + i,
-                       valid);
-                }
-                current_offset += chunk_rows;
-            }
-        } else {
-            auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-            auto ca = group_->GetGroupChunks(cids);
+        if (count == 0) {
+            return;
+        }
+        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
+        auto ca = group_->GetGroupChunks(cids);
 
-            for (int64_t i = 0; i < count; i++) {
-                auto* group_chunk = ca->get_cell_of(cids[i]);
-                auto chunk = group_chunk->GetChunk(field_id_);
-                auto valid = chunk->isValid(offsets_in_chunk[i]);
-                auto str_view = static_cast<StringChunk*>(chunk.get())
-                                    ->
-                                    operator[](offsets_in_chunk[i]);
-                fn(Json(str_view.data(), str_view.size()), i, valid);
-            }
+        for (int64_t i = 0; i < count; i++) {
+            auto* group_chunk = ca->get_cell_of(cids[i]);
+            auto chunk = group_chunk->GetChunk(field_id_);
+            auto valid = chunk->isValid(offsets_in_chunk[i]);
+            auto str_view = static_cast<StringChunk*>(chunk.get())
+                                ->operator[](offsets_in_chunk[i]);
+            fn(Json(str_view.data(), str_view.size()), i, valid);
         }
     }
 
@@ -418,7 +503,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 const int64_t* offsets,
                 int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkArrayAt only supported for ChunkedArrayColumn");
         }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
@@ -438,7 +523,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                       const int64_t* offsets,
                       int64_t count) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "BulkVectorArrayAt only supported for "
                       "ChunkedVectorArrayColumn");
         }

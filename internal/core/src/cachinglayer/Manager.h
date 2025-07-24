@@ -42,8 +42,6 @@ class Manager {
     Manager&
     operator=(Manager&&) = delete;
 
-    ~Manager() = default;
-
     template <typename CellT>
     std::shared_ptr<CacheSlot<CellT>>
     CreateCacheSlot(std::unique_ptr<Translator<CellT>> translator) {
@@ -94,12 +92,11 @@ class Manager {
                            bool evictionEnabled,
                            EvictionConfig eviction_config);
 
-    Manager() = default;  // Private constructor
+    Manager() = default;
 
     std::unique_ptr<internal::DList> dlist_{nullptr};
     CacheWarmupPolicies warmup_policies_{};
     bool evictionEnabled_{false};
-    CacheLimit cache_limit_{};
 };  // class Manager
 
 }  // namespace milvus::cachinglayer

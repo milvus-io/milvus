@@ -341,6 +341,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 			break
 		}
 	}
+	// for sparse vector field, dim should not be specified
 	if typeutil.IsSparseFloatVectorType(field.DataType) {
 		if exist {
 			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.GetName(), field.FieldID)
@@ -355,16 +356,17 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		return fmt.Errorf("invalid dimension: %d. should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 	}
 
-	if typeutil.IsFloatVectorType(field.DataType) {
-		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
-			return fmt.Errorf("invalid dimension: %d of field %s. float vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt())
-		}
-	} else {
+	// for dense vector field, dim will be limited by max_dimension
+	if typeutil.IsBinaryVectorType(field.DataType) {
 		if dim%8 != 0 {
 			return fmt.Errorf("invalid dimension: %d of field %s. binary vector dimension should be multiple of 8. ", dim, field.GetName())
 		}
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64()*8 {
 			return fmt.Errorf("invalid dimension: %d of field %s. binary vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt()*8)
+		}
+	} else {
+		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
+			return fmt.Errorf("invalid dimension: %d of field %s. float vector dimension should be in range 2 ~ %d", dim, field.GetName(), Params.ProxyCfg.MaxDimension.GetAsInt())
 		}
 	}
 	return nil

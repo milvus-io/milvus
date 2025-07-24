@@ -569,6 +569,7 @@ message SegmentInfo {
     bool is_fake = 17;
     data.SegmentLevel level = 18;
     bool is_sorted = 19;
+    int64 storage_version = 20;
 }
 
 message CollectionInfo {
@@ -681,6 +682,7 @@ message CollectionLoadInfo {
     int32 recover_times = 7;
     repeated int64 load_fields = 8;
     int64 dbID= 9;
+    bool user_specified_replica_mode = 10;
 }
 
 message PartitionLoadInfo {

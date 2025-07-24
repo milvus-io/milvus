@@ -55,7 +55,7 @@ class SingleElement : public BaseElement {
     template <typename T>
     void
     SetValue(const proto::plan::GenericValue& value) {
-        value_ = GetValueFromProto<T>(value);
+        value_ = GetValueWithCastNumber<T>(value);
     }
 
     template <typename T>
@@ -80,7 +80,7 @@ class SingleElement : public BaseElement {
         try {
             return std::get<T>(value_);
         } catch (const std::bad_variant_access& e) {
-            PanicInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::UnexpectedError,
                       "SingleElement GetValue() failed: {}",
                       e.what());
         }
@@ -122,7 +122,7 @@ class SortVectorElement : public MultiElement {
     explicit SortVectorElement(
         const std::vector<proto::plan::GenericValue>& values) {
         for (auto& value : values) {
-            values_.push_back(GetValueFromProto<T>(value));
+            values_.push_back(GetValueWithCastNumber<T>(value));
         }
         std::sort(values_.begin(), values_.end());
         sorted_ = true;
@@ -178,7 +178,7 @@ class FlatVectorElement : public MultiElement {
     explicit FlatVectorElement(
         const std::vector<proto::plan::GenericValue>& values) {
         for (auto& value : values) {
-            values_.push_back(GetValueFromProto<T>(value));
+            values_.push_back(GetValueWithCastNumber<T>(value));
         }
     }
 
@@ -223,7 +223,7 @@ class SetElement : public MultiElement {
  public:
     explicit SetElement(const std::vector<proto::plan::GenericValue>& values) {
         for (auto& value : values) {
-            values_.insert(GetValueFromProto<T>(value));
+            values_.insert(GetValueWithCastNumber<T>(value));
         }
     }
 

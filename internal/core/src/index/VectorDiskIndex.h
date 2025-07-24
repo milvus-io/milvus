@@ -82,7 +82,7 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
     GetSparseVector(const DatasetPtr dataset) const override {
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "get sparse vector not supported for disk index");
     }
 

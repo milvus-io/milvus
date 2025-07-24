@@ -20,17 +20,17 @@ type ShardManager interface {
 
 	DropCollection(msg message.ImmutableDropCollectionMessageV1)
 
-	CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error
+	CheckIfPartitionCanBeCreated(uniquePartitionKey PartitionUniqueKey) error
 
-	CheckIfPartitionExists(collectionID int64, partitionID int64) error
+	CheckIfPartitionExists(uniquePartitionKey PartitionUniqueKey) error
 
 	CreatePartition(msg message.ImmutableCreatePartitionMessageV1)
 
 	DropPartition(msg message.ImmutableDropPartitionMessageV1)
 
-	CheckIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error
+	CheckIfSegmentCanBeCreated(uniquePartitionKey PartitionUniqueKey, segmentID int64) error
 
-	CheckIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error
+	CheckIfSegmentCanBeFlushed(uniquePartitionKey PartitionUniqueKey, segmentID int64) error
 
 	CreateSegment(msg message.ImmutableCreateSegmentMessageV2)
 
@@ -40,7 +40,7 @@ type ShardManager interface {
 
 	ApplyDelete(msg message.MutableDeleteMessageV1) error
 
-	WaitUntilGrowingSegmentReady(collectionID int64, partitonID int64) (<-chan struct{}, error)
+	WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error)
 
 	FlushAndFenceSegmentAllocUntil(collectionID int64, timetick uint64) ([]int64, error)
 

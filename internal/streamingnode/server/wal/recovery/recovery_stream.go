@@ -58,7 +58,7 @@ L:
 				// The recovery stream is reach the end, we can stop the recovery.
 				break L
 			}
-			r.observeMessage(msg)
+			r.ObserveMessage(ctx, msg)
 		}
 	}
 	if rs.Error() != nil {

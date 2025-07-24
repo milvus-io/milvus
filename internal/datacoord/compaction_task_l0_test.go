@@ -181,6 +181,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 	task = &mixCompactionTask{
 		allocator: s.mockAlloc,
 		meta:      meta,
+		ievm:      newMockVersionManager(),
 	}
 	task.SetTask(&datapb.CompactionTask{})
 	_, err = task.BuildCompactionRequest()

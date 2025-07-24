@@ -247,17 +247,12 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         if check_items.get("collection_name", None) is not None:
             assert res["collection_name"] == check_items.get("collection_name")
-        if check_items.get("auto_id", False):
-            assert res["auto_id"] == check_items.get("auto_id")
-        if check_items.get("num_shards", 1):
-            assert res["num_shards"] == check_items.get("num_shards", 1)
-        if check_items.get("consistency_level", 2):
-            assert res["consistency_level"] == check_items.get("consistency_level", 2)
-        if check_items.get("enable_dynamic_field", True):
-            assert res["enable_dynamic_field"] == check_items.get("enable_dynamic_field", True)
-        if check_items.get("num_partitions", 1):
-            assert res["num_partitions"] == check_items.get("num_partitions", 1)
-        if check_items.get("id_name", "id"):
+        assert res["auto_id"] == check_items.get("auto_id", False)
+        assert res["num_shards"] == check_items.get("num_shards", 1)
+        assert res["consistency_level"] == check_items.get("consistency_level", 0)
+        assert res["enable_dynamic_field"] == check_items.get("enable_dynamic_field", True)
+        assert res["num_partitions"] == check_items.get("num_partitions", 1)
+        if check_items.get("id_name", None):
             assert res["fields"][0]["name"] == check_items.get("id_name", "id")
         if check_items.get("vector_name", "vector"):
             vector_name_list = []
@@ -474,9 +469,9 @@ class ResponseChecker:
                 elif check_items.get("metric", None) is not None:
                     # verify the distances are already sorted
                     if check_items.get("metric").upper() in ["IP", "COSINE", "BM25"]:
-                        assert distances == sorted(distances, reverse=True)
+                        assert pc.compare_lists_with_epsilon_ignore_dict_order(distances, sorted(distances, reverse=True))
                     else:
-                        assert distances == sorted(distances, reverse=False)
+                        assert pc.compare_lists_with_epsilon_ignore_dict_order(distances, sorted(distances, reverse=False))
                     if check_items.get("vector_nq") is None or check_items.get("original_vectors") is None:
                         log.debug("skip distance check for knowhere does not return the precise distances")
                     else:
@@ -484,9 +479,9 @@ class ResponseChecker:
                 else:
                     pass  # just check nq and topk, not specific ids need check
             nq_i += 1
+
         log.info("search_results_check: limit (topK) and "
                  "ids searched for %d queries are correct" % len(search_res))
-
         return True
 
     @staticmethod
@@ -600,7 +595,7 @@ class ResponseChecker:
             if isinstance(query_res, list):
                 # assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=pk_name, with_vec=with_vec)
                 # return True
-                assert pc.compare_lists_ignore_order(a=query_res, b=exp_res)
+                assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res)
                 return True
             else:
                 log.error(f"Query result {query_res} is not list")

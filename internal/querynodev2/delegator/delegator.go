@@ -368,7 +368,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	log.Debug("Delegator search done")
+	log.Debug("Delegator search done", zap.Int("results", len(results)))
 
 	return results, nil
 }
@@ -647,6 +647,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("query segments...",
+		zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
@@ -684,7 +685,6 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		log.Debug("execute count on segments...",
 			zap.Int64s("sealedIDs", sealedIDs),
 			zap.Int64s("growingIDs", growingIDs),
-			zap.Int64("targetVersion", sd.distribution.queryView.version),
 		)
 	}
 
@@ -936,7 +936,7 @@ func (sd *shardDelegator) speedupGuranteeTS(
 		return guaranteeTS
 	}
 	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
-	if mvcc, err := streaming.WAL().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
+	if mvcc, err := streaming.WAL().Local().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
 		return mvcc
 	}
 	return guaranteeTS

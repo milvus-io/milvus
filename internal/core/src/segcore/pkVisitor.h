@@ -19,7 +19,7 @@ struct Int64PKVisitor {
     template <typename T>
     int64_t
     operator()(T t) const {
-        PanicInfo(Unsupported, "invalid int64 pk value");
+        ThrowInfo(Unsupported, "invalid int64 pk value");
     }
 };
 
@@ -33,7 +33,7 @@ struct StrPKVisitor {
     template <typename T>
     std::string
     operator()(T t) const {
-        PanicInfo(Unsupported, "invalid string pk value");
+        ThrowInfo(Unsupported, "invalid string pk value");
     }
 };
 

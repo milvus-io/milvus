@@ -363,6 +363,9 @@ func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 func (model *ModelFunction[T]) processOneSearchData(ctx context.Context, searchParams *SearchParams, query string, cols []*columns, idGroup map[any]any) (*IDScores[T], error) {
 	uniqueData := make(map[T]string)
 	for _, col := range cols {
+		if col.size == 0 {
+			continue
+		}
 		texts := col.data[0].([]string)
 		ids := col.ids.([]T)
 		for idx, id := range ids {

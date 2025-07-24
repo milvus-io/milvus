@@ -47,7 +47,7 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported PK {}", data_type));
         }
     }
@@ -77,7 +77,7 @@ ParsePksFromFieldData(DataType data_type,
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported PK {}", data_type));
             }
         }
@@ -102,7 +102,7 @@ ParsePksFromIDs(std::vector<PkType>& pks,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported PK {}", data_type));
         }
     }
@@ -118,7 +118,7 @@ GetSizeOfIdArray(const IdArray& data) {
         return data.str_id().data_size();
     }
 
-    PanicInfo(DataTypeInvalid,
+    ThrowInfo(DataTypeInvalid,
               fmt::format("unsupported id {}", data.descriptor()->name()));
 }
 
@@ -202,7 +202,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         break;
                     }
                     default:
-                        PanicInfo(
+                        ThrowInfo(
                             DataTypeInvalid,
                             fmt::format("unsupported element type for array",
                                         field_meta.get_element_type()));
@@ -225,7 +225,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         break;
                     }
                     default: {
-                        PanicInfo(NotImplemented,
+                        ThrowInfo(NotImplemented,
                                   fmt::format("not implemented vector type {}",
                                               field_meta.get_element_type()));
                     }
@@ -233,7 +233,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                 break;
             }
             default: {
-                PanicInfo(
+                ThrowInfo(
                     DataTypeInvalid,
                     fmt::format("unsupported variable datatype {}", data_type));
             }
@@ -324,7 +324,7 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
         }
     }
@@ -394,7 +394,7 @@ CreateEmptyVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
         }
     }
@@ -489,7 +489,7 @@ CreateScalarDataArrayFrom(const void* data_raw,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
         }
     }
@@ -579,7 +579,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
                     break;
                 }
                 default: {
-                    PanicInfo(NotImplemented,
+                    ThrowInfo(NotImplemented,
                               fmt::format("not implemented vector type {}",
                                           vector_type));
                 }
@@ -587,7 +587,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
         }
     }
@@ -668,9 +668,9 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 auto obj = vector_array->mutable_int8_vector();
                 obj->assign(data, dim * sizeof(int8));
             } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-                PanicInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
+                ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
             } else {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));
             }
             continue;
@@ -738,7 +738,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported datatype {}", data_type));
             }
         }
@@ -926,7 +926,7 @@ ReverseDataFromIndex(const index::IndexBase* index,
             break;
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}", data_type));
         }
     }

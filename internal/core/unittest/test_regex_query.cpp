@@ -25,6 +25,8 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "index/InvertedIndexTantivy.h"
 #include "test_utils/storage_test_utils.h"
+#include "index/StringIndexMarisa.h"
+
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
@@ -178,7 +180,7 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
     ASSERT_TRUE(final[4]);
 }
 
-struct MockStringIndex : index::StringIndexSort {
+struct MockStringIndex : index::StringIndexMarisa {
     const bool
     HasRawData() const override {
         return true;
@@ -242,34 +244,14 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
 
     void
     LoadStlSortIndex() {
-        {
-            proto::schema::StringArray arr;
-            for (int64_t i = 0; i < N; i++) {
-                *(arr.mutable_data()->Add()) = raw_str[i];
-            }
-            auto index = index::CreateStringIndexSort();
-            std::vector<uint8_t> buffer(arr.ByteSizeLong());
-            ASSERT_TRUE(
-                arr.SerializeToArray(buffer.data(), arr.ByteSizeLong()));
-            index->BuildWithRawDataForUT(arr.ByteSizeLong(), buffer.data());
-            LoadIndexInfo info{
-                .field_id = schema->get_field_id(FieldName("str")).get(),
-                .index_params = GenIndexParams(index.get()),
-                .cache_index = CreateTestCacheIndex("test", std::move(index)),
-            };
-            seg->LoadIndex(info);
-        }
-        {
-            auto index = index::CreateScalarIndexSort<int64_t>();
-            index->BuildWithRawDataForUT(N, raw_int.data());
-            LoadIndexInfo info{
-                .field_id =
-                    schema->get_field_id(FieldName("another_int64")).get(),
-                .index_params = GenIndexParams(index.get()),
-                .cache_index = CreateTestCacheIndex("test", std::move(index)),
-            };
-            seg->LoadIndex(info);
-        }
+        auto index = index::CreateScalarIndexSort<int64_t>();
+        index->BuildWithRawDataForUT(N, raw_int.data());
+        LoadIndexInfo info{
+            .field_id = schema->get_field_id(FieldName("another_int64")).get(),
+            .index_params = GenIndexParams(index.get()),
+            .cache_index = CreateTestCacheIndex("test", std::move(index)),
+        };
+        seg->LoadIndex(info);
     }
 
     void
@@ -405,35 +387,6 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnIndexedNonStringField) {
     query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
     ASSERT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
-}
-
-TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnStlSortStringField) {
-    std::string operand = "a%";
-    const auto& str_meta = schema->operator[](FieldName("str"));
-    auto column_info = test::GenColumnInfo(str_meta.get_id().get(),
-                                           proto::schema::DataType::VarChar,
-                                           false,
-                                           false);
-    auto unary_range_expr = test::GenUnaryRangeExpr(OpType::Match, operand);
-    unary_range_expr->set_allocated_column_info(column_info);
-    auto expr = test::GenExpr();
-    expr->set_allocated_unary_range_expr(unary_range_expr);
-
-    auto parser = ProtoParser(schema);
-    auto typed_expr = parser.ParseExprs(*expr);
-    auto parsed =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
-
-    LoadStlSortIndex();
-
-    auto segpromote = dynamic_cast<ChunkedSegmentSealedImpl*>(seg.get());
-    BitsetType final;
-    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
-    ASSERT_FALSE(final[0]);
-    ASSERT_TRUE(final[1]);
-    ASSERT_TRUE(final[2]);
-    ASSERT_TRUE(final[3]);
-    ASSERT_TRUE(final[4]);
 }
 
 TEST_F(SealedSegmentRegexQueryTest, PrefixMatchOnInvertedIndexStringField) {

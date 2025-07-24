@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	compactor "github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
+	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -49,6 +50,7 @@ type PipelineParams struct {
 	CheckpointUpdater  *ChannelCheckpointUpdater
 	Allocator          allocator.Interface
 	MsgHandler         MsgHandler
+	SchemaManager      metacache.SchemaManager
 }
 
 // TimeRange is a range of timestamp contains the min-timestamp and max-timestamp

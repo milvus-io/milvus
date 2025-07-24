@@ -1,7 +1,7 @@
 use core::result::Result::Err;
 use std::collections::HashSet;
 
-use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
+use lindera::dictionary::DictionaryKind;
 use lindera::mode::Mode;
 use lindera::segmenter::Segmenter;
 use lindera::token::Token as LToken;
@@ -15,6 +15,7 @@ use lindera::token_filter::korean_keep_tags::KoreanKeepTagsTokenFilter;
 use lindera::token_filter::korean_stop_tags::KoreanStopTagsTokenFilter;
 use lindera::token_filter::BoxTokenFilter as LTokenFilter;
 
+use crate::analyzer::dict::lindera::load_dictionary_from_kind;
 use crate::error::{Result, TantivyBindingError};
 use serde_json as json;
 
@@ -60,12 +61,9 @@ impl LinderaTokenizer {
     /// Create a new `LinderaTokenizer`.
     /// This function will create a new `LinderaTokenizer` with json parameters.
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<LinderaTokenizer> {
-        let kind = fetch_lindera_kind(params)?;
-        let dictionary = load_dictionary_from_kind(kind.clone()).map_err(|_| {
-            TantivyBindingError::InvalidArgument(format!(
-                "lindera tokenizer with invalid dict_kind"
-            ))
-        })?;
+        let kind: DictionaryKind = fetch_lindera_kind(params)?;
+        let dictionary =
+            load_dictionary_from_kind(&kind, "/var/lib/milvus/dict/lindera".to_string(), vec![])?;
 
         let segmenter = Segmenter::new(Mode::Normal, dictionary, None);
         let mut tokenizer = LinderaTokenizer::from_segmenter(segmenter);

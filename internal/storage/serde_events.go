@@ -151,6 +151,23 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	return r, nil
 }
 
+func (crr *CompositeBinlogRecordReader) SetNeededFields(neededFields typeutil.Set[int64]) {
+	if neededFields == nil {
+		return
+	}
+
+	crr.schema = &schemapb.CollectionSchema{
+		Fields: lo.Filter(crr.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return neededFields.Contain(field.GetFieldID())
+		}),
+	}
+	index := make(map[FieldID]int16)
+	for i, f := range crr.schema.Fields {
+		index[f.FieldID] = int16(i)
+	}
+	crr.index = index
+}
+
 func (crr *CompositeBinlogRecordReader) Close() error {
 	if crr.brs != nil {
 		for _, er := range crr.brs {
@@ -1040,6 +1057,10 @@ func (crr *simpleArrowRecordReader) Next() (Record, error) {
 		}
 	}
 	return &crr.r, nil
+}
+
+func (crr *simpleArrowRecordReader) SetNeededFields(_ typeutil.Set[int64]) {
+	// no-op for simple arrow record reader
 }
 
 func (crr *simpleArrowRecordReader) Close() error {

@@ -5,12 +5,16 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -118,7 +122,7 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 
 	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(subSearchResultData[0].GetGroupByFieldValue().GetType(), true, int(limit))
 	if err != nil {
-		return ret, err
+		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
 	}
 	// reducing nq * topk results
 	for nqIdx := int64(0); nqIdx < nq; nqIdx++ {
@@ -222,9 +226,10 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 		totalResCount += subSearchNqOffset[i][nq-1]
 		subSearchGroupByValIterator[i] = typeutil.GetDataIterator(subSearchResultData[i].GetGroupByFieldValue())
 	}
+
 	gpFieldBuilder, err := typeutil.NewFieldDataBuilder(subSearchResultData[0].GetGroupByFieldValue().GetType(), true, int(limit))
 	if err != nil {
-		return ret, err
+		return ret, merr.WrapErrServiceInternal("failed to construct group by field data builder, this is abnormal as segcore should always set up a group by field, no matter data status, check code on qn", err.Error())
 	}
 
 	var realTopK int64 = -1
@@ -468,4 +473,106 @@ func fillInEmptyResult(numQueries int64) *milvuspb.SearchResults {
 			Topks:      make([]int64, numQueries),
 		},
 	}
+}
+
+func reduceResults(ctx context.Context, toReduceResults []*internalpb.SearchResults, nq, topK, offset int64, metricType string, pkType schemapb.DataType, queryInfo *planpb.QueryInfo, isAdvance bool, collectionID int64, partitionIDs []int64) (*milvuspb.SearchResults, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reduceResults")
+	defer sp.End()
+
+	log := log.Ctx(ctx)
+	// Decode all search results
+	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
+	if err != nil {
+		log.Warn("failed to decode search results", zap.Error(err))
+		return nil, err
+	}
+
+	if len(validSearchResults) <= 0 {
+		return fillInEmptyResult(nq), nil
+	}
+
+	// Reduce all search results
+	log.Debug("proxy search post execute reduce",
+		zap.Int64("collection", collectionID),
+		zap.Int64s("partitionIDs", partitionIDs),
+		zap.Int("number of valid search results", len(validSearchResults)))
+	var result *milvuspb.SearchResults
+	result, err = reduceSearchResult(ctx, validSearchResults, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(pkType).
+		WithOffset(offset).WithGroupByField(queryInfo.GetGroupByFieldId()).WithGroupSize(queryInfo.GetGroupSize()).WithAdvance(isAdvance))
+	if err != nil {
+		log.Warn("failed to reduce search results", zap.Error(err))
+		return nil, err
+	}
+	return result, nil
+}
+
+func decodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "decodeSearchResults")
+	defer sp.End()
+	tr := timerecord.NewTimeRecorder("decodeSearchResults")
+	results := make([]*schemapb.SearchResultData, 0)
+	for _, partialSearchResult := range searchResults {
+		if partialSearchResult.SlicedBlob == nil {
+			continue
+		}
+
+		var partialResultData schemapb.SearchResultData
+		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, &partialResultData)
+	}
+	tr.CtxElapse(ctx, "decodeSearchResults done")
+	return results, nil
+}
+
+func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64, pkHitNum int) error {
+	if data.NumQueries != nq {
+		return fmt.Errorf("search result's nq(%d) mis-match with %d", data.NumQueries, nq)
+	}
+	if data.TopK != topk {
+		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
+	}
+
+	if len(data.Scores) != pkHitNum {
+		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
+			len(data.Scores), pkHitNum)
+	}
+	return nil
+}
+
+func selectHighestScoreIndex(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, subSearchNqOffset [][]int64, cursors []int64, qi int64) (int, int64) {
+	var (
+		subSearchIdx        = -1
+		resultDataIdx int64 = -1
+	)
+	maxScore := minFloat32
+	for i := range cursors {
+		if cursors[i] >= subSearchResultData[i].Topks[qi] {
+			continue
+		}
+		sIdx := subSearchNqOffset[i][qi] + cursors[i]
+		sScore := subSearchResultData[i].Scores[sIdx]
+
+		// Choose the larger score idx or the smaller pk idx with the same score
+		if subSearchIdx == -1 || sScore > maxScore {
+			subSearchIdx = i
+			resultDataIdx = sIdx
+			maxScore = sScore
+		} else if sScore == maxScore {
+			if subSearchIdx == -1 {
+				// A bad case happens where Knowhere returns distance/score == +/-maxFloat32
+				// by mistake.
+				log.Ctx(ctx).Error("a bad score is returned, something is wrong here!", zap.Float32("score", sScore))
+			} else if typeutil.ComparePK(
+				typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
+				typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)) {
+				subSearchIdx = i
+				resultDataIdx = sIdx
+				maxScore = sScore
+			}
+		}
+	}
+	return subSearchIdx, resultDataIdx
 }

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -92,7 +91,7 @@ func (p *preImportTask) GetTaskState() taskcommon.State {
 }
 
 func (p *preImportTask) GetTaskSlot() int64 {
-	return int64(funcutil.Min(len(p.GetFileStats())))
+	return int64(CalculateTaskSlot(p, p.importMeta))
 }
 
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -136,12 +135,12 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskID: p.GetTaskID(),
 	}
 	resp, err := cluster.QueryPreImport(p.GetNodeID(), req)
-	if err != nil {
+	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
 		updateErr := p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update preimport task state to pending", WrapTaskLog(p, zap.Error(updateErr))...)
 		}
-		log.Info("reset preimport task state to pending due to error occurs", WrapTaskLog(p, zap.Error(err))...)
+		log.Info("reset preimport task state to pending due to error occurs", WrapTaskLog(p, zap.Error(err), zap.String("reason", resp.GetReason()))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
@@ -153,14 +152,19 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 		log.Warn("preimport failed", WrapTaskLog(p, zap.String("reason", resp.GetReason()))...)
 		return
 	}
-	actions := []UpdateAction{UpdateFileStats(resp.GetFileStats())}
+	actions := []UpdateAction{}
+	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		actions = append(actions, UpdateFileStats(resp.GetFileStats()))
+	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		actions = append(actions, UpdateState(datapb.ImportTaskStateV2_Completed))
 	}
-	err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), actions...)
-	if err != nil {
-		log.Warn("update preimport task failed", WrapTaskLog(p, zap.Error(err))...)
-		return
+	if len(actions) > 0 {
+		err = p.importMeta.UpdateTask(context.TODO(), p.GetTaskID(), actions...)
+		if err != nil {
+			log.Warn("update preimport task failed", WrapTaskLog(p, zap.Error(err))...)
+			return
+		}
 	}
 	log.Info("query preimport", WrapTaskLog(p, zap.String("respState", resp.GetState().String()),
 		zap.Any("fileStats", resp.GetFileStats()))...)

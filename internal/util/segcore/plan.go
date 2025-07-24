@@ -135,6 +135,10 @@ func (req *SearchRequest) GetNumOfQuery() int64 {
 	return int64(numQueries)
 }
 
+func (req *SearchRequest) MVCC() typeutil.Timestamp {
+	return req.mvccTimestamp
+}
+
 func (req *SearchRequest) Plan() *SearchPlan {
 	return req.plan
 }

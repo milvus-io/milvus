@@ -13,6 +13,7 @@ package metricsinfo
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,6 +21,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func Test_ParseMetricType(t *testing.T) {
@@ -77,5 +79,53 @@ func Test_ConstructRequestByMetricType(t *testing.T) {
 			log.Info("TestConstructRequestByMetricType",
 				zap.String("request", got.Request))
 		}
+	}
+}
+
+func Test_ParseMetricProcessInRole(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "Empty JSON",
+			input:    "{}",
+			expected: "",
+			wantErr:  true,
+		},
+		{
+			name:     "Valid ProcessRole value",
+			input:    fmt.Sprintf(`{"%s": "%s"}`, MetricRequestProcessInRoleKey, typeutil.DataCoordRole),
+			expected: typeutil.DataCoordRole,
+			wantErr:  false,
+		},
+		{
+			name:     "Valid ProcessRole with integer value",
+			input:    fmt.Sprintf(`{"%s": 123}`, MetricRequestProcessInRoleKey),
+			expected: "123",
+			wantErr:  false,
+		},
+		{
+			name:     "Invalid key name",
+			input:    `{"invalid_key": "value"}`,
+			expected: "",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jsonRet := gjson.Parse(tt.input)
+			result, err := ParseMetricProcessInRole(jsonRet)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
 	}
 }

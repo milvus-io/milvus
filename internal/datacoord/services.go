@@ -1012,15 +1012,8 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		return resp, nil
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
-	// `handler.GetCollection` cannot fetch dropping collection,
-	// so we use `broker.DescribeCollectionInternal` to get collection info to help fetch dropping collection to get the recovery info.
-	collection, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(collection, err); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
 
-	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, nil, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
 	if channelInfo.SeekPosition == nil {
 		log.Warn("channel recovery start position is not found, may collection is on creating")
@@ -1050,7 +1043,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 	)
 
 	resp.Info = channelInfo
-	resp.Schema = collection.Schema
+	resp.Schema = nil // schema is managed by streaming node itself now.
 	resp.SegmentsNotCreatedByStreaming = segmentsNotCreatedByStreaming
 	return resp, nil
 }
@@ -1891,7 +1884,7 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
 		return resp, nil
 	}
-	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta, s.statsInspector)
+	progress, state, importedRows, totalRows, reason := GetJobProgress(ctx, jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
@@ -1928,7 +1921,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta, s.statsInspector)
+		progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)

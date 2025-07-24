@@ -169,6 +169,54 @@ func (_c *MockMetaCache_DetectMissingSegments_Call) RunAndReturn(run func(map[in
 	return _c
 }
 
+// GetSchema provides a mock function with given fields: timetick
+func (_m *MockMetaCache) GetSchema(timetick uint64) *schemapb.CollectionSchema {
+	ret := _m.Called(timetick)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSchema")
+	}
+
+	var r0 *schemapb.CollectionSchema
+	if rf, ok := ret.Get(0).(func(uint64) *schemapb.CollectionSchema); ok {
+		r0 = rf(timetick)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*schemapb.CollectionSchema)
+		}
+	}
+
+	return r0
+}
+
+// MockMetaCache_GetSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSchema'
+type MockMetaCache_GetSchema_Call struct {
+	*mock.Call
+}
+
+// GetSchema is a helper method to define mock.On call
+//   - timetick uint64
+func (_e *MockMetaCache_Expecter) GetSchema(timetick interface{}) *MockMetaCache_GetSchema_Call {
+	return &MockMetaCache_GetSchema_Call{Call: _e.mock.On("GetSchema", timetick)}
+}
+
+func (_c *MockMetaCache_GetSchema_Call) Run(run func(timetick uint64)) *MockMetaCache_GetSchema_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint64))
+	})
+	return _c
+}
+
+func (_c *MockMetaCache_GetSchema_Call) Return(_a0 *schemapb.CollectionSchema) *MockMetaCache_GetSchema_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMetaCache_GetSchema_Call) RunAndReturn(run func(uint64) *schemapb.CollectionSchema) *MockMetaCache_GetSchema_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentByID provides a mock function with given fields: id, filters
 func (_m *MockMetaCache) GetSegmentByID(id int64, filters ...SegmentFilter) (*SegmentInfo, bool) {
 	_va := make([]interface{}, len(filters))
@@ -495,87 +543,6 @@ func (_c *MockMetaCache_RemoveSegments_Call) Return(_a0 []int64) *MockMetaCache_
 
 func (_c *MockMetaCache_RemoveSegments_Call) RunAndReturn(run func(...SegmentFilter) []int64) *MockMetaCache_RemoveSegments_Call {
 	_c.Call.Return(run)
-	return _c
-}
-
-// Schema provides a mock function with no fields
-func (_m *MockMetaCache) Schema() *schemapb.CollectionSchema {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Schema")
-	}
-
-	var r0 *schemapb.CollectionSchema
-	if rf, ok := ret.Get(0).(func() *schemapb.CollectionSchema); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*schemapb.CollectionSchema)
-		}
-	}
-
-	return r0
-}
-
-// MockMetaCache_Schema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Schema'
-type MockMetaCache_Schema_Call struct {
-	*mock.Call
-}
-
-// Schema is a helper method to define mock.On call
-func (_e *MockMetaCache_Expecter) Schema() *MockMetaCache_Schema_Call {
-	return &MockMetaCache_Schema_Call{Call: _e.mock.On("Schema")}
-}
-
-func (_c *MockMetaCache_Schema_Call) Run(run func()) *MockMetaCache_Schema_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockMetaCache_Schema_Call) Return(_a0 *schemapb.CollectionSchema) *MockMetaCache_Schema_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockMetaCache_Schema_Call) RunAndReturn(run func() *schemapb.CollectionSchema) *MockMetaCache_Schema_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// UpdateSchema provides a mock function with given fields: updatedSchema, version
-func (_m *MockMetaCache) UpdateSchema(updatedSchema *schemapb.CollectionSchema, version uint64) {
-	_m.Called(updatedSchema, version)
-}
-
-// MockMetaCache_UpdateSchema_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateSchema'
-type MockMetaCache_UpdateSchema_Call struct {
-	*mock.Call
-}
-
-// UpdateSchema is a helper method to define mock.On call
-//   - updatedSchema *schemapb.CollectionSchema
-//   - version uint64
-func (_e *MockMetaCache_Expecter) UpdateSchema(updatedSchema interface{}, version interface{}) *MockMetaCache_UpdateSchema_Call {
-	return &MockMetaCache_UpdateSchema_Call{Call: _e.mock.On("UpdateSchema", updatedSchema, version)}
-}
-
-func (_c *MockMetaCache_UpdateSchema_Call) Run(run func(updatedSchema *schemapb.CollectionSchema, version uint64)) *MockMetaCache_UpdateSchema_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*schemapb.CollectionSchema), args[1].(uint64))
-	})
-	return _c
-}
-
-func (_c *MockMetaCache_UpdateSchema_Call) Return() *MockMetaCache_UpdateSchema_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockMetaCache_UpdateSchema_Call) RunAndReturn(run func(*schemapb.CollectionSchema, uint64)) *MockMetaCache_UpdateSchema_Call {
-	_c.Run(run)
 	return _c
 }
 

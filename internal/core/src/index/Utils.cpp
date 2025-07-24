@@ -394,7 +394,7 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
         const size_t count = (size < chunk_size) ? size : chunk_size;
         const ssize_t size_read = read(fd, buf, count);
         if (size_read != count) {
-            PanicInfo(ErrorCode::UnistdError,
+            ThrowInfo(ErrorCode::UnistdError,
                       "read data from fd error, returned read size is " +
                           std::to_string(size_read));
         }

@@ -188,7 +188,7 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
                 field_id, index, current_chunk_id, current_chunk_pos);
         }
         default:
-            PanicInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
     }
 }
 
@@ -301,7 +301,7 @@ SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
                 field_id, chunk_id, data_barrier);
         }
         default:
-            PanicInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);
     }
 }
 

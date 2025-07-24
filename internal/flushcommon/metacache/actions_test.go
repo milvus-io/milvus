@@ -57,7 +57,11 @@ func (s *SegmentFilterSuite) TestFilters() {
 	info.startPosRecorded = true
 	s.False(filter.Filter(info))
 	info.startPosRecorded = false
+	s.False(filter.Filter(info))
+	info.startPosition = &msgpb.MsgPosition{}
 	s.True(filter.Filter(info))
+	info.startPosRecorded = true
+	s.False(filter.Filter(info))
 }
 
 func TestFilters(t *testing.T) {

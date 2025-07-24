@@ -51,18 +51,18 @@ MmapBlock::Init() {
     // create tmp file
     int fd = open(file_name_.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     if (fd == -1) {
-        PanicInfo(ErrorCode::FileCreateFailed,
+        ThrowInfo(ErrorCode::FileCreateFailed,
                   "Failed to open mmap tmp file:{}",
                   file_name_);
     }
     // append file size to 'file_size'
     if (lseek(fd, file_size_ - 1, SEEK_SET) == -1) {
-        PanicInfo(ErrorCode::FileReadFailed,
+        ThrowInfo(ErrorCode::FileReadFailed,
                   "Failed to seek mmap tmp file:{}",
                   file_name_);
     }
     if (write(fd, "", 1) == -1) {
-        PanicInfo(ErrorCode::FileWriteFailed,
+        ThrowInfo(ErrorCode::FileWriteFailed,
                   "Failed to write mmap tmp file:{}",
                   file_name_);
     }
@@ -70,7 +70,7 @@ MmapBlock::Init() {
     addr_ = static_cast<char*>(
         mmap(nullptr, file_size_, kMmapDefaultProt, kMmapDefaultFlags, fd, 0));
     if (addr_ == MAP_FAILED) {
-        PanicInfo(ErrorCode::MmapError,
+        ThrowInfo(ErrorCode::MmapError,
                   "Failed to mmap in mmap_block:{}",
                   file_name_);
     }
@@ -95,14 +95,14 @@ MmapBlock::Close() {
     }
     if (addr_ != nullptr) {
         if (munmap(addr_, file_size_) != 0) {
-            PanicInfo(ErrorCode::MemAllocateSizeNotMatch,
+            ThrowInfo(ErrorCode::MemAllocateSizeNotMatch,
                       "Failed to munmap in mmap_block under file:{}",
                       file_name_);
         }
     }
     if (access(file_name_.c_str(), F_OK) == 0) {
         if (remove(file_name_.c_str()) != 0) {
-            PanicInfo(ErrorCode::MmapError,
+            ThrowInfo(ErrorCode::MmapError,
                       "Failed to munmap in mmap_block under file:{}",
                       file_name_);
         }
@@ -146,7 +146,7 @@ MmapBlocksHandler::AllocateFixSizeBlock() {
     } else {
         // if space not enough for create a new block, clear cache and check again
         if (GetFixFileSize() + Size() > max_disk_limit_) {
-            PanicInfo(ErrorCode::MemAllocateSizeNotMatch,
+            ThrowInfo(ErrorCode::MemAllocateSizeNotMatch,
                       "Failed to create a new mmap_block, not enough disk for "
                       "create a new mmap block. Allocated size: {}, Max size: "
                       "{} under mmap file_prefix: {}",
@@ -167,7 +167,7 @@ MmapBlocksHandler::AllocateLargeBlock(const uint64_t size) {
         ClearCache();
     }
     if (size + Size() > max_disk_limit_) {
-        PanicInfo(ErrorCode::MemAllocateSizeNotMatch,
+        ThrowInfo(ErrorCode::MemAllocateSizeNotMatch,
                   "Failed to create a new mmap_block, not enough disk for "
                   "create a new mmap block. To Allocate:{} Allocated size: {}, "
                   "Max size: {} "
