@@ -85,6 +85,7 @@ class GroupChunkTranslator
     FieldDataInfo column_group_info_;
     std::vector<std::string> insert_files_;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
+    std::vector<size_t> file_row_group_prefix_sum_;
     SchemaPtr schema_;
     bool is_sorted_by_pk_;
     ChunkedSegmentSealedImpl* chunked_segment_;

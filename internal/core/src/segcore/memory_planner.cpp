@@ -151,9 +151,9 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const std::shared_ptr<arrow::Schema> schema,
                  milvus::proto::common::LoadPriority priority) {
     try {
-        AssertInfo(
-            remote_files.size() == row_group_lists.size(),
-            "Number of remote files must match number of row group lists");
+        AssertInfo(remote_files.size() == row_group_lists.size(),
+                   "[StorageV2] Number of remote files must match number of "
+                   "row group lists");
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         auto& pool =
@@ -170,7 +170,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             // Use provided strategy to split row groups
             auto blocks = strategy->split(row_groups);
 
-            LOG_INFO("split row groups into blocks: {} for file {}",
+            LOG_INFO("[StorageV2] split row groups into blocks: {} for file {}",
                      blocks.size(),
                      file);
 
@@ -189,16 +189,18 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                                   file_idx,
                                                   schema,
                                                   reader_memory_limit]() {
-                    AssertInfo(fs != nullptr, "file system is nullptr");
+                    AssertInfo(fs != nullptr,
+                               "[StorageV2] file system is nullptr");
                     auto row_group_reader =
                         std::make_shared<milvus_storage::FileRowGroupReader>(
                             fs, file, schema, reader_memory_limit);
                     AssertInfo(row_group_reader != nullptr,
-                               "row group reader is nullptr");
+                               "[StorageV2] row group reader is nullptr");
                     row_group_reader->SetRowGroupOffsetAndCount(block.offset,
                                                                 block.count);
                     LOG_INFO(
-                        "read row groups from file {} with offset {} and count "
+                        "[StorageV2] read row groups from file {} with offset "
+                        "{} and count "
                         "{}",
                         file,
                         block.offset,
@@ -209,16 +211,19 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                         auto status =
                             row_group_reader->ReadNextRowGroup(&table);
                         AssertInfo(status.ok(),
-                                   "Failed to read row group " +
+                                   "[StorageV2] Failed to read row group " +
                                        std::to_string(block.offset + i) +
                                        " from file " + file + " with error " +
                                        status.ToString());
                         ret->arrow_tables.push_back(
-                            std::make_tuple(file_idx, block.offset + i, table));
+                            {file_idx,
+                             static_cast<size_t>(block.offset + i),
+                             table});
                     }
                     auto close_status = row_group_reader->Close();
                     AssertInfo(close_status.ok(),
-                               "Failed to close row group reader for file " +
+                               "[StorageV2] Failed to close row group reader "
+                               "for file " +
                                    file + " with error " +
                                    close_status.ToString());
                     return ret;
@@ -233,7 +238,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
         channel->close();
     } catch (std::exception& e) {
-        LOG_INFO("failed to load data from remote: {}", e.what());
+        LOG_INFO("[StorageV2] failed to load data from remote: {}", e.what());
         channel->close();
     }
 }
