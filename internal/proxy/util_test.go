@@ -791,11 +791,11 @@ func TestValidateUsername(t *testing.T) {
 	// length gt 32
 	res = ValidateUsername("aaaaaaaaaabbbbbbbbbbccccccccccddddd")
 	assert.Error(t, res)
-	// illegal character which not alphabet, _, or number
-	res = ValidateUsername("a1^7*).,")
+	// illegal character which not alphabet, _, ., ., or number
+	res = ValidateUsername("a1^7*),")
 	assert.Error(t, res)
-	// normal username that only contains alphabet, _, and number
-	res = ValidateUsername("a17_good")
+	// normal username that only contains alphabet, _, ., -, and number
+	res = ValidateUsername("a.17_good-")
 	assert.Nil(t, res)
 }
 
