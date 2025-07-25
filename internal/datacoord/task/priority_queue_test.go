@@ -7,7 +7,7 @@ import (
 )
 
 func TestFIFOQueue_Push(t *testing.T) {
-	queue := NewFIFOQueue()
+	queue := NewPriorityQueuePolicy()
 
 	// Test adding tasks
 	task1 := NewMockTask(t)
@@ -31,7 +31,7 @@ func TestFIFOQueue_Push(t *testing.T) {
 }
 
 func TestFIFOQueue_Pop(t *testing.T) {
-	queue := NewFIFOQueue()
+	queue := NewPriorityQueuePolicy()
 
 	// Test empty queue
 	assert.Nil(t, queue.Pop())
@@ -54,7 +54,7 @@ func TestFIFOQueue_Pop(t *testing.T) {
 }
 
 func TestFIFOQueue_Get(t *testing.T) {
-	queue := NewFIFOQueue()
+	queue := NewPriorityQueuePolicy()
 
 	// Test getting non-existent task
 	assert.Nil(t, queue.Get(1))
@@ -69,7 +69,7 @@ func TestFIFOQueue_Get(t *testing.T) {
 }
 
 func TestFIFOQueue_Remove(t *testing.T) {
-	queue := NewFIFOQueue()
+	queue := NewPriorityQueuePolicy()
 
 	// Test removing non-existent task
 	queue.Remove(1)
@@ -98,7 +98,7 @@ func TestFIFOQueue_Remove(t *testing.T) {
 }
 
 func TestFIFOQueue_TaskIDs(t *testing.T) {
-	queue := NewFIFOQueue()
+	queue := NewPriorityQueuePolicy()
 
 	// Test empty queue
 	assert.Equal(t, 0, len(queue.TaskIDs()))

@@ -182,7 +182,7 @@ HybridScalarIndex<T>::SelectIndexBuildType(
     } else if (IsArrayType(field_type_)) {
         return SelectBuildTypeForArrayType(field_datas);
     } else {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   fmt::format("unsupported build index for type {}",
                               DataType_Name(field_type_)));
     }
@@ -204,7 +204,7 @@ HybridScalarIndex<T>::GetInternalIndex() {
         internal_index_ = std::make_shared<InvertedIndexTantivy<T>>(
             tantivy_index_version_, file_manager_context_);
     } else {
-        PanicInfo(UnexpectedError,
+        ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
     }
     return internal_index_;
@@ -227,7 +227,7 @@ HybridScalarIndex<std::string>::GetInternalIndex() {
         internal_index_ = std::make_shared<InvertedIndexTantivy<std::string>>(
             tantivy_index_version_, file_manager_context_);
     } else {
-        PanicInfo(UnexpectedError,
+        ThrowInfo(UnexpectedError,
                   "unknown index type when get internal index");
     }
     return internal_index_;
@@ -369,6 +369,8 @@ HybridScalarIndex<T>::Load(milvus::tracer::TraceContext ctx,
         config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
+    // clear index_datas to free memory early
+    index_datas.clear();
     DeserializeIndexType(binary_set);
 
     auto index = GetInternalIndex();

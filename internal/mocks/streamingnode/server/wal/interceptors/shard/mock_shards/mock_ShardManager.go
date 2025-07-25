@@ -301,17 +301,17 @@ func (_c *MockShardManager_CheckIfCollectionExists_Call) RunAndReturn(run func(i
 	return _c
 }
 
-// CheckIfPartitionCanBeCreated provides a mock function with given fields: collectionID, partitionID
-func (_m *MockShardManager) CheckIfPartitionCanBeCreated(collectionID int64, partitionID int64) error {
-	ret := _m.Called(collectionID, partitionID)
+// CheckIfPartitionCanBeCreated provides a mock function with given fields: uniquePartitionKey
+func (_m *MockShardManager) CheckIfPartitionCanBeCreated(uniquePartitionKey shards.PartitionUniqueKey) error {
+	ret := _m.Called(uniquePartitionKey)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckIfPartitionCanBeCreated")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
-		r0 = rf(collectionID, partitionID)
+	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey) error); ok {
+		r0 = rf(uniquePartitionKey)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -325,15 +325,14 @@ type MockShardManager_CheckIfPartitionCanBeCreated_Call struct {
 }
 
 // CheckIfPartitionCanBeCreated is a helper method to define mock.On call
-//   - collectionID int64
-//   - partitionID int64
-func (_e *MockShardManager_Expecter) CheckIfPartitionCanBeCreated(collectionID interface{}, partitionID interface{}) *MockShardManager_CheckIfPartitionCanBeCreated_Call {
-	return &MockShardManager_CheckIfPartitionCanBeCreated_Call{Call: _e.mock.On("CheckIfPartitionCanBeCreated", collectionID, partitionID)}
+//   - uniquePartitionKey shards.PartitionUniqueKey
+func (_e *MockShardManager_Expecter) CheckIfPartitionCanBeCreated(uniquePartitionKey interface{}) *MockShardManager_CheckIfPartitionCanBeCreated_Call {
+	return &MockShardManager_CheckIfPartitionCanBeCreated_Call{Call: _e.mock.On("CheckIfPartitionCanBeCreated", uniquePartitionKey)}
 }
 
-func (_c *MockShardManager_CheckIfPartitionCanBeCreated_Call) Run(run func(collectionID int64, partitionID int64)) *MockShardManager_CheckIfPartitionCanBeCreated_Call {
+func (_c *MockShardManager_CheckIfPartitionCanBeCreated_Call) Run(run func(uniquePartitionKey shards.PartitionUniqueKey)) *MockShardManager_CheckIfPartitionCanBeCreated_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		run(args[0].(shards.PartitionUniqueKey))
 	})
 	return _c
 }
@@ -343,22 +342,22 @@ func (_c *MockShardManager_CheckIfPartitionCanBeCreated_Call) Return(_a0 error) 
 	return _c
 }
 
-func (_c *MockShardManager_CheckIfPartitionCanBeCreated_Call) RunAndReturn(run func(int64, int64) error) *MockShardManager_CheckIfPartitionCanBeCreated_Call {
+func (_c *MockShardManager_CheckIfPartitionCanBeCreated_Call) RunAndReturn(run func(shards.PartitionUniqueKey) error) *MockShardManager_CheckIfPartitionCanBeCreated_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CheckIfPartitionExists provides a mock function with given fields: collectionID, partitionID
-func (_m *MockShardManager) CheckIfPartitionExists(collectionID int64, partitionID int64) error {
-	ret := _m.Called(collectionID, partitionID)
+// CheckIfPartitionExists provides a mock function with given fields: uniquePartitionKey
+func (_m *MockShardManager) CheckIfPartitionExists(uniquePartitionKey shards.PartitionUniqueKey) error {
+	ret := _m.Called(uniquePartitionKey)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckIfPartitionExists")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, int64) error); ok {
-		r0 = rf(collectionID, partitionID)
+	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey) error); ok {
+		r0 = rf(uniquePartitionKey)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -372,15 +371,14 @@ type MockShardManager_CheckIfPartitionExists_Call struct {
 }
 
 // CheckIfPartitionExists is a helper method to define mock.On call
-//   - collectionID int64
-//   - partitionID int64
-func (_e *MockShardManager_Expecter) CheckIfPartitionExists(collectionID interface{}, partitionID interface{}) *MockShardManager_CheckIfPartitionExists_Call {
-	return &MockShardManager_CheckIfPartitionExists_Call{Call: _e.mock.On("CheckIfPartitionExists", collectionID, partitionID)}
+//   - uniquePartitionKey shards.PartitionUniqueKey
+func (_e *MockShardManager_Expecter) CheckIfPartitionExists(uniquePartitionKey interface{}) *MockShardManager_CheckIfPartitionExists_Call {
+	return &MockShardManager_CheckIfPartitionExists_Call{Call: _e.mock.On("CheckIfPartitionExists", uniquePartitionKey)}
 }
 
-func (_c *MockShardManager_CheckIfPartitionExists_Call) Run(run func(collectionID int64, partitionID int64)) *MockShardManager_CheckIfPartitionExists_Call {
+func (_c *MockShardManager_CheckIfPartitionExists_Call) Run(run func(uniquePartitionKey shards.PartitionUniqueKey)) *MockShardManager_CheckIfPartitionExists_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		run(args[0].(shards.PartitionUniqueKey))
 	})
 	return _c
 }
@@ -390,22 +388,22 @@ func (_c *MockShardManager_CheckIfPartitionExists_Call) Return(_a0 error) *MockS
 	return _c
 }
 
-func (_c *MockShardManager_CheckIfPartitionExists_Call) RunAndReturn(run func(int64, int64) error) *MockShardManager_CheckIfPartitionExists_Call {
+func (_c *MockShardManager_CheckIfPartitionExists_Call) RunAndReturn(run func(shards.PartitionUniqueKey) error) *MockShardManager_CheckIfPartitionExists_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CheckIfSegmentCanBeCreated provides a mock function with given fields: collectionID, partitionID, segmentID
-func (_m *MockShardManager) CheckIfSegmentCanBeCreated(collectionID int64, partitionID int64, segmentID int64) error {
-	ret := _m.Called(collectionID, partitionID, segmentID)
+// CheckIfSegmentCanBeCreated provides a mock function with given fields: uniquePartitionKey, segmentID
+func (_m *MockShardManager) CheckIfSegmentCanBeCreated(uniquePartitionKey shards.PartitionUniqueKey, segmentID int64) error {
+	ret := _m.Called(uniquePartitionKey, segmentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckIfSegmentCanBeCreated")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, int64, int64) error); ok {
-		r0 = rf(collectionID, partitionID, segmentID)
+	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey, int64) error); ok {
+		r0 = rf(uniquePartitionKey, segmentID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -419,16 +417,15 @@ type MockShardManager_CheckIfSegmentCanBeCreated_Call struct {
 }
 
 // CheckIfSegmentCanBeCreated is a helper method to define mock.On call
-//   - collectionID int64
-//   - partitionID int64
+//   - uniquePartitionKey shards.PartitionUniqueKey
 //   - segmentID int64
-func (_e *MockShardManager_Expecter) CheckIfSegmentCanBeCreated(collectionID interface{}, partitionID interface{}, segmentID interface{}) *MockShardManager_CheckIfSegmentCanBeCreated_Call {
-	return &MockShardManager_CheckIfSegmentCanBeCreated_Call{Call: _e.mock.On("CheckIfSegmentCanBeCreated", collectionID, partitionID, segmentID)}
+func (_e *MockShardManager_Expecter) CheckIfSegmentCanBeCreated(uniquePartitionKey interface{}, segmentID interface{}) *MockShardManager_CheckIfSegmentCanBeCreated_Call {
+	return &MockShardManager_CheckIfSegmentCanBeCreated_Call{Call: _e.mock.On("CheckIfSegmentCanBeCreated", uniquePartitionKey, segmentID)}
 }
 
-func (_c *MockShardManager_CheckIfSegmentCanBeCreated_Call) Run(run func(collectionID int64, partitionID int64, segmentID int64)) *MockShardManager_CheckIfSegmentCanBeCreated_Call {
+func (_c *MockShardManager_CheckIfSegmentCanBeCreated_Call) Run(run func(uniquePartitionKey shards.PartitionUniqueKey, segmentID int64)) *MockShardManager_CheckIfSegmentCanBeCreated_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64), args[2].(int64))
+		run(args[0].(shards.PartitionUniqueKey), args[1].(int64))
 	})
 	return _c
 }
@@ -438,22 +435,22 @@ func (_c *MockShardManager_CheckIfSegmentCanBeCreated_Call) Return(_a0 error) *M
 	return _c
 }
 
-func (_c *MockShardManager_CheckIfSegmentCanBeCreated_Call) RunAndReturn(run func(int64, int64, int64) error) *MockShardManager_CheckIfSegmentCanBeCreated_Call {
+func (_c *MockShardManager_CheckIfSegmentCanBeCreated_Call) RunAndReturn(run func(shards.PartitionUniqueKey, int64) error) *MockShardManager_CheckIfSegmentCanBeCreated_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// CheckIfSegmentCanBeFlushed provides a mock function with given fields: collecionID, partitionID, segmentID
-func (_m *MockShardManager) CheckIfSegmentCanBeFlushed(collecionID int64, partitionID int64, segmentID int64) error {
-	ret := _m.Called(collecionID, partitionID, segmentID)
+// CheckIfSegmentCanBeFlushed provides a mock function with given fields: uniquePartitionKey, segmentID
+func (_m *MockShardManager) CheckIfSegmentCanBeFlushed(uniquePartitionKey shards.PartitionUniqueKey, segmentID int64) error {
+	ret := _m.Called(uniquePartitionKey, segmentID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CheckIfSegmentCanBeFlushed")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(int64, int64, int64) error); ok {
-		r0 = rf(collecionID, partitionID, segmentID)
+	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey, int64) error); ok {
+		r0 = rf(uniquePartitionKey, segmentID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -467,16 +464,15 @@ type MockShardManager_CheckIfSegmentCanBeFlushed_Call struct {
 }
 
 // CheckIfSegmentCanBeFlushed is a helper method to define mock.On call
-//   - collecionID int64
-//   - partitionID int64
+//   - uniquePartitionKey shards.PartitionUniqueKey
 //   - segmentID int64
-func (_e *MockShardManager_Expecter) CheckIfSegmentCanBeFlushed(collecionID interface{}, partitionID interface{}, segmentID interface{}) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
-	return &MockShardManager_CheckIfSegmentCanBeFlushed_Call{Call: _e.mock.On("CheckIfSegmentCanBeFlushed", collecionID, partitionID, segmentID)}
+func (_e *MockShardManager_Expecter) CheckIfSegmentCanBeFlushed(uniquePartitionKey interface{}, segmentID interface{}) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
+	return &MockShardManager_CheckIfSegmentCanBeFlushed_Call{Call: _e.mock.On("CheckIfSegmentCanBeFlushed", uniquePartitionKey, segmentID)}
 }
 
-func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) Run(run func(collecionID int64, partitionID int64, segmentID int64)) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
+func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) Run(run func(uniquePartitionKey shards.PartitionUniqueKey, segmentID int64)) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64), args[2].(int64))
+		run(args[0].(shards.PartitionUniqueKey), args[1].(int64))
 	})
 	return _c
 }
@@ -486,7 +482,7 @@ func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) Return(_a0 error) *M
 	return _c
 }
 
-func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) RunAndReturn(run func(int64, int64, int64) error) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
+func (_c *MockShardManager_CheckIfSegmentCanBeFlushed_Call) RunAndReturn(run func(shards.PartitionUniqueKey, int64) error) *MockShardManager_CheckIfSegmentCanBeFlushed_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -827,9 +823,9 @@ func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *log.MLogger) *M
 	return _c
 }
 
-// WaitUntilGrowingSegmentReady provides a mock function with given fields: collectionID, partitonID
-func (_m *MockShardManager) WaitUntilGrowingSegmentReady(collectionID int64, partitonID int64) (<-chan struct{}, error) {
-	ret := _m.Called(collectionID, partitonID)
+// WaitUntilGrowingSegmentReady provides a mock function with given fields: uniquePartitionKey
+func (_m *MockShardManager) WaitUntilGrowingSegmentReady(uniquePartitionKey shards.PartitionUniqueKey) (<-chan struct{}, error) {
+	ret := _m.Called(uniquePartitionKey)
 
 	if len(ret) == 0 {
 		panic("no return value specified for WaitUntilGrowingSegmentReady")
@@ -837,19 +833,19 @@ func (_m *MockShardManager) WaitUntilGrowingSegmentReady(collectionID int64, par
 
 	var r0 <-chan struct{}
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64, int64) (<-chan struct{}, error)); ok {
-		return rf(collectionID, partitonID)
+	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey) (<-chan struct{}, error)); ok {
+		return rf(uniquePartitionKey)
 	}
-	if rf, ok := ret.Get(0).(func(int64, int64) <-chan struct{}); ok {
-		r0 = rf(collectionID, partitonID)
+	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey) <-chan struct{}); ok {
+		r0 = rf(uniquePartitionKey)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(<-chan struct{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(int64, int64) error); ok {
-		r1 = rf(collectionID, partitonID)
+	if rf, ok := ret.Get(1).(func(shards.PartitionUniqueKey) error); ok {
+		r1 = rf(uniquePartitionKey)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -863,15 +859,14 @@ type MockShardManager_WaitUntilGrowingSegmentReady_Call struct {
 }
 
 // WaitUntilGrowingSegmentReady is a helper method to define mock.On call
-//   - collectionID int64
-//   - partitonID int64
-func (_e *MockShardManager_Expecter) WaitUntilGrowingSegmentReady(collectionID interface{}, partitonID interface{}) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
-	return &MockShardManager_WaitUntilGrowingSegmentReady_Call{Call: _e.mock.On("WaitUntilGrowingSegmentReady", collectionID, partitonID)}
+//   - uniquePartitionKey shards.PartitionUniqueKey
+func (_e *MockShardManager_Expecter) WaitUntilGrowingSegmentReady(uniquePartitionKey interface{}) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
+	return &MockShardManager_WaitUntilGrowingSegmentReady_Call{Call: _e.mock.On("WaitUntilGrowingSegmentReady", uniquePartitionKey)}
 }
 
-func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) Run(run func(collectionID int64, partitonID int64)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
+func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) Run(run func(uniquePartitionKey shards.PartitionUniqueKey)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(int64))
+		run(args[0].(shards.PartitionUniqueKey))
 	})
 	return _c
 }
@@ -881,7 +876,7 @@ func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) Return(_a0 <-chan 
 	return _c
 }
 
-func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) RunAndReturn(run func(int64, int64) (<-chan struct{}, error)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
+func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) RunAndReturn(run func(shards.PartitionUniqueKey) (<-chan struct{}, error)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
 	_c.Call.Return(run)
 	return _c
 }

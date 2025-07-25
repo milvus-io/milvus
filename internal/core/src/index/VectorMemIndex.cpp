@@ -82,9 +82,9 @@ VectorMemIndex<T>::VectorMemIndex(
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
-            PanicInfo(ErrorCode::Unsupported, get_index_obj.what());
+            ThrowInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
-        PanicInfo(ErrorCode::KnowhereError, get_index_obj.what());
+        ThrowInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
@@ -108,9 +108,9 @@ VectorMemIndex<T>::VectorMemIndex(const IndexType& index_type,
     } else {
         auto err = get_index_obj.error();
         if (err == knowhere::Status::invalid_index_error) {
-            PanicInfo(ErrorCode::Unsupported, get_index_obj.what());
+            ThrowInfo(ErrorCode::Unsupported, get_index_obj.what());
         }
-        PanicInfo(ErrorCode::KnowhereError, get_index_obj.what());
+        ThrowInfo(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
@@ -139,7 +139,7 @@ VectorMemIndex<T>::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to serialize index: {}",
                   KnowhereStatusString(stat));
     Disassemble(ret);
@@ -153,7 +153,7 @@ VectorMemIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
                                        const Config& config) {
     auto stat = index_.Deserialize(binary_set, config);
     if (stat != knowhere::Status::success)
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to Deserialize index: {}",
                   KnowhereStatusString(stat));
     SetDim(index_.Dim());
@@ -272,6 +272,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
     AssembleIndexDatas(index_data_codecs, binary_set);
+    // clear index_data_codecs to free memory early
+    index_data_codecs.clear();
 
     // start engine load index span
     auto span_load_engine =
@@ -296,7 +298,7 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     auto stat = index_.Build(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
-        PanicInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, " + KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
@@ -393,7 +395,7 @@ VectorMemIndex<T>::AddWithDataset(const DatasetPtr& dataset,
     knowhere::TimeRecorder rc("AddWithDataset", 1);
     auto stat = index_.Add(dataset, index_config, use_knowhere_build_pool_);
     if (stat != knowhere::Status::success)
-        PanicInfo(ErrorCode::IndexBuildError,
+        ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to append index, " + KnowhereStatusString(stat));
     rc.ElapseFromBegin("Done");
 }
@@ -419,7 +421,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             auto res = index_.RangeSearch(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_range_search");
             if (!res.has_value()) {
-                PanicInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::UnexpectedError,
                           "failed to range search: {}: {}",
                           KnowhereStatusString(res.error()),
                           res.what());
@@ -433,7 +435,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
             auto res = index_.Search(dataset, search_conf, bitset);
             milvus::tracer::AddEvent("finish_knowhere_index_search");
             if (!res.has_value()) {
-                PanicInfo(
+                ThrowInfo(
                     ErrorCode::UnexpectedError,
                     // escape json brace in case of using message as format
                     "failed to search: config={} {}: {}",
@@ -476,7 +478,7 @@ std::vector<uint8_t>
 VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto index_type = GetIndexType();
     if (IndexIsSparse(index_type)) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, index is sparse");
     }
 
@@ -487,7 +489,7 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
 
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, " + KnowhereStatusString(res.error()));
     }
     auto tensor = res.value()->GetTensor();
@@ -505,7 +507,7 @@ std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
 VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
     auto res = index_.GetVectorByIds(dataset);
     if (!res.has_value()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, " + KnowhereStatusString(res.error()));
     }
     // release and transfer ownership to the result unique ptr.
@@ -638,7 +640,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto deserialize_duration =
         std::chrono::system_clock::now() - start_deserialize;
     if (stat != knowhere::Status::success) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to Deserialize index: {}",
                   KnowhereStatusString(stat));
     }

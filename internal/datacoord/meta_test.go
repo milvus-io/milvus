@@ -40,6 +40,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -439,8 +440,9 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 					Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
 					Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
 					// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
-					Deltalogs: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
-					NumOfRows: 2,
+					Deltalogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
+					NumOfRows:      2,
+					StorageVersion: storage.StorageV1,
 				}},
 			} {
 				latestSegments.SetSegment(segID, segment)
@@ -455,6 +457,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
 			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
 			NumOfRows:           2,
+			StorageVersion:      storage.StorageV2,
 		}
 
 		result := &datapb.CompactionPlanResult{
@@ -482,6 +485,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		suite.EqualValues(2, info.GetID())
 		suite.Equal(datapb.SegmentLevel_L2, info.GetLevel())
 		suite.Equal(commonpb.SegmentState_Flushed, info.GetState())
+		suite.Equal(storage.StorageV2, info.GetStorageVersion())
 
 		binlogs := info.GetBinlogs()
 		for _, fbinlog := range binlogs {

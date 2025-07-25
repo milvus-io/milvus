@@ -1059,7 +1059,7 @@ TEST(Expr, TestArrayContains) {
         }
         auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-            expr::ColumnInfo(bool_array_fid, DataType::ARRAY),
+            expr::ColumnInfo(bool_array_fid, DataType::ARRAY, DataType::BOOL),
             proto::plan::JSONContainsExpr_JSONOp_Contains,
             true,
             values);
@@ -1130,7 +1130,8 @@ TEST(Expr, TestArrayContains) {
         }
         auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-            expr::ColumnInfo(double_array_fid, DataType::ARRAY),
+            expr::ColumnInfo(
+                double_array_fid, DataType::ARRAY, DataType::DOUBLE),
             proto::plan::JSONContainsExpr_JSONOp_Contains,
             true,
             values);
@@ -1191,7 +1192,7 @@ TEST(Expr, TestArrayContains) {
         }
         auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-            expr::ColumnInfo(float_array_fid, DataType::ARRAY),
+            expr::ColumnInfo(float_array_fid, DataType::ARRAY, DataType::FLOAT),
             proto::plan::JSONContainsExpr_JSONOp_Contains,
             true,
             values);
@@ -1262,7 +1263,7 @@ TEST(Expr, TestArrayContains) {
         }
         auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-            expr::ColumnInfo(int_array_fid, DataType::ARRAY),
+            expr::ColumnInfo(int_array_fid, DataType::ARRAY, DataType::INT8),
             proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
             true,
             values);
@@ -1324,7 +1325,7 @@ TEST(Expr, TestArrayContains) {
         }
         auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-            expr::ColumnInfo(long_array_fid, DataType::ARRAY),
+            expr::ColumnInfo(long_array_fid, DataType::ARRAY, DataType::INT64),
             proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
             true,
             values);
@@ -1393,7 +1394,8 @@ TEST(Expr, TestArrayContains) {
         }
         auto start = std::chrono::steady_clock::now();
         auto expr = std::make_shared<milvus::expr::JsonContainsExpr>(
-            expr::ColumnInfo(string_array_fid, DataType::ARRAY),
+            expr::ColumnInfo(
+                string_array_fid, DataType::ARRAY, DataType::VARCHAR),
             proto::plan::JSONContainsExpr_JSONOp_ContainsAll,
             true,
             values);

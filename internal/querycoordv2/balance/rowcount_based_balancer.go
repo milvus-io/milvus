@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -208,8 +209,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(ctx context.Context, replica *met
 func (b *RowCountBasedBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
 	var rwNodes, roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
-		roNodes = append(roNodes, replica.GetRONodes()...)
+		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
@@ -366,6 +366,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(ctx context.Context, br *balanceR
 		channelsToMove := make([]*meta.DmChannel, 0)
 		for _, node := range rwNodes {
 			channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
+			channels = sortIfChannelAtWALLocated(channels)
 
 			if len(channels) <= average {
 				nodeWithLessChannel = append(nodeWithLessChannel, node)

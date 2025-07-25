@@ -56,7 +56,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
             }
             return set_data_raw(element_offset, data_raw.data(), element_count);
         } else {
-            PanicInfo(DataTypeInvalid, "unsupported vector type");
+            ThrowInfo(DataTypeInvalid, "unsupported vector type");
         }
     }
 
@@ -121,7 +121,7 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         default: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported datatype {}",
                                   field_meta.get_data_type()));
         }

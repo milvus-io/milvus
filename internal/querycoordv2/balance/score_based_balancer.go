@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -480,8 +481,7 @@ func (b *ScoreBasedBalancer) balanceChannels(ctx context.Context, br *balanceRep
 	var rwNodes []int64
 	var roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
-		roNodes = append(roNodes, replica.GetRONodes()...)
+		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}
@@ -661,6 +661,7 @@ func (b *ScoreBasedBalancer) genChannelPlan(ctx context.Context, br *balanceRepo
 			br.AddRecord(StrRecordf("node %d skip balance since current score(%f) lower than assigned one (%f)", node, currentScore, assignedScore))
 			continue
 		}
+		channels = sortIfChannelAtWALLocated(channels)
 
 		for _, ch := range channels {
 			channelScore := b.calculateChannelScore(ch, replica.GetCollectionID())

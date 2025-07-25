@@ -65,8 +65,9 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                           .GetArrowFileSystem();
         if (!trueFs) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          "Failed to get filesystem");
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
         }
 
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
@@ -81,7 +82,7 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             storage_config,
             columnGroups,
             buffer_size);
-        AssertInfo(writer, "write must not be null");
+        AssertInfo(writer, "[StorageV2] writer pointer is null");
 
         *c_packed_writer = writer.release();
         return milvus::SuccessCStatus();
@@ -109,8 +110,9 @@ NewPackedWriter(struct ArrowSchema* schema,
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                           .GetArrowFileSystem();
         if (!trueFs) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                          "Failed to get filesystem");
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileWriteFailed,
+                "[StorageV2] Failed to get filesystem");
         }
 
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
@@ -120,7 +122,7 @@ NewPackedWriter(struct ArrowSchema* schema,
 
         auto writer = std::make_unique<milvus_storage::PackedRecordBatchWriter>(
             trueFs, truePaths, trueSchema, conf, columnGroups, buffer_size);
-        AssertInfo(writer, "write must not be null");
+        AssertInfo(writer, "[StorageV2] writer pointer is null");
 
         *c_packed_writer = writer.release();
         return milvus::SuccessCStatus();

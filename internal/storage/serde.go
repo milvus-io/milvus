@@ -44,6 +44,7 @@ type Record interface {
 
 type RecordReader interface {
 	Next() (Record, error)
+	SetNeededFields(fields typeutil.Set[int64])
 	Close() error
 }
 
@@ -886,17 +887,24 @@ func BuildRecord(b *array.RecordBuilder, data *InsertData, fields []*schemapb.Fi
 	if data == nil {
 		return nil
 	}
+
 	for i, field := range fields {
 		fBuilder := b.Field(i)
 		typeEntry, ok := serdeMap[field.DataType]
 		if !ok {
 			panic("unknown type")
 		}
-		if data.Data[field.FieldID].RowNum() == 0 {
+		fieldData, exists := data.Data[field.FieldID]
+		if !exists {
+			return merr.WrapErrFieldNotFound(field.FieldID, fmt.Sprintf("field %s not found", field.Name))
+		}
+
+		if fieldData.RowNum() == 0 {
 			return merr.WrapErrServiceInternal(fmt.Sprintf("row num is 0 for field %s", field.Name))
 		}
-		for j := 0; j < data.Data[field.FieldID].RowNum(); j++ {
-			ok = typeEntry.serialize(fBuilder, data.Data[field.FieldID].GetRow(j))
+
+		for j := 0; j < fieldData.RowNum(); j++ {
+			ok = typeEntry.serialize(fBuilder, fieldData.GetRow(j))
 			if !ok {
 				return merr.WrapErrServiceInternal(fmt.Sprintf("serialize error on type %s", field.DataType.String()))
 			}

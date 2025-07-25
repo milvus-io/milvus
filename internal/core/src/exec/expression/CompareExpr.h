@@ -61,7 +61,7 @@ struct CompareElementFunc {
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
                     res[i] = left[offset] <= right[offset];
                 } else {
-                    PanicInfo(
+                    ThrowInfo(
                         OpTypeInvalid,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
@@ -89,7 +89,7 @@ struct CompareElementFunc {
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
                     res[i] = left[i] <= right[i];
                 } else {
-                    PanicInfo(
+                    ThrowInfo(
                         OpTypeInvalid,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
@@ -118,7 +118,7 @@ struct CompareElementFunc {
             res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
                 left, right, size);
         } else {
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format(
                           "unsupported op_type:{} for CompareElementFunc", op));
         }

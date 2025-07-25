@@ -1,7 +1,7 @@
 @Library('jenkins-shared-library@tekton') _
 
 def pod = libraryResource 'io/milvus/pod/tekton-4am.yaml'
-def milvus_helm_chart_version = '4.2.53'
+def milvus_helm_chart_version = '4.2.56'
 
 pipeline {
     options {
@@ -56,7 +56,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: 'make clean && make install USE_ASAN=ON use_disk_index=ON',
+                                              make_cmd: 'make clean && make jobs=8 install USE_ASAN=ON use_disk_index=ON',
                                               images: '["milvus","pytest","helm"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'

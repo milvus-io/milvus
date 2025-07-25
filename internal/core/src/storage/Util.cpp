@@ -206,13 +206,13 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
             break;
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "Sparse Float Vector payload should be added by calling "
                       "add_one_binary_payload",
                       data_type);
         }
         default: {
-            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type {}", data_type);
         }
     }
 }
@@ -290,7 +290,7 @@ CreateArrowBuilder(DataType data_type) {
             return std::make_shared<arrow::BinaryBuilder>();
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
@@ -325,7 +325,7 @@ CreateArrowBuilder(DataType data_type, int dim) {
                 arrow::fixed_size_binary(dim * sizeof(int8)));
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
     }
@@ -365,7 +365,7 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
             return std::make_shared<arrow::StringScalar>(
                 default_value.string_data());
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "unsupported default value data type {}",
                       field_meta.get_data_type());
     }
@@ -420,7 +420,7 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 {arrow::field("val", arrow::binary(), nullable)});
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
@@ -467,7 +467,7 @@ CreateArrowSchema(DataType data_type, int dim, bool nullable) {
                               nullable)});
         }
         default: {
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid, "unsupported vector data type {}", data_type);
         }
     }
@@ -490,7 +490,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(bfloat16);
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("GetDimensionFromFileMetaData should not be "
                                   "called for sparse vector"));
         }
@@ -498,7 +498,7 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
             return schema->type_length() / sizeof(int8);
         }
         default:
-            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -552,7 +552,7 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
             return array->byte_width() / sizeof(int8);
         }
         default:
-            PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
 }
 
@@ -879,7 +879,7 @@ CreateChunkManager(const StorageConfig& storage_config) {
         }
 #endif
         default: {
-            PanicInfo(ConfigInvalid,
+            ThrowInfo(ConfigInvalid,
                       "unsupported storage_config.storage_type {}",
                       fmt::underlying(storage_type));
         }
@@ -980,7 +980,7 @@ CreateFieldData(const DataType& type,
             return std::make_shared<FieldData<VectorArray>>(type,
                                                             total_num_rows);
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "CreateFieldData not support data type " +
                           GetDataTypeName(type));
     }
@@ -1068,14 +1068,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            DataType data_type,
                            int64_t dim,
                            milvus_storage::ArrowFileSystemPtr fs) {
-    AssertInfo(remote_files.size() > 0, "remote files size is 0");
+    AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
     std::unordered_map<int64_t, std::vector<std::string>> column_group_files;
     for (auto& remote_chunk_files : remote_files) {
-        AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
+        AssertInfo(remote_chunk_files.size() > 0,
+                   "[StorageV2] remote files size is 0");
         int64_t group_id = ExtractGroupIdFromPath(remote_chunk_files[0]);
         column_group_files[group_id] = remote_chunk_files;
     }
@@ -1090,7 +1091,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         column_group_id = field_id;
     }
 
-    AssertInfo(remote_chunk_files.size() > 0, "remote files size is 0");
+    AssertInfo(remote_chunk_files.size() > 0,
+               "[StorageV2] remote files size is 0");
 
     // find column offset
     milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
@@ -1105,14 +1107,15 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     // field not found, must be newly added field, return empty resultset
     if (col_offset == -1) {
         LOG_INFO(
-            "field {} not found in column group {}, return empty result set",
+            "[StorageV2] field {} not found in column group {}, return empty "
+            "result set",
             field_id,
             column_group_id);
         return field_data_list;
     }
 
     AssertInfo(fs != nullptr,
-               "storage v2 arrow file system is not initialized");
+               "[StorageV2] storage v2 arrow file system is not initialized");
 
     // set up channel for arrow reader
     auto field_data_info = FieldDataInfo();
@@ -1138,10 +1141,10 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         auto field_schema = reader->schema()->field(col_offset)->Copy();
         auto arrow_schema = arrow::schema({field_schema});
         auto status = reader->Close();
-        AssertInfo(
-            status.ok(),
-            "failed to close file reader when get arrow schema from file: " +
-                column_group_file + " with error: " + status.ToString());
+        AssertInfo(status.ok(),
+                   "[StorageV2] failed to close file reader when get arrow "
+                   "schema from file: " +
+                       column_group_file + " with error: " + status.ToString());
 
         // split row groups for parallel reading
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
@@ -1159,9 +1162,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         while (field_data_info.arrow_reader_channel->pop(r)) {
             size_t num_rows = 0;
             std::vector<std::shared_ptr<arrow::ChunkedArray>> chunked_arrays;
-            for (const auto& table : r->arrow_tables) {
-                num_rows += table->num_rows();
-                chunked_arrays.push_back(table->column(col_offset));
+            for (const auto& table_info : r->arrow_tables) {
+                num_rows += table_info.table->num_rows();
+                chunked_arrays.push_back(table_info.table->column(col_offset));
             }
             auto field_data = storage::CreateFieldData(
                 data_type, field_schema->nullable(), dim, num_rows);

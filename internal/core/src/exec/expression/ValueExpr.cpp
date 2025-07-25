@@ -94,7 +94,7 @@ PhyValueExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::ARRAY:
         case DataType::JSON:
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       "PhyValueExpr not support data type " +
                           GetDataTypeName(expr_->type()));
     }

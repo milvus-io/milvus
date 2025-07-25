@@ -58,7 +58,7 @@ func newEmbeddingNode(channelName string, metaCache metacache.MetaCache) (*embed
 		functionRunners: make(map[int64]function.FunctionRunner),
 	}
 
-	schema := metaCache.Schema()
+	schema := metaCache.GetSchema(0)
 
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() {
@@ -155,7 +155,7 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 		return []Msg{fgMsg}
 	}
 
-	insertData, err := writebuffer.PrepareInsert(eNode.metaCache.Schema(), eNode.pkField, fgMsg.InsertMessages)
+	insertData, err := writebuffer.PrepareInsert(eNode.metaCache.GetSchema(fgMsg.TimeTick()), eNode.pkField, fgMsg.InsertMessages)
 	if err != nil {
 		log.Error("failed to prepare insert data", zap.Error(err))
 		panic(err)

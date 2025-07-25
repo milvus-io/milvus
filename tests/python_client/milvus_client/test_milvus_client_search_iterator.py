@@ -618,6 +618,7 @@ class TestMilvusClientSearchIteratorInValid(TestMilvusClientV2Base):
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
+                                              "consistency_level": 2,
                                               "dim": default_dim})
         # 2. insert
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),
@@ -688,7 +689,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rows = [{default_primary_key_field_name: i,
                  default_vector_field_name: list(cf.gen_vectors(1, default_dim)[0]),

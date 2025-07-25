@@ -31,7 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func LoadBM25Stats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, statsBinlogs []*datapb.FieldBinlog) (map[int64]*storage.BM25Stats, error) {
+func LoadBM25Stats(ctx context.Context, chunkManager storage.ChunkManager, segmentID int64, statsBinlogs []*datapb.FieldBinlog) (map[int64]*storage.BM25Stats, error) {
 	startTs := time.Now()
 	log := log.With(zap.Int64("segmentID", segmentID))
 	log.Info("begin to reload history BM25 stats", zap.Int("statsBinLogsLen", len(statsBinlogs)))

@@ -95,6 +95,11 @@ func (pr *packedRecordReader) Next() (Record, error) {
 	}
 }
 
+func (pr *packedRecordReader) SetNeededFields(fields typeutil.Set[int64]) {
+	// TODO, push down SetNeededFields to packedReader after implemented
+	// no-op for now
+}
+
 func (pr *packedRecordReader) Close() error {
 	if pr.reader != nil {
 		return pr.reader.Close()
@@ -572,5 +577,8 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		pkstats:             stats,
 		bm25Stats:           bm25Stats,
 		storageConfig:       storageConfig,
+
+		tsFrom: typeutil.MaxTimestamp,
+		tsTo:   0,
 	}, nil
 }

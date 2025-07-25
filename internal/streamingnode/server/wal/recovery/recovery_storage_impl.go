@@ -4,9 +4,11 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -85,7 +87,6 @@ type recoveryStorageImpl struct {
 	segments               map[int64]*segmentRecoveryInfo
 	vchannels              map[string]*vchannelRecoveryInfo
 	checkpoint             *WALCheckpoint
-	flusherCheckpoint      *WALCheckpoint
 	dirtyCounter           int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
 	persistNotifier        chan struct{}
@@ -107,15 +108,33 @@ func (r *recoveryStorageImpl) Metrics() RecoveryMetrics {
 
 // UpdateFlusherCheckpoint updates the checkpoint of flusher.
 // TODO: should be removed in future, after merge the flusher logic into recovery storage.
-func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(checkpoint *WALCheckpoint) {
+func (r *recoveryStorageImpl) UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.flusherCheckpoint == nil || r.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
-		r.flusherCheckpoint = checkpoint
-		r.Logger().Info("update checkpoint of flusher", zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
+	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
+		if err := vchannelInfo.UpdateFlushCheckpoint(checkpoint); err != nil {
+			r.Logger().Warn("failed to update flush checkpoint", zap.Error(err))
+			return
+		}
+		r.Logger().Info("update flush checkpoint", zap.String("vchannel", vchannel), zap.String("messageID", checkpoint.MessageID.String()), zap.Uint64("timeTick", checkpoint.TimeTick))
 		return
 	}
-	r.Logger().Warn("update illegal checkpoint of flusher", zap.String("current", r.flusherCheckpoint.MessageID.String()), zap.String("target", checkpoint.MessageID.String()))
+	r.Logger().Warn("vchannel not found", zap.String("vchannel", vchannel))
+}
+
+// GetSchema gets the schema of the collection at the given timetick.
+func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, timetick uint64) (*schemapb.CollectionSchema, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if vchannelInfo, ok := r.vchannels[vchannel]; ok {
+		_, schema := vchannelInfo.GetSchema(timetick)
+		if schema == nil {
+			return nil, errors.Errorf("critical error: schema not found, vchannel: %s, timetick: %d", vchannel, timetick)
+		}
+		return schema, nil
+	}
+	return nil, errors.Errorf("critical error: vchannel not found, vchannel: %s, timetick: %d", vchannel, timetick)
 }
 
 // ObserveMessage is called when a new message is observed.
@@ -209,6 +228,10 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 	r.checkpoint.MessageID = msg.LastConfirmedMessageID()
 	r.metrics.ObServeInMemMetrics(r.checkpoint.TimeTick)
 
+	if !msg.IsPersisted() {
+		// only trigger persist when the message is persisted.
+		return
+	}
 	r.dirtyCounter++
 	if r.dirtyCounter > r.cfg.maxDirtyMessages {
 		r.notifyPersist()
@@ -384,12 +407,12 @@ func (r *recoveryStorageImpl) handleDropPartition(msg message.ImmutableDropParti
 	}
 	r.vchannels[msg.VChannel()].ObserveDropPartition(msg)
 	// flush all existing segments.
-	r.flushAllSegmentOfPartition(msg, msg.Header().CollectionId, msg.Header().PartitionId)
+	r.flushAllSegmentOfPartition(msg, msg.Header().PartitionId)
 	r.Logger().Info("drop partition", log.FieldMessage(msg))
 }
 
 // flushAllSegmentOfPartition flushes all segments of the partition.
-func (r *recoveryStorageImpl) flushAllSegmentOfPartition(msg message.ImmutableMessage, collectionID int64, partitionID int64) {
+func (r *recoveryStorageImpl) flushAllSegmentOfPartition(msg message.ImmutableMessage, partitionID int64) {
 	segmentIDs := make([]int64, 0)
 	rows := make([]uint64, 0)
 	for _, segment := range r.segments {
@@ -422,7 +445,11 @@ func (r *recoveryStorageImpl) handleSchemaChange(msg message.ImmutableSchemaChan
 		segments[segmentID] = struct{}{}
 	}
 	r.flushSegments(msg, segments)
-	// TODO: persist the schema change into recoveryinfo
+
+	// persist the schema change into recovery info.
+	if vchannelInfo, ok := r.vchannels[msg.VChannel()]; ok {
+		vchannelInfo.ObserveSchemaChange(msg)
+	}
 }
 
 // detectInconsistency detects the inconsistency in the recovery storage.
@@ -441,5 +468,16 @@ func (r *recoveryStorageImpl) detectInconsistency(msg message.ImmutableMessage, 
 func (r *recoveryStorageImpl) getFlusherCheckpoint() *WALCheckpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.flusherCheckpoint
+
+	var minimumCheckpoint *WALCheckpoint
+	for _, vchannel := range r.vchannels {
+		if vchannel.GetFlushCheckpoint() == nil {
+			// If any flush checkpoint is not set, not ready.
+			return nil
+		}
+		if minimumCheckpoint == nil || vchannel.GetFlushCheckpoint().MessageID.LTE(minimumCheckpoint.MessageID) {
+			minimumCheckpoint = vchannel.GetFlushCheckpoint()
+		}
+	}
+	return minimumCheckpoint
 }

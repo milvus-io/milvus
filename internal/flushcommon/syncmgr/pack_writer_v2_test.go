@@ -105,7 +105,7 @@ func (s *PackWriterV2Suite) TestPackWriterV2_Write() {
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
-	mc.EXPECT().Schema().Return(s.schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
 	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {
@@ -137,7 +137,7 @@ func (s *PackWriterV2Suite) TestWriteEmptyInsertData() {
 	segmentID := int64(789)
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().Schema().Return(s.schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName)
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil)
@@ -160,7 +160,7 @@ func (s *PackWriterV2Suite) TestNoPkField() {
 	segmentID := int64(789)
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().Schema().Return(s.schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	buf, _ := storage.NewInsertData(s.schema)
 	data := make(map[storage.FieldID]any)
@@ -183,7 +183,7 @@ func (s *PackWriterV2Suite) TestAllocIDExhausedError() {
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	rows := 10
 	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().Schema().Return(s.schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	pack := new(SyncPack).WithCollectionID(collectionID).WithPartitionID(partitionID).WithSegmentID(segmentID).WithChannelName(channelName).WithInsertData(genInsertData(rows, s.schema))
 	bw := NewBulkPackWriterV2(mc, s.schema, s.cm, s.logIDAlloc, packed.DefaultWriteBufferSize, 0, nil)
@@ -199,7 +199,7 @@ func (s *PackWriterV2Suite) TestWriteInsertDataError() {
 	segmentID := int64(789)
 	channelName := fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collectionID)
 	mc := metacache.NewMockMetaCache(s.T())
-	mc.EXPECT().Schema().Return(s.schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	buf, _ := storage.NewInsertData(s.schema)
 	data := make(map[storage.FieldID]any)

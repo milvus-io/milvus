@@ -516,7 +516,7 @@ message GetChannelRecoveryInfoRequest {
 message GetChannelRecoveryInfoResponse {
   common.Status status = 1;
   VchannelInfo info = 2;
-  schema.CollectionSchema schema = 3;
+  schema.CollectionSchema schema = 3 [deprecated = true]; // schema is managed by streaming node itself now, so it should not be passed by rpc.
   repeated SegmentNotCreatedByStreaming segments_not_created_by_streaming = 4; // Should be flushed by streaming service when upgrading.
 }
 
@@ -949,6 +949,7 @@ enum ImportTaskStateV2 {
   InProgress = 2;
   Failed = 3;
   Completed = 4;
+  Retry = 5;
 }
 
 enum ImportTaskSourceV2 {

@@ -67,28 +67,6 @@ IndexFactory::CreatePrimitiveScalarIndex(
     return CreateScalarIndexSort<T>(file_manager_context);
 }
 
-IndexBasePtr
-IndexFactory::CreateNgramIndex(
-    DataType data_type,
-    const NgramParams& params,
-    const storage::FileManagerContext& file_manager_context) {
-    switch (data_type) {
-        case DataType::VARCHAR:
-        case DataType::STRING:
-            return std::make_unique<NgramInvertedIndex>(file_manager_context,
-                                                        params);
-
-        case DataType::JSON:
-            PanicInfo(
-                NotImplemented,
-                fmt::format("building ngram index in json is not implemented"));
-        default:
-            PanicInfo(DataTypeInvalid,
-                      fmt::format("invalid data type to build ngram index: {}",
-                                  data_type));
-    }
-}
-
 template <>
 ScalarIndexPtr<std::string>
 IndexFactory::CreatePrimitiveScalarIndex<std::string>(
@@ -113,7 +91,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
-    PanicInfo(Unsupported, "unsupported platform");
+    ThrowInfo(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -364,14 +342,14 @@ IndexFactory::CreatePrimitiveScalarIndex(
         case DataType::VARCHAR: {
             auto& ngram_params = create_index_info.ngram_params;
             if (ngram_params.has_value()) {
-                return CreateNgramIndex(
-                    data_type, ngram_params.value(), file_manager_context);
+                return std::make_unique<NgramInvertedIndex>(
+                    file_manager_context, ngram_params.value());
             }
             return CreatePrimitiveScalarIndex<std::string>(
                 create_index_info, file_manager_context);
         }
         default:
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("invalid data type to build index: {}", data_type));
     }
@@ -389,7 +367,7 @@ IndexFactory::CreateCompositeScalarIndex(
         return CreatePrimitiveScalarIndex(
             element_type, create_index_info, file_manager_context);
     } else {
-        PanicInfo(
+        ThrowInfo(
             Unsupported,
             fmt::format("index type: {} for composite scalar not supported now",
                         index_type));
@@ -400,19 +378,20 @@ IndexBasePtr
 IndexFactory::CreateComplexScalarIndex(
     IndexType index_type,
     const storage::FileManagerContext& file_manager_context) {
-    PanicInfo(Unsupported, "Complex index not supported now");
+    ThrowInfo(Unsupported, "Complex index not supported now");
 }
 
 IndexBasePtr
 IndexFactory::CreateJsonIndex(
-    IndexType index_type,
-    JsonCastType cast_dtype,
-    const std::string& nested_path,
-    const storage::FileManagerContext& file_manager_context,
-    const std::string& json_cast_function) {
-    AssertInfo(index_type == INVERTED_INDEX_TYPE,
+    const CreateIndexInfo& create_index_info,
+    const storage::FileManagerContext& file_manager_context) {
+    AssertInfo(create_index_info.index_type == INVERTED_INDEX_TYPE ||
+                   create_index_info.index_type == NGRAM_INDEX_TYPE,
                "Invalid index type for json index");
 
+    const auto& cast_dtype = create_index_info.json_cast_type;
+    const auto& nested_path = create_index_info.json_path;
+    const auto& json_cast_function = create_index_info.json_cast_function;
     switch (cast_dtype.element_type()) {
         case JsonCastType::DataType::BOOL:
             return std::make_unique<index::JsonInvertedIndex<bool>>(
@@ -426,17 +405,23 @@ IndexFactory::CreateJsonIndex(
                 nested_path,
                 file_manager_context,
                 JsonCastFunction::FromString(json_cast_function));
-        case JsonCastType::DataType::VARCHAR:
+        case JsonCastType::DataType::VARCHAR: {
+            auto& ngram_params = create_index_info.ngram_params;
+            if (ngram_params.has_value()) {
+                return std::make_unique<NgramInvertedIndex>(
+                    file_manager_context, ngram_params.value(), nested_path);
+            }
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
                 JsonCastFunction::FromString(json_cast_function));
+        }
         case JsonCastType::DataType::JSON:
             return std::make_unique<JsonFlatIndex>(file_manager_context,
                                                    nested_path);
         default:
-            PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
 }
 
@@ -462,14 +447,10 @@ IndexFactory::CreateScalarIndex(
                                               file_manager_context);
         }
         case DataType::JSON: {
-            return CreateJsonIndex(create_index_info.index_type,
-                                   create_index_info.json_cast_type,
-                                   create_index_info.json_path,
-                                   file_manager_context,
-                                   create_index_info.json_cast_function);
+            return CreateJsonIndex(create_index_info, file_manager_context);
         }
         default:
-            PanicInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", data_type);
     }
 }
 
@@ -509,7 +490,7 @@ IndexFactory::CreateVectorIndex(
                 // TODO caiyd, not support yet
             }
             default:
-                PanicInfo(
+                ThrowInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
@@ -558,7 +539,7 @@ IndexFactory::CreateVectorIndex(
                     file_manager_context);
             }
             default:
-                PanicInfo(
+                ThrowInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build mem index: {}",
                                 data_type));

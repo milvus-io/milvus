@@ -1145,6 +1145,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w_2.aliases[0] == alias_1
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("move to test_milvus_client_v2_rename_back_old_collection")
     def test_rename_back_old_collection(self):
         """
         target: test rename collection function to single collection
@@ -1175,6 +1176,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_alias == collection_w.aliases
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("move to test_milvus_client_v2_rename_back_old_alias")
     def test_rename_back_old_alias(self):
         """
         target: test rename collection function to single collection
@@ -1190,6 +1192,7 @@ class TestUtilityBase(TestcaseBase):
         # 3. create an alias
         self.utility_wrap.create_alias(old_collection_name, alias)
         collection_alias = collection_w.aliases
+        log.info(collection_alias)
         # 4. drop the alias
         self.utility_wrap.drop_alias(collection_alias[0])
         # 5. rename collection to the dropped alias name
@@ -1384,8 +1387,8 @@ class TestUtilityAdvanced(TestcaseBase):
         )
 
         for _ in range(segment_num):
-            # insert random pks, ***start=None will generate random data***
-            data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+            # insert random pks
+            data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
             self.collection_wrap.insert(data)
             self.collection_wrap.flush()
 
@@ -1440,14 +1443,13 @@ class TestUtilityAdvanced(TestcaseBase):
         self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(ct.default_float_vec_field_name))
         self.collection_wrap.load()
 
-        # insert random pks, ***start=None will generate random data***
-        data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+        # insert random pks ***
+        data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
         self.collection_wrap.insert(data)
 
         # get_query_segment_info and verify results
         res_sealed, _ = self.utility_wrap.get_query_segment_info(collection_name)
         assert len(res_sealed) == 0
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_sealed_query_segment_info_after_create_index(self):

@@ -1,8 +1,9 @@
+use core::slice;
 use std::ffi::{c_char, c_void, CStr};
 
 use crate::{
     array::RustResult,
-    cstr_to_str,
+    convert_to_rust_slice, cstr_to_str,
     index_reader::IndexReaderWrapper,
     util::{create_binding, free_binding},
     util_c::tantivy_index_exist,
@@ -43,13 +44,61 @@ pub extern "C" fn tantivy_index_count(ptr: *mut c_void) -> RustResult {
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_term_query_i64(
+pub extern "C" fn tantivy_terms_query_bool(
     ptr: *mut c_void,
-    term: i64,
+    terms: *const bool,
+    len: usize,
     bitset: *mut c_void,
 ) -> RustResult {
     let real = ptr as *mut IndexReaderWrapper;
-    unsafe { (*real).term_query_i64(term, bitset).into() }
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe { (*real).terms_query_bool(terms, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_terms_query_i64(
+    ptr: *mut c_void,
+    terms: *const i64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe { (*real).terms_query_i64(terms, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_terms_query_f64(
+    ptr: *mut c_void,
+    terms: *const f64,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe { (*real).terms_query_f64(terms, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_terms_query_keyword(
+    ptr: *mut c_void,
+    terms: *const *const c_char,
+    len: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let terms = unsafe { convert_to_rust_slice!(terms, len) };
+    unsafe { (*real).terms_query_keyword(terms, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_term_query_keyword_i64(
+    ptr: *mut c_void,
+    term: *const c_char,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let term = cstr_to_str!(term);
+    unsafe { (*real).term_query_keyword_i64(term).into() }
 }
 
 #[no_mangle]
@@ -145,15 +194,6 @@ pub extern "C" fn tantivy_range_query_bool(
             .into()
     }
 }
-#[no_mangle]
-pub extern "C" fn tantivy_term_query_f64(
-    ptr: *mut c_void,
-    term: f64,
-    bitset: *mut c_void,
-) -> RustResult {
-    let real = ptr as *mut IndexReaderWrapper;
-    unsafe { (*real).term_query_f64(term, bitset).into() }
-}
 
 #[no_mangle]
 pub extern "C" fn tantivy_lower_bound_range_query_f64(
@@ -198,56 +238,6 @@ pub extern "C" fn tantivy_range_query_f64(
     unsafe {
         (*real)
             .range_query_f64(lower_bound, upper_bound, lb_inclusive, ub_inclusive, bitset)
-            .into()
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_term_query_bool(
-    ptr: *mut c_void,
-    term: bool,
-    bitset: *mut c_void,
-) -> RustResult {
-    let real = ptr as *mut IndexReaderWrapper;
-    unsafe { (*real).term_query_bool(term, bitset).into() }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_term_query_keyword(
-    ptr: *mut c_void,
-    term: *const c_char,
-    bitset: *mut c_void,
-) -> RustResult {
-    let real = ptr as *mut IndexReaderWrapper;
-    let term = cstr_to_str!(term);
-    unsafe { (*real).term_query_keyword(term, bitset).into() }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_term_query_keyword_i64(
-    ptr: *mut c_void,
-    term: *const c_char,
-) -> RustResult {
-    let real = ptr as *mut IndexReaderWrapper;
-    let term = cstr_to_str!(term);
-    unsafe { (*real).term_query_keyword_i64(term).into() }
-}
-
-#[no_mangle]
-pub extern "C" fn tantivy_ngram_match_query(
-    ptr: *mut c_void,
-    literal: *const c_char,
-    min_gram: usize,
-    max_gram: usize,
-    bitset: *mut c_void,
-) -> RustResult {
-    let real = ptr as *mut IndexReaderWrapper;
-    let literal = cstr_to_str!(literal);
-
-    let now = std::time::Instant::now();
-    unsafe {
-        (*real)
-            .ngram_match_query(literal, min_gram, max_gram, bitset)
             .into()
     }
 }
@@ -536,4 +526,22 @@ pub extern "C" fn tantivy_json_prefix_query(
     let json_path = cstr_to_str!(json_path);
     let prefix = cstr_to_str!(prefix);
     unsafe { (*real).json_prefix_query(json_path, prefix, bitset).into() }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_ngram_match_query(
+    ptr: *mut c_void,
+    literal: *const c_char,
+    min_gram: usize,
+    max_gram: usize,
+    bitset: *mut c_void,
+) -> RustResult {
+    let real = ptr as *mut IndexReaderWrapper;
+    let literal = cstr_to_str!(literal);
+
+    unsafe {
+        (*real)
+            .ngram_match_query(literal, min_gram, max_gram, bitset)
+            .into()
+    }
 }

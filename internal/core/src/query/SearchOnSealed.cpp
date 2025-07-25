@@ -54,9 +54,7 @@ SearchOnSealedIndex(const Schema& schema,
 
     auto dataset = knowhere::GenDataSet(num_queries, dim, query_data);
     dataset->SetIsSparse(is_sparse);
-    auto accessor = field_indexing->indexing_->PinCells({0})
-                        .via(&folly::InlineExecutor::instance())
-                        .get();
+    auto accessor = SemiInlineGet(field_indexing->indexing_->PinCells({0}));
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(accessor->get_cell_of(0));
 

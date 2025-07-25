@@ -72,7 +72,7 @@ ScalarIndexSort<T>::Build(size_t n, const T* values, const bool* valid_data) {
     if (is_built_)
         return;
     if (n == 0) {
-        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
     index_build_begin_ = std::chrono::system_clock::now();
 
@@ -110,7 +110,7 @@ ScalarIndexSort<T>::BuildWithFieldData(
         length += data->get_num_rows() - data->get_null_count();
     }
     if (total_num_rows_ == 0) {
-        PanicInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
+        ThrowInfo(DataIsEmpty, "ScalarIndexSort cannot build null values!");
     }
 
     data_.reserve(length);
@@ -289,6 +289,8 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
         index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
+    // clear index_datas to free memory early
+    index_datas.clear();
     LoadWithoutAssemble(binary_set, config);
 }
 
@@ -381,7 +383,7 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
             lb = std::lower_bound(begin(), end(), IndexStructure<T>(value));
             break;
         default:
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
     }
     for (; lb < ub; ++lb) {
@@ -473,7 +475,7 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType for "
                                       "checking scalar index optimization: {}",
                                       op));

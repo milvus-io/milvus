@@ -59,12 +59,13 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	}
 
 	m.collections[collectionID] = newCollectionInfo(vchannel, partitionIDs)
-	for _, partitionID := range partitionIDs {
-		if _, ok := m.partitionManagers[partitionID]; ok {
+	for partitionID := range m.collections[collectionID].PartitionIDs {
+		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+		if _, ok := m.partitionManagers[uniqueKey]; ok {
 			logger.Warn("partition already exists", zap.Int64("partitionID", partitionID))
 			continue
 		}
-		m.partitionManagers[partitionID] = newPartitionSegmentManager(
+		m.partitionManagers[uniqueKey] = newPartitionSegmentManager(
 			m.ctx,
 			m.Logger(),
 			m.wal,
@@ -103,7 +104,8 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	partitionIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
 	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
 	for partitionID := range collectionInfo.PartitionIDs {
-		pm, ok := m.partitionManagers[partitionID]
+		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
+		pm, ok := m.partitionManagers[uniqueKey]
 		if !ok {
 			logger.Warn("partition not exists", zap.Int64("partitionID", partitionID))
 			continue
@@ -112,7 +114,7 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 		segments := pm.FlushAndDropPartition(policy.PolicyCollectionRemoved())
 		partitionIDs = append(partitionIDs, partitionID)
 		segmentIDs = append(segmentIDs, segments...)
-		delete(m.partitionManagers, partitionID)
+		delete(m.partitionManagers, uniqueKey)
 	}
 	logger.Info("collection removed", zap.Int64s("partitionIDs", partitionIDs), zap.Int64s("segmentIDs", segmentIDs))
 	m.updateMetrics()

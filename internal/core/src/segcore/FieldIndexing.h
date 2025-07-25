@@ -12,6 +12,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <map>
 #include <memory>
@@ -26,6 +27,7 @@
 #include "common/Schema.h"
 #include "common/IndexMeta.h"
 #include "IndexConfigGenerator.h"
+#include "common/Types.h"
 #include "knowhere/config.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
@@ -40,7 +42,12 @@ class FieldIndexing {
  public:
     explicit FieldIndexing(const FieldMeta& field_meta,
                            const SegcoreConfig& segcore_config)
-        : field_meta_(field_meta), segcore_config_(segcore_config) {
+        : data_type_(field_meta.get_data_type()),
+          dim_(IsVectorDataType(field_meta.get_data_type()) &&
+                       !IsSparseFloatVectorDataType(field_meta.get_data_type())
+                   ? field_meta.get_dim()
+                   : 1),
+          segcore_config_(segcore_config) {
     }
     FieldIndexing(const FieldIndexing&) = delete;
     FieldIndexing&
@@ -78,9 +85,14 @@ class FieldIndexing {
         return true;
     }
 
-    const FieldMeta&
-    get_field_meta() {
-        return field_meta_;
+    DataType
+    get_data_type() const {
+        return data_type_;
+    }
+
+    int64_t
+    get_dim() const {
+        return dim_;
     }
 
     int64_t
@@ -96,7 +108,8 @@ class FieldIndexing {
 
  protected:
     // additional info
-    const FieldMeta& field_meta_;
+    const DataType data_type_;
+    const int64_t dim_;
     const SegcoreConfig& segcore_config_;
 };
 
@@ -110,7 +123,7 @@ class ScalarFieldIndexing : public FieldIndexing {
                             int64_t size,
                             const VectorBase* vec_base,
                             const void* data_source) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index doesn't support append vector segment index");
     }
 
@@ -120,7 +133,7 @@ class ScalarFieldIndexing : public FieldIndexing {
                              int64_t new_data_dim,
                              const VectorBase* vec_base,
                              const void* data_source) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index doesn't support append vector segment index");
     }
 
@@ -129,7 +142,7 @@ class ScalarFieldIndexing : public FieldIndexing {
                      int64_t count,
                      int64_t element_size,
                      void* output) override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "scalar index don't support get data from index");
     }
 
@@ -146,7 +159,7 @@ class ScalarFieldIndexing : public FieldIndexing {
     // concurrent
     PinWrapper<index::IndexBase*>
     get_chunk_indexing(int64_t chunk_id) const override {
-        Assert(!field_meta_.is_vector());
+        Assert(!IsVectorDataType(data_type_));
         return data_.at(chunk_id).get();
     }
 
@@ -199,7 +212,7 @@ class VectorFieldIndexing : public FieldIndexing {
     // concurrent
     PinWrapper<index::IndexBase*>
     get_chunk_indexing(int64_t chunk_id) const override {
-        Assert(field_meta_.is_vector());
+        Assert(IsVectorDataType(data_type_));
         return PinWrapper<index::IndexBase*>(data_.at(chunk_id).get());
     }
 
@@ -308,7 +321,7 @@ class IndexingRecord {
             return;
         }
         auto& indexing = field_indexings_.at(fieldId);
-        auto type = indexing->get_field_meta().get_data_type();
+        auto type = indexing->get_data_type();
         auto field_raw_data = record.get_data_base(fieldId);
         if (type == DataType::VECTOR_FLOAT &&
             reserved_offset + size >= indexing->get_build_threshold()) {
@@ -354,7 +367,7 @@ class IndexingRecord {
             return;
         }
         auto& indexing = field_indexings_.at(fieldId);
-        auto type = indexing->get_field_meta().get_data_type();
+        auto type = indexing->get_data_type();
         const void* p = data->Data();
 
         if ((type == DataType::VECTOR_FLOAT ||
@@ -388,14 +401,11 @@ class IndexingRecord {
                      void* output_raw) const {
         if (is_in(fieldId)) {
             auto& indexing = field_indexings_.at(fieldId);
-            if (indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_FLOAT ||
-                indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_FLOAT16 ||
-                indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_BFLOAT16 ||
-                indexing->get_field_meta().get_data_type() ==
-                    DataType::VECTOR_SPARSE_FLOAT) {
+            auto data_type = indexing->get_data_type();
+            if (data_type == DataType::VECTOR_FLOAT ||
+                data_type == DataType::VECTOR_FLOAT16 ||
+                data_type == DataType::VECTOR_BFLOAT16 ||
+                data_type == DataType::VECTOR_SPARSE_FLOAT) {
                 indexing->GetDataFromIndex(
                     seg_offsets, count, element_size, output_raw);
             }

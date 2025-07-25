@@ -86,7 +86,7 @@ BitmapIndex<T>::Build(size_t n, const T* data, const bool* valid_data) {
         return;
     }
     if (n == 0) {
-        PanicInfo(DataIsEmpty, "BitmapIndex can not build null values");
+        ThrowInfo(DataIsEmpty, "BitmapIndex can not build null values");
     }
 
     total_num_rows_ = n;
@@ -139,7 +139,7 @@ BitmapIndex<T>::BuildWithFieldData(
         total_num_rows += field_data->get_num_rows();
     }
     if (total_num_rows == 0) {
-        PanicInfo(DataIsEmpty, "scalar bitmap index can not build null values");
+        ThrowInfo(DataIsEmpty, "scalar bitmap index can not build null values");
     }
     total_num_rows_ = total_num_rows;
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
@@ -160,7 +160,7 @@ BitmapIndex<T>::BuildWithFieldData(
             BuildArrayField(field_datas);
             break;
         default:
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("Invalid data type: {} for build bitmap index",
                             proto::schema::DataType_Name(schema_.data_type())));
@@ -494,7 +494,7 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
     if (mmap_data_ == MAP_FAILED) {
         file.Close();
         remove(file_name.c_str());
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
     }
 
@@ -572,6 +572,8 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
+    // clear index_datas to free memory early
+    index_datas.clear();
     LoadWithoutAssemble(binary_set, config);
 }
 
@@ -731,7 +733,7 @@ BitmapIndex<T>::RangeForBitset(const T value, const OpType op) {
             break;
         }
         default: {
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
         }
     }
@@ -803,7 +805,7 @@ BitmapIndex<T>::RangeForMmap(const T value, const OpType op) {
             break;
         }
         default: {
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
         }
     }
@@ -864,7 +866,7 @@ BitmapIndex<T>::RangeForRoaring(const T value, const OpType op) {
             break;
         }
         default: {
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format("Invalid OperatorType: {}", op));
         }
     }
@@ -1126,7 +1128,7 @@ BitmapIndex<T>::Reverse_Lookup(size_t idx) const {
             }
         }
     }
-    PanicInfo(UnexpectedError,
+    ThrowInfo(UnexpectedError,
               fmt::format(
                   "scalar bitmap index can not lookup target value of index {}",
                   idx));
@@ -1168,7 +1170,7 @@ BitmapIndex<T>::ShouldSkip(const T lower_value,
                 break;
             }
             default:
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           fmt::format("Invalid OperatorType for "
                                       "checking scalar index optimization: {}",
                                       op));

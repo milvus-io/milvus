@@ -128,7 +128,7 @@ class TestNoIndexDQLExpr(TestCaseClassBase):
         """
         # the total number of inserted data that matches the expression
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if
-                          eval('math.fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
+                          eval('cf.parse_fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
 
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
@@ -359,7 +359,7 @@ class TestHybridIndexDQLExpr(TestCaseClassBase):
         """
         # the total number of inserted data that matches the expression
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if
-                          eval('math.fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
+                          eval('cf.parse_fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
 
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
@@ -696,7 +696,7 @@ class TestInvertedIndexDQLExpr(TestCaseClassBase):
         """
         # the total number of inserted data that matches the expression
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if
-                          eval('math.fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
+                          eval('cf.parse_fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
 
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
@@ -1022,7 +1022,7 @@ class TestBitmapIndexDQLExpr(TestCaseClassBase):
         """
         # the total number of inserted data that matches the expression
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if
-                          eval('math.fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
+                          eval('cf.parse_fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
 
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
@@ -1438,7 +1438,7 @@ class TestBitmapIndexOffsetCache(TestCaseClassBase):
         """
         # the total number of inserted data that matches the expression
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if
-                          eval('math.fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
+                          eval('cf.parse_fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
 
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=['*'])
@@ -1796,7 +1796,7 @@ class TestBitmapIndexMmap(TestCaseClassBase):
         """
         # the total number of inserted data that matches the expression
         expr_count = len([i for i in self.insert_data.get(expr_field, []) if
-                          eval('math.fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
+                          eval('cf.parse_fmod' + expr.replace(expr_field, str(i)).replace('%', ','))])
 
         # query
         res, _ = self.collection_wrap.query(expr=expr, limit=limit, output_fields=[expr_field])
@@ -2519,7 +2519,6 @@ class TestGroupSearch(TestCaseClassBase):
                                                  output_fields=[DataType.VARCHAR.name],
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": ct.default_nq, "limit": ct.default_limit})[0]
-        print(res)
         for i in range(ct.default_nq):
             group_values = []
             for l in range(ct.default_limit):
@@ -2541,6 +2540,31 @@ class TestGroupSearch(TestCaseClassBase):
                                                group_by_field=self.inverted_string_field,
                                                check_task=CheckTasks.check_search_results,
                                                check_items={"nq": ct.default_nq, "limit": ct.default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_hybrid_search_group_by_empty_results(self):
+        """
+        verify hybrid search group by works if group by empty results
+        """
+        # 3. prepare search params
+        req_list = []
+        for i in range(len(self.vector_fields)):
+            search_param = {
+                "data": cf.gen_vectors(ct.default_nq, dim=self.dims[i],
+                                       vector_data_type=cf.get_field_dtype_by_field_name(self.collection_wrap,
+                                                                                         self.vector_fields[i])),
+                "anns_field": self.vector_fields[i],
+                "param": {},
+                "limit": ct.default_limit,
+                "expr": f"{self.primary_field} < 0"}        # make sure return empty results
+            req = AnnSearchRequest(**search_param)
+            req_list.append(req)
+        # 4. hybrid search group by empty resutls
+        self.collection_wrap.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 0.2, 0.3), ct.default_limit,
+                                           group_by_field=DataType.VARCHAR.name,
+                                           output_fields=[DataType.VARCHAR.name],
+                                           check_task=CheckTasks.check_search_results,
+                                           check_items={"nq": ct.default_nq, "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("support_field", [DataType.INT8.name,  DataType.INT64.name,

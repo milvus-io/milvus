@@ -98,6 +98,7 @@ PrepareInsertBinlog(int64_t collection_id,
             FieldBinlogInfo{field_id,
                             static_cast<int64_t>(row_count),
                             std::vector<int64_t>{int64_t(row_count)},
+                            std::vector<int64_t>{serialized_insert_size},
                             enable_mmap,
                             std::vector<std::string>{file}});
     };
@@ -152,6 +153,8 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
     files.reserve(field_datas.size());
     std::vector<int64_t> row_counts;
     row_counts.reserve(field_datas.size());
+    std::vector<int64_t> serialized_insert_sizes;
+    serialized_insert_sizes.reserve(field_datas.size());
     int64_t row_count = 0;
     for (auto i = 0; i < field_datas.size(); ++i) {
         auto& field_data = field_datas[i];
@@ -168,6 +171,8 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
         insert_data->SetFieldDataMeta(field_data_meta);
         auto serialized_insert_data = insert_data->serialize_to_remote_file();
         auto serialized_insert_size = serialized_insert_data.size();
+        serialized_insert_sizes.push_back(
+            static_cast<int64_t>(serialized_insert_size));
         cm->Write(file, serialized_insert_data.data(), serialized_insert_size);
     }
 
@@ -176,6 +181,7 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
         FieldBinlogInfo{field_id,
                         static_cast<int64_t>(row_count),
                         row_counts,
+                        serialized_insert_sizes,
                         enable_mmap,
                         files});
 

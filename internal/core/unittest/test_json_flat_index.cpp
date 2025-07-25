@@ -565,9 +565,11 @@ class JsonFlatIndexExprTest : public ::testing::Test {
             json_fid_.get());
         file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
         auto index = index::IndexFactory::GetInstance().CreateJsonIndex(
-            index::INVERTED_INDEX_TYPE,
-            JsonCastType::FromString("JSON"),
-            json_index_path,
+            index::CreateIndexInfo{
+                .index_type = index::INVERTED_INDEX_TYPE,
+                .json_cast_type = JsonCastType::FromString("JSON"),
+                .json_path = json_index_path,
+            },
             file_manager_ctx);
 
         json_index_ = std::unique_ptr<index::JsonFlatIndex>(

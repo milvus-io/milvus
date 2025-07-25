@@ -39,6 +39,7 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
           chunks_(std::move(chunks)),
           meta_(segcore::storagev1translator::CTMeta(
               StorageType::MEMORY,
+              CellIdMappingMode::IDENTICAL,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               true)) {
         meta_.num_rows_until_chunk_.reserve(num_cells_ + 1);
@@ -50,6 +51,12 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
             total_rows += num_rows_per_chunk[i];
         }
         key_ = key;
+        segcore::storagev1translator::virtual_chunk_config(
+            total_rows,
+            num_cells_,
+            meta_.num_rows_until_chunk_,
+            meta_.virt_chunk_order_,
+            meta_.vcid_to_cid_arr_);
     }
     ~TestChunkTranslator() override {
     }
@@ -110,6 +117,7 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
           meta_(segcore::storagev2translator::GroupCTMeta(
               num_fields,
               StorageType::MEMORY,
+              CellIdMappingMode::IDENTICAL,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               true)) {
         meta_.num_rows_until_chunk_.reserve(num_cells_ + 1);
@@ -176,6 +184,7 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
           index_(std::move(index)),
           meta_(milvus::cachinglayer::Meta(
               StorageType::MEMORY,
+              CellIdMappingMode::IDENTICAL,
               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
               false)) {
     }

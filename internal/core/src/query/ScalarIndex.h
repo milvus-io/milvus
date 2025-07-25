@@ -50,7 +50,7 @@ generate_scalar_index(SpanBase data, DataType data_type) {
         case DataType::VARCHAR:
             return generate_scalar_index(Span<std::string>(data));
         default:
-            PanicInfo(DataTypeInvalid, "unsupported type {}", data_type);
+            ThrowInfo(DataTypeInvalid, "unsupported type {}", data_type);
     }
 }
 

@@ -120,7 +120,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
         output_data_size += get_field_avg_size(field_id) * result_rows;
     }
     if (output_data_size > limit_size) {
-        PanicInfo(
+        ThrowInfo(
             RetrieveError,
             fmt::format("query results exceed the limit size ", limit_size));
     }
@@ -240,7 +240,7 @@ SegmentInternalInterface::FillTargetEntry(
                     break;
                 }
                 default: {
-                    PanicInfo(DataTypeInvalid,
+                    ThrowInfo(DataTypeInvalid,
                               fmt::format("unsupported datatype {}",
                                           field_meta.get_data_type()));
                 }
@@ -322,10 +322,10 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
             return sizeof(int64_t);
         }
 
-        PanicInfo(FieldIDInvalid, "unsupported system field id");
+        ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto schema = get_schema();
+    auto& schema = get_schema();
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 
@@ -348,7 +348,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto schema = get_schema();
+    auto& schema = get_schema();
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 
@@ -433,7 +433,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
     const milvus::FieldMeta& field_meta, int64_t count) const {
     auto data_type = field_meta.get_data_type();
     if (IsVectorDataType(data_type)) {
-        PanicInfo(DataTypeInvalid,
+        ThrowInfo(DataTypeInvalid,
                   fmt::format("unsupported added field type {}",
                               field_meta.get_data_type()));
     }
@@ -512,7 +512,7 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 break;
             }
             default: {
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           fmt::format("unsupported default value type {}",
                                       field_meta.get_data_type()));
             }
@@ -540,6 +540,23 @@ SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
 PinWrapper<index::NgramInvertedIndex*>
 SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+}
+
+PinWrapper<index::NgramInvertedIndex*>
+SegmentInternalInterface::GetNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+}
+
+bool
+SegmentInternalInterface::HasNgramIndex(FieldId field_id) const {
+    return false;
+}
+
+bool
+SegmentInternalInterface::HasNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    return false;
 }
 
 }  // namespace milvus::segcore

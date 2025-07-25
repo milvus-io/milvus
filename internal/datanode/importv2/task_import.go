@@ -130,6 +130,10 @@ func (t *ImportTask) Clone() Task {
 		cancel:       cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		allocator:    t.allocator,
+		manager:      t.manager,
+		syncMgr:      t.syncMgr,
+		cm:           t.cm,
 		metaCaches:   t.metaCaches,
 	}
 }
@@ -139,7 +143,9 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	log.Info("start to import", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("schema", t.GetSchema()))...)
+		zap.Any("files", t.GetFileStats()),
+		zap.Any("schema", t.GetSchema()),
+	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req

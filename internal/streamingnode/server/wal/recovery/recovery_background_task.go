@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -206,9 +205,12 @@ func (rs *recoveryStorageImpl) retryOperationWithBackoff(ctx context.Context, lo
 		if err == nil {
 			return nil
 		}
-		if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
-			return err
+		// because underlying kv may report the context.Canceled, context.DeadlineExceeded even if the ctx is not canceled.
+		// so we cannot use errors.IsAny(err, context.Canceled, context.DeadlineExceeded) to check the error.
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
+
 		nextInterval := backoff.NextBackOff()
 		logger.Warn("failed to persist operation, wait for retry...", zap.Duration("nextRetryInterval", nextInterval), zap.Error(err))
 		select {

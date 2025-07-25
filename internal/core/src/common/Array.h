@@ -244,7 +244,7 @@ class Array {
                 return true;
             }
             default:
-                PanicInfo(Unsupported, "unsupported element type for array");
+                ThrowInfo(Unsupported, "unsupported element type for array");
         }
     }
 
@@ -282,7 +282,7 @@ class Array {
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_.get())[index]);
                 default:
-                    PanicInfo(Unsupported,
+                    ThrowInfo(Unsupported,
                               "unsupported element type for array");
             }
         }
@@ -524,7 +524,7 @@ class ArrayView {
                     return static_cast<T>(
                         reinterpret_cast<double*>(data_)[index]);
                 default:
-                    PanicInfo(Unsupported,
+                    ThrowInfo(Unsupported,
                               "unsupported element type for array");
             }
         }

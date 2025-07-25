@@ -109,7 +109,7 @@ func (s *SyncTaskSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
 	s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
-	s.metacache.EXPECT().Schema().Return(s.schema).Maybe()
+	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	initcore.InitLocalArrowFileSystem("/tmp")
 }
@@ -349,12 +349,13 @@ func (s *SyncTaskSuite) TestRunError() {
 		s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(nil, false)
 		flag := false
 		handler := func(_ error) { flag = true }
+		// segment not found should be ignored.
 		task := s.getSuiteSyncTask(new(SyncPack)).WithFailureCallback(handler)
 
 		err := task.Run(ctx)
 
-		s.Error(err)
-		s.True(flag)
+		s.NoError(err)
+		s.False(flag)
 	})
 
 	s.metacache.ExpectedCalls = nil
@@ -363,7 +364,7 @@ func (s *SyncTaskSuite) TestRunError() {
 	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().Collection().Return(s.collectionID).Maybe()
-	s.metacache.EXPECT().Schema().Return(s.schema).Maybe()
+	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	s.Run("allocate_id_fail", func() {
 		mockAllocator := allocator.NewMockAllocator(s.T())

@@ -186,13 +186,15 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
 std::vector<FieldDataPtr>
 MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     auto data_type = index::GetValueFromConfig<DataType>(config, DATA_TYPE_KEY);
-    AssertInfo(data_type.has_value(), "data type is empty when build index");
+    AssertInfo(data_type.has_value(),
+               "[StorageV2] data type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);
     AssertInfo(segment_insert_files.has_value(),
-               "insert file paths for storage v2 is empty when build index");
+               "[StorageV2] insert file paths for storage v2 is empty when "
+               "build index");
     auto remote_files = segment_insert_files.value();
     for (auto& files : remote_files) {
         SortByPath(files);
@@ -283,7 +285,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
     if (0 == num_of_fields) {
         return {};
     } else if (num_of_fields > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
     }
@@ -316,7 +318,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     if (0 == num_of_fields) {
         return {};
     } else if (num_of_fields > 1) {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::NotImplemented,
             "vector index build with multiple fields is not supported yet");
     }
