@@ -75,7 +75,7 @@ class DList {
         clearWaitingQueue();
     }
 
-    // If after evicting all unpinned items, the used_memory_ is still larger than new_limit, false will be returned
+    // If after evicting all unpinned items, the used_resources_ is still larger than new_limit, false will be returned
     // and no eviction will be done.
     // Will throw if new_limit is negative.
     bool
@@ -104,7 +104,7 @@ class DList {
     void
     decreaseEvictableSize(const ResourceUsage& size);
 
-    // Used only when load failed. This will only cause used_memory_ to decrease, which will not affect the correctness
+    // Used only when load failed. This will only cause used_resources_ to decrease, which will not affect the correctness
     // of concurrent reserveMemoryWithTimeout() even without lock.
     void
     releaseMemory(const ResourceUsage& size);
@@ -112,9 +112,9 @@ class DList {
     // Caller must guarantee that the current thread holds the lock of list_node->mtx_.
     // touchItem is used in 2 places:
     // 1. when a loaded cell is pinned/unpinned, we need to touch it to refresh the LRU order.
-    //    we don't update used_memory_ here.
+    //    we don't update used_resources_ here.
     // 2. when a cell is loaded as a bonus, we need to touch it to insert into the LRU and update
-    //    used_memory_ to track the memory usage(usage of such cell is not counted during reservation).
+    //    used_resources_ to track the memory usage(usage of such cell is not counted during reservation).
     //
     // Returns the time point when the item was last touched. This methods always acquires the
     // global list_mtx_, thus the returned time point is guaranteed to be monotonically increasing.
@@ -123,7 +123,7 @@ class DList {
               std::optional<ResourceUsage> size = std::nullopt);
 
     // Caller must guarantee that the current thread holds the lock of list_node->mtx_.
-    // Removes the node from the list and updates used_memory_.
+    // Removes the node from the list and updates used_resources_.
     void
     removeItem(ListNode* list_node, ResourceUsage size);
 
@@ -238,8 +238,8 @@ class DList {
 
     // TODO(tiered storage 3): benchmark folly::DistributedMutex for this usecase.
     mutable std::mutex list_mtx_;
-    // access to used_memory_ and max_memory_ must be done under the lock of list_mtx_
-    std::atomic<ResourceUsage> used_memory_{};
+    // access to used_resources_ and max_memory_ must be done under the lock of list_mtx_
+    std::atomic<ResourceUsage> used_resources_{};
     // Track estimated resources currently being loaded
     std::atomic<ResourceUsage> loading_{};
     ResourceUsage low_watermark_;
