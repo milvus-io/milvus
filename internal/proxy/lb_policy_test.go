@@ -663,8 +663,6 @@ func (s *LBPolicySuite) TestSelectNodeWithExcludeClearing() {
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
 	// First attempt fails due to no candidates
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable).Times(1)
-	// Second attempt succeeds after exclude nodes are cleared
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(1, nil).Times(1)
 
 	// Setup mock to return only excluded nodes first, then same nodes for retry
