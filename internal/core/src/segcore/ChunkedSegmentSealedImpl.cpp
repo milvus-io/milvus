@@ -252,11 +252,11 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
                 }
                 init_timestamp_index(timestamps, num_rows);
                 system_ready_count_++;
-                AssertInfo(
-                    offset == num_rows,
-                    "timestamp total row count {} not equal to expected {}",
-                    offset,
-                    num_rows);
+                AssertInfo(offset == num_rows,
+                           "[StorageV2] timestamp total row count {} not equal "
+                           "to expected {}",
+                           offset,
+                           num_rows);
             }
             break;
         default:
@@ -272,7 +272,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
 
     for (auto& [id, info] : load_info.field_infos) {
-        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+        AssertInfo(info.row_count > 0,
+                   "[StorageV2] The row count of field data is 0");
 
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
@@ -299,7 +300,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                load_info.mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
-            "segment {} loads column group {} with field ids {} with "
+            "[StorageV2] segment {} loads column group {} with field ids {} "
+            "with "
             "num_rows "
             "{}",
             this->get_segment_id(),
@@ -1082,8 +1084,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               T* dst) {
     static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
     // use field->data_type_ to determine the type of dst
-    field->BulkPrimitiveValueAt(
-        static_cast<void*>(dst), seg_offsets, count);
+    field->BulkPrimitiveValueAt(static_cast<void*>(dst), seg_offsets, count);
 }
 
 // for dense vector
