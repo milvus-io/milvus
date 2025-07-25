@@ -172,14 +172,27 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     if (field_meta.get_data_type() == DataType::JSON) {
         auto path = info.index_params.at(JSON_PATH);
-        JsonIndex index;
-        index.nested_path = path;
-        index.field_id = field_id;
-        index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-        index.cast_type =
-            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-        json_indices.push_back(std::move(index));
-        return;
+        if (auto it = info.index_params.find(index::INDEX_TYPE);
+            it != info.index_params.end() &&
+            it->second == index::NGRAM_INDEX_TYPE) {
+            if (ngram_indexings_.find(field_id) == ngram_indexings_.end()) {
+                ngram_indexings_[field_id] =
+                    std::unordered_map<std::string, index::CacheIndexBasePtr>();
+            }
+            ngram_indexings_[field_id][path] =
+                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            return;
+        } else {
+            JsonIndex index;
+            index.nested_path = path;
+            index.field_id = field_id;
+            index.index =
+                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            index.cast_type =
+                JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+            json_indices.push_back(std::move(index));
+            return;
+        }
     }
 
     if (auto it = info.index_params.find(index::INDEX_TYPE);
@@ -634,6 +647,29 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     AssertInfo(index != nullptr,
                "ngram index cache is corrupted, field_id: {}",
                field_id.get());
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+}
+
+PinWrapper<index::NgramInvertedIndex*>
+ChunkedSegmentSealedImpl::GetNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    std::shared_lock lck(mutex_);
+    auto iter = ngram_indexings_.find(field_id);
+    if (iter == ngram_indexings_.end() ||
+        iter->second.find(nested_path) == iter->second.end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+
+    auto slot = iter->second.at(nested_path).get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache for json is corrupted, field_id: {}, "
+               "nested_path: {}",
+               field_id.get(),
+               nested_path);
     return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
@@ -1127,6 +1163,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         ngram_fields_.clear();
         scalar_indexings_.clear();
         vector_indexings_.clear();
+        ngram_indexings_.clear();
         insert_record_.clear();
         fields_.clear();
         variable_fields_avg_size_.clear();

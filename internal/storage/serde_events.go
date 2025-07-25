@@ -300,7 +300,7 @@ func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 			dt := f.DataType
 			if r.Column(j).IsNull(i) {
 				if f.GetDefaultValue() != nil {
-					m[j] = getDefaultValue(f)
+					m[j] = GetDefaultValue(f)
 				} else {
 					m[j] = nil
 				}

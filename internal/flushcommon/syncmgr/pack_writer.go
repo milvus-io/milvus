@@ -272,7 +272,7 @@ func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (
 
 	if pack.isFlush {
 		if pack.level != datapb.SegmentLevel_L0 {
-			if hasBM25Function(bw.metaCache.GetSchema(pack.tsFrom)) {
+			if hasBM25Function(bw.schema) {
 				mergedBM25Blob, err := serializer.serializeMergedBM25Stats(pack)
 				if err != nil {
 					return nil, err

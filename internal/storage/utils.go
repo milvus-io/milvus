@@ -538,11 +538,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 	getFieldData := func(field *schemapb.FieldSchema) (FieldData, error) {
 		srcField, ok := srcFields[field.GetFieldID()]
 		if !ok && field.GetFieldID() >= common.StartOfUserFieldID {
-			if !field.GetNullable() {
-				return nil, merr.WrapErrFieldNotFound(field.GetFieldID(), fmt.Sprintf("field %s not found when converting insert msg to insert data", field.GetName()))
-			}
-			log.Warn("insert msg missing field but nullable", zap.Int64("fieldID", field.GetFieldID()), zap.String("fieldName", field.GetName()))
-			return nil, nil
+			err := fillMissingFields(collSchema, idata)
+			return nil, err
 		}
 		var fieldData FieldData
 		switch field.DataType {
@@ -1506,7 +1503,7 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 	return false
 }
 
-func getDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
+func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 	switch fieldSchema.DataType {
 	case schemapb.DataType_Bool:
 		return fieldSchema.GetDefaultValue().GetBoolData()
@@ -1528,4 +1525,46 @@ func getDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 		// won't happen
 		panic(fmt.Sprintf("undefined data type:%s", fieldSchema.DataType.String()))
 	}
+}
+
+// fillMissingFields fills default values or null values for missing fields in insertData
+func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData) error {
+	batchRows := int64(insertData.GetRowNum())
+
+	for _, field := range schema.Fields {
+		// Skip function output fields and system fields
+		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
+			continue
+		}
+
+		_, exists := insertData.Data[field.GetFieldID()]
+
+		if !exists {
+			// Create default field data if not found
+			fieldData, err := NewFieldData(field.DataType, field, int(batchRows))
+			if err != nil {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("failed to create default field data for field %s: %v", field.Name, err))
+			}
+
+			if field.GetDefaultValue() != nil { // Fill with default value
+				defaultValue := GetDefaultValue(field)
+
+				for j := 0; j < int(batchRows); j++ {
+					if err := fieldData.AppendRow(defaultValue); err != nil {
+						return merr.WrapErrServiceInternal(fmt.Sprintf("failed to append default value for field %s: %v", field.Name, err))
+					}
+				}
+			} else if field.GetNullable() { // Fill with null values
+				for j := 0; j < int(batchRows); j++ {
+					if err := fieldData.AppendRow(nil); err != nil {
+						return merr.WrapErrServiceInternal(fmt.Sprintf("failed to append null value for field %s: %v", field.Name, err))
+					}
+				}
+			} else {
+				return merr.WrapErrServiceInternal(fmt.Sprintf("field %s is not nullable and has no default value", field.Name))
+			}
+			insertData.Data[field.GetFieldID()] = fieldData
+		}
+	}
+	return nil
 }

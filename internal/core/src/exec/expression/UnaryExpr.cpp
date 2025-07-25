@@ -197,8 +197,19 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
-            if (CanUseIndexForJson(FromValCase(val_type)) &&
+            auto val_type_inner = FromValCase(val_type);
+            if (CanExecNgramMatchForJson(val_type_inner) &&
                 !has_offset_input_) {
+                auto res = ExecNgramMatch();
+                // If nullopt is returned, it means the query cannot be
+                // optimized by ngram index. Forward it to the normal path.
+                if (res.has_value()) {
+                    result = res.value();
+                    break;
+                }
+            }
+
+            if (CanUseIndexForJson(val_type_inner) && !has_offset_input_) {
                 switch (val_type) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
@@ -1885,6 +1896,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
                            val_type);
     switch (val_type) {
         case DataType::STRING:
+        case DataType::VARCHAR:
             use_index_ = has_index &&
                          expr_->op_type_ != proto::plan::OpType::Match &&
                          expr_->op_type_ != proto::plan::OpType::PostfixMatch &&
@@ -1974,6 +1986,18 @@ PhyUnaryRangeFilterExpr::CanExecNgramMatch(proto::plan::OpType op_type) {
            !has_offset_input_ && CanUseNgramIndex(field_id_);
 }
 
+bool
+PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson(DataType val_type) {
+    return (val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
+           (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
+            expr_->op_type_ == proto::plan::OpType::Match ||
+            expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
+            expr_->op_type_ == proto::plan::OpType::PostfixMatch) &&
+           !has_offset_input_ &&
+           CanUseNgramIndexForJson(
+               field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+}
+
 std::optional<VectorPtr>
 PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     if (!arg_inited_) {
@@ -1988,8 +2012,15 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        auto pinned_index = segment_->GetNgramIndex(field_id_);
-        auto index = pinned_index.get();
+        index::NgramInvertedIndex* index;
+        if (expr_->column_.data_type_ == DataType::JSON) {
+            auto pinned_index = segment_->GetNgramIndexForJson(
+                field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+            index = pinned_index.get();
+        } else {
+            auto pinned_index = segment_->GetNgramIndex(field_id_);
+            index = pinned_index.get();
+        }
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
