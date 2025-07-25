@@ -425,8 +425,8 @@ func (suite *ServerSuite) TestUpdateAutoBalanceConfigLoop() {
 	})
 }
 
-func TestCheckLoadConfigChanges(t *testing.T) {
-	mockey.PatchConvey("TestCheckLoadConfigChanges", t, func() {
+func TestApplyLoadConfigChanges(t *testing.T) {
+	mockey.PatchConvey("TestApplyLoadConfigChanges", t, func() {
 		ctx := context.Background()
 
 		// Create mock server
@@ -471,23 +471,29 @@ func TestCheckLoadConfigChanges(t *testing.T) {
 
 		// Mock UpdateLoadConfig to capture the call
 		var updateLoadConfigCalled bool
-		var capturedRequest *querypb.UpdateLoadConfigRequest
-		mockey.Mock((*Server).UpdateLoadConfig).To(func(s *Server, ctx context.Context, req *querypb.UpdateLoadConfigRequest) (*commonpb.Status, error) {
+		var capturedCollectionIDs []int64
+		var capturedReplicaNum int32
+		var capturedRGs []string
+		mockey.Mock((*Server).updateLoadConfig).To(func(s *Server, ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
 			updateLoadConfigCalled = true
-			capturedRequest = req
-			return merr.Success(), nil
+			capturedCollectionIDs = collectionIDs
+			capturedReplicaNum = newReplicaNum
+			capturedRGs = newRGs
+			return nil
 		}).Build()
 
-		// Call checkLoadConfigChanges
-		testServer.checkLoadConfigChanges(ctx)
+		replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsUint32()
+		rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
+		// Call applyLoadConfigChanges
+		testServer.applyLoadConfigChanges(ctx, int32(replicaNum), rgs)
 
 		// Verify UpdateLoadConfig was called
 		assert.True(t, updateLoadConfigCalled, "UpdateLoadConfig should be called")
 
 		// Verify that only collections with IsUserSpecifiedReplicaMode = false are included
-		assert.Equal(t, []int64{1001}, capturedRequest.CollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
-		assert.Equal(t, int32(2), capturedRequest.ReplicaNumber, "ReplicaNumber should match cluster level config")
-		assert.Equal(t, []string{"default"}, capturedRequest.ResourceGroups, "ResourceGroups should match cluster level config")
+		assert.Equal(t, []int64{1001}, capturedCollectionIDs, "Only collections with IsUserSpecifiedReplicaMode = false should be included")
+		assert.Equal(t, int32(2), capturedReplicaNum, "ReplicaNumber should match cluster level config")
+		assert.Equal(t, []string{"default"}, capturedRGs, "ResourceGroups should match cluster level config")
 	})
 }
 
