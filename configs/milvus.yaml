@@ -190,6 +190,7 @@ woodpecker:
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
+      maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
@@ -204,6 +205,11 @@ woodpecker:
       maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
       maxSize: 2M # The maximum size of the merged files.
+      maxParallelUploads: 4 # The maximum number of parallel upload threads for compaction.
+      maxParallelReads: 8 # The maximum number of parallel read threads for compaction.
+    segmentReadPolicy:
+      maxBatchSize: 16M # Maximum size of a batch in bytes.
+      maxFetchThreads: 32 # Maximum number of threads to fetch data.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
