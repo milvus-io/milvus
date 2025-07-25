@@ -65,6 +65,7 @@ type CompactionMeta interface {
 	SetSegmentsCompacting(ctx context.Context, segmentID []int64, compacting bool)
 	CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
+	ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error
 	CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
 
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
@@ -1738,6 +1739,29 @@ func (m *meta) completeMixCompactionMutation(
 
 	log.Info("meta update: alter in memory meta after compaction - complete")
 	return compactToSegments, metricMutation, nil
+}
+
+func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+
+	for _, segmentID := range t.GetInputSegments() {
+		segment := m.segments.GetSegment(segmentID)
+		if !isSegmentHealthy(segment) {
+			// SHOULD NOT HAPPEN: input segment was dropped.
+			// This indicates that compaction tasks, which should be mutually exclusive,
+			// may have executed concurrently.
+			log.Warn("should not happen! input segment was dropped",
+				zap.Int64("planID", t.GetPlanID()),
+				zap.String("type", t.GetType().String()),
+				zap.String("channel", t.GetChannel()),
+				zap.Int64("partitionID", t.GetPartitionID()),
+				zap.Int64("segmentID", segmentID),
+			)
+			return merr.WrapErrSegmentNotFound(segmentID, "input segment was dropped")
+		}
+	}
+	return nil
 }
 
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
