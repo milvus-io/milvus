@@ -201,18 +201,17 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
 
     if (is_mmap_) {
         // some test may pass invalid file_manager_context in constructor which results in a nullptr disk_file_manager_
-        auto mmap_filepath =
-            disk_file_manager_ != nullptr
-                ? disk_file_manager_->GetLocalIndexObjectPrefix() +
-                      STLSORT_INDEX_FILE_NAME
-                : MMAP_PATH_FOR_TEST;
+        mmap_filepath_ = disk_file_manager_ != nullptr
+                             ? disk_file_manager_->GetLocalIndexObjectPrefix() +
+                                   STLSORT_INDEX_FILE_NAME
+                             : MMAP_PATH_FOR_TEST;
         std::filesystem::create_directories(
-            std::filesystem::path(mmap_filepath).parent_path());
+            std::filesystem::path(mmap_filepath_).parent_path());
 
         auto aligned_size =
             ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
         {
-            auto file_writer = storage::FileWriter(mmap_filepath);
+            auto file_writer = storage::FileWriter(mmap_filepath_);
             file_writer.Write(index_data->data.get(), (size_t)index_data->size);
 
             if (aligned_size > index_data->size) {
@@ -223,17 +222,13 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
             file_writer.Finish();
         }
 
-        auto file = File::Open(mmap_filepath, O_RDONLY);
-        mmap_data_ = static_cast<char*>(mmap(NULL,
-                                             (size_t)index_data->size,
-                                             PROT_READ,
-                                             MAP_PRIVATE,
-                                             file.Descriptor(),
-                                             0));
+        auto file = File::Open(mmap_filepath_, O_RDONLY);
+        mmap_data_ = static_cast<char*>(mmap(
+            NULL, aligned_size, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
 
         if (mmap_data_ == MAP_FAILED) {
             file.Close();
-            remove(mmap_filepath.c_str());
+            remove(mmap_filepath_.c_str());
             PanicInfo(ErrorCode::UnexpectedError,
                       "failed to mmap: {}",
                       strerror(errno));

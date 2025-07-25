@@ -53,7 +53,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ~ScalarIndexSort() {
         if (is_mmap_ && mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
             munmap(mmap_data_, mmap_size_);
-            unlink(mmap_filepath.c_str());
+            unlink(mmap_filepath_.c_str());
         }
     }
 
@@ -207,6 +207,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     int64_t data_size_ = 0;
     // Note: it should not be used directly for accessing data. Use data_ptr_ instead.
     char* mmap_data_ = nullptr;
+    std::string mmap_filepath_;
 
     mutable const IndexStructure<T>* data_ptr_ = nullptr;
     mutable const IndexStructure<T>* end_ptr_ = nullptr;
