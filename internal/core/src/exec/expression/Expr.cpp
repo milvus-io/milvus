@@ -68,7 +68,7 @@ CompileExpressions(const std::vector<expr::TypedExprPtr>& sources,
                                              enable_constant_folding));
     }
 
-    if (OPTIMIZE_EXPR_ENABLED) {
+    if (OPTIMIZE_EXPR_ENABLED.load()) {
         OptimizeCompiledExprs(context, exprs);
     }
 
