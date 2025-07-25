@@ -1158,15 +1158,12 @@ class TestIndexInvalid(TestcaseBase):
         target: test drop index after load without release
         method: 1. create a collection and build an index then load
                 2. drop the index
-        expected: raise exception
+        expected: succeed
         """
         collection_w = self.init_collection_general(prefix, True, nb=100, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
-        collection_w.drop_index(check_task=CheckTasks.err_res,
-                                check_items={"err_code": 999,
-                                             "err_msg": "index cannot be dropped, collection is "
-                                                        "loaded, please release it first"})
+        collection_w.drop_index()
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("n_trees", [-1, 1025, 'a'])
