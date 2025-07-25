@@ -841,6 +841,11 @@ func (s *Server) updateBalanceConfig() bool {
 }
 
 func (s *Server) applyLoadConfigChanges(ctx context.Context, newReplicaNum int32, newRGs []string) {
+	if newReplicaNum <= 0 && len(newRGs) == 0 {
+		log.Info("invalid cluster level load config, skip it", zap.Int32("replica_num", newReplicaNum), zap.Strings("resource_groups", newRGs))
+		return
+	}
+
 	// try to check load config changes after restart, and try to update replicas
 	collectionIDs := s.meta.GetAll(ctx)
 	collectionIDs = lo.Filter(collectionIDs, func(collectionID int64, _ int) bool {
@@ -851,6 +856,11 @@ func (s *Server) applyLoadConfigChanges(ctx context.Context, newReplicaNum int32
 		}
 		return true
 	})
+
+	if len(collectionIDs) == 0 {
+		log.Info("no collection to update load config, skip it")
+		return
+	}
 
 	log.Info("apply load config changes",
 		zap.Int64s("collectionIDs", collectionIDs),
@@ -876,10 +886,6 @@ func (s *Server) watchLoadConfigChanges() {
 			log.Warn("invalid cluster level load config, skip it", zap.String("key", e.Key), zap.String("value", e.Value))
 			return
 		}
-		if replicaNum <= 0 {
-			log.Info("invalid cluster level load config, skip it", zap.Int64("replica_num", replicaNum))
-			return
-		}
 		rgs := paramtable.Get().QueryCoordCfg.ClusterLevelLoadResourceGroups.GetAsStrings()
 
 		s.applyLoadConfigChanges(s.ctx, int32(replicaNum), rgs)
@@ -895,11 +901,6 @@ func (s *Server) watchLoadConfigChanges() {
 
 		rgs := strings.Split(e.Value, ",")
 		rgs = lo.Map(rgs, func(rg string, _ int) string { return strings.TrimSpace(rg) })
-		if len(rgs) == 0 {
-			log.Info("invalid cluster level load config, skip it", zap.Strings("resource_groups", rgs))
-			return
-		}
-
 		replicaNum := paramtable.Get().QueryCoordCfg.ClusterLevelLoadReplicaNumber.GetAsInt64()
 		s.applyLoadConfigChanges(s.ctx, int32(replicaNum), rgs)
 	})
