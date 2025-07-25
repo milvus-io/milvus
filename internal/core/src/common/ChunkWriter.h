@@ -122,8 +122,15 @@ class ChunkWriter : public ChunkWriterBase {
     std::shared_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        return std::make_shared<FixedWidthChunk>(
-            row_nums_, dim_, data, size, sizeof(T), nullable_);
+        auto mmap_file_raii =
+            file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
+        return std::make_unique<FixedWidthChunk>(row_nums_,
+                                                 dim_,
+                                                 data,
+                                                 size,
+                                                 sizeof(T),
+                                                 nullable_,
+                                                 std::move(mmap_file_raii));
     }
 
  private:

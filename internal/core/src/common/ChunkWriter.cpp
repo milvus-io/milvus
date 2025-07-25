@@ -85,7 +85,10 @@ StringChunkWriter::finish() {
     char padding[MMAP_STRING_PADDING];
     target_->write(padding, MMAP_STRING_PADDING);
     auto [data, size] = target_->get();
-    return std::make_shared<StringChunk>(row_nums_, data, size, nullable_);
+    auto mmap_file_raii =
+        file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
+    return std::make_unique<StringChunk>(
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 void
@@ -144,7 +147,10 @@ JSONChunkWriter::finish() {
     target_->write(padding, simdjson::SIMDJSON_PADDING);
 
     auto [data, size] = target_->get();
-    return std::make_shared<JSONChunk>(row_nums_, data, size, nullable_);
+    auto mmap_file_raii =
+        file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
+    return std::make_unique<JSONChunk>(
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 void
@@ -227,10 +233,15 @@ std::shared_ptr<Chunk>
 ArrayChunkWriter::finish() {
     char padding[MMAP_ARRAY_PADDING];
     target_->write(padding, MMAP_ARRAY_PADDING);
-
     auto [data, size] = target_->get();
-    return std::make_shared<ArrayChunk>(
-        row_nums_, data, size, element_type_, nullable_);
+    auto mmap_file_raii =
+        file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
+    return std::make_unique<ArrayChunk>(row_nums_,
+                                        data,
+                                        size,
+                                        element_type_,
+                                        nullable_,
+                                        std::move(mmap_file_raii));
 }
 
 void
@@ -292,8 +303,10 @@ SparseFloatVectorChunkWriter::write(
 std::shared_ptr<Chunk>
 SparseFloatVectorChunkWriter::finish() {
     auto [data, size] = target_->get();
-    return std::make_shared<SparseFloatVectorChunk>(
-        row_nums_, data, size, nullable_);
+    auto mmap_file_raii =
+        file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
+    return std::make_unique<SparseFloatVectorChunk>(
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 std::shared_ptr<Chunk>
