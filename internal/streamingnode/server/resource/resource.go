@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
+	primaryindex "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/primarykeyindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
@@ -72,6 +73,7 @@ func Init(opts ...optResourceInit) {
 
 	newR.logger = log.With(log.FieldModule(typeutil.StreamingNodeRole))
 	newR.segmentStatsManager = stats.NewStatsManager()
+	newR.primaryIndexManager = primaryindex.NewPKStatsManager()
 	newR.timeTickInspector = tinspector.NewTimeTickSyncInspector()
 	newR.syncMgr = syncmgr.NewSyncManager(newR.chunkManager)
 	newR.wbMgr = writebuffer.NewManager(newR.syncMgr)
@@ -109,6 +111,7 @@ type resourceImpl struct {
 	mixCoordClient       *syncutil.Future[types.MixCoordClient]
 	streamingNodeCatalog metastore.StreamingNodeCataLog
 	segmentStatsManager  *stats.StatsManager
+	primaryIndexManager  *primaryindex.PKStatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
 
@@ -159,6 +162,10 @@ func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
 
 func (r *resourceImpl) SegmentStatsManager() *stats.StatsManager {
 	return r.segmentStatsManager
+}
+
+func (r *resourceImpl) PrimaryIndexManager() *primaryindex.PKStatsManager {
+	return r.primaryIndexManager
 }
 
 func (r *resourceImpl) TimeTickInspector() tinspector.TimeTickSyncInspector {

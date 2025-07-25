@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
+	"google.golang.org/protobuf/proto"
 )
 
 type globalStatsTask struct {
@@ -148,6 +149,19 @@ func (gt *globalStatsTask) QueryTaskOnWorker(cluster session.Cluster) {
 		switch state {
 		case indexpb.JobState_JobStateFinished:
 			gt.UpdateStateWithMeta(state, result.GetFailReason())
+			// Broadcast primary key index built event
+			eventData := &datapb.PrimaryKeyIndexBuiltData{
+				CollectionId: gt.GlobalStatsTask.GetCollectionID(),
+				VchannelName: gt.GlobalStatsTask.GetVChannel(),
+				Version:      gt.GlobalStatsTask.GetVersion(),
+				Files:        result.GetFiles(),
+			}
+			data, err := proto.Marshal(eventData)
+			if err != nil {
+				log.Error("failed to marshal event data", zap.Error(err))
+				return
+			}
+			gt.handler.BroadcastEvent(datapb.EventType_EventType_PrimaryKeyIndexBuilt, data)
 		case indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateNone:
 			gt.dropAndResetTaskOnWorker(cluster, result.GetFailReason())
 		case indexpb.JobState_JobStateFailed:

@@ -107,6 +107,30 @@ service DataCoord {
   rpc AddFileResource(milvus.AddFileResourceRequest) returns (common.Status) {}
   rpc RemoveFileResource(milvus.RemoveFileResourceRequest) returns (common.Status) {}
   rpc ListFileResources(milvus.ListFileResourcesRequest) returns (milvus.ListFileResourcesResponse) {}
+  rpc Watch(WatchRequest) returns (stream WatchResponse) {}  
+}
+
+// Event types for watch
+enum EventType {
+  EventType_PrimaryKeyIndexBuilt = 0; 
+}
+
+// Event data for primary key index built
+message PrimaryKeyIndexBuiltData {
+  int64 collection_id = 1;
+  string vchannel_name = 2;
+  int64 version = 3;
+  repeated string files = 4;
+}
+
+message WatchRequest {
+  common.MsgBase base = 1;
+  EventType event_type = 2;
+}
+
+message WatchResponse {
+  EventType event_type = 1;
+  bytes event_data = 2;
 }
 
 service DataNode {

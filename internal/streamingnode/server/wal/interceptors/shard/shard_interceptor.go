@@ -8,7 +8,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/primaryindex"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
@@ -27,11 +28,10 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 
 // shardInterceptor is the implementation of shard management interceptor.
 type shardInterceptor struct {
-	shardManager   shards.ShardManager
-	ops            map[message.MessageType]interceptors.AppendInterceptorCall
-	pkStatsManager *primaryindex.GrowingSegmentPKStatsManager
-	pkFieldID      int64
-	pkType         int64
+	shardManager shards.ShardManager
+	ops          map[message.MessageType]interceptors.AppendInterceptorCall
+	pkFieldID    int64
+	pkType       int64
 }
 
 // initOpTable initializes the operation table for the segment interceptor.
@@ -103,9 +103,7 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 				zap.Int64("pkType", impl.pkType),
 				zap.String("fieldName", field.Name))
 
-			if impl.pkStatsManager != nil {
-				impl.pkStatsManager.SetPrimaryKeyInfo(impl.pkFieldID, impl.pkType)
-			}
+			resource.Resource().PrimaryIndexManager().SetPrimaryKeyInfo(impl.pkFieldID, impl.pkType)
 			break
 		}
 	}
@@ -173,23 +171,24 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
 	header := insertMsg.Header()
-	if impl.pkStatsManager != nil {
-		primaryKeys, err := impl.pkStatsManager.ExtractPrimaryKeyColumn(insertMsg)
+	body, _ := insertMsg.Body()
+	var pks []storage.PrimaryKey
+	if resource.Resource().PrimaryIndexManager() != nil {
+		var primaryKeys []interface{}
+		var duplicateKeys *schemapb.IDs
+		var err error
+		primaryKeys, _ = resource.Resource().PrimaryIndexManager().ExtractPrimaryKeyColumn(insertMsg)
 		if err == nil && len(primaryKeys) > 0 {
-			pks := impl.pkStatsManager.ConvertToPrimaryKeys(primaryKeys)
-			duplicateKeys := impl.pkStatsManager.CheckDuplicatePrimaryKeys(pks)
+			pks = resource.Resource().PrimaryIndexManager().ConvertToPrimaryKeys(primaryKeys)
+			duplicateKeys = resource.Resource().PrimaryIndexManager().CheckDuplicatePrimaryKeys(body.GetShardName(), pks)
 			if duplicateKeys != nil {
 				switch duplicateKeys.GetIdField().(type) {
 				case *schemapb.IDs_IntId:
 					if len(duplicateKeys.GetIntId().GetData()) > 0 {
-						log.Info("found duplicate primary keys, converting to upsert",
-							zap.Int("duplicateCount", len(duplicateKeys.GetIntId().GetData())))
 						header.DeletePrimaryKeys = duplicateKeys
 					}
 				case *schemapb.IDs_StrId:
 					if len(duplicateKeys.GetStrId().GetData()) > 0 {
-						log.Info("found duplicate primary keys, converting to upsert",
-							zap.Int("duplicateCount", len(duplicateKeys.GetStrId().GetData())))
 						header.DeletePrimaryKeys = duplicateKeys
 					}
 				}
@@ -249,9 +248,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			SegmentId: result.SegmentID,
 		}
 
-		// Update Bloom Filter for primary keys
-		if impl.pkStatsManager != nil {
-			impl.pkStatsManager.UpdateBloomFilterFromInsert(insertMsg, result.SegmentID)
+		if resource.Resource().PrimaryIndexManager() != nil && len(pks) > 0 {
+			resource.Resource().PrimaryIndexManager().UpdateBloomFilterFromPrimaryKeys(body.GetShardName(), pks, result.SegmentID)
 		}
 	}
 	// Update the insert message headers.
@@ -321,22 +319,6 @@ func (impl *shardInterceptor) handleCreateSegment(ctx context.Context, msg messa
 		return nil, err
 	}
 	impl.shardManager.CreateSegment(message.MustAsImmutableCreateSegmentMessageV2(msg.IntoImmutableMessage(msgID)))
-
-	if impl.pkStatsManager != nil {
-		estimatedRowCount := int64(10000)
-		if err := impl.pkStatsManager.CreateSegmentStats(h.SegmentId, impl.pkFieldID, impl.pkType, estimatedRowCount); err != nil {
-			impl.shardManager.Logger().Error("failed to create primary key stats for segment",
-				zap.Int64("segmentID", h.SegmentId),
-				zap.Error(err))
-		} else {
-			impl.shardManager.Logger().Info("created primary key stats for new segment",
-				zap.Int64("segmentID", h.SegmentId),
-				zap.Int64("collectionID", h.CollectionId),
-				zap.Int64("partitionID", h.PartitionId),
-				zap.Int64("pkFieldID", impl.pkFieldID),
-				zap.Int64("pkType", impl.pkType))
-		}
-	}
 
 	return msgID, nil
 }

@@ -169,6 +169,10 @@ type Server struct {
 	broker broker.Broker
 
 	metricsRequest *metricsinfo.MetricsRequest
+
+	// Event related fields
+	eventMu       sync.RWMutex
+	eventWatchers map[datapb.EventType][]chan *datapb.WatchResponse
 }
 
 type CollectionNameInfo struct {

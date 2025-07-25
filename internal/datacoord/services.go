@@ -2113,3 +2113,68 @@ func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileRe
 		Resources: fileResources,
 	}, nil
 }
+
+func (s *Server) Watch(req *datapb.WatchRequest, stream datapb.DataCoord_WatchServer) error {
+	ch := make(chan *datapb.WatchResponse, 100)
+	log.Ctx(stream.Context()).Info("receive Watch request", zap.Any("req", req))
+	s.eventMu.Lock()
+	if s.eventWatchers == nil {
+		s.eventWatchers = make(map[datapb.EventType][]chan *datapb.WatchResponse)
+	}
+	s.eventWatchers[req.EventType] = append(s.eventWatchers[req.EventType], ch)
+	s.eventMu.Unlock()
+
+	defer func() {
+		s.eventMu.Lock()
+		watchers := s.eventWatchers[req.EventType]
+		for i, w := range watchers {
+			if w == ch {
+				watchers = append(watchers[:i], watchers[i+1:]...)
+				break
+			}
+		}
+		if len(watchers) == 0 {
+			delete(s.eventWatchers, req.EventType)
+		} else {
+			s.eventWatchers[req.EventType] = watchers
+		}
+		s.eventMu.Unlock()
+		close(ch)
+	}()
+
+	for {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if err := stream.Send(event); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return nil
+		}
+	}
+}
+
+// BroadcastEvent broadcasts an event to all watchers
+func (s *Server) BroadcastEvent(eventType datapb.EventType, eventData []byte) {
+	s.eventMu.RLock()
+	defer s.eventMu.RUnlock()
+
+	event := &datapb.WatchResponse{
+		EventType: eventType,
+		EventData: eventData,
+	}
+
+	log.Ctx(s.ctx).Info("broadcast event", zap.Any("eventType", s.eventWatchers), zap.Any("eventData", eventData))
+	if watchers, ok := s.eventWatchers[eventType]; ok {
+		for _, ch := range watchers {
+			select {
+			case ch <- event:
+			default:
+				// Channel is full or closed, skip
+			}
+		}
+	}
+}
