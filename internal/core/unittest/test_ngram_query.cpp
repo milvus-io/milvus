@@ -22,6 +22,8 @@
 #include "index/IndexFactory.h"
 #include "index/NgramInvertedIndex.h"
 #include "segcore/load_index_c.h"
+#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "expr/ITypeExpr.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -380,4 +382,138 @@ TEST(NgramIndex, TestNgramSimple) {
                          "ary",
                          proto::plan::OpType::PostfixMatch,
                          std::vector<bool>(10000, true));
+}
+
+TEST(NgramIndex, TestNgramJson) {
+    std::vector<std::string> json_raw_data = {
+        R"(1)",
+        R"({"a": "Milvus project"})",
+        R"({"a": "Zilliz cloud"})",
+        R"({"a": "Query Node"})",
+        R"({"a": "Data Node"})",
+        R"({"a": [1, 2, 3]})",
+        R"({"a": {"b": 1}})",
+        R"({"a": 1001})",
+        R"({"a": true})",
+        R"({"a": "Milvus", "b": "Zilliz cloud"})",
+    };
+
+    auto json_path = "/a";
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+
+    auto file_manager_ctx = storage::FileManagerContext();
+    file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
+        milvus::proto::schema::JSON);
+    file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
+
+    index::CreateIndexInfo create_index_info{
+        .index_type = index::INVERTED_INDEX_TYPE,
+        .json_cast_type = JsonCastType::FromString("VARCHAR"),
+        .json_path = json_path,
+        .ngram_params = std::optional<index::NgramParams>{index::NgramParams{
+            .loading_index = false,
+            .min_gram = 2,
+            .max_gram = 3,
+        }},
+    };
+    auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        create_index_info, file_manager_ctx);
+
+    auto ngram_index = std::unique_ptr<index::NgramInvertedIndex>(
+        static_cast<index::NgramInvertedIndex*>(inv_index.release()));
+
+    std::vector<milvus::Json> jsons;
+    for (auto& json : json_raw_data) {
+        jsons.push_back(milvus::Json(simdjson::padded_string(json)));
+    }
+
+    auto json_field =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    json_field->add_json_data(jsons);
+    ngram_index->BuildWithFieldData({json_field});
+    ngram_index->finish();
+    ngram_index->create_reader(milvus::index::SetBitsetSealed);
+
+    auto segment = segcore::CreateSealedSegment(schema);
+    segcore::LoadIndexInfo load_index_info;
+    load_index_info.field_id = json_fid.get();
+    load_index_info.field_type = DataType::JSON;
+    load_index_info.cache_index =
+        CreateTestCacheIndex("", std::move(ngram_index));
+
+    std::map<std::string, std::string> index_params{
+        {milvus::index::INDEX_TYPE, milvus::index::NGRAM_INDEX_TYPE},
+        {milvus::index::MIN_GRAM, "2"},
+        {milvus::index::MAX_GRAM, "3"},
+        {milvus::LOAD_PRIORITY, "HIGH"},
+        {JSON_PATH, json_path},
+        {JSON_CAST_TYPE, "VARCHAR"}};
+    load_index_info.index_params = index_params;
+
+    segment->LoadIndex(load_index_info);
+
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        0, 0, 0, json_fid.get(), {json_field}, cm);
+    segment->LoadFieldData(load_info);
+
+    std::vector<std::tuple<proto::plan::GenericValue,
+                           std::vector<int64_t>,
+                           proto::plan::OpType>>
+        test_cases;
+    proto::plan::GenericValue value;
+    value.set_string_val("nothing");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{}, proto::plan::OpType::InnerMatch));
+
+    value.set_string_val("il");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{1, 2, 9}, proto::plan::OpType::InnerMatch));
+
+    value.set_string_val("lliz");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{2}, proto::plan::OpType::InnerMatch));
+
+    value.set_string_val("Zi");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{2}, proto::plan::OpType::PrefixMatch));
+
+    value.set_string_val("Zilliz");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{2}, proto::plan::OpType::PrefixMatch));
+
+    value.set_string_val("de");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{3, 4}, proto::plan::OpType::PostfixMatch));
+
+    value.set_string_val("Node");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{3, 4}, proto::plan::OpType::PostfixMatch));
+
+    value.set_string_val("%ery%ode%");
+    test_cases.push_back(std::make_tuple(
+        value, std::vector<int64_t>{3}, proto::plan::OpType::Match));
+
+    for (auto& test_case : test_cases) {
+        auto value = std::get<0>(test_case);
+        auto expr = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+            milvus::expr::ColumnInfo(json_fid, DataType::JSON, {"a"}, true),
+            std::get<2>(test_case),
+            value,
+            std::vector<proto::plan::GenericValue>{});
+
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+
+        auto result = milvus::query::ExecuteQueryExpr(
+            plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+        auto expect_result = std::get<1>(test_case);
+        EXPECT_EQ(result.count(), expect_result.size());
+        for (auto& id : expect_result) {
+            EXPECT_TRUE(result[id]);
+        }
+    }
 }

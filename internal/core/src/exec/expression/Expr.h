@@ -1283,11 +1283,13 @@ class SegmentExpr : public Expr {
 
     bool
     CanUseNgramIndex(FieldId field_id) const {
-        if (segment_->type() != SegmentType::Sealed) {
-            return false;
-        }
-        auto cast_ptr = dynamic_cast<const segcore::SegmentSealed*>(segment_);
-        return (cast_ptr != nullptr && cast_ptr->HasNgramIndex(field_id));
+        return segment_->HasNgramIndex(field_id);
+    }
+
+    bool
+    CanUseNgramIndexForJson(FieldId field_id,
+                            const std::string& nested_path) const {
+        return segment_->HasNgramIndexForJson(field_id, nested_path);
     }
 
  protected:

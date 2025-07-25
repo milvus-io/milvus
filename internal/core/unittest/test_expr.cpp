@@ -16530,9 +16530,11 @@ TYPED_TEST(JsonIndexTestFixture, TestJsonIndexUnaryExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        this->cast_type,
-        this->json_path,
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = this->cast_type,
+            .json_path = this->json_path,
+        },
         file_manager_ctx);
 
     using json_index_type =
@@ -16664,10 +16666,13 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::FromString("DOUBLE"),
-        "/a",
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("DOUBLE"),
+            .json_path = "/a",
+        },
         file_manager_ctx);
 
     using json_index_type = index::JsonInvertedIndex<double>;
@@ -16772,9 +16777,11 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE,
-        JsonCastType::FromString("DOUBLE"),
-        json_index_path,
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = JsonCastType::FromString("DOUBLE"),
+            .json_path = json_index_path,
+        },
         file_manager_ctx);
 
     using json_index_type = index::JsonInvertedIndex<double>;
@@ -16958,7 +16965,12 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
-        index::INVERTED_INDEX_TYPE, GetParam(), "/a", file_manager_ctx);
+        index::CreateIndexInfo{
+            .index_type = index::INVERTED_INDEX_TYPE,
+            .json_cast_type = GetParam(),
+            .json_path = "/a",
+        },
+        file_manager_ctx);
 
     using json_index_type = index::JsonInvertedIndex<double>;
     auto json_index = std::unique_ptr<json_index_type>(
