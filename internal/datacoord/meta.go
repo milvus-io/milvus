@@ -1132,7 +1132,7 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		if segment.GetNumOfRows() == 0 && segment.GetState() == commonpb.SegmentState_Flushing {
+		if segment.Level != datapb.SegmentLevel_L0 && segment.GetNumOfRows() == 0 && (segment.GetState() == commonpb.SegmentState_Flushing || segment.GetState() == commonpb.SegmentState_Flushed) {
 			log.Ctx(context.TODO()).Info("meta update: update as dropped if empty when flusing", zap.Int64("segmentID", segmentID))
 			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
 		}
