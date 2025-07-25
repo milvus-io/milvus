@@ -53,6 +53,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     ~ScalarIndexSort() {
         if (is_mmap_ && mmap_data_ != nullptr && mmap_data_ != MAP_FAILED) {
             munmap(mmap_data_, mmap_size_);
+            unlink(mmap_filepath.c_str());
         }
     }
 

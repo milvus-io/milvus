@@ -243,7 +243,6 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         data_size_ = index_data->size;
 
         file.Close();
-        unlink(mmap_filepath.c_str());
     } else {
         data_.resize(index_size);
         memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
