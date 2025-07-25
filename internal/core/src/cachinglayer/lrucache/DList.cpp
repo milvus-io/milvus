@@ -86,7 +86,7 @@ DList::reserveMemoryWithTimeout(const ResourceUsage& size,
 
 bool
 DList::reserveMemoryInternal(const ResourceUsage& size) {
-    auto used = used_memory_.load();
+    auto used = used_resources_.load();
 
     // Combined logical and physical memory limit check
     bool logical_limit_exceeded = !max_memory_.CanHold(used + size);
@@ -110,9 +110,14 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
             eviction_target.memory_bytes =
                 std::max(eviction_target.memory_bytes,
                          physical_eviction_needed.memory_bytes);
+            eviction_target.file_bytes =
+                std::max(eviction_target.file_bytes,
+                         physical_eviction_needed.file_bytes);
             min_eviction.memory_bytes =
                 std::max(min_eviction.memory_bytes,
                          physical_eviction_needed.memory_bytes);
+            min_eviction.file_bytes = std::max(
+                min_eviction.file_bytes, physical_eviction_needed.file_bytes);
         }
 
         // Attempt unified eviction
@@ -149,7 +154,7 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
     }
 
     // Reserve resources (both checks passed)
-    used_memory_ += size;
+    used_resources_ += size;
     loading_ += size * eviction_config_.loading_memory_factor;
     return true;
 }
@@ -164,7 +169,7 @@ DList::evictionLoop() {
                 })) {
             break;
         }
-        auto used = used_memory_.load();
+        auto used = used_resources_.load();
         // if usage is above high watermark, evict until low watermark is reached.
         tryEvict(
             {
@@ -183,13 +188,13 @@ DList::evictionLoop() {
 
 std::string
 DList::usageInfo(const ResourceUsage& actively_pinned) const {
-    auto used = used_memory_.load();
+    auto used = used_resources_.load();
     static double precision = 100.0;
     return fmt::format(
         "low_watermark_: {}; "
         "high_watermark_: {}; "
         "max_memory_: {}; "
-        "used_memory_: {} {:.2}% of max, {:.2}% of "
+        "used_resources_: {} {:.2}% of max, {:.2}% of "
         "high_watermark memory, {:.2}% of max, {:.2}% of "
         "high_watermark disk; "
         "evictable_size_: {}; "
@@ -356,7 +361,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
         internal::cache_cell_eviction_count(size.storage_type()).Increment();
         popItem(list_node);
         list_node->clear_data();
-        used_memory_ -= size;
+        used_resources_ -= size;
         decreaseEvictableSize(size);  // It was evictable, now it's gone.
     }
 
@@ -391,7 +396,7 @@ DList::UpdateLimit(const ResourceUsage& new_limit) {
                new_limit.ToString(),
                high_watermark_.ToString());
     std::unique_lock<std::mutex> list_lock(list_mtx_);
-    auto used = used_memory_.load();
+    auto used = used_resources_.load();
     if (!new_limit.CanHold(used)) {
         // positive means amount owed
         auto deficit = used - new_limit;
@@ -444,7 +449,7 @@ DList::UpdateHighWatermark(const ResourceUsage& new_high_watermark) {
 void
 DList::releaseMemory(const ResourceUsage& size) {
     // safe to substract on atomic without lock
-    used_memory_ -= size;
+    used_resources_ -= size;
     // this is called when a cell failed to load.
     loading_ -= size * eviction_config_.loading_memory_factor;
 
@@ -459,7 +464,7 @@ DList::touchItem(ListNode* list_node, std::optional<ResourceUsage> size) {
     popItem(list_node);
     pushHead(list_node);
     if (size.has_value()) {
-        used_memory_ += size.value();
+        used_resources_ += size.value();
         // A bonus cell is loaded, so it's evictable.
         evictable_size_ += size.value();
         // If there are waiters, try to satisfy them
@@ -474,7 +479,7 @@ void
 DList::removeItem(ListNode* list_node, ResourceUsage size) {
     std::lock_guard<std::mutex> list_lock(list_mtx_);
     if (popItem(list_node)) {
-        used_memory_ -= size;
+        used_resources_ -= size;
         if (list_node->pin_count_ == 0) {
             decreaseEvictableSize(size);
         }

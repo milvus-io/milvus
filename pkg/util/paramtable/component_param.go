@@ -2830,19 +2830,19 @@ type queryNodeConfig struct {
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 
 	// TODO(tiered storage 2) this should be refreshable?
-	TieredWarmupScalarField        ParamItem `refreshable:"false"`
-	TieredWarmupScalarIndex        ParamItem `refreshable:"false"`
-	TieredWarmupVectorField        ParamItem `refreshable:"false"`
-	TieredWarmupVectorIndex        ParamItem `refreshable:"false"`
-	TieredMemoryLowWatermarkRatio  ParamItem `refreshable:"false"`
-	TieredMemoryHighWatermarkRatio ParamItem `refreshable:"false"`
-	TieredDiskLowWatermarkRatio    ParamItem `refreshable:"false"`
-	TieredDiskHighWatermarkRatio   ParamItem `refreshable:"false"`
-	TieredEvictionEnabled          ParamItem `refreshable:"false"`
-	TieredCacheTouchWindowMs       ParamItem `refreshable:"false"`
-	TieredEvictionIntervalMs       ParamItem `refreshable:"false"`
-	TieredLoadingMemoryFactor      ParamItem `refreshable:"false"`
-	CacheCellUnaccssedSurvivalTime ParamItem `refreshable:"false"`
+	TieredWarmupScalarField         ParamItem `refreshable:"false"`
+	TieredWarmupScalarIndex         ParamItem `refreshable:"false"`
+	TieredWarmupVectorField         ParamItem `refreshable:"false"`
+	TieredWarmupVectorIndex         ParamItem `refreshable:"false"`
+	TieredMemoryLowWatermarkRatio   ParamItem `refreshable:"false"`
+	TieredMemoryHighWatermarkRatio  ParamItem `refreshable:"false"`
+	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
+	TieredDiskHighWatermarkRatio    ParamItem `refreshable:"false"`
+	TieredEvictionEnabled           ParamItem `refreshable:"false"`
+	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
+	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
+	TieredLoadingMemoryFactor       ParamItem `refreshable:"false"`
+	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3161,7 +3161,7 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	}
 	p.TieredLoadingMemoryFactor.Init(base.mgr)
 
-	p.CacheCellUnaccssedSurvivalTime = ParamItem{
+	p.CacheCellUnaccessedSurvivalTime = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
 		Version:      "2.6.0",
 		DefaultValue: "0",
@@ -3177,7 +3177,7 @@ If a cached data hasn't been accessed again after this time since its last acces
 If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
-	p.CacheCellUnaccssedSurvivalTime.Init(base.mgr)
+	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
