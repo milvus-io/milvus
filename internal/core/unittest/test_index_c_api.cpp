@@ -176,12 +176,10 @@ TEST(CBoolIndexTest, All) {
             status = DeleteIndex(copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
-        {
-            DeleteBinarySet(binary_set);
-        }
+        { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(half_ds->GetTensor());
+    delete[](char*)(half_ds->GetTensor());
 }
 
 // TODO: more scalar type.
@@ -235,9 +233,7 @@ TEST(CInt64IndexTest, All) {
             status = DeleteIndex(copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
-        {
-            DeleteBinarySet(binary_set);
-        }
+        { DeleteBinarySet(binary_set); }
     }
 }
 
@@ -297,12 +293,10 @@ TEST(CStringIndexTest, All) {
             status = DeleteIndex(copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
-        {
-            DeleteBinarySet(binary_set);
-        }
+        { DeleteBinarySet(binary_set); }
     }
 
-    delete[] (char*)(str_ds->GetTensor());
+    delete[](char*)(str_ds->GetTensor());
 }
 #endif
 
