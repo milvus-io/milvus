@@ -1012,15 +1012,8 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 		return resp, nil
 	}
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
-	// `handler.GetCollection` cannot fetch dropping collection,
-	// so we use `broker.DescribeCollectionInternal` to get collection info to help fetch dropping collection to get the recovery info.
-	collection, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(collection, err); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
 
-	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, collection.Schema, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
+	channel := NewRWChannel(req.GetVchannel(), collectionID, nil, nil, 0, nil) // TODO: remove RWChannel, just use vchannel + collectionID
 	channelInfo := s.handler.GetDataVChanPositions(channel, allPartitionID)
 	if channelInfo.SeekPosition == nil {
 		log.Warn("channel recovery start position is not found, may collection is on creating")
@@ -1050,7 +1043,7 @@ func (s *Server) GetChannelRecoveryInfo(ctx context.Context, req *datapb.GetChan
 	)
 
 	resp.Info = channelInfo
-	resp.Schema = collection.Schema
+	resp.Schema = nil // schema is managed by streaming node itself now.
 	resp.SegmentsNotCreatedByStreaming = segmentsNotCreatedByStreaming
 	return resp, nil
 }

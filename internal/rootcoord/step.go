@@ -508,8 +508,7 @@ func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, e
 			CollectionId: s.collection.CollectionID,
 		}).
 		WithBody(&message.SchemaChangeMessageBody{
-			Schema:   schema,
-			ModifyTs: s.ts,
+			Schema: schema,
 		}).BuildBroadcast()
 	if err != nil {
 		return nil, err

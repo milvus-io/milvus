@@ -1,8 +1,12 @@
 package recovery
 
 import (
+	"math"
+
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -27,6 +31,10 @@ func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCre
 			PartitionId: partitionId,
 		})
 	}
+	schema := &schemapb.CollectionSchema{}
+	if err := proto.Unmarshal(msg.MustBody().Schema, schema); err != nil {
+		panic("failed to unmarshal collection schema, err: " + err.Error())
+	}
 	return &vchannelRecoveryInfo{
 		meta: &streamingpb.VChannelMeta{
 			Vchannel: msg.VChannel(),
@@ -34,6 +42,13 @@ func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCre
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 				CollectionId: msg.Header().CollectionId,
 				Partitions:   partitions,
+				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{
+						Schema:             schema,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						CheckpointTimeTick: msg.TimeTick(),
+					},
+				},
 			},
 			CheckpointTimeTick: msg.TimeTick(),
 		},
@@ -44,8 +59,9 @@ func newVChannelRecoveryInfoFromCreateCollectionMessage(msg message.ImmutableCre
 
 // vchannelRecoveryInfo is the recovery info for a vchannel.
 type vchannelRecoveryInfo struct {
-	meta  *streamingpb.VChannelMeta
-	dirty bool // whether the vchannel recovery info is dirty.
+	meta              *streamingpb.VChannelMeta
+	flusherCheckpoint *WALCheckpoint // update from the flusher.
+	dirty             bool           // whether the vchannel recovery info is dirty.
 }
 
 // IsActive returns true if the vchannel is active.
@@ -61,6 +77,67 @@ func (info *vchannelRecoveryInfo) IsPartitionActive(partitionId int64) bool {
 		}
 	}
 	return false
+}
+
+// GetFlushCheckpoint returns the flush checkpoint of the vchannel recovery info.
+// return nil if the flush checkpoint is not set.
+func (info *vchannelRecoveryInfo) GetFlushCheckpoint() *WALCheckpoint {
+	return info.flusherCheckpoint
+}
+
+// GetSchema returns the schema of the vchannel at the given timetick.
+// return nil if the schema is not found.
+func (info *vchannelRecoveryInfo) GetSchema(timetick uint64) (int, *schemapb.CollectionSchema) {
+	if timetick == 0 {
+		// timetick 0 means the latest schema.
+		timetick = math.MaxUint64
+	}
+
+	for i := len(info.meta.CollectionInfo.Schemas) - 1; i >= 0; i-- {
+		schema := info.meta.CollectionInfo.Schemas[i]
+		if schema.CheckpointTimeTick <= timetick {
+			return i, schema.Schema
+		}
+	}
+	return -1, nil
+}
+
+// UpdateFlushCheckpoint updates the flush checkpoint of the vchannel recovery info.
+func (info *vchannelRecoveryInfo) UpdateFlushCheckpoint(checkpoint *WALCheckpoint) error {
+	if info.flusherCheckpoint == nil || info.flusherCheckpoint.MessageID.LTE(checkpoint.MessageID) {
+		info.flusherCheckpoint = checkpoint
+		idx, _ := info.GetSchema(info.flusherCheckpoint.TimeTick)
+		for i := 0; i < idx; i++ {
+			// drop the schema that is not used anymore.
+			// the future GetSchema operation will use the timetick greater than the flusher checkpoint.
+			// Those schema is too old, and will not be used anymore, can be dropped.
+			if info.meta.CollectionInfo.Schemas[i].State == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL {
+				info.meta.CollectionInfo.Schemas[i].State = streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
+				info.dirty = true
+			}
+		}
+		return nil
+	}
+	return errors.Errorf("update illegal checkpoint of flusher, current: %s, target: %s", info.flusherCheckpoint.MessageID.String(), checkpoint.MessageID.String())
+}
+
+// ObserveSchemaChange is called when a schema change message is observed.
+func (info *vchannelRecoveryInfo) ObserveSchemaChange(msg message.ImmutableSchemaChangeMessageV2) {
+	if msg.TimeTick() < info.meta.CheckpointTimeTick {
+		// the txn message will share the same time tick.
+		// (although the flush operation is not a txn message)
+		// so we only filter the time tick is less than the checkpoint time tick.
+		// Consistent state is guaranteed by the recovery storage's mutex.
+		return
+	}
+
+	info.meta.CollectionInfo.Schemas = append(info.meta.CollectionInfo.Schemas, &streamingpb.CollectionSchemaOfVChannel{
+		Schema:             msg.MustBody().Schema,
+		State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+		CheckpointTimeTick: msg.TimeTick(),
+	})
+	info.meta.CheckpointTimeTick = msg.TimeTick()
+	info.dirty = true
 }
 
 // ObserveDropCollection is called when a drop collection message is observed.
@@ -129,6 +206,20 @@ func (info *vchannelRecoveryInfo) ConsumeDirtyAndGetSnapshot() (dirtySnapshot *s
 	if !info.dirty {
 		return nil, info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 	}
+	// create the snapshot of the vchannel recovery info first.
+	snapshot := proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+
+	// consume the dirty part of the vchannel recovery info.
+	for i := len(info.meta.CollectionInfo.Schemas) - 1; i >= 0; i-- {
+		// the schema is always dropped by timetick order,
+		// so we find the max index of the schema that is dropped,
+		// and drop all schema before it.
+		// the last schema is always normal, so it's safe to drop the schema by range.
+		if info.meta.CollectionInfo.Schemas[i].State == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED {
+			info.meta.CollectionInfo.Schemas = info.meta.CollectionInfo.Schemas[i+1:]
+			break
+		}
+	}
 	info.dirty = false
-	return proto.Clone(info.meta).(*streamingpb.VChannelMeta), info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
+	return snapshot, info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
 }

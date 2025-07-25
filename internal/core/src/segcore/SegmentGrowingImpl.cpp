@@ -497,7 +497,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
 
         std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
         while (column_group_info.arrow_reader_channel->pop(r)) {
-            for (const auto& table : r->arrow_tables) {
+            for (const auto& [row_group_id, table] : r->arrow_tables) {
                 size_t batch_num_rows = table->num_rows();
                 for (int i = 0; i < table->schema()->num_fields(); ++i) {
                     AssertInfo(table->schema()->field(i)->metadata()->Contains(
@@ -1270,13 +1270,16 @@ void
 SegmentGrowingImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(sch_mutex_);
 
-    auto absent_fields = sch->AbsentFields(*schema_);
+    // double check condition, avoid multiple assignment
+    if (sch->get_schema_version() > schema_->get_schema_version()) {
+        auto absent_fields = sch->AbsentFields(*schema_);
 
-    for (const auto& field_meta : *absent_fields) {
-        fill_empty_field(field_meta);
+        for (const auto& field_meta : *absent_fields) {
+            fill_empty_field(field_meta);
+        }
+
+        schema_ = sch;
     }
-
-    schema_ = sch;
 }
 
 void

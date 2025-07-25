@@ -55,14 +55,19 @@ type DeleteBuffer[T timed] interface {
 
 	// clean up delete buffer
 	Clear()
+
+	// Pin/Unpin methods for protecting specific timestamps from cleanup
+	Pin(ts uint64, segmentID int64)
+	Unpin(ts uint64, segmentID int64)
 }
 
 func NewDoubleCacheDeleteBuffer[T timed](startTs uint64, maxSize int64) DeleteBuffer[T] {
 	return &doubleCacheBuffer[T]{
-		head:       newCacheBlock[T](startTs, maxSize),
-		maxSize:    maxSize,
-		ts:         startTs,
-		l0Segments: make([]segments.Segment, 0),
+		head:             newCacheBlock[T](startTs, maxSize),
+		maxSize:          maxSize,
+		ts:               startTs,
+		l0Segments:       make([]segments.Segment, 0),
+		pinnedTimestamps: make(map[uint64]map[int64]struct{}),
 	}
 }
 
@@ -75,6 +80,10 @@ type doubleCacheBuffer[T timed] struct {
 
 	// maintain l0 segment list
 	l0Segments []segments.Segment
+
+	// track pinned timestamps to prevent cleanup
+	// map[timestamp]map[segmentID]struct{} - tracks which segments pin which timestamps
+	pinnedTimestamps map[uint64]map[int64]struct{}
 }
 
 func (c *doubleCacheBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
@@ -253,4 +262,42 @@ func (c *cacheBlock[T]) ListAfter(ts uint64) []T {
 
 func (c *cacheBlock[T]) Size() (entryNum, memorySize int64) {
 	return c.entryNum, c.size
+}
+
+// Pin protects a specific timestamp from being cleaned up by a specific segment
+func (c *doubleCacheBuffer[T]) Pin(ts uint64, segmentID int64) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	if c.pinnedTimestamps[ts] == nil {
+		c.pinnedTimestamps[ts] = make(map[int64]struct{})
+	}
+	c.pinnedTimestamps[ts][segmentID] = struct{}{}
+
+	log.Info("pin timestamp for segment",
+		zap.Uint64("timestamp", ts),
+		zap.Int64("segmentID", segmentID),
+		zap.Time("physicalTime", tsoutil.PhysicalTime(ts)),
+	)
+}
+
+// Unpin removes protection for a specific timestamp by a specific segment
+func (c *doubleCacheBuffer[T]) Unpin(ts uint64, segmentID int64) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	if segmentMap, exists := c.pinnedTimestamps[ts]; exists {
+		delete(segmentMap, segmentID)
+		if len(segmentMap) == 0 {
+			delete(c.pinnedTimestamps, ts)
+		}
+	}
+
+	log.Info("unpin timestamp for segment",
+		zap.Uint64("timestamp", ts),
+		zap.Int64("segmentID", segmentID),
+		zap.Time("physicalTime", tsoutil.PhysicalTime(ts)),
+	)
+	// Note: doubleCacheBuffer doesn't implement cleanup logic in TryDiscard,
+	// so no cleanup is triggered here
 }

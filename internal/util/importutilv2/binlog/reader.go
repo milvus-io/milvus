@@ -41,6 +41,7 @@ type reader struct {
 	storageVersion int64
 
 	fileSize   *atomic.Int64
+	bufferSize int
 	deleteData map[any]typeutil.Timestamp // pk2ts
 	insertLogs map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
 
@@ -56,6 +57,7 @@ func NewReader(ctx context.Context,
 	paths []string,
 	tsStart,
 	tsEnd uint64,
+	bufferSize int,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -73,6 +75,7 @@ func NewReader(ctx context.Context,
 		schema:         schema,
 		storageVersion: storageVersion,
 		fileSize:       atomic.NewInt64(0),
+		bufferSize:     bufferSize,
 	}
 	err := r.init(paths, tsStart, tsEnd, storageConfig)
 	if err != nil {
@@ -122,8 +125,9 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 		return err
 	}
 
+	allFields := typeutil.GetAllFieldSchemas(r.schema)
 	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(record, v, r.schema)
+		return storage.ValueDeserializer(record, v, allFields)
 	})
 
 	if len(paths) < 2 {
@@ -193,7 +197,8 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if err != nil {
 		return nil, err
 	}
-	for range 4096 {
+	rowNum := 0
+	for {
 		v, err := r.dr.NextValue()
 		if err == io.EOF {
 			if insertData.GetRowNum() == 0 {
@@ -219,6 +224,11 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			if err != nil {
 				return nil, err
 			}
+			rowNum++
+		}
+		if rowNum%100 == 0 && // Prevent frequent memory check
+			insertData.GetMemorySize() >= r.bufferSize {
+			break
 		}
 	}
 	insertData, err = r.filter(insertData)

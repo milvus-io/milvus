@@ -312,7 +312,7 @@ func (s *MixCompactionTaskStorageV2Suite) initStorageV2Segments(rows int, seed i
 	metacache.UpdateNumOfRows(1000)(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
-	mc.EXPECT().Schema().Return(s.meta.Schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(s.meta.Schema).Maybe()
 	mc.EXPECT().GetSegmentByID(seed).Return(seg, true).Maybe()
 	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {

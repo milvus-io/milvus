@@ -84,18 +84,23 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
         case proto::plan::JSONContainsExpr_JSONOp_Contains:
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
             if (IsArrayDataType(data_type)) {
-                auto val_type = expr_->vals_[0].val_case();
+                auto val_type = expr_->column_.element_type_;
                 switch (val_type) {
-                    case proto::plan::GenericValue::kBoolVal: {
+                    case DataType::BOOL: {
                         return ExecArrayContains<bool>(context);
                     }
-                    case proto::plan::GenericValue::kInt64Val: {
+                    case DataType::INT8:
+                    case DataType::INT16:
+                    case DataType::INT32:
+                    case DataType::INT64: {
                         return ExecArrayContains<int64_t>(context);
                     }
-                    case proto::plan::GenericValue::kFloatVal: {
+                    case DataType::FLOAT:
+                    case DataType::DOUBLE: {
                         return ExecArrayContains<double>(context);
                     }
-                    case proto::plan::GenericValue::kStringVal: {
+                    case DataType::STRING:
+                    case DataType::VARCHAR: {
                         return ExecArrayContains<std::string>(context);
                     }
                     default:

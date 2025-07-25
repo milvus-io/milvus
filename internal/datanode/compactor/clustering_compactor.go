@@ -614,8 +614,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return err
 	}
 
+	allFields := typeutil.GetAllFieldSchemas(t.plan.Schema)
 	reader := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(r, v, t.plan.Schema)
+		return storage.ValueDeserializer(r, v, allFields)
 	})
 	defer reader.Close()
 
@@ -864,26 +865,39 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		return nil, merr.WrapErrIllegalCompactionPlan("all segments' binlogs are empty")
 	}
 	log.Debug("binlogNum", zap.Int("binlogNum", binlogNum))
-	fieldBinlogPaths := make([][]string, 0)
-	for idx := 0; idx < binlogNum; idx++ {
-		var ps []string
-		for _, f := range segment.GetFieldBinlogs() {
-			ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
-		}
-		fieldBinlogPaths = append(fieldBinlogPaths, ps)
-	}
 
 	expiredFilter := compaction.NewEntityFilter(nil, t.plan.GetCollectionTtl(), t.currentTime)
+	binlogs := make([]*datapb.FieldBinlog, 0)
 
+	requiredFields := typeutil.NewSet[int64]()
+	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
+	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return requiredFields.Contain(field.GetFieldID())
+	})
+
+	switch segment.GetStorageVersion() {
+	case storage.StorageV1:
+		for _, fieldBinlog := range segment.GetFieldBinlogs() {
+			if requiredFields.Contain(fieldBinlog.GetFieldID()) {
+				binlogs = append(binlogs, fieldBinlog)
+			}
+		}
+	case storage.StorageV2:
+		binlogs = segment.GetFieldBinlogs()
+	default:
+		log.Warn("unsupported storage version", zap.Int64("storage version", segment.GetStorageVersion()))
+		return nil, fmt.Errorf("unsupported storage version %d", segment.GetStorageVersion())
+	}
 	rr, err := storage.NewBinlogRecordReader(ctx,
-		segment.GetFieldBinlogs(),
-		t.plan.Schema,
+		binlogs,
+		t.plan.GetSchema(),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
 		storage.WithVersion(segment.StorageVersion),
 		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
+		storage.WithNeededFields(requiredFields),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
@@ -891,7 +905,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(r, v, t.plan.Schema)
+		return storage.ValueDeserializer(r, v, selectedFields)
 	})
 	defer pkIter.Close()
 	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(pkIter, expiredFilter)
@@ -908,8 +922,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		timestampTo   int64                 = -1
-		timestampFrom int64                 = -1
 		remained      int64                 = 0
 		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
 	)
@@ -930,13 +942,6 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 			continue
 		}
 
-		// Update timestampFrom, timestampTo
-		if (*v).Timestamp < timestampFrom || timestampFrom == -1 {
-			timestampFrom = (*v).Timestamp
-		}
-		if (*v).Timestamp > timestampTo || timestampFrom == -1 {
-			timestampTo = (*v).Timestamp
-		}
 		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
 		if !ok {

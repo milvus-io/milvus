@@ -63,7 +63,7 @@ func NewReader(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize)
 	}
 
 	fileType, err := GetFileType(importFile)

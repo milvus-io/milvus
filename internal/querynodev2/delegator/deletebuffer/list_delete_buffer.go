@@ -31,11 +31,12 @@ import (
 
 func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64, labels []string) DeleteBuffer[T] {
 	return &listDeleteBuffer[T]{
-		safeTs:       startTs,
-		sizePerBlock: sizePerBlock,
-		list:         []*cacheBlock[T]{newCacheBlock[T](startTs, sizePerBlock)},
-		labels:       labels,
-		l0Segments:   make([]segments.Segment, 0),
+		safeTs:           startTs,
+		sizePerBlock:     sizePerBlock,
+		list:             []*cacheBlock[T]{newCacheBlock[T](startTs, sizePerBlock)},
+		labels:           labels,
+		l0Segments:       make([]segments.Segment, 0),
+		pinnedTimestamps: make(map[uint64]map[int64]struct{}),
 	}
 }
 
@@ -59,6 +60,10 @@ type listDeleteBuffer[T timed] struct {
 
 	// maintain l0 segment list
 	l0Segments []segments.Segment
+
+	// track pinned timestamps to prevent cleanup
+	// map[timestamp]map[segmentID]struct{} - tracks which segments pin which timestamps
+	pinnedTimestamps map[uint64]map[int64]struct{}
 }
 
 func (b *listDeleteBuffer[T]) RegisterL0(segmentList ...segments.Segment) {
@@ -87,8 +92,10 @@ func (b *listDeleteBuffer[T]) ListL0() []segments.Segment {
 func (b *listDeleteBuffer[T]) UnRegister(ts uint64) {
 	b.mut.Lock()
 	defer b.mut.Unlock()
+	if b.isPinned(ts) {
+		return
+	}
 	var newSegments []segments.Segment
-
 	for _, s := range b.l0Segments {
 		if s.StartPosition().GetTimestamp() >= ts {
 			newSegments = append(newSegments, s)
@@ -162,6 +169,9 @@ func (b *listDeleteBuffer[T]) SafeTs() uint64 {
 func (b *listDeleteBuffer[T]) TryDiscard(ts uint64) {
 	b.mut.Lock()
 	defer b.mut.Unlock()
+	if b.isPinned(ts) {
+		return
+	}
 	b.tryCleanDelete(ts)
 }
 
@@ -190,9 +200,75 @@ func (b *listDeleteBuffer[T]) tryCleanDelete(ts uint64) {
 	}
 }
 
+// check if any records is pinned before the cleanTs
+func (b *listDeleteBuffer[T]) isPinned(cleanTs uint64) bool {
+	// Check if there are any pinned timestamps before the cleanTs
+	// If there are pinned timestamps before cleanTs, we should skip cleanup
+	// because pinning a timestamp protects all data after that timestamp
+	var pinnedSegments []int64
+	var pinnedTimestamp uint64
+	for pinnedTs, segmentMap := range b.pinnedTimestamps {
+		if pinnedTs < cleanTs && len(segmentMap) > 0 {
+			// Found a pinned timestamp before cleanTs
+			pinnedTimestamp = pinnedTs
+			for segmentID := range segmentMap {
+				pinnedSegments = append(pinnedSegments, segmentID)
+			}
+			break
+		}
+	}
+
+	if len(pinnedSegments) > 0 {
+		log.Info("skip cleanup due to pinned timestamp before cleanTs",
+			zap.Time("pinnedPhysicalTime", tsoutil.PhysicalTime(pinnedTimestamp)),
+			zap.Time("cleanPhysicalTime", tsoutil.PhysicalTime(cleanTs)),
+			zap.Int64s("pinningSegmentIDs", pinnedSegments),
+			zap.Int("segmentCount", len(pinnedSegments)),
+		)
+		return true
+	}
+	return false
+}
+
 func (b *listDeleteBuffer[T]) Size() (entryNum, memorySize int64) {
 	b.mut.RLock()
 	defer b.mut.RUnlock()
 
 	return b.rowNum, b.size
+}
+
+// Pin protects a specific timestamp from being cleaned up by a specific segment
+func (b *listDeleteBuffer[T]) Pin(ts uint64, segmentID int64) {
+	b.mut.Lock()
+	defer b.mut.Unlock()
+
+	if b.pinnedTimestamps[ts] == nil {
+		b.pinnedTimestamps[ts] = make(map[int64]struct{})
+	}
+	b.pinnedTimestamps[ts][segmentID] = struct{}{}
+
+	log.Info("pin timestamp for segment",
+		zap.Uint64("timestamp", ts),
+		zap.Int64("segmentID", segmentID),
+		zap.Time("physicalTime", tsoutil.PhysicalTime(ts)),
+	)
+}
+
+// Unpin removes protection for a specific timestamp by a specific segment and triggers cleanup
+func (b *listDeleteBuffer[T]) Unpin(ts uint64, segmentID int64) {
+	b.mut.Lock()
+	defer b.mut.Unlock()
+
+	if segmentMap, exists := b.pinnedTimestamps[ts]; exists {
+		delete(segmentMap, segmentID)
+		if len(segmentMap) == 0 {
+			delete(b.pinnedTimestamps, ts)
+		}
+	}
+
+	log.Info("unpin timestamp for segment",
+		zap.Uint64("timestamp", ts),
+		zap.Int64("segmentID", segmentID),
+		zap.Time("physicalTime", tsoutil.PhysicalTime(ts)),
+	)
 }

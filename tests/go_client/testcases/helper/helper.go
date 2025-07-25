@@ -166,7 +166,7 @@ func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) client.Cre
 	}
 
 	if !common.IsZeroValue(tmpOption.consistencyLevel) {
-		collectionOption.WithConsistencyLevel(tmpOption.consistencyLevel)
+		collectionOption.WithConsistencyLevel(*tmpOption.consistencyLevel)
 	}
 
 	return collectionOption

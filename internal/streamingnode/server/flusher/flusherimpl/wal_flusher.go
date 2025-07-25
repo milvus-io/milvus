@@ -152,7 +152,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 
 	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
 		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID)
-		impl.RecoveryStorage.UpdateFlusherCheckpoint(&recovery.WALCheckpoint{
+		impl.RecoveryStorage.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
 			MessageID: messageID,
 			TimeTick:  mp.Timestamp,
 			Magic:     recovery.RecoveryMagicStreamingInitialized,
@@ -168,6 +168,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		dataServices:               make(map[string]*dataSyncServiceWrapper),
 		logger:                     impl.logger,
 		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
+		rs:                         impl.RecoveryStorage,
 	}
 	impl.logger.Info("flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {

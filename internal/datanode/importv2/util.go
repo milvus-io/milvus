@@ -98,7 +98,7 @@ func NewSyncTask(ctx context.Context,
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
-		WithSchema(metaCache.Schema()). // TODO specify import schema if needed
+		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig)
 	return task, nil

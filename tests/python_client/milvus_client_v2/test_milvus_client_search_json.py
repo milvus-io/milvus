@@ -463,6 +463,34 @@ class TestCollectionSearchJSON(TestcaseBase):
         exp_ids = cf.assert_json_contains(expression, string_field_value)
         assert set(res[0].ids) == set(exp_ids)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expr_prefix", ["array_contains_any", "ARRAY_CONTAINS_ANY",
+                                             "not array_contains_any", "not ARRAY_CONTAINS_ANY"])
+    def test_search_expr_array_contains_any_with_float_field(self, expr_prefix):
+        """
+        target: test query with expression using array_contains with float field
+        method: query with expression using array_contains with float field
+        expected: succeed
+        """
+        # 1. create a collection
+        schema = cf.gen_array_collection_schema()
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        float_field_value = [[random.random() for j in range(i, i + 3)] for i in range(ct.default_nb)]
+        data = cf.gen_array_dataframe_data()
+        data[ct.default_float_array_field_name] = float_field_value
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, {})
+
+        # 3. search with array_contains_any with float and int target
+        collection_w.load()
+        expression = f"{expr_prefix}({ct.default_float_array_field_name}, [0.5, 0.6, 1, 2])"
+        res = collection_w.search(vectors[:default_nq], default_search_field, {},
+                                  limit=ct.default_nb, expr=expression)[0]
+        exp_ids = cf.assert_json_contains(expression, float_field_value)
+        assert set(res[0].ids) == set(exp_ids)
+        
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr_prefix", ["array_contains_all", "ARRAY_CONTAINS_ALL",
                                              "array_contains_any", "ARRAY_CONTAINS_ANY"])

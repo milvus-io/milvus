@@ -269,7 +269,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) initStorageV2Segments(rows int,
 	metacache.UpdateNumOfRows(int64(rows))(seg)
 	mc := metacache.NewMockMetaCache(s.T())
 	mc.EXPECT().Collection().Return(CollectionID).Maybe()
-	mc.EXPECT().Schema().Return(genCollectionSchema()).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(genCollectionSchema()).Maybe()
 	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
 	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {

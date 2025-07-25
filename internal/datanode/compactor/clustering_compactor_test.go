@@ -213,7 +213,13 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 
 	s.NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, strings []string) ([][]byte, error) {
+		result := make([][]byte, 0, len(strings))
+		for _, path := range strings {
+			result = append(result, kvs[path])
+		}
+		return result, nil
+	})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
@@ -307,7 +313,11 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 			one.Do(func() {
 				s.task.memoryLimit = 32 * 1024 * 1024
 			})
-			return lo.Values(kvs), nil
+			result := make([][]byte, 0, len(strings))
+			for _, path := range strings {
+				result = append(result, kvs[path])
+			}
+			return result, nil
 		})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
@@ -390,7 +400,13 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 
 	kvs, fBinlogs, err := serializeWrite(context.TODO(), s.mockAlloc, segWriter)
 	s.NoError(err)
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(lo.Values(kvs), nil)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, strings []string) ([][]byte, error) {
+		result := make([][]byte, 0, len(strings))
+		for _, path := range strings {
+			result = append(result, kvs[path])
+		}
+		return result, nil
+	})
 
 	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{

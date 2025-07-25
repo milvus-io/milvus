@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -68,7 +69,7 @@ func TestEmbeddingNode_BM25_Operator(t *testing.T) {
 	}
 
 	metaCache := metacache.NewMockMetaCache(t)
-	metaCache.EXPECT().Schema().Return(collSchema)
+	metaCache.EXPECT().GetSchema(mock.Anything).Return(collSchema)
 
 	t.Run("normal case", func(t *testing.T) {
 		node, err := newEmbeddingNode("test-channel", metaCache)

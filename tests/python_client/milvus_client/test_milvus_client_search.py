@@ -1782,7 +1782,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -1892,7 +1892,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -1991,7 +1991,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2086,7 +2086,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2181,7 +2181,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2276,7 +2276,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2393,42 +2393,74 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
+        old_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        self.create_collection(client, old_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
-        assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 0})
-        old_name = collection_name
-        new_name = collection_name + "new"
+        assert old_name in collections
+        c_info = self.describe_collection(client, old_name,
+                                          check_task=CheckTasks.check_describe_collection_property,
+                                          check_items={"collection_name": old_name,
+                                                       "dim": default_dim,
+                                                       "consistency_level": 0})[0]
+
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=c_info)
+        self.insert(client, old_name, rows)
+        self.flush(client, old_name)
+        self.wait_for_index_ready(client, collection_name=old_name, index_name='vector')
+
+        vectors_to_search = cf.gen_vectors(ct.default_nq, default_dim)
+        insert_ids = [item.get('id') for item in rows]
+        old_search_res = self.search(client, old_name, vectors_to_search,
+                                     check_task=CheckTasks.check_search_results,
+                                     check_items={"enable_milvus_client_api": True,
+                                                  "nq": ct.default_nq,
+                                                  "ids": insert_ids,
+                                                  "pk_name": "id",
+                                                  "limit": default_limit})[0]
+        old_query_res = self.query(client, old_name, filter=default_search_exp,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: rows,
+                                                "with_vec": True})[0]
+
+        new_name = old_name + "new"
         self.rename_collection(client, old_name, new_name)
-        # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.describe_collection(client, new_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": new_name,
+                                              "dim": default_dim})
+
+        # search again after rename collection
+        new_search_res = self.search(client, new_name, vectors_to_search,
+                                     check_task=CheckTasks.check_search_results,
+                                     check_items={"enable_milvus_client_api": True,
+                                                  "nq": ct.default_nq,
+                                                  "ids": insert_ids,
+                                                  "pk_name": "id",
+                                                  "limit": default_limit})[0]
+        new_query_res = self.query(client, new_name, filter=default_search_exp,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: rows,
+                                                "with_vec": True})[0]
+        assert old_search_res[0].ids == new_search_res[0].ids
+        assert old_query_res == new_query_res
+
+        rows = cf.gen_row_data_by_schema(nb=200, schema=c_info, start=default_nb)
+        error = {ct.err_code: 0, ct.err_msg: f"collection not found"}
+        self.insert(client, old_name, rows,
+                    check_task=CheckTasks.err_res,
+                    check_items=error)
         self.insert(client, new_name, rows)
-        self.flush(client, new_name)
-        # assert self.num_entities(client, collection_name)[0] == default_nb
-        # 3. search
-        vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        new_ids = [item.get('id') for item in rows]
+        insert_ids.extend(new_ids)
         self.search(client, new_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
+                                 "nq": ct.default_nq,
                                  "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
+                                 "pk_name": "id",
                                  "limit": default_limit})
-        # 4. query
-        self.query(client, new_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 

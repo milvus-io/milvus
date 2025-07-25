@@ -41,8 +41,6 @@ class GroupChunkTranslator
         FieldDataInfo column_group_info,
         std::vector<std::string> insert_files,
         bool use_mmap,
-        const std::vector<milvus_storage::RowGroupMetadataVector>&
-            row_group_meta_list,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority);
 

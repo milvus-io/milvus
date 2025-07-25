@@ -62,7 +62,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: "make clean && make install use_disk_index=ON",
+                                              make_cmd: "make clean && make jobs=8 install use_disk_index=ON",
                                               images: '["milvus","pytest","helm"]',
                                               tekton_log_timeout: '30m'
 

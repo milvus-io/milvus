@@ -262,6 +262,31 @@ func TestValidateDimension(t *testing.T) {
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
+
+	fieldSchema.DataType = schemapb.DataType_Int8Vector
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "200",
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "201",
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension.GetAsInt32() + 1)),
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
 }
 
 func TestValidateVectorFieldMetricType(t *testing.T) {
@@ -614,11 +639,11 @@ func TestValidateUsername(t *testing.T) {
 	// length gt 32
 	res = ValidateUsername("aaaaaaaaaabbbbbbbbbbccccccccccddddd")
 	assert.Error(t, res)
-	// illegal character which not alphabet, _, or number
-	res = ValidateUsername("a1^7*).,")
+	// illegal character which not alphabet, _, ., ., or number
+	res = ValidateUsername("a1^7*),")
 	assert.Error(t, res)
-	// normal username that only contains alphabet, _, and number
-	res = ValidateUsername("a17_good")
+	// normal username that only contains alphabet, _, ., -, and number
+	res = ValidateUsername("a.17_good-")
 	assert.Nil(t, res)
 }
 

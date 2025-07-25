@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -32,10 +31,10 @@ import (
 
 //go:generate mockery --name=MetaCache --structname=MockMetaCache --output=./  --filename=mock_meta_cache.go --with-expecter --inpackage
 type MetaCache interface {
+	SchemaManager
+
 	// Collection returns collection id of metacache.
 	Collection() int64
-	// Schema returns collection schema.
-	Schema() *schemapb.CollectionSchema
 	// AddSegment adds a segment from segment info.
 	AddSegment(segInfo *datapb.SegmentInfo, pkFactory PkStatsFactory, bmFactory BM25StatsFactory, actions ...SegmentAction)
 	// UpdateSegments applies action to segment(s) satisfy the provided filters.
@@ -54,8 +53,6 @@ type MetaCache interface {
 	DetectMissingSegments(segments map[int64]struct{}) []int64
 	// UpdateSegmentView updates the segments BF from datacoord view.
 	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*pkoracle.BloomFilterSet, allSegments map[int64]struct{})
-	// UpdateSchema update the latest collection schema
-	UpdateSchema(updatedSchema *schemapb.CollectionSchema, version uint64)
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
@@ -74,23 +71,33 @@ func NewBM25StatsFactory(vchannel *datapb.SegmentInfo) *SegmentBM25Stats {
 }
 
 type metaCacheImpl struct {
+	SchemaManager
+
 	collectionID int64
 	vChannelName string
-	schema       *schemapb.CollectionSchema
 
 	mu            sync.RWMutex
 	segmentInfos  map[int64]*SegmentInfo
 	stateSegments map[commonpb.SegmentState]map[int64]*SegmentInfo
 }
 
-func NewMetaCache(info *datapb.ChannelWatchInfo, pkFactory PkStatsFactory, bmFactor BM25StatsFactory) MetaCache {
+func NewMetaCache(
+	info *datapb.ChannelWatchInfo,
+	pkFactory PkStatsFactory,
+	bmFactor BM25StatsFactory,
+	schemaManager ...SchemaManager,
+) MetaCache {
 	vchannel := info.GetVchan()
+	var m SchemaManager = newVersionlessSchemaManager(info.GetSchema())
+	if len(schemaManager) > 0 && schemaManager[0] != nil {
+		m = schemaManager[0]
+	}
 	cache := &metaCacheImpl{
+		SchemaManager: m,
 		collectionID:  vchannel.GetCollectionID(),
 		vChannelName:  vchannel.GetChannelName(),
 		segmentInfos:  make(map[int64]*SegmentInfo),
 		stateSegments: make(map[commonpb.SegmentState]map[int64]*SegmentInfo),
-		schema:        info.GetSchema(),
 	}
 
 	for _, state := range []commonpb.SegmentState{
@@ -123,11 +130,6 @@ func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, pkFactory PkStatsFac
 // Collection returns collection id of metacache.
 func (c *metaCacheImpl) Collection() int64 {
 	return c.collectionID
-}
-
-// Schema returns collection schema.
-func (c *metaCacheImpl) Schema() *schemapb.CollectionSchema {
-	return c.schema
 }
 
 // AddSegment adds a segment from segment info.
@@ -317,8 +319,4 @@ func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 			delete(c.stateSegments[info.State()], segID)
 		}
 	}
-}
-
-func (c *metaCacheImpl) UpdateSchema(updatedSchema *schemapb.CollectionSchema, _ uint64) {
-	c.schema = updatedSchema
 }

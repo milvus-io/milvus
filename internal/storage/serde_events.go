@@ -176,6 +176,23 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	return r, nil
 }
 
+func (crr *CompositeBinlogRecordReader) SetNeededFields(neededFields typeutil.Set[int64]) {
+	if neededFields == nil {
+		return
+	}
+
+	crr.schema = &schemapb.CollectionSchema{
+		Fields: lo.Filter(crr.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+			return neededFields.Contain(field.GetFieldID())
+		}),
+	}
+	index := make(map[FieldID]int16)
+	for i, f := range crr.schema.Fields {
+		index[f.FieldID] = int16(i)
+	}
+	crr.index = index
+}
+
 func (crr *CompositeBinlogRecordReader) Close() error {
 	if crr.brs != nil {
 		for _, er := range crr.brs {
@@ -256,9 +273,9 @@ func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsRead
 	}, nil
 }
 
-func ValueDeserializer(r Record, v []*Value, schema *schemapb.CollectionSchema) error {
+func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
 	pkField := func() *schemapb.FieldSchema {
-		for _, field := range schema.Fields {
+		for _, field := range fieldSchema {
 			if field.GetIsPrimaryKey() {
 				return field
 			}
@@ -269,21 +286,16 @@ func ValueDeserializer(r Record, v []*Value, schema *schemapb.CollectionSchema) 
 		return merr.WrapErrServiceInternal("no primary key field found")
 	}
 
-	allFields := schema.Fields
-	for _, structField := range schema.StructArrayFields {
-		allFields = append(allFields, structField.Fields...)
-	}
-
 	for i := 0; i < r.Len(); i++ {
 		value := v[i]
 		if value == nil {
 			value = &Value{}
-			value.Value = make(map[FieldID]interface{}, len(allFields))
+			value.Value = make(map[FieldID]interface{}, len(fieldSchema))
 			v[i] = value
 		}
 
 		m := value.Value.(map[FieldID]interface{})
-		for _, f := range allFields {
+		for _, f := range fieldSchema {
 			j := f.FieldID
 			dt := f.DataType
 			if r.Column(j).IsNull(i) {
@@ -327,8 +339,9 @@ func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader C
 		return nil, err
 	}
 
+	allFields := typeutil.GetAllFieldSchemas(schema)
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, schema)
+		return ValueDeserializer(r, v, allFields)
 	}), nil
 }
 
@@ -1097,6 +1110,10 @@ func (crr *simpleArrowRecordReader) Next() (Record, error) {
 		}
 	}
 	return &crr.r, nil
+}
+
+func (crr *simpleArrowRecordReader) SetNeededFields(_ typeutil.Set[int64]) {
+	// no-op for simple arrow record reader
 }
 
 func (crr *simpleArrowRecordReader) Close() error {

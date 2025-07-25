@@ -98,6 +98,11 @@ func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64,
 }
 
 func (pr *PackedReader) ReadNext() (arrow.Record, error) {
+	// return EOF if reader is closed
+	if pr.cPackedReader == nil {
+		return nil, io.EOF
+	}
+
 	if pr.currentBatch != nil {
 		pr.currentBatch.Release()
 		pr.currentBatch = nil
