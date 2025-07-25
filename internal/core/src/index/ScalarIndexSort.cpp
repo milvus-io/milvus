@@ -229,7 +229,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         if (mmap_data_ == MAP_FAILED) {
             file.Close();
             remove(mmap_filepath_.c_str());
-            PanicInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::UnexpectedError,
                       "failed to mmap: {}",
                       strerror(errno));
         }
