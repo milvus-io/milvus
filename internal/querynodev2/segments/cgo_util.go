@@ -52,3 +52,8 @@ func HandleCStatus(ctx context.Context, status *C.CStatus, extraInfo string, fie
 	log.Warn("CStatus returns err", zap.Error(err), zap.String("extra", extraInfo))
 	return err
 }
+
+func TestCgoUtil(ctx context.Context) error {
+	C.TestCgoUtil()
+	return nil
+}
