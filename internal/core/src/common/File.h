@@ -113,12 +113,7 @@ class MmapFileRAII {
     }
     ~MmapFileRAII() {
         if (!file_path_.empty()) {
-            auto ok = unlink(file_path_.c_str());
-            AssertInfo(
-                ok == 0,
-                fmt::format("failed to unlink mmap data file {}, err: {}",
-                            file_path_.c_str(),
-                            strerror(errno)));
+            unlink(file_path_.c_str());
         }
     }
 
