@@ -20,7 +20,7 @@ namespace milvus::index {
 
 template <typename T>
 using JsonDataAdder =
-    std::function<void(const folly::fbvector<T>& values, int64_t offset)>;
+    std::function<void(const T* data, int64_t size, int64_t offset)>;
 
 using JsonErrorRecorder = std::function<void(const Json& json,
                                              const std::string& nested_path,

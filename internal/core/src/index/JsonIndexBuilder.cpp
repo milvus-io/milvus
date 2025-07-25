@@ -43,7 +43,8 @@ ProcessJsonFieldData(
             auto json_column = static_cast<const Json*>(data->RawValue(i));
             if (schema.nullable() && !data->is_valid(i)) {
                 non_exist_adder(offset);
-                null_adder(offset++);
+                null_adder(offset);
+                data_adder(nullptr, 0, offset++);
                 continue;
             }
 
@@ -51,7 +52,8 @@ ProcessJsonFieldData(
             if (!exists || !json_column->exist(nested_path)) {
                 error_recorder(
                     *json_column, nested_path, simdjson::NO_SUCH_FIELD);
-                non_exist_adder(offset++);
+                non_exist_adder(offset);
+                data_adder(nullptr, 0, offset++);
                 continue;
             }
 
@@ -90,7 +92,7 @@ ProcessJsonFieldData(
                 }
             }
 
-            data_adder(values, offset++);
+            data_adder(values.data(), values.size(), offset++);
         }
     }
 }

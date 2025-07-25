@@ -52,15 +52,11 @@ JsonInvertedIndex<T>::build_index_for_json(
         cast_type_,
         cast_function_,
         // add data
-        [this](const folly::fbvector<T>& values, int64_t offset) {
-            this->wrapper_->template add_array_data<T>(
-                values.data(), values.size(), offset);
+        [this](const T* data, int64_t size, int64_t offset) {
+            this->wrapper_->template add_array_data<T>(data, size, offset);
         },
         // handle null
-        [this](int64_t offset) {
-            this->null_offset_.push_back(offset);
-            this->wrapper_->template add_array_data<T>(nullptr, 0, offset);
-        },
+        [this](int64_t offset) { this->null_offset_.push_back(offset); },
         // handle non exist
         [this](int64_t offset) { this->non_exist_offsets_.push_back(offset); },
         // handle error

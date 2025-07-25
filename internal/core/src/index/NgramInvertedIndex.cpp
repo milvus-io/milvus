@@ -87,16 +87,14 @@ NgramInvertedIndex::BuildWithJsonFieldData(
         JSON_CAST_TYPE,
         JSON_CAST_FUNCTION,
         // add data
-        [this](const folly::fbvector<std::string>& values, int64_t offset) {
+        [this](const std::string* data, int64_t size, int64_t offset) {
             this->wrapper_->template add_array_data<std::string>(
-                values.data(), values.size(), offset);
+                data, size, offset);
         },
         // handle null
-        [this](int64_t offset) {
-            this->null_offset_.push_back(offset);
-            this->wrapper_->template add_array_data<std::string>(
-                nullptr, 0, offset);
-        },
+        [this](int64_t offset) { this->null_offset_.push_back(offset); },
+        // handle non exist
+        [this](int64_t offset) {},
         // handle error
         [this](const Json& json,
                const std::string& nested_path,
