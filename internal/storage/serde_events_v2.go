@@ -133,9 +133,8 @@ func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSch
 	if err != nil {
 		return nil, err
 	}
-	allFields := typeutil.GetAllFieldSchemas(schema)
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, allFields)
+		return ValueDeserializerWithSchema(r, v, schema)
 	}), nil
 }
 

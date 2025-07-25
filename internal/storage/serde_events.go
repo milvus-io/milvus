@@ -273,7 +273,16 @@ func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsRead
 	}, nil
 }
 
-func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
+func ValueDeserializerWithSelectedFields(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
+	return valueDeserializer(r, v, fieldSchema)
+}
+
+func ValueDeserializerWithSchema(r Record, v []*Value, schema *schemapb.CollectionSchema) error {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	return valueDeserializer(r, v, allFields)
+}
+
+func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
 	pkField := func() *schemapb.FieldSchema {
 		for _, field := range fieldSchema {
 			if field.GetIsPrimaryKey() {
@@ -339,9 +348,8 @@ func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader C
 		return nil, err
 	}
 
-	allFields := typeutil.GetAllFieldSchemas(schema)
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, allFields)
+		return ValueDeserializerWithSchema(r, v, schema)
 	}), nil
 }
 
