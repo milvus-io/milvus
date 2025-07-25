@@ -280,7 +280,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		expectedState commonpb.SegmentState
 	}{
 		{"segID=0, flushed to dropped", 0, true, false, 100, commonpb.SegmentState_Dropped},
-		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushing},
+		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushed},
 		// empty segment flush should be dropped directly.
 		{"segID=2, sealed to dropped", 2, false, true, 0, commonpb.SegmentState_Dropped},
 	}
@@ -307,12 +307,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.EqualValues(0, len(segment.GetBinlogs()))
 			s.EqualValues(segment.NumOfRows, test.numOfRows)
 
-			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
-			if lo.Contains(flushing, test.expectedState) {
-				s.True(lo.Contains(flushing, segment.GetState()))
-			} else {
-				s.Equal(test.expectedState, segment.GetState())
-			}
+			s.Equal(test.expectedState, segment.GetState())
 		})
 	}
 }
