@@ -72,11 +72,13 @@ class JsonInvertedIndexParseErrorRecorder {
 template <typename T>
 class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
  public:
-    JsonInvertedIndex(const JsonCastType& cast_type,
-                      const std::string& nested_path,
-                      const storage::FileManagerContext& ctx,
-                      const JsonCastFunction& cast_function =
-                          JsonCastFunction::FromString("unknown"))
+    JsonInvertedIndex(
+        const JsonCastType& cast_type,
+        const std::string& nested_path,
+        const storage::FileManagerContext& ctx,
+        const int64_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION,
+        const JsonCastFunction& cast_function =
+            JsonCastFunction::FromString("unknown"))
         : nested_path_(nested_path),
           cast_type_(cast_type),
           cast_function_(cast_function) {
@@ -95,11 +97,11 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         boost::filesystem::create_directories(this->path_);
         std::string field_name = std::to_string(
             this->disk_file_manager_->GetFieldDataMeta().field_id);
-        this->wrapper_ = std::make_shared<index::TantivyIndexWrapper>(
-            field_name.c_str(),
-            this->d_type_,
-            this->path_.c_str(),
-            TANTIVY_INDEX_LATEST_VERSION /* json index is not supported in old version */);
+        this->wrapper_ =
+            std::make_shared<index::TantivyIndexWrapper>(field_name.c_str(),
+                                                         this->d_type_,
+                                                         this->path_.c_str(),
+                                                         tantivy_index_version);
     }
 
     void
