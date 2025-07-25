@@ -179,7 +179,8 @@ func (bw *BulkPackWriterV2) serializeBinlog(ctx context.Context, pack *SyncPack)
 	if len(pack.insertData) == 0 {
 		return nil, nil
 	}
-	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema.Fields)
+
+	arrowSchema, err := storage.ConvertToArrowSchema(bw.schema.GetFields())
 	if err != nil {
 		return nil, err
 	}
