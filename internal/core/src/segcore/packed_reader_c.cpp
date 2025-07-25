@@ -61,8 +61,9 @@ NewPackedReaderWithStorageConfig(char** paths,
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                           .GetArrowFileSystem();
         if (!trueFs) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          "Failed to get filesystem");
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
@@ -87,8 +88,9 @@ NewPackedReader(char** paths,
         auto trueFs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                           .GetArrowFileSystem();
         if (!trueFs) {
-            return milvus::FailureCStatus(milvus::ErrorCode::FileReadFailed,
-                                          "Failed to get filesystem");
+            return milvus::FailureCStatus(
+                milvus::ErrorCode::FileReadFailed,
+                "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(

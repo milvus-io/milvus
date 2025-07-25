@@ -144,6 +144,11 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 			}
 			return
 		}
+		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
+		if err != nil {
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			return
+		}
 		if err := t.saveSegmentMeta(result); err != nil {
 			log.Warn("mixCompactionTask failed to save segment meta", zap.Error(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
