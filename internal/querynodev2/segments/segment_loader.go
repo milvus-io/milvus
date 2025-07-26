@@ -150,6 +150,9 @@ type resourceEstimateFactor struct {
 	EnableInterminSegmentIndex bool
 	tempSegmentIndexFactor     float64
 	deltaDataExpansionFactor   float64
+	TieredEvictionEnabled      bool
+	TieredMemoryEvictionFactor float64
+	TieredDiskEvictionFactor   float64
 }
 
 func NewLoader(
@@ -311,6 +314,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		segment, err := NewSegment(
 			ctx,
 			collection,
+			loader.manager.Segment,
 			segmentType,
 			version,
 			loadInfo,
@@ -473,6 +477,18 @@ func (loader *segmentLoader) requestResource(ctx context.Context, infos ...*quer
 		return requestResourceResult{}, errors.Wrap(err, "get local used size failed")
 	}
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() {
+		// After introducing the caching layer's lazy loading and eviction mechanisms, most parts of a segment won't be
+		// loaded into memory or disk immediately, even if the segment is marked as LOADED. This means physical resource
+		// usage may be very low.
+		// However, we still need to reserve enough resources for the segments marked as LOADED. For now, we calculate the
+		// current used resource usage as the maximum value between the reserved resource size and the current physical
+		// resource usage.
+		reservedResourceUsage := loader.manager.Segment.GetReservedResource()
+		memoryUsage = max(memoryUsage, reservedResourceUsage.MemorySize)
+		diskUsage = max(diskUsage, int64(reservedResourceUsage.DiskSize))
+	}
 
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
@@ -1423,6 +1439,9 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 		EnableInterminSegmentIndex: paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
 		tempSegmentIndexFactor:     paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
 		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:      paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredMemoryEvictionFactor: paramtable.Get().QueryNodeCfg.TieredMemoryEvictionFactor.GetAsFloat(),
+		TieredDiskEvictionFactor:   paramtable.Get().QueryNodeCfg.TieredDiskEvictionFactor.GetAsFloat(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -1495,6 +1514,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 // getResourceUsageEstimateOfSegment estimates the resource usage of the segment
 func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, err error) {
 	var segmentMemorySize, segmentDiskSize uint64
+	var segmentEvictableMemorySize, segmentEvictableDiskSize uint64
 	var indexMemorySize uint64
 	var mmapFieldCount int
 	var fieldGpuMemorySize []uint64
@@ -1537,6 +1557,11 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			}
 			indexMemorySize += estimateResult.MaxMemoryCost
 			segmentDiskSize += estimateResult.MaxDiskCost
+			if multiplyFactor.TieredEvictionEnabled {
+				// to avoid burst memory allocation during index loading, use final cost to estimate evictable size
+				segmentEvictableMemorySize += estimateResult.FinalMemoryCost
+				segmentEvictableDiskSize += estimateResult.FinalDiskCost
+			}
 			if vecindexmgr.GetVecIndexMgrInstance().IsGPUVecIndex(common.GetIndexType(fieldIndexInfo.IndexParams)) {
 				fieldGpuMemorySize = append(fieldGpuMemorySize, estimateResult.MaxMemoryCost)
 			}
@@ -1590,8 +1615,14 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			mmapVectorField := paramtable.Get().QueryNodeCfg.MmapVectorField.GetAsBool()
 			if mmapVectorField {
 				segmentDiskSize += binlogSize
+				if multiplyFactor.TieredEvictionEnabled {
+					segmentEvictableDiskSize += binlogSize
+				}
 			} else {
 				segmentMemorySize += binlogSize
+				if multiplyFactor.TieredEvictionEnabled {
+					segmentEvictableMemorySize += binlogSize
+				}
 			}
 			continue
 		}
@@ -1599,22 +1630,33 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		// missing mapping, shall be "0" group for storage v2
 		if fieldSchema == nil {
 			segmentMemorySize += binlogSize
+			if multiplyFactor.TieredEvictionEnabled {
+				segmentEvictableMemorySize += binlogSize
+			}
 			continue
 		}
 		mmapEnabled := isDataMmapEnable(fieldSchema)
 		if !mmapEnabled || common.IsSystemField(fieldSchema.GetFieldID()) {
 			segmentMemorySize += binlogSize
+			// system field is not evictable, skip evictable size calculation
+			if !common.IsSystemField(fieldSchema.GetFieldID()) && multiplyFactor.TieredEvictionEnabled {
+				segmentEvictableMemorySize += binlogSize
+			}
 			if DoubleMemorySystemField(fieldSchema.GetFieldID()) || DoubleMemoryDataType(fieldSchema.GetDataType()) {
 				segmentMemorySize += binlogSize
 			}
 		} else {
 			segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			if multiplyFactor.TieredEvictionEnabled {
+				segmentEvictableDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
+			}
 		}
 	}
 
 	// get size of stats data
 	for _, fieldBinlog := range loadInfo.Statslogs {
 		segmentMemorySize += uint64(getBinlogDataMemorySize(fieldBinlog))
+		// stats data is not evictable, skip evictable size calculation
 	}
 
 	// get size of delete data
@@ -1631,10 +1673,12 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			expansionFactor = multiplyFactor.deltaDataExpansionFactor
 		}
 		segmentMemorySize += uint64(float64(memSize) * expansionFactor)
+		// deltalog is not evictable, skip evictable size calculation
 	}
+
 	return &ResourceUsage{
-		MemorySize:         segmentMemorySize + indexMemorySize,
-		DiskSize:           segmentDiskSize,
+		MemorySize:         segmentMemorySize + indexMemorySize - uint64(float64(segmentEvictableMemorySize)*multiplyFactor.TieredMemoryEvictionFactor),
+		DiskSize:           segmentDiskSize - uint64(float64(segmentEvictableDiskSize)*multiplyFactor.TieredDiskEvictionFactor),
 		MmapFieldCount:     mmapFieldCount,
 		FieldGpuMemorySize: fieldGpuMemorySize,
 	}, nil
