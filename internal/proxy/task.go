@@ -85,6 +85,7 @@ const (
 	HasPartitionTaskName          = "HasPartitionTask"
 	ShowPartitionTaskName         = "ShowPartitionTask"
 	FlushTaskName                 = "FlushTask"
+	FlushAllTaskName              = "FlushAllTask"
 	LoadCollectionTaskName        = "LoadCollectionTask"
 	ReleaseCollectionTaskName     = "ReleaseCollectionTask"
 	LoadPartitionTaskName         = "LoadPartitionsTask"
