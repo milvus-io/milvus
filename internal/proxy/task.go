@@ -107,7 +107,7 @@ const (
 	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
 	RunAnalyzerTaskName           = "RunAnalyzer"
 
-	CreateDatabaseTaskName   = "CreateCollectionTask"
+	CreateDatabaseTaskName   = "CreateDatabaseTaskName"
 	DropDatabaseTaskName     = "DropDatabaseTaskName"
 	ListDatabaseTaskName     = "ListDatabaseTaskName"
 	AlterDatabaseTaskName    = "AlterDatabaseTaskName"
