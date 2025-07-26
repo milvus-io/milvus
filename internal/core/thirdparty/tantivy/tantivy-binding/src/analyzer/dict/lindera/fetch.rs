@@ -1,4 +1,6 @@
 use std::error::Error;
+use std::fmt::format;
+use std::fs::remove_file;
 use std::path::Path;
 
 use lindera::dictionary::Dictionary;
@@ -13,7 +15,6 @@ use reqwest::Client;
 use tokio::time::sleep;
 use tokio::time::Duration;
 
-use serde_json as json;
 use std::fs;
 use std::path::PathBuf;
 
@@ -143,6 +144,7 @@ pub async fn fetch(
     params: &FetchParams,
     builder: impl DictionaryBuilder,
 ) -> Result<(), Box<dyn Error>> {
+    use fs2::FileExt;
     use std::env;
     use std::fs::{rename, File};
     use std::io::{self, Cursor, Read, Write};
@@ -153,20 +155,26 @@ pub async fn fetch(
     use tar::Archive;
 
     let start = Instant::now();
-    info!(
-        "start fetch lindera dictionary name: {}\n",
-        params.file_name.as_str()
-    );
     let build_dir = PathBuf::from(params.lindera_dir.as_str());
     std::fs::create_dir_all(&build_dir)?;
 
     let input_dir = build_dir.join(params.input_dir.as_str());
     let output_dir = build_dir.join(params.output_dir.as_str());
+    let lock_path = build_dir.join(format!("lindera-{}.lock", params.file_name.as_str()));
 
     // Fast path where the data is already in cache
     if output_dir.is_dir() {
         return Ok(());
     }
+
+    let flock = File::create(&lock_path)?;
+    flock.lock_exclusive()?;
+
+    info!(
+        "start fetch lindera dictionary name: {} to {:?}\n",
+        params.file_name.as_str(),
+        output_dir,
+    );
 
     // Source file path for build package
     let source_path_for_build = &build_dir.join(params.file_name.as_str());
@@ -269,6 +277,8 @@ pub async fn fetch(
     }
 
     let _ = std::fs::remove_dir_all(&input_dir);
+    flock.unlock()?;
+    remove_file(&lock_path)?;
 
     info!(
         "finish fetch lindera dictionary name: {} duration: {} ms\n",

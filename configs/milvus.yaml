@@ -1385,3 +1385,9 @@ function:
           enable: true # Whether to enable TEI rerank service
         vllm:
           enable: true # Whether to enable vllm rerank service
+  analyzer:
+    local_dict_path: /var/lib/milvus/analyzer/dict
+    # lindera:
+    #   download_urls:
+    #     ipadic:
+    #       - https://Lindera.dev/mecab-ipadic-2.7.0-20070801.tar.gz

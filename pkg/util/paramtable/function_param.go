@@ -23,6 +23,8 @@ import (
 type functionConfig struct {
 	TextEmbeddingProviders ParamGroup `refreshable:"true"`
 	RerankModelProviders   ParamGroup `refreshable:"true"`
+	LocalDictionaryPath    ParamItem  `refreshable:"true"`
+	LinderaDownloadUrls    ParamGroup `refreshable:"true"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -91,6 +93,20 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.RerankModelProviders.Init(base.mgr)
+
+	p.LocalDictionaryPath = ParamItem{
+		Key:          "function.analyzer.local_dict_path",
+		Version:      "2.5.16",
+		Export:       true,
+		DefaultValue: "/var/lib/milvus/analyzer_dict",
+	}
+	p.LocalDictionaryPath.Init(base.mgr)
+
+	p.LinderaDownloadUrls = ParamGroup{
+		KeyPrefix: "function.analyzer.lindera.download_urls",
+		Version:   "2.5.16",
+	}
+	p.LinderaDownloadUrls.Init(base.mgr)
 }
 
 const (
