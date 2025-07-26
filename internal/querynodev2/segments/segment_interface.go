@@ -77,6 +77,7 @@ type Segment interface {
 	ExistIndex(fieldID int64) bool
 	Indexes() []*IndexedFieldInfo
 	HasRawData(fieldID int64) bool
+	DropIndex(ctx context.Context, indexID int64) error
 
 	// Modification related
 	Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error

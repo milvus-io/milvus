@@ -58,45 +58,60 @@ class SegmentSealed : public SegmentInternalInterface {
     get_insert_record() = 0;
 
     virtual PinWrapper<index::IndexBase*>
-    GetJsonIndex(FieldId field_id, std::string path) const override {
+    GetJsonIndex(FieldId field_id,
+                 const std::string& path,
+                 DataType data_type,
+                 bool any_type,
+                 bool is_array) const override {
         int path_len_diff = std::numeric_limits<int>::max();
         index::CacheIndexBasePtr best_match = nullptr;
         std::string_view path_view = path;
-        for (const auto& index : json_indices) {
-            if (index.field_id != field_id) {
-                continue;
-            }
-            switch (index.cast_type.data_type()) {
-                case JsonCastType::DataType::JSON:
-                    if (path_view.length() < index.nested_path.length()) {
-                        continue;
-                    }
-                    if (path_view.substr(0, index.nested_path.length()) ==
-                        index.nested_path) {
-                        int current_len_diff =
-                            path_view.length() - index.nested_path.length();
-                        if (current_len_diff < path_len_diff) {
-                            path_len_diff = current_len_diff;
-                            best_match = index.index;
+        return json_indices.withRLock([&](auto vec)
+                                          -> PinWrapper<index::IndexBase*> {
+            for (const auto& index : vec) {
+                if (index.field_id != field_id) {
+                    continue;
+                }
+                switch (index.cast_type.data_type()) {
+                    case JsonCastType::DataType::JSON:
+                        if (path_view.length() < index.nested_path.length()) {
+                            continue;
                         }
-                        if (path_len_diff == 0) {
+                        if (path_view.substr(0, index.nested_path.length()) ==
+                            index.nested_path) {
+                            int current_len_diff =
+                                path_view.length() - index.nested_path.length();
+                            if (current_len_diff < path_len_diff) {
+                                path_len_diff = current_len_diff;
+                                best_match = index.index;
+                            }
+                            if (path_len_diff == 0) {
+                                break;
+                            }
+                        }
+                        break;
+                    default:
+                        if (index.nested_path != path) {
+                            continue;
+                        }
+                        if (any_type) {
+                            best_match = index.index;
                             break;
                         }
-                    }
-                    break;
-                default:
-                    if (index.nested_path == path) {
-                        best_match = index.index;
-                        break;
-                    }
+                        if (milvus::index::json::IsDataTypeSupported(
+                                index.cast_type, data_type, is_array)) {
+                            best_match = index.index;
+                            break;
+                        }
+                }
             }
-        }
-        if (best_match == nullptr) {
-            return nullptr;
-        }
-        auto ca = SemiInlineGet(best_match->PinCells({0}));
-        auto index = ca->get_cell_of(0);
-        return PinWrapper<index::IndexBase*>(ca, index);
+            if (best_match == nullptr) {
+                return nullptr;
+            }
+            auto ca = SemiInlineGet(best_match->PinCells({0}));
+            auto index = ca->get_cell_of(0);
+            return PinWrapper<index::IndexBase*>(ca, index);
+        });
     }
 
     virtual void
@@ -131,30 +146,9 @@ class SegmentSealed : public SegmentInternalInterface {
              DataType data_type,
              bool any_type = false,
              bool is_json_contain = false) const override {
-        auto it = std::find_if(
-            json_indices.begin(),
-            json_indices.end(),
-            [field_id, path, data_type, any_type, is_json_contain](
-                const JsonIndex& index) {
-                if (index.field_id != field_id) {
-                    return false;
-                }
-                if (index.cast_type.data_type() ==
-                    JsonCastType::DataType::JSON) {
-                    // for json flat index, path should be a subpath of nested_path
-                    return path.substr(0, index.nested_path.length()) ==
-                           index.nested_path;
-                }
-                if (index.nested_path != path) {
-                    return false;
-                }
-                if (any_type) {
-                    return true;
-                }
-                return milvus::index::json::IsDataTypeSupported(
-                    index.cast_type, data_type, is_json_contain);
-            });
-        return it != json_indices.end();
+        auto index =
+            GetJsonIndex(field_id, path, data_type, any_type, is_json_contain);
+        return index.get() != nullptr;
     }
 
  protected:
@@ -164,8 +158,11 @@ class SegmentSealed : public SegmentInternalInterface {
     PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
+                     DataType data_type,
+                     bool any_type,
+                     bool is_array,
                      int64_t chunk_id) const override {
-        return GetJsonIndex(field_id, path)
+        return GetJsonIndex(field_id, path, data_type, any_type, is_array)
             .template transform<const index::IndexBase*>(
                 [](auto&& index) { return index; });
     }
@@ -176,7 +173,7 @@ class SegmentSealed : public SegmentInternalInterface {
         index::CacheIndexBasePtr index;
     };
 
-    std::vector<JsonIndex> json_indices;
+    folly::Synchronized<std::vector<JsonIndex>> json_indices;
 };
 
 using SegmentSealedSPtr = std::shared_ptr<SegmentSealed>;
