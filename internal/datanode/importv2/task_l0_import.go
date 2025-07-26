@@ -140,7 +140,7 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	log.Info("start to import l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("files", t.GetFileStats()),
+		zap.Any("files", t.req.GetFiles()),
 		zap.Any("schema", t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))

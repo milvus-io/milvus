@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 )
 
 type Scheduler interface {
@@ -37,19 +36,16 @@ type Scheduler interface {
 }
 
 type scheduler struct {
-	manager         TaskManager
-	memoryAllocator MemoryAllocator
+	manager TaskManager
 
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
 
 func NewScheduler(manager TaskManager) Scheduler {
-	memoryAllocator := NewMemoryAllocator(int64(hardware.GetMemoryCount()))
 	return &scheduler{
-		manager:         manager,
-		memoryAllocator: memoryAllocator,
-		closeChan:       make(chan struct{}),
+		manager:   manager,
+		closeChan: make(chan struct{}),
 	}
 }
 
@@ -76,34 +72,23 @@ func (s *scheduler) Start() {
 	}
 }
 
-// scheduleTasks implements memory-based task scheduling using MemoryAllocator
-// It selects tasks that can fit within the available memory.
 func (s *scheduler) scheduleTasks() {
-	pendingTasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
-	sort.Slice(pendingTasks, func(i, j int) bool {
-		return pendingTasks[i].GetTaskID() < pendingTasks[j].GetTaskID()
+	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].GetTaskID() < tasks[j].GetTaskID()
 	})
 
-	selectedTasks := make([]Task, 0)
-	tasksBufferSize := make(map[int64]int64)
-	for _, task := range pendingTasks {
-		taskBufferSize := task.GetBufferSize()
-		if s.memoryAllocator.TryAllocate(task.GetTaskID(), taskBufferSize) {
-			selectedTasks = append(selectedTasks, task)
-			tasksBufferSize[task.GetTaskID()] = taskBufferSize
-		}
-	}
-
-	if len(selectedTasks) == 0 {
+	if len(tasks) == 0 {
 		return
 	}
 
-	log.Info("processing selected tasks",
-		zap.Int("pending", len(pendingTasks)),
-		zap.Int("selected", len(selectedTasks)))
+	taskIDs := lo.Map(tasks, func(t Task, _ int) int64 {
+		return t.GetTaskID()
+	})
+	log.Info("processing tasks...", zap.Int64s("taskIDs", taskIDs))
 
 	futures := make(map[int64][]*conc.Future[any])
-	for _, task := range selectedTasks {
+	for _, task := range tasks {
 		fs := task.Execute()
 		futures[task.GetTaskID()] = fs
 	}
@@ -111,16 +96,16 @@ func (s *scheduler) scheduleTasks() {
 	for taskID, fs := range futures {
 		err := conc.AwaitAll(fs...)
 		if err != nil {
-			s.memoryAllocator.Release(taskID, tasksBufferSize[taskID])
 			continue
 		}
 		s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
-		s.memoryAllocator.Release(taskID, tasksBufferSize[taskID])
 		log.Info("preimport/import done", zap.Int64("taskID", taskID))
 	}
+
+	log.Info("all tasks completed", zap.Int64s("taskIDs", taskIDs))
 }
 
-// Slots returns the available slots for import
+// Slots returns the used slots for import
 func (s *scheduler) Slots() int64 {
 	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
 	used := lo.SumBy(tasks, func(t Task) int64 {

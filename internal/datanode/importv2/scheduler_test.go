@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -551,88 +550,6 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 	s.manager.Add(importTask)
 	err = importTask.(*ImportTask).importFile(s.reader)
 	s.NoError(err)
-}
-
-// TestScheduler_ScheduleTasks tests the scheduleTasks method with various scenarios
-func (s *SchedulerSuite) TestScheduler_ScheduleTasks() {
-	// Memory limit exceeded - some tasks should be skipped
-	s.Run("MemoryLimitExceeded", func() {
-		manager := NewMockTaskManager(s.T())
-		s.scheduler.manager = manager
-
-		// Add tasks that exceed memory limit
-		tasks := make(map[int64]Task, 0)
-		for i := 0; i < 5; i++ {
-			t := NewMockTask(s.T())
-			t.EXPECT().GetTaskID().Return(int64(i))
-			t.EXPECT().GetBufferSize().Return(int64(300))
-			if i < 3 { // Only first 3 tasks should be allocated (900 total)
-				t.EXPECT().Execute().Return([]*conc.Future[any]{})
-			}
-			tasks[t.GetTaskID()] = t
-		}
-
-		manager.EXPECT().GetBy(mock.Anything).Return(lo.Values(tasks))
-		manager.EXPECT().Update(mock.Anything, mock.Anything).Return()
-
-		memAllocator := NewMemoryAllocator(1000 / 0.2)
-		s.scheduler.memoryAllocator = memAllocator
-
-		s.scheduler.scheduleTasks()
-		s.Equal(int64(0), memAllocator.(*memoryAllocator).usedMemory)
-	})
-
-	// Task execution failure - memory should be released
-	s.Run("TaskExecutionFailure", func() {
-		manager := NewMockTaskManager(s.T())
-		s.scheduler.manager = manager
-
-		tasks := make(map[int64]Task, 0)
-		// Create a task that will fail execution
-		failedTask := NewMockTask(s.T())
-		failedTask.EXPECT().GetTaskID().Return(int64(1))
-		failedTask.EXPECT().GetBufferSize().Return(int64(256))
-
-		// Create a future that will fail
-		failedFuture := conc.Go(func() (any, error) {
-			return nil, errors.New("mock execution error")
-		})
-		failedTask.EXPECT().Execute().Return([]*conc.Future[any]{failedFuture})
-		tasks[failedTask.GetTaskID()] = failedTask
-
-		// Create a successful task
-		successTask := NewMockTask(s.T())
-		successTask.EXPECT().GetTaskID().Return(int64(2))
-		successTask.EXPECT().GetBufferSize().Return(int64(128))
-		successTask.EXPECT().Execute().Return([]*conc.Future[any]{})
-		tasks[successTask.GetTaskID()] = successTask
-
-		manager.EXPECT().GetBy(mock.Anything).Return(lo.Values(tasks))
-		manager.EXPECT().Update(mock.Anything, mock.Anything).Return()
-
-		memAllocator := NewMemoryAllocator(512 * 5)
-		s.scheduler.memoryAllocator = memAllocator
-
-		s.scheduler.scheduleTasks()
-		s.Equal(int64(0), memAllocator.(*memoryAllocator).usedMemory)
-	})
-
-	// Empty task list
-	s.Run("EmptyTaskList", func() {
-		manager := NewMockTaskManager(s.T())
-		s.scheduler.manager = manager
-
-		memAllocator := NewMemoryAllocator(1024)
-		s.scheduler.memoryAllocator = memAllocator
-
-		manager.EXPECT().GetBy(mock.Anything).Return(nil)
-
-		// Should not panic or error
-		s.NotPanics(func() {
-			s.scheduler.scheduleTasks()
-		})
-		s.Equal(int64(0), memAllocator.(*memoryAllocator).usedMemory)
-	})
 }
 
 func TestScheduler(t *testing.T) {
