@@ -23,8 +23,8 @@ class DListTest : public ::testing::Test {
     ResourceUsage low_watermark{80, 40};   // 80%
     ResourceUsage high_watermark{90, 45};  // 90%
     // Use a very long interval to disable background eviction for most tests
-    EvictionConfig eviction_config_{10,   // cache_touch_window (10 ms)
-                                    10};  // eviction_interval (10 ms)
+    EvictionConfig eviction_config_{10,    // cache_touch_window (10 ms)
+                                    100};  // eviction_interval (100 ms)
 
     std::unique_ptr<DList> dlist;
     // Keep track of nodes to prevent them from being deleted prematurely

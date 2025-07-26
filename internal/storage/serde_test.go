@@ -20,6 +20,7 @@ import (
 	"io"
 	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -109,13 +110,62 @@ func TestSerDe(t *testing.T) {
 			serdeMap[dt].serialize(builder, v)
 			// assert.True(t, ok)
 			a := builder.NewArray()
-			got, got1 := serdeMap[dt].deserialize(a, 0)
+			got, got1 := serdeMap[dt].deserialize(a, 0, false)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("deserialize() got = %v, want %v", got, tt.want)
 			}
 			if got1 != tt.want1 {
 				t.Errorf("deserialize() got1 = %v, want %v", got1, tt.want1)
 			}
+		})
+	}
+}
+
+func TestSerDeCopy(t *testing.T) {
+	tests := []struct {
+		name string
+		dt   schemapb.DataType
+		v    any
+	}{
+		{"test string copy", schemapb.DataType_String, "test"},
+		{"test string no copy", schemapb.DataType_String, "test"},
+		{"test binary copy", schemapb.DataType_JSON, []byte{1, 2, 3}},
+		{"test binary no copy", schemapb.DataType_JSON, []byte{1, 2, 3}},
+		{"test bool copy", schemapb.DataType_Bool, true},
+		{"test bool no copy", schemapb.DataType_Bool, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dt := tt.dt
+			v := tt.v
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1))
+			defer builder.Release()
+			serdeMap[dt].serialize(builder, v)
+			a := builder.NewArray()
+
+			// Test deserialize with shouldCopy parameter
+			copy, got1 := serdeMap[dt].deserialize(a, 0, true)
+			if !got1 {
+				t.Errorf("deserialize() failed for %s", tt.name)
+			}
+			if !reflect.DeepEqual(copy, tt.v) {
+				t.Errorf("deserialize() got = %v, want %v", copy, tt.v)
+			}
+			ref, _ := serdeMap[dt].deserialize(a, 0, false)
+			// check the unsafe pointers of copy and ref are different
+			switch v := copy.(type) {
+			case []byte:
+				if unsafe.Pointer(&v[0]) == unsafe.Pointer(&ref.([]byte)[0]) {
+					t.Errorf("deserialize() got same pointer for %v", tt.v)
+				}
+			case string:
+				if unsafe.StringData(v) == unsafe.StringData(ref.(string)) {
+					t.Errorf("deserialize() got same pointer for %v", tt.v)
+				}
+			}
+
+			a.Release()
 		})
 	}
 }
@@ -127,7 +177,7 @@ func BenchmarkDeserializeReader(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 		assert.NoError(b, err)
 		defer reader.Close()
 		for i := 0; i < len; i++ {
