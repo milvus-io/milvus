@@ -2879,6 +2879,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		chMgr:           node.chMgr,
 		chTicker:        node.chTicker,
 		schemaTimestamp: request.SchemaTimestamp,
+		node:            node,
 	}
 	var enqueuedTask task = it
 	if streamingutil.IsStreamingServiceEnabled() {
@@ -2976,6 +2977,207 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	log.Debug("Finish processing upsert request in Proxy")
+	return it.result, nil
+}
+
+func (node *Proxy) Update(ctx context.Context, request *milvuspb.UpdateRequest) (*milvuspb.MutationResult, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Uint32("NumRows", request.NumRows),
+	)
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Update")
+	defer sp.End()
+
+	log.Debug("Start processing update request in Proxy")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+	method := "Update"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.GetStats(ctx).
+		SetNodeID(paramtable.GetNodeID()).
+		SetInboundLabel(metrics.UpdateLabel).
+		SetCollectionName(request.GetCollectionName())
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		log.Warn("failed to get collection id", zap.Error(err))
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, request.GetDbName(), request.GetCollectionName())
+	if err != nil {
+		log.Warn("failed to get collection schema", zap.Error(err))
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// check if num_rows is valid
+	if request.NumRows <= 0 {
+		err := merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(request.NumRows), "num_rows should be greater than 0")
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// check if the collection is loaded
+	_, collectionNotLoadErr := globalMetaCache.GetShardLeaderList(ctx, request.GetDbName(), request.GetCollectionName(), collectionID, true)
+	// check if insert msg is lack of field data
+	lackOfFieldErr := LackOfFieldsDataBySchema(schema.CollectionSchema, request.GetFieldsData(), false, true)
+	if collectionNotLoadErr != nil && lackOfFieldErr != nil {
+		log.Warn("collection is not loaded", zap.Error(collectionNotLoadErr))
+
+		return &milvuspb.MutationResult{
+			Status: merr.Status(merr.WrapErrCollectionLoaded(schema.CollectionSchema.Name,
+				"partial update is not supported when collection is not loaded", lackOfFieldErr.Error())),
+		}, nil
+	}
+	partialUpdate := collectionNotLoadErr == nil && lackOfFieldErr != nil
+
+	// Convert UpdateRequest to UpsertRequest for internal processing
+	upsertRequest := &milvuspb.UpsertRequest{
+		Base:            request.Base,
+		DbName:          request.DbName,
+		CollectionName:  request.CollectionName,
+		PartitionName:   request.PartitionName,
+		FieldsData:      request.FieldsData,
+		NumRows:         request.NumRows,
+		HashKeys:        request.HashKeys,
+		SchemaTimestamp: request.SchemaTimestamp,
+	}
+
+	// Create updateTask that wraps the upsert task
+	it := &upsertTask{
+		baseMsg: msgstream.BaseMsg{
+			HashValues: upsertRequest.HashKeys,
+		},
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       upsertRequest,
+		result: &milvuspb.MutationResult{
+			Status: merr.Success(),
+			IDs: &schemapb.IDs{
+				IdField: nil,
+			},
+		},
+
+		idAllocator:     node.rowIDAllocator,
+		segIDAssigner:   node.segAssigner,
+		chMgr:           node.chMgr,
+		chTicker:        node.chTicker,
+		schemaTimestamp: upsertRequest.SchemaTimestamp,
+		node:            node,
+		partialUpdate:   partialUpdate,
+	}
+
+	var enqueuedTask task = it
+	if streamingutil.IsStreamingServiceEnabled() {
+		enqueuedTask = &upsertTaskByStreamingService{
+			upsertTask: it,
+		}
+	}
+
+	log.Debug("Enqueue update request in Proxy",
+		zap.Int("len(FieldsData)", len(request.FieldsData)),
+		zap.Int("len(HashKeys)", len(request.HashKeys)))
+
+	if err := node.sched.dmQueue.Enqueue(enqueuedTask); err != nil {
+		log.Info("Failed to enqueue update task",
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		return &milvuspb.MutationResult{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Debug("Detail of update request in Proxy",
+		zap.Uint64("BeginTS", it.BeginTs()),
+		zap.Uint64("EndTS", it.EndTs()))
+
+	if err := it.WaitToFinish(); err != nil {
+		log.Info("Failed to execute update task in task scheduler",
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		// Not every error case changes the status internally
+		// change status there to handle it
+		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
+			it.result.Status = merr.Status(err)
+		}
+
+		numRows := request.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+
+		return &milvuspb.MutationResult{
+			Status:   merr.Status(err),
+			ErrIndex: errIndex,
+		}, nil
+	}
+
+	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		setErrorIndex := func() {
+			numRows := request.NumRows
+			errIndex := make([]uint32, numRows)
+			for i := uint32(0); i < numRows; i++ {
+				errIndex[i] = i
+			}
+			it.result.ErrIndex = errIndex
+		}
+		setErrorIndex()
+	}
+
+	// UpdateCnt always equals to the number of entities in the request
+	it.result.UpsertCnt = int64(request.NumRows)
+
+	username := GetCurUserFromContextOrDefault(ctx)
+	nodeID := paramtable.GetStringNodeID()
+	dbName := request.DbName
+	collectionName := request.CollectionName
+	v := hookutil.GetExtension().Report(map[string]any{
+		hookutil.OpTypeKey:          hookutil.OpTypeUpdate,
+		hookutil.DatabaseKey:        request.DbName,
+		hookutil.UsernameKey:        username,
+		hookutil.RequestDataSizeKey: proto.Size(it.req),
+		hookutil.SuccessCntKey:      it.result.UpsertCnt,
+		hookutil.FailCntKey:         len(it.result.ErrIndex),
+	})
+	SetReportValue(it.result.GetStatus(), v)
+	if merr.Ok(it.result.GetStatus()) {
+		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpdate, dbName, username).Add(float64(v))
+	}
+
+	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(it.upsertMsg.InsertMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
+	if merr.Ok(it.result.GetStatus()) {
+		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpdate, dbName, username).Add(float64(v))
+	}
+	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method,
+		metrics.SuccessLabel, dbName, collectionName).Inc()
+	successCnt := it.result.UpsertCnt - int64(len(it.result.ErrIndex))
+	metrics.ProxyUpsertVectors.
+		WithLabelValues(nodeID, dbName, collectionName).
+		Add(float64(successCnt))
+	metrics.ProxyMutationLatency.
+		WithLabelValues(nodeID, metrics.UpdateLabel, dbName, collectionName).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpdateLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Debug("Finish processing update request in Proxy")
 	return it.result, nil
 }
 

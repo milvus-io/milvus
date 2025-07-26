@@ -39,4 +39,5 @@ var (
 	OpTypeSearch       = "search"
 	OpTypeHybridSearch = "hybrid_search"
 	OpTypeNodeID       = "node_id"
+	OpTypeUpdate       = "update"
 )

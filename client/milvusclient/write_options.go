@@ -43,9 +43,16 @@ type UpsertOption interface {
 	CollectionName() string
 }
 
+type UpdateOption interface {
+	UpdateRequest(coll *entity.Collection) (*milvuspb.UpdateRequest, error)
+	CollectionName() string
+}
+
 var (
 	_ UpsertOption = (*columnBasedDataOption)(nil)
+	_ UpdateOption = (*columnBasedDataOption)(nil)
 	_ InsertOption = (*columnBasedDataOption)(nil)
+	_ UpdateOption = (*rowBasedDataOption)(nil)
 )
 
 type columnBasedDataOption struct {
@@ -285,6 +292,25 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	}, nil
 }
 
+func (opt *columnBasedDataOption) UpdateRequest(coll *entity.Collection) (*milvuspb.UpdateRequest, error) {
+	// UpdateRequest converts UpsertRequest to UpdateRequest for partial update semantics
+	upsertReq, err := opt.UpsertRequest(coll)
+	if err != nil {
+		return nil, err
+	}
+
+	return &milvuspb.UpdateRequest{
+		Base:            upsertReq.Base,
+		DbName:          upsertReq.DbName,
+		CollectionName:  upsertReq.CollectionName,
+		PartitionName:   upsertReq.PartitionName,
+		FieldsData:      upsertReq.FieldsData,
+		HashKeys:        upsertReq.HashKeys,
+		NumRows:         upsertReq.NumRows,
+		SchemaTimestamp: upsertReq.SchemaTimestamp,
+	}, nil
+}
+
 func NewColumnBasedInsertOption(collName string, columns ...column.Column) *columnBasedDataOption {
 	return &columnBasedDataOption{
 		columns:  columns,
@@ -340,6 +366,25 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		PartitionName:  opt.partitionName,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
+	}, nil
+}
+
+func (opt *rowBasedDataOption) UpdateRequest(coll *entity.Collection) (*milvuspb.UpdateRequest, error) {
+	// UpdateRequest converts UpsertRequest to UpdateRequest for partial update semantics
+	upsertReq, err := opt.UpsertRequest(coll)
+	if err != nil {
+		return nil, err
+	}
+
+	return &milvuspb.UpdateRequest{
+		Base:            upsertReq.Base,
+		DbName:          upsertReq.DbName,
+		CollectionName:  upsertReq.CollectionName,
+		PartitionName:   upsertReq.PartitionName,
+		FieldsData:      upsertReq.FieldsData,
+		HashKeys:        upsertReq.HashKeys,
+		NumRows:         upsertReq.NumRows,
+		SchemaTimestamp: upsertReq.SchemaTimestamp,
 	}, nil
 }
 
