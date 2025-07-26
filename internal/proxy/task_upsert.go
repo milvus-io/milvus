@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -157,10 +157,10 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	// Calculate embedding fields
-	if function.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
+	if embedding.HasNonBM25Functions(it.schema.CollectionSchema.Functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Proxy-Upsert-insertPreExecute-call-function-udf")
 		defer sp.End()
-		exec, err := function.NewFunctionExecutor(it.schema.CollectionSchema)
+		exec, err := embedding.NewFunctionExecutor(it.schema.CollectionSchema)
 		if err != nil {
 			return err
 		}

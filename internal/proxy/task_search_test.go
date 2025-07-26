@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
@@ -963,7 +963,7 @@ func TestSearchTask_WithFunctions(t *testing.T) {
 			"mock.apikey": "mock",
 		}
 	}
-	ts := function.CreateOpenAIEmbeddingServer()
+	ts := embedding.CreateOpenAIEmbeddingServer()
 	defer ts.Close()
 	paramtable.Get().FunctionCfg.TextEmbeddingProviders.GetFunc = func() map[string]string {
 		return map[string]string{
