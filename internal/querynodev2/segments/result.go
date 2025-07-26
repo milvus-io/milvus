@@ -270,8 +270,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			Status: merr.Success(),
 			Ids:    &schemapb.IDs{},
 		}
-		skipDupCnt int64
-		loopEnd    int
+		loopEnd int
 	)
 
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeInternalRetrieveResult")
@@ -306,33 +305,19 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	}
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
-	idTsMap := make(map[interface{}]int64)
 	cursors := make([]int64, len(validRetrieveResults))
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; {
+	for j := 0; j < loopEnd; j++ {
 		sel, drainOneResult := typeutil.SelectMinPKWithTimestamp(validRetrieveResults, cursors)
 		if sel == -1 || (reduce.ShouldStopWhenDrained(param.reduceType) && drainOneResult) {
 			break
 		}
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
-		if _, ok := idTsMap[pk]; !ok {
-			typeutil.AppendPKs(ret.Ids, pk)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
-			idTsMap[pk] = ts
-			j++
-		} else {
-			// primary keys duplicate
-			skipDupCnt++
-			if ts != 0 && ts > idTsMap[pk] {
-				idTsMap[pk] = ts
-				typeutil.DeleteFieldData(ret.FieldsData)
-				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
-			}
-		}
+		typeutil.AppendPKs(ret.Ids, pk)
+		retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].Result.GetFieldsData(), cursors[sel])
 
 		// limit retrieve result to avoid oom
 		if retSize > maxOutputSize {
@@ -340,10 +325,6 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		}
 
 		cursors[sel]++
-	}
-
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
 	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
@@ -388,8 +369,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			Ids: &schemapb.IDs{},
 		}
 
-		skipDupCnt int64
-		loopEnd    int
+		loopEnd int
 	)
 
 	validRetrieveResults := []*TimestampedRetrieveResult[*segcorepb.RetrieveResults]{}
@@ -426,7 +406,6 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 	ret.FieldsData = typeutil.PrepareResultFieldData(validRetrieveResults[0].Result.GetFieldsData(), int64(loopEnd))
 	cursors := make([]int64, len(validRetrieveResults))
-	idTsMap := make(map[any]int64, limit*len(validRetrieveResults))
 
 	var availableCount int
 	var retSize int64
@@ -447,44 +426,15 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		}
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		ts := validRetrieveResults[sel].Timestamps[cursors[sel]]
-		if _, ok := idTsMap[pk]; !ok {
-			typeutil.AppendPKs(ret.Ids, pk)
-			selections = append(selections, selection{
-				batchIndex:  sel,
-				resultIndex: cursors[sel],
-				offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
-			})
-			idTsMap[pk] = ts
-			availableCount++
-		} else {
-			// primary keys duplicate
-			skipDupCnt++
-			if ts != 0 && ts > idTsMap[pk] {
-				idTsMap[pk] = ts
-				idx := len(selections) - 1
-				for ; idx >= 0; idx-- {
-					selection := selections[idx]
-					pkValue := typeutil.GetPK(validRetrieveResults[selection.batchIndex].GetIds(), selection.resultIndex)
-					if pk == pkValue {
-						break
-					}
-				}
-				if idx >= 0 {
-					selections[idx] = selection{
-						batchIndex:  sel,
-						resultIndex: cursors[sel],
-						offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
-					}
-				}
-			}
-		}
+		typeutil.AppendPKs(ret.Ids, pk)
+		selections = append(selections, selection{
+			batchIndex:  sel,
+			resultIndex: cursors[sel],
+			offset:      validRetrieveResults[sel].Result.GetOffset()[cursors[sel]],
+		})
+		availableCount++
 
 		cursors[sel]++
-	}
-
-	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
 	if !plan.IsIgnoreNonPk() {

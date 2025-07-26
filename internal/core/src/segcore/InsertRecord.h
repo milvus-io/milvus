@@ -147,8 +147,12 @@ class OffsetOrderedMap : public OffsetMap {
                 if (!bitset[seg_offset]) {
                     seg_offsets.push_back(seg_offset);
                     hit_num++;
-                    // PK hit, no need to continue traversing offsets with the same PK.
-                    break;
+                    // Remove primary key deduplication - allow multiple offsets for the same PK
+                    // Original logic: break after finding one offset for the same PK
+                    // New logic: continue to find all offsets for the same PK
+                    if (hit_num >= limit) {
+                        break;  // Only break when we've reached the limit
+                    }
                 }
             }
         }
