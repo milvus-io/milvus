@@ -569,6 +569,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
+		if segment.State == commonpb.SegmentState_Flushed && !req.Dropped {
+			log.Info("save to flushed segment, ignore this request")
+			return merr.Success(), nil
+		}
+
 		if segment.State == commonpb.SegmentState_Dropped {
 			log.Info("save to dropped segment, ignore this request")
 			return merr.Success(), nil

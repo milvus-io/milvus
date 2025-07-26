@@ -1385,7 +1385,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
-			SegmentID:    0,
+			SegmentID:    10089,
 			CollectionID: 0,
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
@@ -1425,8 +1425,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 					},
 				},
 			},
+			Flushed: true,
 		}
-		segment := createSegment(0, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
+		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -1447,6 +1448,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
@@ -1460,7 +1463,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()))
-		assert.EqualValues(t, 0, resp.GetBinlogs()[0].GetSegmentID())
+		assert.EqualValues(t, binlogReq.SegmentID, resp.GetBinlogs()[0].GetSegmentID())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
 		for _, binlog := range resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs() {
