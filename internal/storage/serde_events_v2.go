@@ -127,7 +127,7 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 }
 
 func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
-	bufferSize int64,
+	bufferSize int64, shouldCopy bool,
 ) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil)
 	if err != nil {
@@ -135,7 +135,7 @@ func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSch
 	}
 
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, schema.Fields)
+		return ValueDeserializer(r, v, schema.Fields, shouldCopy)
 	}), nil
 }
 
