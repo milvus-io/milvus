@@ -152,7 +152,7 @@ func TestSerDeCopy(t *testing.T) {
 			if !reflect.DeepEqual(copy, tt.v) {
 				t.Errorf("deserialize() got = %v, want %v", copy, tt.v)
 			}
-			ref, got1 := serdeMap[dt].deserialize(a, 0, false)
+			ref, _ := serdeMap[dt].deserialize(a, 0, false)
 			// check the unsafe pointers of copy and ref are different
 			switch v := copy.(type) {
 			case []byte:
