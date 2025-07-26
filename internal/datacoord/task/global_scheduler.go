@@ -141,10 +141,10 @@ func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlot
 	var maxAvailable int64 = -1
 	var nodeID int64 = NullNodeID
 
-	for nodeID, ws := range workerSlots {
+	for id, ws := range workerSlots {
 		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
 			maxAvailable = ws.AvailableSlots
-			nodeID = nodeID
+			nodeID = id
 		}
 	}
 
