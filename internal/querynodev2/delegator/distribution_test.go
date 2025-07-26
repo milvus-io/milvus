@@ -187,7 +187,7 @@ func (s *DistributionSuite) TestAddDistribution() {
 			s.dist.SyncTargetVersion(&querypb.SyncAction{
 				TargetVersion: 1000,
 			}, []int64{1})
-			_, _, version, err := s.dist.PinReadableSegments(1.0, 1)
+			_, _, _, version, err := s.dist.PinReadableSegments(1.0, 1)
 			s.Require().NoError(err)
 			s.dist.AddDistributions(tc.input...)
 			sealed, _ := s.dist.PeekSegments(false)
@@ -269,7 +269,7 @@ func (s *DistributionSuite) TestAddGrowing() {
 				TargetVersion:   1000,
 				GrowingInTarget: []int64{1, 2},
 			}, tc.workingParts)
-			_, growing, version, err := s.dist.PinReadableSegments(1.0, tc.workingParts...)
+			_, growing, _, version, err := s.dist.PinReadableSegments(1.0, tc.workingParts...)
 			s.Require().NoError(err)
 			defer s.dist.Unpin(version)
 
@@ -471,7 +471,7 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 			var version int64
 			if tc.withMockRead {
 				var err error
-				_, _, version, err = s.dist.PinReadableSegments(1.0, 1)
+				_, _, _, version, err = s.dist.PinReadableSegments(1.0, 1)
 				s.Require().NoError(err)
 			}
 
@@ -762,7 +762,7 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 		DroppedInTarget:       []int64{6},
 	}, []int64{1})
 
-	s1, s2, _, err := s.dist.PinReadableSegments(1.0, 1)
+	s1, s2, _, _, err := s.dist.PinReadableSegments(1.0, 1)
 	s.Require().NoError(err)
 	s.Len(s1[0].Segments, 2)
 	s.Len(s2, 1)
@@ -778,7 +778,7 @@ func (s *DistributionSuite) Test_SyncTargetVersion() {
 		DroppedInTarget:       []int64{},
 	}, []int64{1})
 	s.False(s.dist.Serviceable())
-	_, _, _, err = s.dist.PinReadableSegments(1.0, 1)
+	_, _, _, _, err = s.dist.PinReadableSegments(1.0, 1)
 	s.Error(err)
 }
 
@@ -1214,7 +1214,7 @@ func (s *DistributionSuite) TestPinReadableSegments_RequiredLoadRatio() {
 			}, []int64{1})
 
 			// Test PinReadableSegments with different requiredLoadRatio
-			sealed, growing, _, err := s.dist.PinReadableSegments(tc.requiredLoadRatio, 1)
+			sealed, growing, _, _, err := s.dist.PinReadableSegments(tc.requiredLoadRatio, 1)
 
 			if tc.shouldError {
 				s.Error(err)

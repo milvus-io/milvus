@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type DelegatorSuite struct {
@@ -1733,7 +1735,108 @@ func TestDelegatorSearchBM25InvalidMetricType(t *testing.T) {
 		isBM25Field: map[int64]bool{101: true},
 	}
 
-	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{})
+	_, err := sd.search(context.Background(), searchReq, []SnapshotItem{}, []SegmentEntry{}, map[int64]int64{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must use BM25 metric type when searching against BM25 Function output field")
+}
+
+func TestNewRowCountBasedEvaluator_SearchAndQueryTasks(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_SearchAndQueryTasks", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 1000,
+			2: 2000,
+			3: 3000,
+		}
+
+		// Mock paramtable configuration
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.8).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// Test Search task - success segments meet required ratio
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1, 2) // 3000 rows out of 6000 total = 0.5
+		failureSegments := []int64{3}
+		errors := []error{errors.New("segment 3 failed")}
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, errors)
+		assert.False(t, shouldReturn) // 0.5 < 0.8, should not return partial
+		assert.Equal(t, 0.5, accessedRatio)
+
+		// Test Query task - success segments meet required ratio
+		successSegments = typeutil.NewSet[int64]()
+		successSegments.Insert(1, 2, 3) // 6000 rows out of 6000 total = 1.0
+		failureSegments = []int64{}
+		errors = []error{}
+
+		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, errors)
+		assert.True(t, shouldReturn)
+		assert.True(t, accessedRatio >= 0.8) // All segments succeeded
+		assert.Equal(t, 1.0, accessedRatio)
+	})
+}
+
+func TestNewRowCountBasedEvaluator_RequiredRatioConfiguration(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_RequiredRatioConfiguration", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 1000,
+			2: 2000,
+		}
+
+		// Test with required ratio >= 1.0 (should always return false for partial results)
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(1.0).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1) // Only partial data available
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, []int64{2}, []error{errors.New("test error")})
+		assert.False(t, shouldReturn) // Should not return partial when ratio >= 1.0
+		assert.Equal(t, 0.0, accessedRatio)
+
+		// Test non-Search/Query task (should use ratio 1.0)
+		shouldReturn, accessedRatio = evaluator("GetStatistics", successSegments, []int64{2}, []error{errors.New("test error")})
+		assert.False(t, shouldReturn)
+		assert.Equal(t, 0.0, accessedRatio)
+	})
+}
+
+func TestNewRowCountBasedEvaluator_PartialResultAcceptance(t *testing.T) {
+	mockey.PatchConvey("TestNewRowCountBasedEvaluator_PartialResultAcceptance", t, func() {
+		sealedRowCount := map[int64]int64{
+			1: 1000, // 1000 rows
+			2: 2000, // 2000 rows
+			3: 3000, // 3000 rows
+			4: 4000, // 4000 rows
+		}
+		// Total: 10000 rows
+
+		// Mock paramtable to require 70% data availability
+		mockParamTable := mockey.Mock(mockey.GetMethod(&paramtable.ParamItem{}, "GetAsFloat")).Return(0.7).Build()
+		defer mockParamTable.UnPatch()
+
+		evaluator := NewRowCountBasedEvaluator(sealedRowCount)
+
+		// Test case: 80% data available (should accept partial result)
+		successSegments := typeutil.NewSet[int64]()
+		successSegments.Insert(1, 2, 3) // 6000 rows out of 10000 = 0.6
+		failureSegments := []int64{4}
+		testErrors := []error{errors.New("segment 4 failed")}
+
+		shouldReturn, accessedRatio := evaluator("Search", successSegments, failureSegments, testErrors)
+		assert.False(t, shouldReturn) // 0.6 < 0.7, should not return partial
+		assert.Equal(t, 0.6, accessedRatio)
+
+		// Test case: 90% data available (should accept partial result)
+		successSegments = typeutil.NewSet[int64]()
+		successSegments.Insert(2, 3, 4) // 9000 rows out of 10000 = 0.9
+		failureSegments = []int64{1}
+		testErrors = []error{errors.New("segment 1 failed")}
+
+		shouldReturn, accessedRatio = evaluator("Query", successSegments, failureSegments, testErrors)
+		assert.True(t, shouldReturn) // 0.9 > 0.7, should return partial
+		assert.Equal(t, 0.9, accessedRatio)
+	})
 }

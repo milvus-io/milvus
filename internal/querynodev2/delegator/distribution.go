@@ -160,12 +160,12 @@ func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
 }
 
 // return segment distribution in query view
-func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, version int64, err error) {
+func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
 	if d.queryView.GetLoadedRatio() < requiredLoadRatio {
-		return nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName,
+		return nil, nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName,
 			fmt.Sprintf("channel distribution is not serviceable, required load ratio is %f, current load ratio is %f", requiredLoadRatio, d.queryView.GetLoadedRatio()))
 	}
 
@@ -174,11 +174,12 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	// if user specified a partition id which is not serviceable, return err
 	for _, partition := range partitions {
 		if !current.partitions.Contain(partition) {
-			return nil, nil, -1, merr.WrapErrPartitionNotLoaded(partition)
+			return nil, nil, nil, -1, merr.WrapErrPartitionNotLoaded(partition)
 		}
 	}
 	sealed, growing = current.Get(partitions...)
 	version = current.version
+	sealedRowCount = d.queryView.sealedSegmentRowCount
 	if d.queryView.GetLoadedRatio() == 1.0 {
 		// if query view is fully loaded, we can use current target version to filter segments
 		targetVersion := current.GetTargetVersion()
