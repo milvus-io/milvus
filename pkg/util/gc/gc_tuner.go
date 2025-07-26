@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 )
 
 var (
@@ -82,25 +83,21 @@ func optimizeGOGC() {
 
 	action(newGoGC)
 
-	toMB := func(mem uint64) uint64 {
-		return mem / 1024 / 1024
-	}
-
 	// currently we assume 20 ms as long gc pause
 	if (m.PauseNs[(m.NumGC+255)%256] / uint64(time.Millisecond)) < 20 {
 		log.Ctx(context.TODO()).Debug("GC Tune done", zap.Uint32("previous GOGC", previousGOGC),
-			zap.Uint64("heapuse ", toMB(heapuse)),
-			zap.Uint64("total memory", toMB(totaluse)),
-			zap.Uint64("next GC", toMB(m.NextGC)),
+			zap.Uint64("heapuse ", logutil.ToMB(heapuse)),
+			zap.Uint64("total memory", logutil.ToMB(totaluse)),
+			zap.Uint64("next GC", logutil.ToMB(m.NextGC)),
 			zap.Uint32("new GOGC", newGoGC),
 			zap.Duration("gc-pause", time.Duration(m.PauseNs[(m.NumGC+255)%256])),
 			zap.Uint64("gc-pause-end", m.PauseEnd[(m.NumGC+255)%256]),
 		)
 	} else {
 		log.Ctx(context.TODO()).Warn("GC Tune done, and the gc is slow", zap.Uint32("previous GOGC", previousGOGC),
-			zap.Uint64("heapuse ", toMB(heapuse)),
-			zap.Uint64("total memory", toMB(totaluse)),
-			zap.Uint64("next GC", toMB(m.NextGC)),
+			zap.Uint64("heapuse ", logutil.ToMB(heapuse)),
+			zap.Uint64("total memory", logutil.ToMB(totaluse)),
+			zap.Uint64("next GC", logutil.ToMB(m.NextGC)),
 			zap.Uint32("new GOGC", newGoGC),
 			zap.Duration("gc-pause", time.Duration(m.PauseNs[(m.NumGC+255)%256])),
 			zap.Uint64("gc-pause-end", m.PauseEnd[(m.NumGC+255)%256]),
