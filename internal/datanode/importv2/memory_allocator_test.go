@@ -121,7 +121,7 @@ func TestMemoryAllocatorNegativeRelease(t *testing.T) {
 // TestMemoryAllocatorMultipleTasks tests memory management for multiple tasks
 func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 	// Create memory allocator with 1GB system memory
-	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	ma := NewMemoryAllocator(1024 * 1024 * 1024 * 2)
 
 	// Allocate memory for multiple tasks with smaller sizes
 	taskIDs := []int64{1, 2, 3, 4, 5}
