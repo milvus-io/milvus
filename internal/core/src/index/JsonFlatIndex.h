@@ -178,10 +178,12 @@ class JsonFlatIndex : public InvertedIndexTantivy<std::string> {
     JsonFlatIndex() : InvertedIndexTantivy<std::string>() {
     }
 
-    explicit JsonFlatIndex(const storage::FileManagerContext& ctx,
-                           const std::string& nested_path)
+    explicit JsonFlatIndex(
+        const storage::FileManagerContext& ctx,
+        const std::string& nested_path,
+        const int64_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION)
         : InvertedIndexTantivy<std::string>(
-              TANTIVY_INDEX_LATEST_VERSION, ctx, false, false),
+              tantivy_index_version, ctx, false, false),
           nested_path_(nested_path) {
     }
 

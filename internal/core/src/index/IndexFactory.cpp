@@ -398,12 +398,14 @@ IndexFactory::CreateJsonIndex(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
+                create_index_info.tantivy_index_version,
                 JsonCastFunction::FromString(json_cast_function));
         case JsonCastType::DataType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
+                create_index_info.tantivy_index_version,
                 JsonCastFunction::FromString(json_cast_function));
         case JsonCastType::DataType::VARCHAR: {
             auto& ngram_params = create_index_info.ngram_params;
@@ -415,11 +417,14 @@ IndexFactory::CreateJsonIndex(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
+                create_index_info.tantivy_index_version,
                 JsonCastFunction::FromString(json_cast_function));
         }
         case JsonCastType::DataType::JSON:
-            return std::make_unique<JsonFlatIndex>(file_manager_context,
-                                                   nested_path);
+            return std::make_unique<JsonFlatIndex>(
+                file_manager_context,
+                nested_path,
+                create_index_info.tantivy_index_version);
         default:
             ThrowInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
     }
