@@ -439,21 +439,29 @@ type Field struct {
 	IsFunctionOutput bool              `json:"is_function_output,omitempty"`
 }
 
+type StructArrayField struct {
+	FieldID     string   `json:"field_id,omitempty,string"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Fields      []*Field `json:"fields,omitempty"`
+}
+
 type Collection struct {
-	CollectionID         string            `json:"collection_id,omitempty"`
-	CollectionName       string            `json:"collection_name,omitempty"`
-	CreatedTime          string            `json:"created_time,omitempty"`
-	ShardsNum            int               `json:"shards_num,omitempty"`
-	ConsistencyLevel     string            `json:"consistency_level,omitempty"`
-	Aliases              []string          `json:"aliases,omitempty"`
-	Properties           map[string]string `json:"properties,omitempty"`
-	DBName               string            `json:"db_name,omitempty"`
-	NumPartitions        int               `json:"num_partitions,omitempty,string"`
-	VirtualChannelNames  []string          `json:"virtual_channel_names,omitempty"`
-	PhysicalChannelNames []string          `json:"physical_channel_names,omitempty"`
-	PartitionInfos       []*PartitionInfo  `json:"partition_infos,omitempty"`
-	EnableDynamicField   bool              `json:"enable_dynamic_field,omitempty"`
-	Fields               []*Field          `json:"fields,omitempty"`
+	CollectionID         string              `json:"collection_id,omitempty"`
+	CollectionName       string              `json:"collection_name,omitempty"`
+	CreatedTime          string              `json:"created_time,omitempty"`
+	ShardsNum            int                 `json:"shards_num,omitempty"`
+	ConsistencyLevel     string              `json:"consistency_level,omitempty"`
+	Aliases              []string            `json:"aliases,omitempty"`
+	Properties           map[string]string   `json:"properties,omitempty"`
+	DBName               string              `json:"db_name,omitempty"`
+	NumPartitions        int                 `json:"num_partitions,omitempty,string"`
+	VirtualChannelNames  []string            `json:"virtual_channel_names,omitempty"`
+	PhysicalChannelNames []string            `json:"physical_channel_names,omitempty"`
+	PartitionInfos       []*PartitionInfo    `json:"partition_infos,omitempty"`
+	EnableDynamicField   bool                `json:"enable_dynamic_field,omitempty"`
+	Fields               []*Field            `json:"fields,omitempty"`
+	StructArrayFields    []*StructArrayField `json:"struct_array_fields,omitempty"`
 }
 
 type Database struct {
