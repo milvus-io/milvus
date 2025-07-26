@@ -21,6 +21,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -77,7 +79,11 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, func() balance.Balance { return balancer })
+	getBalancerFunc := func() balance.Balance { return balancer }
+	checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+		return true
+	}
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, getBalancerFunc, checkSegmentExist)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
@@ -863,4 +869,118 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 
 func TestSegmentCheckerSuite(t *testing.T) {
 	suite.Run(t, new(SegmentCheckerTestSuite))
+}
+
+func TestGetSealedSegmentDiff_WithL0SegmentCheck(t *testing.T) {
+	mockey.PatchConvey("TestGetSealedSegmentDiff_WithL0SegmentCheck", t, func() {
+		// Test case 1: L0 segment exists
+		t.Run("L0_segment_exists", func(t *testing.T) {
+			checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+				return true // L0 segment exists
+			}
+
+			// Create test segments
+			segments := []*datapb.SegmentInfo{
+				{
+					ID:           1,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L0,
+				},
+				{
+					ID:           2,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L1,
+				},
+			}
+
+			// Filter L0 segments with existence check
+			var level0Segments []*datapb.SegmentInfo
+			for _, segment := range segments {
+				if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
+					level0Segments = append(level0Segments, segment)
+				}
+			}
+
+			// Verify: L0 segment should be included
+			assert.Equal(t, 1, len(level0Segments))
+			assert.Equal(t, int64(1), level0Segments[0].GetID())
+		})
+
+		// Test case 2: L0 segment does not exist
+		t.Run("L0_segment_not_exists", func(t *testing.T) {
+			checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+				return false // L0 segment does not exist
+			}
+
+			// Create test segments
+			segments := []*datapb.SegmentInfo{
+				{
+					ID:           1,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L0,
+				},
+				{
+					ID:           2,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L1,
+				},
+			}
+
+			// Filter L0 segments with existence check
+			var level0Segments []*datapb.SegmentInfo
+			for _, segment := range segments {
+				if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
+					level0Segments = append(level0Segments, segment)
+				}
+			}
+
+			// Verify: L0 segment should be filtered out
+			assert.Equal(t, 0, len(level0Segments))
+		})
+
+		// Test case 3: Mixed L0 segments, only some exist
+		t.Run("Mixed_L0_segments", func(t *testing.T) {
+			checkSegmentExist := func(ctx context.Context, collectionID int64, segmentID int64) bool {
+				return segmentID == 1 // Only segment 1 exists
+			}
+
+			// Create test segments
+			segments := []*datapb.SegmentInfo{
+				{
+					ID:           1,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L0,
+				},
+				{
+					ID:           2,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L0,
+				},
+				{
+					ID:           3,
+					CollectionID: 1,
+					PartitionID:  1,
+					Level:        datapb.SegmentLevel_L1,
+				},
+			}
+
+			// Filter L0 segments with existence check
+			var level0Segments []*datapb.SegmentInfo
+			for _, segment := range segments {
+				if segment.GetLevel() == datapb.SegmentLevel_L0 && checkSegmentExist(context.Background(), segment.GetCollectionID(), segment.GetID()) {
+					level0Segments = append(level0Segments, segment)
+				}
+			}
+
+			// Verify: Only existing L0 segment should be included
+			assert.Equal(t, 1, len(level0Segments))
+			assert.Equal(t, int64(1), level0Segments[0].GetID())
+		})
+	})
 }

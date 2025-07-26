@@ -33,9 +33,7 @@ type schedulePolicy interface {
 	Remove(taskID UniqueID)
 }
 
-var (
-	_ schedulePolicy = &priorityQueuePolicy{}
-)
+var _ schedulePolicy = &priorityQueuePolicy{}
 
 // priorityQueuePolicy implements a priority queue that sorts tasks by taskID (smaller taskID has higher priority)
 type priorityQueuePolicy struct {
