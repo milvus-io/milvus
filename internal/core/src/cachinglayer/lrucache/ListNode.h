@@ -180,6 +180,8 @@ class ListNode {
     touch(bool update_used_memory = true);
 
     mutable std::shared_mutex mtx_;
+    // if a ListNode is in a DList, last_touch_ is the time when the node was lastly pushed
+    // to the head of the DList. Thus all ListNodes in a DList are sorted by last_touch_.
     std::chrono::high_resolution_clock::time_point last_touch_;
     // a nullptr dlist_ means this node is not in any DList, and is not prone to cache management.
     DList* dlist_;

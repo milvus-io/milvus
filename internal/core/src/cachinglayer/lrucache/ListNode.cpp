@@ -204,8 +204,7 @@ ListNode::touch(bool update_used_memory) {
         if (update_used_memory) {
             size = size_;
         }
-        dlist_->touchItem(this, size);
-        last_touch_ = now;
+        last_touch_ = dlist_->touchItem(this, size);
     }
 }
 
