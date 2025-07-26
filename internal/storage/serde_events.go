@@ -273,16 +273,16 @@ func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsRead
 	}, nil
 }
 
-func ValueDeserializerWithSelectedFields(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
-	return valueDeserializer(r, v, fieldSchema)
+func ValueDeserializerWithSelectedFields(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema, shouldCopy bool) error {
+	return valueDeserializer(r, v, fieldSchema, shouldCopy)
 }
 
-func ValueDeserializerWithSchema(r Record, v []*Value, schema *schemapb.CollectionSchema) error {
+func ValueDeserializerWithSchema(r Record, v []*Value, schema *schemapb.CollectionSchema, shouldCopy bool) error {
 	allFields := typeutil.GetAllFieldSchemas(schema)
-	return valueDeserializer(r, v, allFields)
+	return valueDeserializer(r, v, allFields, shouldCopy)
 }
 
-func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
+func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema, shouldCopy bool) error {
 	pkField := func() *schemapb.FieldSchema {
 		for _, field := range fieldSchema {
 			if field.GetIsPrimaryKey() {
@@ -314,7 +314,7 @@ func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 					m[j] = nil
 				}
 			} else {
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i)
+				d, ok := serdeMap[dt].deserialize(r.Column(j), i, shouldCopy)
 				if ok {
 					m[j] = d // TODO: avoid memory copy here.
 				} else {
@@ -342,14 +342,14 @@ func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 	return nil
 }
 
-func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*DeserializeReaderImpl[*Value], error) {
+func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader, shouldCopy bool) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newCompositeBinlogRecordReader(schema, blobsReader)
 	if err != nil {
 		return nil, err
 	}
 
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializerWithSchema(r, v, schema)
+		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
 	}), nil
 }
 

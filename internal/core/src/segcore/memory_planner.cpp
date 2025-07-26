@@ -240,6 +240,7 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
     } catch (std::exception& e) {
         LOG_INFO("[StorageV2] failed to load data from remote: {}", e.what());
         channel->close();
+        throw e;
     }
 }
 

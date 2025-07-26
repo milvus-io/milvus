@@ -135,7 +135,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	blobs, err := generateTestData(rows)
 	s.NoError(err)
 
-	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 	s.NoError(err)
 	defer reader.Close()
 
@@ -330,7 +330,7 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 	blobs, err := generateTestData(size)
 	s.NoError(err)
 
-	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 	s.NoError(err)
 	defer reader.Close()
 
