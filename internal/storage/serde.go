@@ -21,6 +21,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -105,10 +106,10 @@ type serdeEntry struct {
 var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	m := make(map[schemapb.DataType]serdeEntry)
 	m[schemapb.DataType_Bool] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.FixedWidthTypes.Boolean
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -117,7 +118,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -132,10 +133,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Int8] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Int8
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -144,7 +145,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -159,10 +160,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Int16] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Int16
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -171,7 +172,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -186,10 +187,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Int32] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Int32
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -198,7 +199,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -213,10 +214,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Int64] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Int64
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -225,7 +226,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -240,10 +241,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Float] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Float32
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -252,7 +253,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -267,10 +268,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Double] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Float64
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -279,7 +280,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -294,23 +295,23 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	stringEntry := serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.BinaryTypes.String
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
 			if arr, ok := a.(*array.String); ok && i < arr.Len() {
 				value := arr.Value(i)
 				if shouldCopy {
-					return string([]byte(value)), true
+					return strings.Clone(value), true
 				}
 				return value, true
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -332,25 +333,22 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	// We're not using the deserialized data in go, so we can skip the heavy pb serde.
 	// If there is need in the future, just assign it to m[schemapb.DataType_Array]
 	eagerArrayEntry := serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
 			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
 				v := &schemapb.ScalarField{}
 				if err := proto.Unmarshal(arr.Value(i), v); err == nil {
-					if shouldCopy {
-						return proto.Clone(v), true
-					}
 					return v, true
 				}
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -369,10 +367,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	_ = eagerArrayEntry
 
 	byteEntry := serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -387,7 +385,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -441,31 +439,31 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	}
 
 	m[schemapb.DataType_BinaryVector] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: (i + 7) / 8}
 		},
-		fixedSizeDeserializer,
-		fixedSizeSerializer,
+		deserialize: fixedSizeDeserializer,
+		serialize:   fixedSizeSerializer,
 	}
 	m[schemapb.DataType_Float16Vector] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i * 2}
 		},
-		fixedSizeDeserializer,
-		fixedSizeSerializer,
+		deserialize: fixedSizeDeserializer,
+		serialize:   fixedSizeSerializer,
 	}
 	m[schemapb.DataType_BFloat16Vector] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i * 2}
 		},
-		fixedSizeDeserializer,
-		fixedSizeSerializer,
+		deserialize: fixedSizeDeserializer,
+		serialize:   fixedSizeSerializer,
 	}
 	m[schemapb.DataType_Int8Vector] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i}
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -480,7 +478,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
@@ -498,19 +496,25 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_FloatVector] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i * 4}
 		},
-		func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
 			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
-				return arrow.Float32Traits.CastFromBytes(arr.Value(i)), true
+				vector := arrow.Float32Traits.CastFromBytes(arr.Value(i))
+				if shouldCopy {
+					vectorCopy := make([]float32, len(vector))
+					copy(vectorCopy, vector)
+					return vectorCopy, true
+				}
+				return vector, true
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
