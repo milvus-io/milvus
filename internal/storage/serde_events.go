@@ -240,7 +240,7 @@ func newCompositeBinlogRecordReader(schema *schemapb.CollectionSchema, blobsRead
 	}, nil
 }
 
-func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema) error {
+func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema, shouldCopy bool) error {
 	pkField := func() *schemapb.FieldSchema {
 		for _, field := range fieldSchema {
 			if field.GetIsPrimaryKey() {
@@ -272,7 +272,7 @@ func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 					m[j] = nil
 				}
 			} else {
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i)
+				d, ok := serdeMap[dt].deserialize(r.Column(j), i, shouldCopy)
 				if ok {
 					m[j] = d // TODO: avoid memory copy here.
 				} else {
@@ -300,14 +300,14 @@ func ValueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 	return nil
 }
 
-func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader) (*DeserializeReaderImpl[*Value], error) {
+func NewBinlogDeserializeReader(schema *schemapb.CollectionSchema, blobsReader ChunkedBlobsReader, shouldCopy bool) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newCompositeBinlogRecordReader(schema, blobsReader)
 	if err != nil {
 		return nil, err
 	}
 
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, schema.Fields)
+		return ValueDeserializer(r, v, schema.Fields, shouldCopy)
 	}), nil
 }
 
