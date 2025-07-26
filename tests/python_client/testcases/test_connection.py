@@ -444,11 +444,16 @@ class TestConnectionOperation(TestcaseBase):
         target: connect with non existing params
         method: 1. add connection with non existing params
                 2. try to connect
+                3. connect failure will remove connection alias in list connections
         expected: raise an exception
         """
 
         # add invalid default connection
         self.connection_wrap.add_connection(default={'host': "host", 'port': port})
+
+        # list all connections and check the response
+        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
+                                              check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None)]})
 
         # using default alias to create connection, the connection does not exist
         err_msg = cem.FailConnect % ("host", str(port))
@@ -457,13 +462,11 @@ class TestConnectionOperation(TestcaseBase):
                                                   ct.err_msg: "illegal connection params or server unavailable"})
 
         # list all connections and check the response
-        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
-                                              check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None)]})
+        self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr, check_items={ct.list_content: []})
 
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
-                                                 check_items={ct.dict_content: {"address": f"host:{port}",
-                                                                                "user": ""}})
+                                                 check_items={ct.dict_content: {}})
 
     @pytest.mark.tags(ct.CaseLabel.L0)
     def test_connection_connect_default_alias_effective(self, host, port):
@@ -883,8 +886,8 @@ class TestConnect(TestcaseBase):
         """
         self.connection_wrap.connect(alias=connect_name, host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
-        res = self.utility_wrap.list_collections()[0]
-        assert len(res) == 0
+        res = self.connection_wrap.list_connections()[0]
+        assert len(res) == 1
 
 
 class TestConnectIPInvalid(TestcaseBase):
