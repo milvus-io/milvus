@@ -497,6 +497,7 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 	for _, f := range allFieldsSchema {
 		dim, _ := typeutil.GetDim(f)
 		builders[f.FieldID] = array.NewBuilder(memory.DefaultAllocator, serdeMap[f.DataType].arrowType(int(dim)))
+		builders[f.FieldID].Reserve(len(v)) // reserve space to avoid copy
 		types[f.FieldID] = f.DataType
 	}
 
