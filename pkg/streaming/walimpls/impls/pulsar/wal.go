@@ -146,7 +146,8 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 		Topic:                    w.Channel().Name,
 		SubscriptionName:         truncateCursorSubscriptionName,
 		Type:                     pulsar.Exclusive,
-		MaxPendingChunkedMessage: 0,
+		MaxPendingChunkedMessage: 1, // We cannot set it to 0, because the 0 means 100.
+		ReceiverQueueSize:        1, // We cannot set it to 0, because the 0 means 1000.
 		StartMessageIDInclusive:  true,
 	})
 	if err != nil {

@@ -114,7 +114,8 @@ func (h *backlogClearHelper) getConsumer() (pulsar.Consumer, error) {
 		Topic:                    h.channelName.Name,
 		SubscriptionName:         backlogClearHelperName,
 		Type:                     pulsar.Shared, // use shared subscription to avoid the subscription is rejected because of consumer exists.
-		MaxPendingChunkedMessage: 0,
+		MaxPendingChunkedMessage: 1,             // We cannot set it to 0, because the 0 means 100.
+		ReceiverQueueSize:        1,             // We cannot set it to 0, because the 0 means 1000.
 		StartMessageIDInclusive:  true,
 	})
 	if err != nil {
