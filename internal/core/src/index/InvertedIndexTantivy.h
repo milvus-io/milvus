@@ -25,6 +25,8 @@
 
 namespace milvus::index {
 
+const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
+
 inline TantivyDataType
 get_tantivy_data_type(proto::schema::DataType data_type) {
     switch (data_type) {
@@ -252,6 +254,18 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
         PanicInfo(ErrorCode::NotImplemented,
                   "build_index_for_json not implemented");
     };
+
+    // Loads the index metas that usually used along with the tantivy index.
+    // For example,  the null offset files of json index.
+    virtual void
+    LoadIndexMetas(const std::vector<std::string>& index_files,
+                   const Config& config);
+
+    // Filters out index files that are not belong to tantivy index.
+    // For example, index files of json index may contain null offset files.
+    // Modifying the index_files in place.
+    virtual void
+    RetainTantivyIndexFiles(std::vector<std::string>& index_files);
 
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
