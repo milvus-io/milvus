@@ -127,17 +127,20 @@ func TestGlobalScheduler_pickNode(t *testing.T) {
 }
 
 func TestGlobalScheduler_TestSchedule(t *testing.T) {
-	cluster := session.NewMockCluster(t)
-	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
-		1: {
-			NodeID:         1,
-			AvailableSlots: 100,
-		},
-		2: {
-			NodeID:         2,
-			AvailableSlots: 100,
-		},
-	}).Maybe()
+	newCluster := func() session.Cluster {
+		cluster := session.NewMockCluster(t)
+		cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+			1: {
+				NodeID:         1,
+				AvailableSlots: 100,
+			},
+			2: {
+				NodeID:         2,
+				AvailableSlots: 100,
+			},
+		}).Maybe()
+		return cluster
+	}
 
 	newTask := func() *MockTask {
 		task := NewMockTask(t)
@@ -149,7 +152,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 	}
 
 	t.Run("task retry when CreateTaskOnWorker", func(t *testing.T) {
-		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+		scheduler := NewGlobalTaskScheduler(context.TODO(), newCluster())
 		scheduler.Start()
 		defer scheduler.Stop()
 
@@ -180,7 +183,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 	})
 
 	t.Run("task retry when QueryTaskOnWorker", func(t *testing.T) {
-		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+		scheduler := NewGlobalTaskScheduler(context.TODO(), newCluster())
 		scheduler.Start()
 		defer scheduler.Stop()
 
@@ -218,7 +221,7 @@ func TestGlobalScheduler_TestSchedule(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		scheduler := NewGlobalTaskScheduler(context.TODO(), cluster)
+		scheduler := NewGlobalTaskScheduler(context.TODO(), newCluster())
 		scheduler.Start()
 		defer scheduler.Stop()
 
