@@ -84,8 +84,9 @@ class ChunkedColumnGroup {
 
     int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const {
-        AssertInfo(chunk_id >= 0 && chunk_id <= num_chunks_,
-                   "[StorageV2] chunk_id out of range: " + std::to_string(chunk_id));
+        AssertInfo(
+            chunk_id >= 0 && chunk_id <= num_chunks_,
+            "[StorageV2] chunk_id out of range: " + std::to_string(chunk_id));
         return GetNumRowsUntilChunk()[chunk_id];
     }
 
@@ -264,7 +265,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                     std::nullopt) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
             ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] StringViews only supported for ChunkedVariableColumn");
+                      "[StorageV2] StringViews only supported for "
+                      "ChunkedVariableColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
@@ -279,8 +281,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] ArrayViews only supported for ChunkedArrayColumn");
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "[StorageV2] ArrayViews only supported for ChunkedArrayColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
@@ -292,9 +295,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<std::vector<VectorArrayView>>
     VectorArrayViews(int64_t chunk_id) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "[StorageV2] VectorArrayViews only supported for ChunkedVectorArrayColumn");
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] VectorArrayViews only supported for "
+                      "ChunkedVectorArrayColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
@@ -307,9 +310,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     ViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "[StorageV2] ViewsByOffsets only supported for ChunkedVariableColumn");
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] ViewsByOffsets only supported for "
+                      "ChunkedVariableColumn");
         }
         auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
         auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
@@ -409,11 +412,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 break;
             }
             default: {
-                ThrowInfo(
-                    ErrorCode::Unsupported,
-                    "[StorageV2] BulkScalarValueAt is not supported for unknown scalar "
-                    "data type: {}",
-                    data_type_);
+                ThrowInfo(ErrorCode::Unsupported,
+                          "[StorageV2] BulkScalarValueAt is not supported for "
+                          "unknown scalar "
+                          "data type: {}",
+                          data_type_);
             }
         }
     }
@@ -441,7 +444,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         if (!IsChunkedVariableColumnDataType(data_type_) ||
             data_type_ == DataType::JSON) {
             ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] BulkRawStringAt only supported for ProxyChunkColumn of "
+                      "[StorageV2] BulkRawStringAt only supported for "
+                      "ProxyChunkColumn of "
                       "variable length type(except Json)");
         }
         if (offsets == nullptr) {
@@ -479,9 +483,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                   const int64_t* offsets,
                   int64_t count) const override {
         if (data_type_ != DataType::JSON) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "[StorageV2] RawJsonAt only supported for ProxyChunkColumn of Json type");
+            ThrowInfo(ErrorCode::Unsupported,
+                      "[StorageV2] RawJsonAt only supported for "
+                      "ProxyChunkColumn of Json type");
         }
         if (count == 0) {
             return;
@@ -506,7 +510,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                 int64_t count) const override {
         if (!IsChunkedArrayColumnDataType(data_type_)) {
             ThrowInfo(ErrorCode::Unsupported,
-                      "[StorageV2] BulkArrayAt only supported for ChunkedArrayColumn");
+                      "[StorageV2] BulkArrayAt only supported for "
+                      "ChunkedArrayColumn");
         }
         auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
         auto ca = group_->GetGroupChunks(cids);

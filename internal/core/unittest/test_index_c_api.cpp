@@ -59,7 +59,7 @@ TestVecIndex() {
     CBinarySet binary_set;
     CIndex copy_index;
 
-    status = CreateIndexV0(
+    status = CreateIndexForUT(
         dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
     ASSERT_EQ(milvus::Success, status.error_code);
 
@@ -94,7 +94,7 @@ TestVecIndex() {
     status = SerializeIndexToBinarySet(index, &binary_set);
     ASSERT_EQ(milvus::Success, status.error_code);
 
-    status = CreateIndexV0(
+    status = CreateIndexForUT(
         dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
     ASSERT_EQ(milvus::Success, status.error_code);
 
@@ -142,10 +142,10 @@ TEST(CBoolIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndexV0(dtype,
-                                   type_params_str.c_str(),
-                                   index_params_str.c_str(),
-                                   &index);
+            status = CreateIndexForUT(dtype,
+                                      type_params_str.c_str(),
+                                      index_params_str.c_str(),
+                                      &index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -158,10 +158,10 @@ TEST(CBoolIndexTest, All) {
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
-            status = CreateIndexV0(dtype,
-                                   type_params_str.c_str(),
-                                   index_params_str.c_str(),
-                                   &copy_index);
+            status = CreateIndexForUT(dtype,
+                                      type_params_str.c_str(),
+                                      index_params_str.c_str(),
+                                      &copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -200,10 +200,10 @@ TEST(CInt64IndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndexV0(dtype,
-                                   type_params_str.c_str(),
-                                   index_params_str.c_str(),
-                                   &index);
+            status = CreateIndexForUT(dtype,
+                                      type_params_str.c_str(),
+                                      index_params_str.c_str(),
+                                      &index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -215,10 +215,10 @@ TEST(CInt64IndexTest, All) {
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
-            status = CreateIndexV0(dtype,
-                                   type_params_str.c_str(),
-                                   index_params_str.c_str(),
-                                   &copy_index);
+            status = CreateIndexForUT(dtype,
+                                      type_params_str.c_str(),
+                                      index_params_str.c_str(),
+                                      &copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -259,10 +259,10 @@ TEST(CStringIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndexV0(dtype,
-                                   type_params_str.c_str(),
-                                   index_params_str.c_str(),
-                                   &index);
+            status = CreateIndexForUT(dtype,
+                                      type_params_str.c_str(),
+                                      index_params_str.c_str(),
+                                      &index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
@@ -275,10 +275,10 @@ TEST(CStringIndexTest, All) {
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {
-            status = CreateIndexV0(dtype,
-                                   type_params_str.c_str(),
-                                   index_params_str.c_str(),
-                                   &copy_index);
+            status = CreateIndexForUT(dtype,
+                                      type_params_str.c_str(),
+                                      index_params_str.c_str(),
+                                      &copy_index);
             ASSERT_EQ(milvus::Success, status.error_code);
         }
         {

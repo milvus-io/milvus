@@ -70,7 +70,9 @@ initTelemetry(const TraceConfig& cfg) {
             auto headers_map = parseHeaders(cfg.otlpHeaders);
             if (!headers_map.empty()) {
                 for (const auto& pair : headers_map) {
-                    opts.http_headers.insert(std::pair<std::string, std::string>(pair.first, pair.second));
+                    opts.http_headers.insert(
+                        std::pair<std::string, std::string>(pair.first,
+                                                            pair.second));
                 }
             }
             exporter = otlp::OtlpHttpExporterFactory::Create(opts);
@@ -82,7 +84,8 @@ initTelemetry(const TraceConfig& cfg) {
             auto headers_map = parseHeaders(cfg.otlpHeaders);
             if (!headers_map.empty()) {
                 for (const auto& pair : headers_map) {
-                    opts.metadata.insert(std::pair<std::string, std::string>(pair.first, pair.second));
+                    opts.metadata.insert(std::pair<std::string, std::string>(
+                        pair.first, pair.second));
                 }
             }
             opts.use_ssl_credentials = cfg.oltpSecure;
@@ -296,14 +299,16 @@ std::map<std::string, std::string>
 parseHeaders(const std::string& headers) {
     if (headers.empty()) {
         return {};
-    }    
-    
+    }
+
     try {
         nlohmann::json json = nlohmann::json::parse(headers);
         return json.get<std::map<std::string, std::string>>();
     } catch (const std::exception& e) {
         // Log the parsing error and return empty map
-        LOG_ERROR("Failed to parse headers as JSON: {}, error: {}", headers, e.what());
+        LOG_ERROR("Failed to parse headers as JSON: {}, error: {}",
+                  headers,
+                  e.what());
         return {};
     }
 }

@@ -157,7 +157,8 @@ TEST_F(FileWriterTest, WriteWithoutFinishWithDirectIO) {
     EXPECT_NE(content.size(), data.size());
     EXPECT_EQ(content.size(), kBufferSize * 2);
     EXPECT_NE(content, std::vector<char>(data.begin(), data.end()));
-    EXPECT_EQ(content, std::vector<char>(data.begin(), data.begin() + kBufferSize * 2));
+    EXPECT_EQ(content,
+              std::vector<char>(data.begin(), data.begin() + kBufferSize * 2));
 }
 
 // Test writing data with size slightly less than buffer size
@@ -416,12 +417,10 @@ TEST_F(FileWriterTest, LargeBufferSizeWriteWithDirectIO) {
 // Tese config FileWriterConfig with unknown mode
 TEST_F(FileWriterTest, UnknownModeWriteWithDirectIO) {
     uint8_t mode = 2;
-    EXPECT_NO_THROW(
-        {
-            FileWriter::SetMode(
-                static_cast<FileWriter::WriteMode>(mode));
-            FileWriter::SetBufferSize(kBufferSize);
-        });
+    EXPECT_NO_THROW({
+        FileWriter::SetMode(static_cast<FileWriter::WriteMode>(mode));
+        FileWriter::SetBufferSize(kBufferSize);
+    });
 }
 
 TEST_F(FileWriterTest, HalfAlignedDataWriteWithDirectIO) {
@@ -840,9 +839,8 @@ TEST_F(FileWriterTest, ConcurrentAccessToFileWriterConfig) {
         threads.emplace_back([i]() {
             // Each thread sets different executor configurations
             FileWriteWorkerPool::GetInstance().Configure(i + 1);
-            FileWriter::SetMode(
-                i % 2 == 0 ? FileWriter::WriteMode::BUFFERED
-                           : FileWriter::WriteMode::DIRECT);
+            FileWriter::SetMode(i % 2 == 0 ? FileWriter::WriteMode::BUFFERED
+                                           : FileWriter::WriteMode::DIRECT);
             FileWriter::SetBufferSize(4096 * (i + 1));
         });
     }

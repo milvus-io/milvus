@@ -561,13 +561,13 @@ std::map<std::string, std::string> diskWriteModeDirectLabel = {
     {"mode", "direct"}};
 
 DEFINE_PROMETHEUS_COUNTER_FAMILY(disk_write_total_bytes,
-                               "[cpp]disk write total bytes");
+                                 "[cpp]disk write total bytes");
 DEFINE_PROMETHEUS_COUNTER(disk_write_total_bytes_buffered,
-                        disk_write_total_bytes,
-                        diskWriteModeBufferedLabel);
+                          disk_write_total_bytes,
+                          diskWriteModeBufferedLabel);
 DEFINE_PROMETHEUS_COUNTER(disk_write_total_bytes_direct,
-                        disk_write_total_bytes,
-                        diskWriteModeDirectLabel);
+                          disk_write_total_bytes,
+                          diskWriteModeDirectLabel);
 
 // --- file writer metrics end ---
 

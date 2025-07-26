@@ -107,7 +107,7 @@ HybridScalarIndex<T>::SelectBuildTypeForPrimitiveType(
     // Decide whether to select bitmap index or inverted sort
     if (distinct_vals.size() >= bitmap_index_cardinality_limit_) {
         if constexpr (std::is_integral_v<T>) {
-            internal_index_type_  = ScalarIndexType::STLSORT;
+            internal_index_type_ = ScalarIndexType::STLSORT;
         } else {
             internal_index_type_ = ScalarIndexType::INVERTED;
         }
