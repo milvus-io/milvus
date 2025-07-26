@@ -71,6 +71,7 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
     JsonInvertedIndex(const JsonCastType& cast_type,
                       const std::string& nested_path,
                       const storage::FileManagerContext& ctx,
+                      const int64_t tantivy_index_version,
                       const JsonCastFunction& cast_function =
                           JsonCastFunction::FromString("unknown"))
         : nested_path_(nested_path),
@@ -94,8 +95,11 @@ class JsonInvertedIndex : public index::InvertedIndexTantivy<T> {
         boost::filesystem::create_directories(this->path_);
         std::string field_name = std::to_string(
             this->disk_file_manager_->GetFieldDataMeta().field_id);
-        this->wrapper_ = std::make_shared<index::TantivyIndexWrapper>(
-            field_name.c_str(), this->d_type_, this->path_.c_str());
+        this->wrapper_ =
+            std::make_shared<index::TantivyIndexWrapper>(field_name.c_str(),
+                                                         this->d_type_,
+                                                         this->path_.c_str(),
+                                                         tantivy_index_version);
     }
 
     void

@@ -391,18 +391,21 @@ IndexFactory::CreateJsonIndex(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
+                create_index_info.tantivy_index_version,
                 JsonCastFunction::FromString(json_cast_function));
         case JsonCastType::DataType::DOUBLE:
             return std::make_unique<index::JsonInvertedIndex<double>>(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
+                create_index_info.tantivy_index_version,
                 JsonCastFunction::FromString(json_cast_function));
         case JsonCastType::DataType::VARCHAR:
             return std::make_unique<index::JsonInvertedIndex<std::string>>(
                 cast_dtype,
                 nested_path,
                 file_manager_context,
+                create_index_info.tantivy_index_version,
                 JsonCastFunction::FromString(json_cast_function));
         default:
             PanicInfo(DataTypeInvalid, "Invalid data type:{}", cast_dtype);
