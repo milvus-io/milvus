@@ -1030,7 +1030,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
-			SegmentID:    0,
+			SegmentID:    10087,
 			CollectionID: 0,
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
@@ -1071,8 +1071,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 					},
 				},
 			},
+			Flushed: true,
 		}
-		segment := createSegment(0, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
+		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -1099,6 +1100,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.channelManager.Watch(context.Background(), &channelMeta{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1112,7 +1116,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.Status))
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetSegments()))
-		assert.EqualValues(t, 0, resp.GetSegments()[0].GetID())
+		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 0, len(resp.GetSegments()[0].GetBinlogs()))
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
