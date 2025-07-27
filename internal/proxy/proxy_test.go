@@ -1525,7 +1525,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		searchParams := []*commonpb.KeyValuePair{
 			{Key: MetricTypeKey, Value: metric.L2},
-			{Key: SearchParamsKey, Value: string(b)},
+			{Key: ParamsKey, Value: string(b)},
 			{Key: AnnsFieldKey, Value: floatVecField},
 			{Key: TopKKey, Value: strconv.Itoa(topk)},
 			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
@@ -1558,7 +1558,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		searchParams := []*commonpb.KeyValuePair{
 			{Key: MetricTypeKey, Value: metric.L2},
-			{Key: SearchParamsKey, Value: string(b)},
+			{Key: ParamsKey, Value: string(b)},
 			{Key: AnnsFieldKey, Value: floatVecField},
 			{Key: TopKKey, Value: strconv.Itoa(topk)},
 			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
@@ -1597,7 +1597,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		rankParams := []*commonpb.KeyValuePair{
 			{Key: RankTypeKey, Value: "rrf"},
-			{Key: RankParamsKey, Value: string(b)},
+			{Key: ParamsKey, Value: string(b)},
 			{Key: LimitKey, Value: strconv.Itoa(topk)},
 			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 		}
@@ -1655,7 +1655,7 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		searchParams := []*commonpb.KeyValuePair{
 			{Key: MetricTypeKey, Value: metric.L2},
-			{Key: SearchParamsKey, Value: string(b)},
+			{Key: ParamsKey, Value: string(b)},
 			{Key: AnnsFieldKey, Value: floatVecField},
 			{Key: TopKKey, Value: strconv.Itoa(topk)},
 			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},

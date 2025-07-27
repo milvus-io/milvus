@@ -490,7 +490,7 @@ func constructSearchRequest(
 				Value: metric.L2,
 			},
 			{
-				Key:   SearchParamsKey,
+				Key:   ParamsKey,
 				Value: string(b),
 			},
 			{
