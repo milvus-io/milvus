@@ -215,7 +215,7 @@ class DList {
     popItem(ListNode* list_node);
 
     std::string
-    usageInfo(const ResourceUsage& actively_pinned) const;
+    usageInfo() const;
 
     // Physical resource protection methods
     // Returns the amount of memory/disk that needs to be evicted to satisfy physical resource limit

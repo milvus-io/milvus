@@ -103,6 +103,16 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
             // Calculate logical eviction requirements
             eviction_target = used + size - low_watermark_;
             min_eviction = used + size - max_memory_;
+
+            // Ensure non-negative values
+            if (eviction_target.memory_bytes < 0)
+                eviction_target.memory_bytes = 0;
+            if (eviction_target.file_bytes < 0)
+                eviction_target.file_bytes = 0;
+            if (min_eviction.memory_bytes < 0)
+                min_eviction.memory_bytes = 0;
+            if (min_eviction.file_bytes < 0)
+                min_eviction.file_bytes = 0;
         }
 
         if (physical_eviction_needed.AnyGTZero()) {
@@ -187,7 +197,7 @@ DList::evictionLoop() {
 }
 
 std::string
-DList::usageInfo(const ResourceUsage& actively_pinned) const {
+DList::usageInfo() const {
     auto used = used_resources_.load();
     static double precision = 100.0;
     return fmt::format(
@@ -198,7 +208,6 @@ DList::usageInfo(const ResourceUsage& actively_pinned) const {
         "high_watermark memory, {:.2}% of max, {:.2}% of "
         "high_watermark disk; "
         "evictable_size_: {}; "
-        "actively_pinned: {} {:.2}% of used memory, {:.2}% of used disk; "
         "loading: {}; ",
         low_watermark_.ToString(),
         high_watermark_.ToString(),
@@ -213,11 +222,6 @@ DList::usageInfo(const ResourceUsage& actively_pinned) const {
         static_cast<double>(used.file_bytes) / high_watermark_.file_bytes *
             precision,
         evictable_size_.load().ToString(),
-        actively_pinned.ToString(),
-        static_cast<double>(actively_pinned.memory_bytes) / used.memory_bytes *
-            precision,
-        static_cast<double>(actively_pinned.file_bytes) / used.file_bytes *
-            precision,
         loading_.load().ToString());
 }
 
@@ -251,7 +255,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             "eviction without traversing list. Current usage: {}",
             current_evictable.ToString(),
             min_eviction.ToString(),
-            usageInfo(ResourceUsage{0, 0}));
+            usageInfo());
         return ResourceUsage{0, 0};
     }
 
@@ -271,56 +275,57 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
                (need_disk && size.file_bytes > 0);
     };
 
-    ResourceUsage actively_pinned{0, 0};
+    auto time_threshold =
+        evict_expired_items
+            ? (std::chrono::high_resolution_clock::now() -
+               eviction_config_.cache_cell_unaccessed_survival_time)
+            : std::chrono::high_resolution_clock::time_point::min();
 
-    // accumulate victims using expected_eviction.
-    ListNode* it = nullptr;
-    for (it = tail_; it != nullptr; it = it->next_) {
-        if (!would_help(it->size())) {
+    bool first_node_checked = false;
+    // current_node_time is initialized when first_node_checked is set to true.
+    std::chrono::high_resolution_clock::time_point current_node_time;
+
+    for (ListNode* it = tail_; it != nullptr; it = it->next_) {
+        bool need_lock = (!first_node_checked) ||
+                         (current_node_time < time_threshold) ||
+                         would_help(it->size());
+
+        if (!need_lock) {
             continue;
         }
-        // use try_to_lock to avoid dead lock by failing immediately if the ListNode lock is already held.
+
         auto& lock = item_locks.emplace_back(it->mtx_, std::try_to_lock);
-        bool acquired_lock = lock.owns_lock();
-        // if lock failed, it means this ListNode will be used again, so we don't evict it anymore.
-        if (acquired_lock && it->pin_count_ == 0) {
+
+        if (!lock.owns_lock()) {
+            // Failed to acquire lock, node is being used, skip it
+            item_locks.pop_back();
+            continue;
+        }
+
+        // If node is pinned, cannot evict
+        if (it->pin_count_ > 0) {
+            item_locks.pop_back();
+            continue;
+        }
+
+        current_node_time = it->last_touch_;
+        first_node_checked = true;
+
+        if (current_node_time < time_threshold || would_help(it->size())) {
             to_evict.push_back(it);
             size_to_evict += it->size();
-            if (size_to_evict.CanHold(expected_eviction)) {
-                it = it->next_;
-                break;
-            }
         } else {
-            // if we grabbed the lock only to find that the ListNode is pinned; or if we failed to lock
-            // the ListNode, we do not evict this ListNode.
+            // Release lock if node is neither expired nor helpful
             item_locks.pop_back();
-            if (acquired_lock) {
-                actively_pinned += it->size();
-            }
         }
-    }
-    if (evict_expired_items) {
-        auto time_threshold =
-            std::chrono::high_resolution_clock::now() -
-            eviction_config_.cache_cell_unaccessed_survival_time;
-        for (; it != nullptr; it = it->next_) {
-            auto& lock = item_locks.emplace_back(it->mtx_, std::try_to_lock);
-            bool acquired_lock = lock.owns_lock();
-            if (acquired_lock && it->pin_count_ == 0) {
-                if (it->last_touch_ < time_threshold) {
-                    to_evict.push_back(it);
-                    size_to_evict += it->size();
-                } else {
-                    // since all ListNodes in a DList are sorted by last_touch_,
-                    // we can break here.
-                    break;
-                }
-            } else {
-                item_locks.pop_back();
-                if (acquired_lock) {
-                    actively_pinned += it->size();
-                }
-            }
+
+        // Check if we should stop traversing
+        // Stop if:
+        // 1. We're evicting expired items AND current node time has passed threshold
+        // 2. OR we've collected enough eviction size
+        if ((evict_expired_items && current_node_time >= time_threshold) ||
+            size_to_evict.CanHold(expected_eviction)) {
+            break;
         }
     }
     if (!size_to_evict.AnyGTZero()) {
@@ -329,7 +334,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             "{}, giving up eviction. Current usage: {}",
             expected_eviction.ToString(),
             min_eviction.ToString(),
-            usageInfo(actively_pinned));
+            usageInfo());
         return ResourceUsage{0, 0};
     }
     if (!size_to_evict.CanHold(expected_eviction)) {
@@ -341,7 +346,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
                 "Something must be wrong",
                 min_eviction.ToString(),
                 size_to_evict.ToString(),
-                usageInfo(actively_pinned));
+                usageInfo());
             LOG_TRACE("[MCL] DList chain: {}", chainString());
             return ResourceUsage{0, 0};
         }
@@ -352,7 +357,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             expected_eviction.ToString(),
             min_eviction.ToString(),
             size_to_evict.ToString(),
-            usageInfo(actively_pinned));
+            usageInfo());
     }
 
     internal::cache_eviction_event_count().Increment();
