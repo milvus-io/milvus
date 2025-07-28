@@ -184,8 +184,12 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
     valid_bitset_ = TargetBitmap(total_num_rows_, false);
     memcpy(data_.data(), index_data->data.get(), (size_t)index_data->size);
     for (size_t i = 0; i < data_.size(); ++i) {
-        idx_to_offsets_[data_[i].idx_] = i;
-        valid_bitset_.set(data_[i].idx_);
+        auto idx = data_[i].idx_;
+        if (idx < 0 || static_cast<size_t>(idx) >= total_num_rows_) {
+            continue;
+        }
+        idx_to_offsets_[idx] = i;
+        valid_bitset_.set(idx);
     }
 
     is_built_ = true;
