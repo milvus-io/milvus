@@ -80,6 +80,9 @@ func (it *searchIteratorV2) next(ctx context.Context) (ResultSet, error) {
 		opt.annRequest.WithSearchParam(IteratorSearchLastBoundKey, fmt.Sprintf("%v", iteratorInfo.GetLastBound()))
 
 		resultSets, err := it.client.handleSearchResult(it.schema, req.GetOutputFields(), int(resp.GetResults().GetNumQueries()), resp)
+		if err != nil {
+			return err
+		}
 		rs = resultSets[0]
 
 		if rs.IDs.Len() == 0 {
