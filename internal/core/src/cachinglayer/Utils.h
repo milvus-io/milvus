@@ -277,7 +277,8 @@ struct EvictionConfig {
                    float loading_memory_factor = 2.5f)
         : cache_touch_window(std::chrono::milliseconds(cache_touch_window_ms)),
           eviction_interval(std::chrono::milliseconds(eviction_interval_ms)),
-          overloaded_memory_threshold_percentage(overloaded_memory_threshold_percentage),
+          overloaded_memory_threshold_percentage(
+              overloaded_memory_threshold_percentage),
           max_disk_usage_percentage(max_disk_usage_percentage),
           loading_memory_factor(loading_memory_factor) {
     }
