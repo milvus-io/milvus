@@ -2297,7 +2297,7 @@ func TestConvertToExtraParams(t *testing.T) {
 		if pair.Key == common.IndexTypeKey {
 			assert.Equal(t, "IVF_FLAT", pair.Value)
 		}
-		if pair.Key == common.IndexParamsKey {
+		if pair.Key == common.ParamsKey {
 			assert.Equal(t, string("{\"nlist\":128}"), pair.Value)
 		}
 	}
