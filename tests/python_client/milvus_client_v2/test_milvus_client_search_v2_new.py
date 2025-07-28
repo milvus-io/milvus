@@ -2008,3 +2008,55 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
         for i in range(ct.default_nq):
             assert max(res1[i].ids) < ct.default_nb * 5
             assert max(res2[i].ids) < ct.default_nb * 5
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_json_fields_comparison_in_filter(self):
+        """
+        Test case for searching with JSON fields comparison in filter.
+
+        Target:
+            Verify that searching with JSON fields comparison in filter behaves as expected.
+
+        Method:
+            1. Create a collection with JSON fields.
+            2. Insert data into the collection.
+            3. Build an index and load the collection.
+            4. Perform a search with a filter comparing JSON fields.
+
+        Expected:
+            The search should return an error indicating that JSON field comparison is not supported.
+        """ 
+        # 1. create a collection
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 64
+        schema = self.create_schema(client)[0]
+        self.add_field(schema, field_name='pk', datatype=DataType.INT64, is_primary=True)
+        self.add_field(schema, field_name=ct.default_float_vec_field_name, datatype=DataType.FLOAT_VECTOR, dim=dim)
+        self.add_field(schema, field_name='json_field1', datatype=DataType.JSON, is_nullable=True)
+        self.add_field(schema, field_name='json_field2', datatype=DataType.JSON, is_nullable=True)
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. insert data
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        
+        # build index
+        index_params, _ = self.prepare_index_params(client)
+        index_params.add_index(field_name=ct.default_float_vec_field_name, index_type="FLAT", metric_type="COSINE")
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
+        
+        # 3. search with json fields comparison in filter
+        search_params = {}
+        search_vectors = cf.gen_vectors(1, dim=dim)
+        search_exp = "json_field1['count'] < json_field2['count']"
+        error = {ct.err_code: 999, ct.err_msg: "two column comparison with JSON type is not supported"}
+        res = self.search(client, collection_name, search_vectors,
+                          anns_field=ct.default_float_vec_field_name,
+                          search_params=search_params,
+                          limit=ct.default_limit,
+                          filter=search_exp,
+                          check_task=CheckTasks.err_res,
+                          check_items=error)

@@ -71,55 +71,10 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # 2. Insert data with null values for nullable fields
         num_inserts = 5  # insert data for 5 times
         total_rows = []
-        for batch in range(num_inserts):
-            vectors = list(cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)) \
-                if vector_type == DataType.FLOAT_VECTOR \
-                else cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)
-            rows = []
-            start_id = batch * default_nb  # ensure id is not duplicated
-
-            for i in range(default_nb):
-                row = {
-                    "id": start_id + i,  # ensure id is not duplicated
-                    "vector": vectors[i]
-                }
-
-                # Add nullable fields with null values for every 5th record
-                if i % 5 == 0:
-                    row.update({
-                        "bool_field": None,
-                        "int8_field": None,
-                        "int16_field": None,
-                        "int32_field": None,
-                        "int64_field": None,
-                        "float_field": None,
-                        "double_field": None,
-                        "varchar_field": None,
-                        "json_field": None,
-                        "array_field": None
-                    })
-                else:
-                    row.update({
-                        "bool_field": i % 2 == 0,
-                        "int8_field": i % 128,
-                        "int16_field": i % 32768,
-                        "int32_field": i,
-                        "int64_field": i,
-                        "float_field": random.random(), 
-                        "double_field": random.random(),
-                        "varchar_field": f"varchar_{start_id + i}",
-                        "json_field": {"id": start_id + i, "value": f"json_{start_id + i}"},
-                        "array_field": [random.random() for _ in range(5)]
-                    })
-                rows.append(row)
-                total_rows.append(row)
-
-            t0 = time.time()
-            self.insert(client, collection_name, rows)
-            t1 = time.time()
-            time.sleep(0.5)
-            log.info(f"Insert batch {batch + 1}: {default_nb} entities cost {t1 - t0:.4f} seconds")
-
+        for i in range(num_inserts):
+            data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=i * default_nb)
+            self.insert(client, collection_name, data)
+            total_rows.extend(data)
         log.info(f"Total inserted {num_inserts * default_nb} entities")
 
         if flush_enable:
@@ -504,8 +459,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         )
 
         # JSON field is not null
-        json_not_null_filter = "json_field is not null and json_field['id'] < 100"
-        json_not_null_expected = [r for r in total_rows if r["json_field"] is not None and r["json_field"]["id"] < 100]
+        json_not_null_filter = "json_field is not null and json_field['count'] < 15"
+        json_not_null_expected = [r for r in total_rows if r["json_field"] is not None and r["json_field"]["count"] < 15]
         query_res, _ = self.query(
             client,
             collection_name,
