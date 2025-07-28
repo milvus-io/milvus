@@ -1663,7 +1663,7 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 		if err != nil {
 			return nil, err
 		}
-		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
+		params = append(params, &commonpb.KeyValuePair{Key: common.ParamsKey, Value: string(v)})
 	}
 	return params, nil
 }

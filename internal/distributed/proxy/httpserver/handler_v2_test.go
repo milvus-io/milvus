@@ -2141,7 +2141,7 @@ func TestDML(t *testing.T) {
 	mp.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 		if matchCountRule(req.OutputFields) {
 			for _, pair := range req.QueryParams {
-				if pair.GetKey() == ParamLimit {
+				if pair.GetKey() == proxy.LimitKey {
 					return nil, errors.New("mock error")
 				}
 			}

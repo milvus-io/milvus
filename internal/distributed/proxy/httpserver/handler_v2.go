@@ -837,10 +837,10 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req.ExprTemplateValues = generateExpressionTemplate(httpReq.ExprParams)
 	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
-		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	}
 	if httpReq.Limit > 0 && !matchCountRule(httpReq.OutputFields) {
-		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
+		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	}
 	resp, err := wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Query", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
@@ -1201,7 +1201,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
-	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
+	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	if httpReq.GroupByField != "" {
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamGroupByField, Value: httpReq.GroupByField})
 	}
@@ -1297,7 +1297,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(subReq.Limit), 10)})
-		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
+		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(subReq.Offset), 10)})
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.AnnsFieldKey, Value: subReq.AnnsField})
 		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
 		if err != nil {
@@ -1321,11 +1321,14 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		searchReq.ExprTemplateValues = generateExpressionTemplate(subReq.ExprParams)
 		req.Requests = append(req.Requests, searchReq)
 	}
+
 	bs, _ := json.Marshal(httpReq.Rerank.Params)
+	// leave the rerank check to proxy side
 	req.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: httpReq.Rerank.Strategy},
-		{Key: proxy.RankParamsKey, Value: string(bs)},
-		{Key: ParamLimit, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
+		{Key: proxy.ParamsKey, Value: string(bs)},
+		{Key: proxy.LimitKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)},
+		{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)},
 		{Key: ParamRoundDecimal, Value: "-1"},
 	}
 	if httpReq.GroupByField != "" {
