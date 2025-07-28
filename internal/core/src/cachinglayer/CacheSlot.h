@@ -52,11 +52,13 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         "representing the memory consumption of the cell");
 
     CacheSlot(std::unique_ptr<Translator<CellT>> translator,
-              internal::DList* dlist)
+              internal::DList* dlist,
+              bool evictable)
         : translator_(std::move(translator)),
           cell_id_mapping_mode_(translator_->meta()->cell_id_mapping_mode),
           cells_(translator_->num_cells()),
-          dlist_(dlist) {
+          dlist_(dlist),
+          evictable_(evictable) {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
             new (&cells_[i])
                 CacheCell(this, i, translator_->estimated_byte_size_of_cell(i));
@@ -239,34 +241,32 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             auto start = std::chrono::high_resolution_clock::now();
             std::vector<cid_t> cids_vec(cids.begin(), cids.end());
 
-            if (dlist_) {
-                bool reservation_success = false;
+            bool reservation_success = false;
 
-                auto now = std::chrono::steady_clock::now();
-                reservation_success = SemiInlineGet(
-                    dlist_->reserveMemoryWithTimeout(resource_needed, timeout));
-                LOG_TRACE(
-                    "[MCL] CacheSlot reserveMemoryWithTimeout {} sec "
-                    "result: {} time: {} sec",
-                    timeout.count() / 1000.0,
-                    reservation_success ? "success" : "failed",
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - now)
-                            .count() *
-                        1.0 / 1000);
+            auto now = std::chrono::steady_clock::now();
+            reservation_success = SemiInlineGet(
+                dlist_->reserveMemoryWithTimeout(resource_needed, timeout));
+            LOG_TRACE(
+                "[MCL] CacheSlot reserveMemoryWithTimeout {} sec "
+                "result: {} time: {} sec",
+                timeout.count() / 1000.0,
+                reservation_success ? "success" : "failed",
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - now)
+                        .count() *
+                    1.0 / 1000);
 
-                if (!reservation_success) {
-                    auto error_msg = fmt::format(
-                        "[MCL] CacheSlot failed to reserve memory for "
-                        "cells: key={}, cell_ids=[{}], total "
-                        "resource_needed={}",
-                        translator_->key(),
-                        fmt::join(cids_vec, ","),
-                        resource_needed.ToString());
-                    LOG_ERROR(error_msg);
-                    reserve_resource_failure = true;
-                    ThrowInfo(ErrorCode::InsufficientResource, error_msg);
-                }
+            if (!reservation_success) {
+                auto error_msg = fmt::format(
+                    "[MCL] CacheSlot failed to reserve memory for "
+                    "cells: key={}, cell_ids=[{}], total "
+                    "resource_needed={}",
+                    translator_->key(),
+                    fmt::join(cids_vec, ","),
+                    resource_needed.ToString());
+                LOG_ERROR(error_msg);
+                reserve_resource_failure = true;
+                ThrowInfo(ErrorCode::InsufficientResource, error_msg);
             }
 
             auto results = translator_->get_cells(cids_vec);
@@ -294,7 +294,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 cells_[cid].set_error(ew);
             }
             // If the resource reservation failed, we don't need to release the memory.
-            if (dlist_ && !reserve_resource_failure) {
+            if (!reserve_resource_failure) {
                 dlist_->releaseMemory(resource_needed);
             }
         }
@@ -304,7 +304,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
      public:
         CacheCell() = default;
         CacheCell(CacheSlot<CellT>* slot, cid_t cid, ResourceUsage size)
-            : internal::ListNode(slot->dlist_, size), slot_(slot), cid_(cid) {
+            : internal::ListNode(slot->evictable_ ? slot->dlist_ : nullptr,
+                                 size),
+              slot_(slot),
+              cid_(cid) {
         }
         ~CacheCell() override {
             if (state_ == State::LOADING) {
@@ -384,6 +387,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     std::vector<CacheCell> cells_;
     CellIdMappingMode cell_id_mapping_mode_;
     internal::DList* dlist_;
+    bool evictable_;
 };
 
 // - A thin wrapper for accessing cells in a CacheSlot.
