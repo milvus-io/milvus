@@ -2361,7 +2361,7 @@ class TestBitmapIndex(TestcaseBase):
         expected:
             1. build and drop index successful on a not loaded collection
             2. build index successful on non-indexed and loaded fields
-            3. can not drop index on loaded collection
+            3. can drop index on loaded collection
         """
         # init params
         collection_name, nb = f"{request.function.__name__}_{primary_field}_{auto_id}", 3000
@@ -2398,9 +2398,7 @@ class TestBitmapIndex(TestcaseBase):
         self.collection_wrap.load()
 
         # re-drop scalars' index
-        self.drop_multi_index(index_names=list(set(index_params.keys()) - {DataType.FLOAT_VECTOR.name}),
-                              check_task=CheckTasks.err_res,
-                              check_items={ct.err_code: 65535, ct.err_msg: iem.DropLoadedIndex})
+        self.drop_multi_index(index_names=list(set(index_params.keys()) - {DataType.FLOAT_VECTOR.name}))
 
         # re-build loaded index
         self.build_multi_index(index_params=index_params)
