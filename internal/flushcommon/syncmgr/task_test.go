@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -224,11 +223,6 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))
-		if storageVersion == storage.StorageV2 {
-			task.WithMultiPartUploadSize(0)
-			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
-		}
-
 		err := task.Run(ctx)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
@@ -244,10 +238,6 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 					Timestamp:   100,
 				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
-		if storageVersion == storage.StorageV2 {
-			task.WithMultiPartUploadSize(0)
-			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
-		}
 
 		err := task.Run(ctx)
 		s.NoError(err)
@@ -265,10 +255,6 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 					Timestamp:   100,
 				}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
-		if storageVersion == storage.StorageV2 {
-			task.WithMultiPartUploadSize(0)
-			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
-		}
 		err := task.Run(ctx)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished
@@ -285,10 +271,6 @@ func (s *SyncTaskSuite) runTestRunNormal(storageVersion int64) {
 				Timestamp:   100,
 			}))
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
-		if storageVersion == storage.StorageV2 {
-			task.WithMultiPartUploadSize(0)
-			task.WithSyncBufferSize(packed.DefaultWriteBufferSize)
-		}
 		err := task.Run(ctx)
 		s.NoError(err)
 		s.True(isDataReleased(task)) // data should be released after task finished

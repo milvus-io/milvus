@@ -123,7 +123,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_MixToV2Format() {
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:      segID,
-			FieldBinlogs:   lo.Values(binlogs),
+			FieldBinlogs:   storage.SortFieldBinlogs(binlogs),
 			Deltalogs:      []*datapb.FieldBinlog{},
 			StorageVersion: storage.StorageV2,
 		})
@@ -157,7 +157,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV2Format() {
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:      segID,
-			FieldBinlogs:   lo.Values(binlogs),
+			FieldBinlogs:   storage.SortFieldBinlogs(binlogs),
 			Deltalogs:      []*datapb.FieldBinlog{},
 			StorageVersion: storage.StorageV2,
 		})
@@ -192,7 +192,7 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV1Format() {
 		s.NoError(err)
 		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
 			SegmentID:      segID,
-			FieldBinlogs:   lo.Values(binlogs),
+			FieldBinlogs:   storage.SortFieldBinlogs(binlogs),
 			Deltalogs:      []*datapb.FieldBinlog{},
 			StorageVersion: storage.StorageV2,
 		})

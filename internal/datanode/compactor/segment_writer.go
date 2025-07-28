@@ -124,7 +124,7 @@ func (w *MultiSegmentWriter) closeWriter() error {
 
 		result := &datapb.CompactionSegment{
 			SegmentID:           w.currentSegmentID,
-			InsertLogs:          lo.Values(fieldBinlogs),
+			InsertLogs:          storage.SortFieldBinlogs(fieldBinlogs),
 			Field2StatslogPaths: []*datapb.FieldBinlog{statsLog},
 			NumOfRows:           w.writer.GetRowNum(),
 			Channel:             w.channel,
