@@ -18,7 +18,6 @@ package importv2
 
 import (
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -54,43 +53,18 @@ type memoryAllocator struct {
 	systemTotalMemory int64
 	usedMemory        int64
 	mutex             sync.RWMutex
+	cond              *sync.Cond
 }
 
 // NewMemoryAllocator creates a new MemoryAllocator instance
 func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	log.Info("new import memory allocator", zap.Int64("systemTotalMemory", systemTotalMemory))
 	ma := &memoryAllocator{
-		systemTotalMemory: int64(systemTotalMemory),
+		systemTotalMemory: systemTotalMemory,
 		usedMemory:        0,
 	}
+	ma.cond = sync.NewCond(&ma.mutex)
 	return ma
-}
-
-// tryAllocate attempts to allocate memory of the specified size
-func (ma *memoryAllocator) tryAllocate(taskID int64, size int64) bool {
-	ma.mutex.Lock()
-	defer ma.mutex.Unlock()
-
-	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
-	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
-
-	if ma.usedMemory+size > memoryLimit {
-		log.Info("memory allocation failed, insufficient memory",
-			zap.Int64("taskID", taskID),
-			zap.Int64("requestedSize", size),
-			zap.Int64("usedMemory", ma.usedMemory),
-			zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-		return false
-	}
-
-	ma.usedMemory += size
-	log.Info("memory allocated successfully",
-		zap.Int64("taskID", taskID),
-		zap.Int64("allocatedSize", size),
-		zap.Int64("usedMemory", ma.usedMemory),
-		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-
-	return true
 }
 
 // Release releases memory of the specified size
@@ -110,24 +84,52 @@ func (ma *memoryAllocator) Release(taskID int64, size int64) {
 		zap.Int64("taskID", taskID),
 		zap.Int64("releasedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory))
+
+	// Wake up waiting tasks after memory is released
+	ma.cond.Broadcast()
 }
 
 // BlockingAllocate blocks until memory is available and then allocates
 func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
-	// First try to allocate immediately
-	if ma.tryAllocate(taskID, size) {
+	ma.mutex.Lock()
+	defer ma.mutex.Unlock()
+
+	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
+	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
+
+	// Check if we can allocate immediately
+	if ma.usedMemory+size <= memoryLimit {
+		ma.usedMemory += size
+		log.Info("memory allocated successfully",
+			zap.Int64("taskID", taskID),
+			zap.Int64("allocatedSize", size),
+			zap.Int64("usedMemory", ma.usedMemory),
+			zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
 		return
 	}
 
 	log.Info("task waiting for memory allocation",
 		zap.Int64("taskID", taskID),
-		zap.Int64("requestedSize", size))
+		zap.Int64("requestedSize", size),
+		zap.Int64("usedMemory", ma.usedMemory),
+		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
 
-	// Keep trying until allocation succeeds
-	for {
-		time.Sleep(5 * time.Second)
-		if ma.tryAllocate(taskID, size) {
-			return
-		}
+	// Wait until enough memory is available
+	for ma.usedMemory+size > memoryLimit {
+		log.Warn("task still waiting for memory allocation...",
+			zap.Int64("taskID", taskID),
+			zap.Int64("requestedSize", size),
+			zap.Int64("usedMemory", ma.usedMemory),
+			zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
+
+		ma.cond.Wait()
 	}
+
+	// Allocate memory
+	ma.usedMemory += size
+	log.Info("memory allocated successfully",
+		zap.Int64("taskID", taskID),
+		zap.Int64("allocatedSize", size),
+		zap.Int64("usedMemory", ma.usedMemory),
+		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
 }
