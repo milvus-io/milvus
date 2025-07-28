@@ -20,7 +20,7 @@ type createCollectionOpt struct {
 	shardNum             int32
 	enabledDynamicSchema bool
 
-	consistencyLevel entity.ConsistencyLevel
+	consistencyLevel *entity.ConsistencyLevel
 	properties       map[string]any
 }
 
@@ -33,5 +33,11 @@ func TWithShardNum(shardNum int32) CreateCollectionOpt {
 func TWithProperties(properties map[string]any) CreateCollectionOpt {
 	return func(opt *createCollectionOpt) {
 		opt.properties = properties
+	}
+}
+
+func TWithConsistencyLevel(consistencyLevel entity.ConsistencyLevel) CreateCollectionOpt {
+	return func(opt *createCollectionOpt) {
+		opt.consistencyLevel = &consistencyLevel
 	}
 }
