@@ -1577,6 +1577,9 @@ ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
     } else {
         exists = get_bit(field_data_ready_bitset_, field_id);
     }
+    if (!exists) {
+        return {nullptr, false};
+    }
     AssertInfo(fields_.find(field_id) != fields_.end(),
                "field {} must exist if bitset is set",
                field_id.get());
