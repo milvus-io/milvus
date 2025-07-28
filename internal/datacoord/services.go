@@ -519,6 +519,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.String("level", req.GetSegLevel().String()),
+		zap.Bool("withFullBinlogs", req.GetWithFullBinlogs()),
 	)
 
 	log.Info("receive SaveBinlogPaths request",
@@ -569,11 +570,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
-		if segment.State == commonpb.SegmentState_Flushed && !req.Dropped {
-			log.Info("save to flushed segment, ignore this request")
-			return merr.Success(), nil
-		}
-
 		if segment.State == commonpb.SegmentState_Dropped {
 			log.Info("save to dropped segment, ignore this request")
 			return merr.Success(), nil
@@ -603,18 +599,33 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 	}
 
+	if req.GetWithFullBinlogs() {
+		// check checkpoint will be executed at updateSegmentPack validation to ignore the illegal checkpoint update.
+		operators = append(operators, UpdateBinlogsFromSaveBinlogPathsOperator(
+			req.GetSegmentID(),
+			req.GetField2BinlogPaths(),
+			req.GetField2StatslogPaths(),
+			req.GetDeltalogs(),
+			req.GetField2Bm25LogPaths(),
+		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
+	} else {
+		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
+			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
+	}
+
 	// save binlogs, start positions and checkpoints
 	operators = append(operators,
-		AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
 		UpdateStartPosition(req.GetStartPositions()),
-		UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		log.Error("save binlog and checkpoints failed", zap.Error(err))
-		return merr.Status(err), nil
+		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
+			log.Error("save binlog and checkpoints failed", zap.Error(err))
+			return merr.Status(err), nil
+		}
+		log.Info("save binlog and checkpoints failed with ignorable error", zap.Error(err))
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())

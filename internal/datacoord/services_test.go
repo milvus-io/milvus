@@ -373,6 +373,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 		0: 0,
 		1: 0,
 		2: 0,
+		3: 0,
 	}
 	for segID, collID := range segments {
 		info := &datapb.SegmentInfo{
@@ -475,6 +476,152 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	segment = s.testServer.meta.GetSegment(context.TODO(), 2)
 	s.NotNil(segment)
 	s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    3,
+		CollectionID: 0,
+		Channel:      "ch1",
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		Field2StatslogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 1,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(2, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    3,
+		CollectionID: 0,
+		Channel:      "ch1",
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/3",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		Field2StatslogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/3",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 1,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(3, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[2].GetLogPath())
+	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
 }
 
 func (s *ServerSuite) TestFlush_NormalCase() {

@@ -769,7 +769,35 @@ type updateSegmentPack struct {
 	// for update etcd binlog paths
 	increments map[int64]metastore.BinlogsIncrement
 	// for update segment metric after alter segments
-	metricMutation *segMetricMutation
+	metricMutation              *segMetricMutation
+	fromSaveBinlogPathSegmentID int64 // if true, the operator is from save binlog paths
+}
+
+func (p *updateSegmentPack) Validate() error {
+	if p.fromSaveBinlogPathSegmentID != 0 {
+		segment, ok := p.segments[p.fromSaveBinlogPathSegmentID]
+		if !ok {
+			panic(fmt.Sprintf("segment %d not found when validating save binlog paths", p.fromSaveBinlogPathSegmentID))
+		}
+		if segment.Level == datapb.SegmentLevel_L0 {
+			return nil
+		}
+		segmentInMeta := p.meta.segments.GetSegment(segment.ID)
+		if segmentInMeta.State == commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Dropped {
+			// if the segment is flushed, we should not update the segment meta, ignore the operation directly.
+			return errors.Wrapf(ErrIgnoredSegmentMetaOperation,
+				"segment is flushed, segmentID: %d",
+				segment.ID)
+		}
+		if segment.GetDmlPosition().GetTimestamp() < segmentInMeta.GetDmlPosition().GetTimestamp() {
+			return errors.Wrapf(ErrIgnoredSegmentMetaOperation,
+				"dml time tick is less than the segment meta, segmentID: %d, new incoming time tick: %d, existing time tick: %d",
+				segment.ID,
+				segment.GetDmlPosition().GetTimestamp(),
+				segmentInMeta.GetDmlPosition().GetTimestamp())
+		}
+	}
+	return nil
 }
 
 func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
@@ -1012,6 +1040,19 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 	}
 }
 
+func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		modPack.fromSaveBinlogPathSegmentID = segmentID
+		if !UpdateBinlogsOperator(segmentID, binlogs, statslogs, deltalogs, bm25logs)(modPack) {
+			return false
+		}
+		if segment := modPack.Get(segmentID); segment != nil && len(deltalogs) > 0 {
+			segment.deltaRowcount.Store(-1)
+		}
+		return true
+	}
+}
+
 // update startPosition
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
@@ -1051,7 +1092,7 @@ func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOp
 }
 
 // UpdateCheckPointOperator updates segment checkpoint and num rows
-func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint) UpdateOperator {
+func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint, skipDmlPositionCheck ...bool) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -1070,7 +1111,7 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint)
 				continue
 			}
 
-			if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+			if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp && (len(skipDmlPositionCheck) == 0 || !skipDmlPositionCheck[0]) {
 				log.Ctx(context.TODO()).Warn("checkpoint in segment is larger than reported", zap.Any("current", segment.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
 				// segment position in etcd is larger than checkpoint, then dont change it
 				continue
@@ -1162,6 +1203,11 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	// skip if all segment not exist
 	if len(updatePack.segments) == 0 {
 		return nil
+	}
+
+	// Validate the update pack.
+	if err := updatePack.Validate(); err != nil {
+		return err
 	}
 
 	segments := lo.MapToSlice(updatePack.segments, func(_ int64, segment *SegmentInfo) *datapb.SegmentInfo { return segment.SegmentInfo })

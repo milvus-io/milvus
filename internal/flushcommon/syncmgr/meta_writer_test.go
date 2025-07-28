@@ -38,15 +38,49 @@ func (s *MetaWriterSuite) SetupTest() {
 func (s *MetaWriterSuite) TestNormalSave() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
 
 	bfs := pkoracle.NewBloomFilterSet()
-	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{}, bfs, nil)
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1,
+		Binlogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		},
+		Statslogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		},
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		},
+		Bm25Statslogs: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		},
+	}, bfs, nil)
 	metacache.UpdateNumOfRows(1000)(seg)
 	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacache.EXPECT().GetSegmentByID(mock.Anything).Return(seg, true)
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(new(SyncPack))
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
+			s.Equal(1, len(req.Field2BinlogPaths))
+			s.Equal(1, len(req.Field2Bm25LogPaths))
+			s.Equal(1, len(req.Field2StatslogPaths))
+			s.Equal(1, len(req.Deltalogs))
+			return nil
+		})
+
 	err := s.writer.UpdateSync(ctx, task)
 	s.NoError(err)
 }
