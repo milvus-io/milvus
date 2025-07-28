@@ -173,6 +173,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName, MetaFieldName}) {
 		log.Ctx(ctx).Error("schema contains system field",
 			zap.String("RowIDFieldName", RowIDFieldName),
@@ -181,14 +185,32 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
+
+	if err := validateStructArrayFieldDataType(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+
 	return validateFieldDataType(schema.GetFields())
 }
 
 func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.CollectionSchema) error {
 	name2id := map[string]int64{}
-	for idx, field := range schema.GetFields() {
+	idx := 0
+	for _, field := range schema.GetFields() {
 		field.FieldID = int64(idx + StartOfUserFieldID)
+		idx++
+
 		name2id[field.GetName()] = field.GetFieldID()
+	}
+
+	for _, structArrayField := range schema.GetStructArrayFields() {
+		structArrayField.FieldID = int64(idx + StartOfUserFieldID)
+		idx++
+
+		for _, field := range structArrayField.GetFields() {
+			field.FieldID = int64(idx + StartOfUserFieldID)
+			idx++
+		}
 	}
 
 	for fidx, function := range schema.GetFunctions() {
@@ -211,6 +233,7 @@ func (t *createCollectionTask) assignFieldAndFunctionID(schema *schemapb.Collect
 			function.OutputFieldIds[idx] = fieldId
 		}
 	}
+
 	return nil
 }
 
@@ -515,6 +538,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Description:          t.schema.Description,
 		AutoID:               t.schema.AutoID,
 		Fields:               model.UnmarshalFieldModels(t.schema.Fields),
+		StructArrayFields:    model.UnmarshalStructArrayFieldModels(t.schema.StructArrayFields),
 		Functions:            model.UnmarshalFunctionModels(t.schema.Functions),
 		VirtualChannelNames:  vchanNames,
 		PhysicalChannelNames: chanNames,
@@ -622,13 +646,14 @@ func executeCreateCollectionTaskSteps(ctx context.Context,
 			vChannels:      col.VirtualChannelNames,
 			startPositions: col.StartPositions,
 			schema: &schemapb.CollectionSchema{
-				Name:        col.Name,
-				DbName:      col.DBName,
-				Description: col.Description,
-				AutoID:      col.AutoID,
-				Fields:      model.MarshalFieldModels(col.Fields),
-				Properties:  col.Properties,
-				Functions:   model.MarshalFunctionModels(col.Functions),
+				Name:              col.Name,
+				DbName:            col.DBName,
+				Description:       col.Description,
+				AutoID:            col.AutoID,
+				Fields:            model.MarshalFieldModels(col.Fields),
+				StructArrayFields: model.MarshalStructArrayFieldModels(col.StructArrayFields),
+				Properties:        col.Properties,
+				Functions:         model.MarshalFunctionModels(col.Functions),
 			},
 			dbProperties: dbProperties,
 		},

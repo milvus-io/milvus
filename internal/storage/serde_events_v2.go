@@ -109,7 +109,7 @@ func (pr *packedRecordReader) Close() error {
 
 func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig,
 ) (*packedRecordReader, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
@@ -133,9 +133,8 @@ func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSch
 	if err != nil {
 		return nil, err
 	}
-
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, schema.Fields, shouldCopy)
+		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
 	}), nil
 }
 
@@ -212,7 +211,7 @@ func (pw *packedRecordWriter) Close() error {
 }
 
 func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig) (*packedRecordWriter, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
@@ -267,7 +266,7 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
 	}
 	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema.Fields)
+		return ValueSerializer(v, schema)
 	}, batchSize), nil
 }
 
@@ -538,7 +537,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 ) (*PackedBinlogRecordWriter, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}

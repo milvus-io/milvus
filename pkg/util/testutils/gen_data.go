@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-const elemCountOfArray = 10
+const ElemCountOfArray = 10
 
 // generate data
 func GenerateBoolArray(numRows int) []bool {
@@ -155,7 +155,7 @@ func GenerateArrayOfBoolArray(numRows int) []*schemapb.ScalarField {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_BoolData{
 				BoolData: &schemapb.BoolArray{
-					Data: GenerateBoolArray(elemCountOfArray),
+					Data: GenerateBoolArray(ElemCountOfArray),
 				},
 			},
 		})
@@ -169,7 +169,7 @@ func GenerateArrayOfIntArray(numRows int) []*schemapb.ScalarField {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{
-					Data: GenerateInt32Array(elemCountOfArray),
+					Data: GenerateInt32Array(ElemCountOfArray),
 				},
 			},
 		})
@@ -183,7 +183,7 @@ func GenerateArrayOfLongArray(numRows int) []*schemapb.ScalarField {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_LongData{
 				LongData: &schemapb.LongArray{
-					Data: GenerateInt64Array(elemCountOfArray),
+					Data: GenerateInt64Array(ElemCountOfArray),
 				},
 			},
 		})
@@ -197,7 +197,7 @@ func GenerateArrayOfFloatArray(numRows int) []*schemapb.ScalarField {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
 				FloatData: &schemapb.FloatArray{
-					Data: GenerateFloat32Array(elemCountOfArray),
+					Data: GenerateFloat32Array(ElemCountOfArray),
 				},
 			},
 		})
@@ -211,7 +211,22 @@ func GenerateArrayOfDoubleArray(numRows int) []*schemapb.ScalarField {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
 				DoubleData: &schemapb.DoubleArray{
-					Data: GenerateFloat64Array(elemCountOfArray),
+					Data: GenerateFloat64Array(ElemCountOfArray),
+				},
+			},
+		})
+	}
+	return ret
+}
+
+func GenerateArrayOfFloatVectorArray(numRows int, dim int) []*schemapb.VectorField {
+	ret := make([]*schemapb.VectorField, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, &schemapb.VectorField{
+			Dim: int64(dim),
+			Data: &schemapb.VectorField_FloatVector{
+				FloatVector: &schemapb.FloatArray{
+					Data: GenerateFloatVectors(ElemCountOfArray, dim),
 				},
 			},
 		})
@@ -225,7 +240,7 @@ func GenerateArrayOfStringArray(numRows int) []*schemapb.ScalarField {
 		ret = append(ret, &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_StringData{
 				StringData: &schemapb.StringArray{
-					Data: GenerateStringArray(elemCountOfArray),
+					Data: GenerateStringArray(ElemCountOfArray),
 				},
 			},
 		})
@@ -708,6 +723,25 @@ func NewArrayFieldData(fieldName string, numRows int) *schemapb.FieldData {
 	}
 }
 
+func NewVectorArrayFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Data:        GenerateArrayOfFloatVectorArray(numRows, dim),
+						ElementType: schemapb.DataType_FloatVector,
+						Dim:         int64(dim),
+					},
+				},
+			},
+		},
+	}
+}
+
 func NewArrayFieldDataWithValue(fieldName string, fieldValue interface{}) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Array,
@@ -1000,5 +1034,42 @@ func GenerateVectorFieldDataWithValue(dType schemapb.DataType, fieldName string,
 		panic("unsupported data type")
 	}
 	fieldData.FieldId = fieldID
+	return fieldData
+}
+
+// Generate number of fields in StructField FieldDatas where each field is an ArrayType of something
+func GenerateArrayOfStructArray(schema *schemapb.StructArrayFieldSchema, numRows int, dim int) []*schemapb.FieldData {
+	ret := make([]*schemapb.FieldData, 0, numRows)
+	for _, field := range schema.Fields {
+		if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
+			panic("Only Array or ArrayOfVector type is supported for StructField")
+		}
+
+		switch field.GetElementType() {
+		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+			fieldData := NewArrayFieldData(field.Name, numRows)
+			fieldData.FieldId = field.FieldID
+			ret = append(ret, fieldData)
+		case schemapb.DataType_FloatVector:
+			fieldData := NewVectorArrayFieldData(field.Name, numRows, dim)
+			fieldData.FieldId = field.FieldID
+			ret = append(ret, fieldData)
+		default:
+			panic(fmt.Sprintf("unimplemented data type: %s", field.ElementType))
+		}
+	}
+	return ret
+}
+
+func GenerateStructFieldData(schema *schemapb.StructArrayFieldSchema, fieldName string, numRow int, dim int) *schemapb.FieldData {
+	fieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_StructArrays{
+			StructArrays: &schemapb.StructArrayField{
+				Fields: GenerateArrayOfStructArray(schema, numRow, dim),
+			},
+		},
+	}
 	return fieldData
 }
