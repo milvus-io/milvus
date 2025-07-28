@@ -41,7 +41,7 @@ class ListNode {
         ~NodePin();
 
      private:
-        NodePin(ListNode* node);
+        explicit NodePin(ListNode* node);
         friend class ListNode;
         ListNode* node_;
     };

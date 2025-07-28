@@ -89,7 +89,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
             cids.push_back(i);
         }
-        SemiInlineGet(PinCells(std::move(cids)));
+        SemiInlineGet(PinCells(cids));
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
@@ -306,7 +306,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         CacheCell(CacheSlot<CellT>* slot, cid_t cid, ResourceUsage size)
             : internal::ListNode(slot->dlist_, size), slot_(slot), cid_(cid) {
         }
-        ~CacheCell() {
+        ~CacheCell() override {
             if (state_ == State::LOADING) {
                 LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading",
                           key());

@@ -14,6 +14,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <utility>
 
 #include <fmt/core.h>
 #include <folly/ExceptionWrapper.h>
@@ -52,8 +53,7 @@ ListNode::ListNode(DList* dlist, ResourceUsage size)
                            2 * dlist->eviction_config().cache_touch_window)
                         : std::chrono::high_resolution_clock::now()),
       dlist_(dlist),
-      size_(size),
-      state_(State::NOT_LOADED) {
+      size_(size) {
 }
 
 ListNode::~ListNode() {
@@ -166,7 +166,7 @@ ListNode::set_error(folly::exception_wrapper error) {
     // setException may call continuation of bound futures inline, and those continuation may also need to acquire the
     // lock, which may cause deadlock. So we release the lock before calling setException.
     if (promise) {
-        promise->setException(error);
+        promise->setException(std::move(error));
     }
 }
 
