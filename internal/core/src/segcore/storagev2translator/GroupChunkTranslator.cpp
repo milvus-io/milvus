@@ -298,13 +298,6 @@ GroupChunkTranslator::load_group_chunk(
             std::filesystem::create_directories(filepath.parent_path());
 
             chunk = create_chunk(field_meta, array_vec, filepath.string());
-            auto ok = unlink(filepath.c_str());
-            AssertInfo(ok == 0,
-                       fmt::format("[StorageV2] translator {} failed to unlink "
-                                   "mmap data file {}, err: {}",
-                                   key_,
-                                   filepath.c_str(),
-                                   strerror(errno)));
         }
 
         chunks[fid] = std::move(chunk);
