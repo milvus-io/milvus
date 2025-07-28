@@ -201,6 +201,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return true;
     }
 
+    std::vector<std::pair<SegOffset, Timestamp>>
+    search_batch_pks(const std::vector<PkType>& pks,
+                     const Timestamp* timestamps) const;
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;

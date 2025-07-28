@@ -896,6 +896,86 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
     });
 }
 
+std::vector<std::pair<SegOffset, Timestamp>>
+ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
+                                           const Timestamp* timestamps) const {
+    AssertInfo(is_sorted_by_pk_,
+               "search_batch_pks only works on pk sorted segment");
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = fields_.at(pk_field_id);
+    std::vector<std::pair<SegOffset, Timestamp>> pk_offsets;
+
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64: {
+            for (size_t i = 0; i < pks.size(); i++) {
+                // get int64 pks
+                auto target = std::get<int64_t>(pks[i]);
+                auto timestamp = timestamps[i];
+                auto num_chunk = pk_column->num_chunks();
+                for (int i = 0; i < num_chunk; ++i) {
+                    auto pw = pk_column->DataOfChunk(i);
+                    auto src = reinterpret_cast<const int64_t*>(pw.get());
+                    auto chunk_row_num = pk_column->chunk_row_nums(i);
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        if (insert_record_.timestamps_[offset] <= timestamp) {
+                            pk_offsets.emplace_back(offset, timestamp);
+                        }
+                    }
+                }
+            }
+
+            break;
+        }
+        case DataType::VARCHAR: {
+            for (size_t i = 0; i < pks.size(); i++) {
+                // get varchar pks
+                auto target = std::get<std::string>(pks[i]);
+                auto timestamp = timestamps[i];
+
+                auto num_chunk = pk_column->num_chunks();
+                for (int i = 0; i < num_chunk; ++i) {
+                    // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    auto pw = pk_column->GetChunk(i);
+                    auto string_chunk = static_cast<StringChunk*>(pw.get());
+                    auto offset = string_chunk->binary_search_string(target);
+                    for (; offset != -1 && offset < string_chunk->RowNums() &&
+                           string_chunk->operator[](offset) == target;
+                         ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (insert_record_.timestamps_[segment_offset] <=
+                            timestamp) {
+                            pk_offsets.emplace_back(segment_offset, timestamp);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
+    }
+
+    return pk_offsets;
+}
+
 template <typename Condition>
 std::vector<SegOffset>
 ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
@@ -1020,8 +1100,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           &insert_record_,
-          [this](const PkType& pk, Timestamp timestamp) {
-              return this->search_pk(pk, timestamp);
+          [this](const std::vector<PkType>& pks, const Timestamp* timestamps) {
+              return this->search_batch_pks(pks, timestamps);
           },
           segment_id) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
