@@ -106,7 +106,8 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                     default:
                         ThrowInfo(
                             DataTypeInvalid,
-                            fmt::format("unsupported data type {}", val_type));
+                            fmt::format("unsupported array sub element type {}",
+                                        val_type));
                 }
             } else {
                 if (expr_->same_type_) {
@@ -139,24 +140,30 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
         }
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
             if (IsArrayDataType(data_type)) {
-                auto val_type = expr_->vals_[0].val_case();
+                auto val_type = expr_->column_.element_type_;
                 switch (val_type) {
-                    case proto::plan::GenericValue::kBoolVal: {
+                    case DataType::BOOL: {
                         return ExecArrayContainsAll<bool>(context);
                     }
-                    case proto::plan::GenericValue::kInt64Val: {
+                    case DataType::INT8:
+                    case DataType::INT16:
+                    case DataType::INT32:
+                    case DataType::INT64: {
                         return ExecArrayContainsAll<int64_t>(context);
                     }
-                    case proto::plan::GenericValue::kFloatVal: {
+                    case DataType::FLOAT:
+                    case DataType::DOUBLE: {
                         return ExecArrayContainsAll<double>(context);
                     }
-                    case proto::plan::GenericValue::kStringVal: {
+                    case DataType::STRING:
+                    case DataType::VARCHAR: {
                         return ExecArrayContainsAll<std::string>(context);
                     }
                     default:
                         ThrowInfo(
                             DataTypeInvalid,
-                            fmt::format("unsupported data type {}", val_type));
+                            fmt::format("unsupported array sub element type {}",
+                                        val_type));
                 }
             } else {
                 if (expr_->same_type_) {
@@ -747,7 +754,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
 
     std::set<GetType> elements;
     for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueFromProto<GetType>(element));
+        elements.insert(GetValueWithCastNumber<GetType>(element));
     }
 
     int processed_cursor = 0;
