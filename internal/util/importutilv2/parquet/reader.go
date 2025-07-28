@@ -68,16 +68,20 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
 
-	fileReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	readProps := pqarrow.ArrowReadProperties{
+		BatchSize: count,
+	}
+	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)
-	if err != nil {
-		return nil, err
-	}
-	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
