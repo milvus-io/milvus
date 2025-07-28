@@ -41,12 +41,12 @@ func GetMemoryAllocator() MemoryAllocator {
 
 // MemoryAllocator handles memory allocation and deallocation for import tasks
 type MemoryAllocator interface {
-	// Release releases memory of the specified size
-	Release(taskID int64, size int64)
-
 	// BlockingAllocate blocks until memory is available and then allocates
 	// This method will block until memory becomes available
 	BlockingAllocate(taskID int64, size int64)
+
+	// Release releases memory of the specified size
+	Release(taskID int64, size int64)
 }
 
 type memoryAllocator struct {
@@ -65,28 +65,6 @@ func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	}
 	ma.cond = sync.NewCond(&ma.mutex)
 	return ma
-}
-
-// Release releases memory of the specified size
-func (ma *memoryAllocator) Release(taskID int64, size int64) {
-	ma.mutex.Lock()
-	defer ma.mutex.Unlock()
-
-	ma.usedMemory -= size
-	if ma.usedMemory < 0 {
-		ma.usedMemory = 0 // Prevent negative memory usage
-		log.Warn("memory release resulted in negative usage, reset to 0",
-			zap.Int64("taskID", taskID),
-			zap.Int64("releaseSize", size))
-	}
-
-	log.Info("memory released successfully",
-		zap.Int64("taskID", taskID),
-		zap.Int64("releasedSize", size),
-		zap.Int64("usedMemory", ma.usedMemory))
-
-	// Wake up waiting tasks after memory is released
-	ma.cond.Broadcast()
 }
 
 // BlockingAllocate blocks until memory is available and then allocates
@@ -132,4 +110,26 @@ func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 		zap.Int64("allocatedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory),
 		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
+}
+
+// Release releases memory of the specified size
+func (ma *memoryAllocator) Release(taskID int64, size int64) {
+	ma.mutex.Lock()
+	defer ma.mutex.Unlock()
+
+	ma.usedMemory -= size
+	if ma.usedMemory < 0 {
+		ma.usedMemory = 0 // Prevent negative memory usage
+		log.Warn("memory release resulted in negative usage, reset to 0",
+			zap.Int64("taskID", taskID),
+			zap.Int64("releaseSize", size))
+	}
+
+	log.Info("memory released successfully",
+		zap.Int64("taskID", taskID),
+		zap.Int64("releasedSize", size),
+		zap.Int64("usedMemory", ma.usedMemory))
+
+	// Wake up waiting tasks after memory is released
+	ma.cond.Broadcast()
 }
