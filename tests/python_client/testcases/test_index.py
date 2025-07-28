@@ -2356,7 +2356,7 @@ class TestBitmapIndex(TestcaseBase):
         method:
             1. build and drop `BITMAP` index on an empty collection
             2. rebuild `BITMAP` index on loaded collection
-            3. drop index on loaded collection and raises expected error
+            3. drop index on loaded collection
             4. re-build the same index on loaded collection
         expected:
             1. build and drop index successful on a not loaded collection
