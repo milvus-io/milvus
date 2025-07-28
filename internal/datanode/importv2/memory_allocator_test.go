@@ -17,7 +17,10 @@
 package importv2
 
 import (
+	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -186,4 +189,40 @@ func TestMemoryAllocatorSimple(t *testing.T) {
 	// Test memory release
 	ma.Release(1, 50*1024*1024)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorMassiveConcurrency tests massive concurrent memory allocation and release
+func TestMemoryAllocatorMassiveConcurrency(t *testing.T) {
+	// Create memory allocator with 1.6GB system memory
+	totalMemory := int64(16 * 1024 * 1024 * 1024) // 16GB * 10%
+	ma := NewMemoryAllocator(totalMemory)
+
+	const numTasks = 200
+
+	var wg sync.WaitGroup
+	wg.Add(numTasks)
+	// Start concurrent allocation and release
+	for i := 0; i < numTasks; i++ {
+		taskID := int64(i + 1)
+		var memorySize int64
+		// 10% chance to allocate 1.6GB, 90% chance to allocate 128MB-1536MB
+		if rand.Float64() < 0.1 {
+			memorySize = int64(1600 * 1024 * 1024)
+		} else {
+			multiple := rand.Intn(12) + 1
+			memorySize = int64(multiple * 128 * 1024 * 1024) // 128MB to 1536MB
+		}
+
+		go func(id int64, size int64) {
+			defer wg.Done()
+			ma.BlockingAllocate(id, size)
+			time.Sleep(1 * time.Millisecond)
+			ma.Release(id, size)
+		}(taskID, memorySize)
+	}
+	wg.Wait()
+
+	// Assert that all memory is released
+	finalMemory := ma.(*memoryAllocator).usedMemory
+	assert.Equal(t, int64(0), finalMemory, "All memory should be released")
 }
