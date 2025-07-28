@@ -37,7 +37,7 @@ ScalarIndexCreator::ScalarIndexCreator(
         if (index_type_ == milvus::index::NGRAM_INDEX_TYPE) {
             if (!config.contains(milvus::index::MIN_GRAM) ||
                 !config.contains(milvus::index::MAX_GRAM)) {
-                PanicInfo(
+                ThrowInfo(
                     milvus::ErrorCode::InvalidParameter,
                     "Ngram index must specify both min_gram and max_gram");
             }

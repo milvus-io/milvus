@@ -106,6 +106,12 @@ type collectionInfo struct {
 	replicateID           string
 	updateTimestamp       uint64
 	collectionTTL         uint64
+	numPartitions         int64
+	vChannels             []string
+	pChannels             []string
+	shardsNum             int32
+	aliases               []string
+	properties            []*commonpb.KeyValuePair
 }
 
 type databaseInfo struct {
@@ -135,6 +141,12 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 		}
 		if field.GetIsPrimaryKey() {
 			pkField = field
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		fieldMap.Insert(structField.GetName(), structField.GetFieldID())
+		for _, field := range structField.GetFields() {
+			fieldMap.Insert(field.GetName(), field.GetFieldID())
 		}
 	}
 	// skip load fields logic for now
@@ -177,6 +189,15 @@ func (s *schemaInfo) GetLoadFieldIDs(loadFields []string, skipDynamicField bool)
 	// fieldIDs := make([]int64, 0, len(loadFields))
 	fields := make([]*schemapb.FieldSchema, 0, len(loadFields))
 	for _, name := range loadFields {
+		// todo(SpadeA): check struct field
+		if structArrayField := s.schemaHelper.GetStructArrayFieldFromName(name); structArrayField != nil {
+			for _, field := range structArrayField.GetFields() {
+				fields = append(fields, field)
+				fieldIDs.Insert(field.GetFieldID())
+			}
+			continue
+		}
+
 		fieldSchema, err := s.schemaHelper.GetFieldFromName(name)
 		if err != nil {
 			return nil, err
@@ -472,6 +493,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 			partitionKeyIsolation: isolation,
 			updateTimestamp:       collection.UpdateTimestamp,
 			collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+			vChannels:             collection.VirtualChannelNames,
+			pChannels:             collection.PhysicalChannelNames,
+			numPartitions:         collection.NumPartitions,
+			shardsNum:             collection.ShardsNum,
+			aliases:               collection.Aliases,
+			properties:            collection.Properties,
 		}, nil
 	}
 	_, dbOk := m.collInfo[database]
@@ -491,12 +518,18 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		replicateID:           replicateID,
 		updateTimestamp:       collection.UpdateTimestamp,
 		collectionTTL:         getCollectionTTL(schemaInfo.CollectionSchema.GetProperties()),
+		vChannels:             collection.VirtualChannelNames,
+		pChannels:             collection.PhysicalChannelNames,
+		numPartitions:         collection.NumPartitions,
+		shardsNum:             collection.ShardsNum,
+		aliases:               collection.Aliases,
+		properties:            collection.Properties,
 	}
 
 	log.Ctx(ctx).Info("meta update success", zap.String("database", database), zap.String("collectionName", collectionName),
 		zap.String("actual collection Name", collection.Schema.GetName()), zap.Int64("collectionID", collection.CollectionID),
 		zap.Strings("partition", partitions.PartitionNames), zap.Uint64("currentVersion", curVersion),
-		zap.Uint64("version", collection.GetRequestTime()),
+		zap.Uint64("version", collection.GetRequestTime()), zap.Any("aliases", collection.Aliases),
 	)
 
 	m.collectionCacheVersion[collection.GetCollectionID()] = collection.GetRequestTime()

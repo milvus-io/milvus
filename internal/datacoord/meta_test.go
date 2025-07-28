@@ -40,6 +40,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -424,6 +425,90 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 		droppedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]
 		suite.EqualValues(2, droppedCount)
+	})
+
+	suite.Run("test L2 sort", func() {
+		getLatestSegments := func() *SegmentsInfo {
+			latestSegments := NewSegmentsInfo()
+			for segID, segment := range map[UniqueID]*SegmentInfo{
+				1: {SegmentInfo: &datapb.SegmentInfo{
+					ID:           1,
+					CollectionID: 100,
+					PartitionID:  10,
+					State:        commonpb.SegmentState_Flushed,
+					Level:        datapb.SegmentLevel_L2,
+					Binlogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 10000, 10001)},
+					Statslogs:    []*datapb.FieldBinlog{getFieldBinlogIDs(0, 20000, 20001)},
+					// latest segment has 2 deltalogs, one submit for compaction, one is appended before compaction done
+					Deltalogs:      []*datapb.FieldBinlog{getFieldBinlogIDs(0, 30000), getFieldBinlogIDs(0, 30001)},
+					NumOfRows:      2,
+					StorageVersion: storage.StorageV1,
+				}},
+			} {
+				latestSegments.SetSegment(segID, segment)
+			}
+
+			return latestSegments
+		}
+
+		latestSegments := getLatestSegments()
+		compactToSeg := &datapb.CompactionSegment{
+			SegmentID:           2,
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50001)},
+			NumOfRows:           2,
+			StorageVersion:      storage.StorageV2,
+		}
+
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{compactToSeg},
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []UniqueID{1},
+			Type:          datapb.CompactionType_SortCompaction,
+		}
+		m := &meta{
+			catalog:      &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments:     latestSegments,
+			chunkManager: mockChMgr,
+		}
+
+		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		assert.NoError(suite.T(), err)
+		suite.Equal(1, len(infos))
+		info := infos[0]
+		suite.NoError(err)
+		suite.NotNil(info)
+		suite.NotNil(mutation)
+
+		// check newSegment
+		suite.EqualValues(2, info.GetID())
+		suite.Equal(datapb.SegmentLevel_L2, info.GetLevel())
+		suite.Equal(commonpb.SegmentState_Flushed, info.GetState())
+		suite.Equal(storage.StorageV2, info.GetStorageVersion())
+
+		binlogs := info.GetBinlogs()
+		for _, fbinlog := range binlogs {
+			for _, blog := range fbinlog.GetBinlogs() {
+				suite.Empty(blog.GetLogPath())
+				suite.EqualValues(50000, blog.GetLogID())
+			}
+		}
+
+		statslogs := info.GetStatslogs()
+		for _, fbinlog := range statslogs {
+			for _, blog := range fbinlog.GetBinlogs() {
+				suite.Empty(blog.GetLogPath())
+				suite.EqualValues(50001, blog.GetLogID())
+			}
+		}
+
+		// check compactFrom segments
+		for _, segID := range []int64{1} {
+			seg := m.GetSegment(context.TODO(), segID)
+			suite.Equal(commonpb.SegmentState_Dropped, seg.GetState())
+			suite.NotEmpty(seg.GetDroppedAt())
+		}
 	})
 }
 

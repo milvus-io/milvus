@@ -107,7 +107,7 @@ struct UnaryElementFunc {
                                      op == proto::plan::OpType::InnerMatch) {
                     res[i] = milvus::query::Match(src[offset], val, op);
                 } else {
-                    PanicInfo(OpTypeInvalid,
+                    ThrowInfo(OpTypeInvalid,
                               "unsupported op_type:{} for UnaryElementFunc",
                               op);
                 }
@@ -144,7 +144,7 @@ struct UnaryElementFunc {
                                              proto::plan::OpType::InnerMatch) {
                         res[i] = milvus::query::Match(src[i], val, op);
                     } else {
-                        PanicInfo(OpTypeInvalid,
+                        ThrowInfo(OpTypeInvalid,
                                   "unsupported op_type:{} for UnaryElementFunc",
                                   op);
                     }
@@ -181,7 +181,7 @@ struct UnaryElementFunc {
             res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
                 src, size, val);
         } else {
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       "unsupported op_type:{} for UnaryElementFunc",
                       op);
         }
@@ -283,7 +283,7 @@ struct UnaryElementFuncForArray {
                     res[i] = matcher(array_data);
                 }
             } else {
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           "unsupported op_type:{} for "
                           "UnaryElementFuncForArray",
                           op);
@@ -313,7 +313,7 @@ struct UnaryIndexFuncForMatch {
             }
 
             if (!index->HasRawData()) {
-                PanicInfo(Unsupported,
+                ThrowInfo(Unsupported,
                           "index don't support regex query and don't have "
                           "raw data");
             }
@@ -347,7 +347,7 @@ struct UnaryIndexFuncForMatch {
                 return res;
             }
         }
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "UnaryIndexFuncForMatch is only supported on string types");
     }
 };
@@ -378,7 +378,7 @@ struct UnaryIndexFunc {
             UnaryIndexFuncForMatch<T> func;
             return func(index, val, op);
         } else {
-            PanicInfo(
+            ThrowInfo(
                 OpTypeInvalid,
                 fmt::format("unsupported op_type:{} for UnaryIndexFunc", op));
         }
@@ -505,6 +505,12 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     VectorPtr
     ExecTextMatch();
+
+    bool
+    CanExecNgramMatch(proto::plan::OpType op_type);
+
+    bool
+    CanExecNgramMatchForJson(DataType val_type);
 
     std::optional<VectorPtr>
     ExecNgramMatch();

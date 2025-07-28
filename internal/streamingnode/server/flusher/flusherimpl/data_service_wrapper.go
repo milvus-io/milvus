@@ -3,6 +3,8 @@ package flusherimpl
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -15,22 +17,25 @@ func newDataSyncServiceWrapper(
 	channelName string,
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
+	channelCheckpointTimeTick uint64,
 ) *dataSyncServiceWrapper {
 	handler := adaptor.NewBaseMsgPackAdaptorHandler()
 	return &dataSyncServiceWrapper{
-		channelName: channelName,
-		input:       input,
-		handler:     handler,
-		ds:          ds,
+		channelName:               channelName,
+		input:                     input,
+		handler:                   handler,
+		ds:                        ds,
+		channelCheckpointTimeTick: channelCheckpointTimeTick,
 	}
 }
 
 // dataSyncServiceWrapper wraps DataSyncService and related input channel.
 type dataSyncServiceWrapper struct {
-	channelName string
-	input       chan<- *msgstream.MsgPack
-	handler     *adaptor.BaseMsgPackAdaptorHandler
-	ds          *pipeline.DataSyncService
+	channelName               string
+	channelCheckpointTimeTick uint64
+	input                     chan<- *msgstream.MsgPack
+	handler                   *adaptor.BaseMsgPackAdaptorHandler
+	ds                        *pipeline.DataSyncService
 }
 
 // Start starts the data sync service.
@@ -44,6 +49,16 @@ func (ds *dataSyncServiceWrapper) HandleMessage(ctx context.Context, msg message
 	for ds.handler.PendingMsgPack.Len() > 0 {
 		next := ds.handler.PendingMsgPack.Next()
 		nextTsMsg := msgstream.MustBuildMsgPackFromConsumeMsgPack(next, adaptor.UnmashalerDispatcher)
+
+		// filter out the message less than vchannel level checkpoint.
+		if nextTsMsg.EndTs < ds.channelCheckpointTimeTick {
+			ds.handler.Logger.Debug("skip the message less than vchannel checkpoint",
+				zap.Uint64("timestamp", nextTsMsg.EndTs),
+				zap.Uint64("checkpoint", ds.channelCheckpointTimeTick),
+			)
+			ds.handler.PendingMsgPack.UnsafeAdvance()
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

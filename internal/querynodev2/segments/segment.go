@@ -521,6 +521,7 @@ func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
 
 func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error) {
 	log := log.Ctx(ctx).WithLazy(
+		zap.Uint64("mvcc", searchReq.MVCC()),
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
@@ -572,7 +573,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan)
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
-		zap.Int64("msgID", plan.MsgID()),
+		zap.Uint64("mvcc", plan.Timestamp),
 		zap.String("segmentType", s.segmentType.String()),
 	)
 

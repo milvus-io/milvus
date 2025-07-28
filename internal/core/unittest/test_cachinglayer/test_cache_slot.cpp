@@ -46,8 +46,10 @@ class MockTranslator : public Translator<TestCell> {
                    bool for_concurrent_test = false)
         : uid_to_cid_map_(std::move(uid_to_cid_map)),
           key_(key),
-          meta_(
-              storage_type, CacheWarmupPolicy::CacheWarmupPolicy_Disable, true),
+          meta_(storage_type,
+                CellIdMappingMode::CUSTOMIZED,
+                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                true),
           num_unique_cids_(cell_sizes.size()),
           for_concurrent_test_(for_concurrent_test) {
         cid_set_.reserve(cell_sizes.size());
@@ -217,6 +219,8 @@ class CacheSlotTest : public ::testing::Test {
     static constexpr int64_t DISK_LIMIT = 0;
     const std::string SLOT_KEY = "test_slot";
 
+    CacheSlotTest() = default;
+
     void
     SetUp() override {
         auto limit = ResourceUsage{MEMORY_LIMIT, DISK_LIMIT};
@@ -344,7 +348,7 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
         {
             try {
                 SemiInlineGet(std::move(future));
-            } catch (const std::invalid_argument& e) {
+            } catch (const milvus::SegcoreError& e) {
                 std::string error_what = e.what();
                 EXPECT_TRUE(error_what.find("out of range") !=
                                 std::string::npos ||
@@ -352,7 +356,7 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
                 throw;
             }
         },
-        std::invalid_argument);
+        milvus::SegcoreError);
 
     EXPECT_EQ(translator_->GetCellsCallCount(), 0);
 }
@@ -515,9 +519,9 @@ TEST_F(CacheSlotTest, EvictionTest) {
     ResourceUsage new_limit = ResourceUsage(300, 0);
     ResourceUsage new_high_watermark = ResourceUsage(250, 0);
     ResourceUsage new_low_watermark = ResourceUsage(200, 0);
-    EXPECT_TRUE(dlist_->UpdateLimit(new_limit));
-    dlist_->UpdateHighWatermark(new_high_watermark);
     dlist_->UpdateLowWatermark(new_low_watermark);
+    dlist_->UpdateHighWatermark(new_high_watermark);
+    EXPECT_TRUE(dlist_->UpdateLimit(new_limit));
     EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_), new_limit);
 
     std::vector<cl_uid_t> uids_012 = {10, 20, 30};
@@ -579,9 +583,9 @@ TEST_P(CacheSlotConcurrentTest, ConcurrentAccessMultipleSlots) {
     ResourceUsage new_limit = ResourceUsage(700, 0);
     ResourceUsage new_high_watermark = ResourceUsage(650, 0);
     ResourceUsage new_low_watermark = ResourceUsage(600, 0);
-    ASSERT_TRUE(dlist_->UpdateLimit(new_limit));
-    dlist_->UpdateHighWatermark(new_high_watermark);
     dlist_->UpdateLowWatermark(new_low_watermark);
+    dlist_->UpdateHighWatermark(new_high_watermark);
+    ASSERT_TRUE(dlist_->UpdateLimit(new_limit));
     EXPECT_EQ(DListTestFriend::get_max_memory(*dlist_).memory_bytes,
               new_limit.memory_bytes);
 

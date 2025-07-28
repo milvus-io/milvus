@@ -236,6 +236,12 @@ func (m *CollectionManager) upgradeLoadFields(ctx context.Context, collection *q
 		return fieldSchema.GetFieldID(), !common.IsSystemField(fieldSchema.GetFieldID())
 	})
 
+	for _, structArrayField := range resp.GetSchema().GetStructArrayFields() {
+		for _, field := range structArrayField.GetFields() {
+			collection.LoadFields = append(collection.LoadFields, field.GetFieldID())
+		}
+	}
+
 	// put updated meta back to store
 	err = m.putCollection(ctx, true, &Collection{
 		CollectionLoadInfo: collection,
@@ -619,7 +625,7 @@ func (m *CollectionManager) removePartition(ctx context.Context, collectionID ty
 	return nil
 }
 
-func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionID typeutil.UniqueID, replicaNumber int32) error {
+func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionID typeutil.UniqueID, replicaNumber int32, userSpecifiedReplicaMode bool) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -629,7 +635,7 @@ func (m *CollectionManager) UpdateReplicaNumber(ctx context.Context, collectionI
 	}
 	newCollection := collection.Clone()
 	newCollection.ReplicaNumber = replicaNumber
-
+	newCollection.UserSpecifiedReplicaMode = userSpecifiedReplicaMode
 	partitions := m.getPartitionsByCollection(collectionID)
 	newPartitions := make([]*Partition, 0, len(partitions))
 	for _, partition := range partitions {

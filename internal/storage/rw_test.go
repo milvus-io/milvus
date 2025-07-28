@@ -29,36 +29,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storagecommon"
-	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
-
-type mockIDAllocator struct{}
-
-func (tso *mockIDAllocator) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
-	return &rootcoordpb.AllocIDResponse{
-		Status: merr.Success(),
-		ID:     int64(1),
-		Count:  req.Count,
-	}, nil
-}
-
-func newMockIDAllocator() *mockIDAllocator {
-	return &mockIDAllocator{}
-}
 
 func TestPackedBinlogRecordSuite(t *testing.T) {
 	suite.Run(t, new(PackedBinlogRecordSuite))
@@ -72,14 +55,13 @@ type PackedBinlogRecordSuite struct {
 	logIDAlloc   allocator.Interface
 	mockBinlogIO *mock_util.MockBinlogIO
 
-	collectionID UniqueID
-	partitionID  UniqueID
-	segmentID    UniqueID
-	schema       *schemapb.CollectionSchema
-	bucketName   string
-	rootPath     string
-	maxRowNum    int64
-	chunkSize    uint64
+	collectionID  UniqueID
+	partitionID   UniqueID
+	segmentID     UniqueID
+	schema        *schemapb.CollectionSchema
+	maxRowNum     int64
+	chunkSize     uint64
+	storageConfig *indexpb.StorageConfig
 }
 
 func (s *PackedBinlogRecordSuite) SetupTest() {
@@ -87,17 +69,22 @@ func (s *PackedBinlogRecordSuite) SetupTest() {
 	s.ctx = ctx
 	logIDAlloc := allocator.NewLocalAllocator(1, math.MaxInt64)
 	s.logIDAlloc = logIDAlloc
-	initcore.InitLocalArrowFileSystem("/tmp")
+	// initcore.InitLocalArrowFileSystem("/tmp")
 	s.mockID.Store(time.Now().UnixMilli())
 	s.mockBinlogIO = mock_util.NewMockBinlogIO(s.T())
 	s.collectionID = UniqueID(0)
 	s.partitionID = UniqueID(0)
 	s.segmentID = UniqueID(0)
 	s.schema = generateTestSchema()
-	s.rootPath = "/tmp"
-	s.bucketName = "a-bucket"
+	// s.rootPath = "/tmp"
+	// s.bucketName = "a-bucket"
 	s.maxRowNum = int64(1000)
 	s.chunkSize = uint64(1024)
+	s.storageConfig = &indexpb.StorageConfig{
+		StorageType: "local",
+		RootPath:    "/tmp",
+		BucketName:  "a-bucket",
+	}
 }
 
 func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
@@ -139,22 +126,23 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 		WithMultiPartUploadSize(0),
 		WithBufferSize(1 * 1024 * 1024), // 1MB
 		WithColumnGroups(columnGroups),
+		WithStorageConfig(s.storageConfig),
 	}
 
-	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.NoError(err)
 
 	blobs, err := generateTestData(rows)
 	s.NoError(err)
 
-	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 	s.NoError(err)
 	defer reader.Close()
 
 	for i := 1; i <= rows; i++ {
 		value, err := reader.NextValue()
 		s.NoError(err)
-		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.NoError(err)
@@ -183,6 +171,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 	binlogs := lo.Values(fieldBinlogs)
 	rOption := []RwOption{
 		WithVersion(StorageV2),
+		WithStorageConfig(s.storageConfig),
 	}
 	r, err := NewBinlogRecordReader(s.ctx, binlogs, s.schema, rOption...)
 	s.NoError(err)
@@ -228,6 +217,7 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 		WithMultiPartUploadSize(0),
 		WithBufferSize(10 * 1024 * 1024), // 10MB
 		WithColumnGroups(columnGroups),
+		WithStorageConfig(s.storageConfig),
 	}
 
 	v := &Value{
@@ -235,10 +225,10 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 		Timestamp: int64(tsoutil.ComposeTSByTime(getMilvusBirthday(), 0)),
 		Value:     genRowWithBM25(0),
 	}
-	rec, err := ValueSerializer([]*Value{v}, s.schema.Fields)
+	rec, err := ValueSerializer([]*Value{v}, s.schema)
 	s.NoError(err)
 
-	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.NoError(err)
 	err = w.Write(rec)
 	s.NoError(err)
@@ -258,8 +248,9 @@ func (s *PackedBinlogRecordSuite) TestGenerateBM25Stats() {
 func (s *PackedBinlogRecordSuite) TestUnsuportedStorageVersion() {
 	wOption := []RwOption{
 		WithVersion(-1),
+		WithStorageConfig(s.storageConfig),
 	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.Error(err)
 
 	rOption := []RwOption{
@@ -282,8 +273,9 @@ func (s *PackedBinlogRecordSuite) TestNoPrimaryKeyError() {
 	wOption := []RwOption{
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
+		WithStorageConfig(s.storageConfig),
 	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.Error(err)
 }
 
@@ -300,14 +292,16 @@ func (s *PackedBinlogRecordSuite) TestConvertArrowSchemaError() {
 	wOption := []RwOption{
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
+		WithStorageConfig(s.storageConfig),
 	}
-	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
+	_, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, s.logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.Error(err)
 }
 
 func (s *PackedBinlogRecordSuite) TestEmptyBinlog() {
 	rOption := []RwOption{
 		WithVersion(StorageV2),
+		WithStorageConfig(s.storageConfig),
 	}
 	_, err := NewBinlogRecordReader(s.ctx, []*datapb.FieldBinlog{}, s.schema, rOption...)
 	s.Error(err)
@@ -323,16 +317,20 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 	wOption := []RwOption{
 		WithVersion(StorageV2),
 		WithColumnGroups(columnGroups),
+		WithStorageConfig(s.storageConfig),
+		WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
+			return nil
+		}),
 	}
 	logIDAlloc := allocator.NewLocalAllocator(1, 1)
-	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, logIDAlloc, s.chunkSize, s.bucketName, s.rootPath, s.maxRowNum, wOption...)
+	w, err := NewBinlogRecordWriter(s.ctx, s.collectionID, s.partitionID, s.segmentID, s.schema, logIDAlloc, s.chunkSize, s.maxRowNum, wOption...)
 	s.NoError(err)
 
 	size := 10
 	blobs, err := generateTestData(size)
 	s.NoError(err)
 
-	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+	reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 	s.NoError(err)
 	defer reader.Close()
 
@@ -340,7 +338,7 @@ func (s *PackedBinlogRecordSuite) TestAllocIDExhausedError() {
 		value, err := reader.NextValue()
 		s.NoError(err)
 
-		rec, err := ValueSerializer([]*Value{*value}, s.schema.Fields)
+		rec, err := ValueSerializer([]*Value{*value}, s.schema)
 		s.NoError(err)
 		err = w.Write(rec)
 		s.Error(err)
@@ -570,6 +568,82 @@ func Test_makeBlobsReader(t *testing.T) {
 				got = append(got, bs)
 			}
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRwOptionValidate(t *testing.T) {
+	testCases := []struct {
+		tag         string
+		input       *rwOptions
+		expectError bool
+	}{
+		{
+			tag: "normal_case",
+			input: &rwOptions{
+				version:       StorageV1,
+				storageConfig: &indexpb.StorageConfig{},
+				op:            OpRead,
+				downloader:    func(ctx context.Context, paths []string) ([][]byte, error) { return nil, nil },
+			},
+			expectError: false,
+		},
+		{
+			tag: "normal_case_v2",
+			input: &rwOptions{
+				version:       StorageV2,
+				storageConfig: &indexpb.StorageConfig{},
+				op:            OpRead,
+			},
+			expectError: false,
+		},
+		{
+			tag: "bad_version",
+			input: &rwOptions{
+				version:       -1,
+				storageConfig: &indexpb.StorageConfig{},
+				downloader:    func(ctx context.Context, paths []string) ([][]byte, error) { return nil, nil },
+				op:            OpRead,
+			},
+			expectError: true,
+		},
+		{
+			tag: "missing_config",
+			input: &rwOptions{
+				version:       StorageV2,
+				storageConfig: nil,
+				op:            OpRead,
+			},
+			expectError: true,
+		},
+		{
+			tag: "v1eader_missing_downloader",
+			input: &rwOptions{
+				version:       StorageV1,
+				storageConfig: &indexpb.StorageConfig{},
+				op:            OpRead,
+			},
+			expectError: true,
+		},
+		{
+			tag: "writer_missing_uploader",
+			input: &rwOptions{
+				version:       StorageV2,
+				storageConfig: &indexpb.StorageConfig{},
+				op:            OpWrite,
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.tag, func(t *testing.T) {
+			err := tc.input.validate()
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

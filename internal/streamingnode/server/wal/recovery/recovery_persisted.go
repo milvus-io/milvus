@@ -2,19 +2,26 @@ package recovery
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
 // recoverRecoveryInfoFromMeta retrieves the recovery info for the given channel.
@@ -91,13 +98,37 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return nil, errors.Wrap(err, "failed to get pchannel info from rootcoord")
 	}
+	schemas, err := r.fetchLatestSchemaFromCoord(ctx, resp)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch latest schema from coord")
+	}
 
 	// save the vchannel recovery info into the catalog
 	vchannels := make(map[string]*streamingpb.VChannelMeta, len(resp.GetCollections()))
 	for _, collection := range resp.GetCollections() {
+		if collection.State == etcdpb.CollectionState_CollectionDropping {
+			// Drop the already dropping collection before streaming arch enabled.
+			// Otherwise, the dropping collection message will be lost,
+			// and the data of collection can not be dropped.
+			coordClient, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+			resp, err := coordClient.DropVirtualChannel(ctx, &datapb.DropVirtualChannelRequest{
+				Base:        commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+				ChannelName: collection.Vchannel,
+			})
+			if err = merr.CheckRPCCall(resp, err); err != nil {
+				return nil, errors.Wrap(err, "failed to drop virtual channel")
+			}
+			continue
+		}
 		partitions := make([]*streamingpb.PartitionInfoOfVChannel, 0, len(collection.Partitions))
 		for _, partition := range collection.Partitions {
 			partitions = append(partitions, &streamingpb.PartitionInfoOfVChannel{PartitionId: partition.PartitionId})
+		}
+		if schemas[collection.CollectionId] == nil {
+			panic(fmt.Sprintf("schema not found for collection, %d", collection.CollectionId))
 		}
 		vchannels[collection.Vchannel] = &streamingpb.VChannelMeta{
 			Vchannel: collection.Vchannel,
@@ -105,7 +136,17 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 				CollectionId: collection.CollectionId,
 				Partitions:   partitions,
+				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
+					{
+						Schema:             schemas[collection.CollectionId].Schema,
+						State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+						CheckpointTimeTick: 0, // The recovery info from old arch should be set as zero.
+						// because we don't have the version before streaming service is enabled.
+						// all message will happen after the recovery info is initialized.
+					},
+				},
 			},
+			CheckpointTimeTick: 0, // same as schema above.
 		}
 	}
 
@@ -131,4 +172,46 @@ func (r *recoveryStorageImpl) initializeRecoverInfo(ctx context.Context, channel
 		zap.Int64("magic", checkpoint.RecoveryMagic),
 	)
 	return checkpoint, nil
+}
+
+// fetchLatestSchemaFromCoord fetches the latest schema from coord.
+func (r *recoveryStorageImpl) fetchLatestSchemaFromCoord(ctx context.Context, resp *rootcoordpb.GetPChannelInfoResponse) (map[int64]*streamingpb.CollectionSchemaOfVChannel, error) {
+	rc, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get coord client")
+	}
+
+	futures := make([]*conc.Future[*milvuspb.DescribeCollectionResponse], 0, len(resp.GetCollections()))
+	for _, collection := range resp.GetCollections() {
+		if collection.State == etcdpb.CollectionState_CollectionDropping {
+			continue
+		}
+		future := conc.Go(func() (*milvuspb.DescribeCollectionResponse, error) {
+			resp, err := rc.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				CollectionID: collection.CollectionId,
+			})
+			if err = merr.CheckRPCCall(resp, err); err != nil {
+				return nil, errors.Wrap(err, "failed to describe collection")
+			}
+			return resp, nil
+		})
+		futures = append(futures, future)
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		return nil, errors.Wrap(err, "failed to describe collection")
+	}
+
+	schemas := make(map[int64]*streamingpb.CollectionSchemaOfVChannel, len(futures))
+	for _, future := range futures {
+		resp := future.Value()
+		collectionID := resp.CollectionID
+		schemas[collectionID] = &streamingpb.CollectionSchemaOfVChannel{
+			Schema: resp.Schema,
+		}
+	}
+	return schemas, nil
 }

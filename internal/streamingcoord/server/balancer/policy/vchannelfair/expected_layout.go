@@ -108,7 +108,7 @@ func (p *expectedLayoutForVChannelFairPolicy) Assign(channelID types.ChannelID, 
 	info.Term++
 	p.Assignments[channelID] = types.PChannelInfoAssigned{
 		Channel: info,
-		Node:    node,
+		Node:    node.StreamingNodeInfo,
 	}
 	p.Nodes[node.ServerID].AssignedChannels[channelID] = struct{}{}
 	p.Nodes[node.ServerID].AssignedVChannelCount += len(stats.VChannels)
@@ -171,6 +171,9 @@ func (p *expectedLayoutForVChannelFairPolicy) FindTheLeastUnbalanceScoreIncremen
 	var targetChannelID types.ChannelID
 	minScore := math.MaxFloat64
 	for channelID := range p.Assignments {
+		if !p.CurrentLayout.AllowRebalance(channelID) {
+			continue
+		}
 		serverID := p.Assignments[channelID].Node.ServerID
 		p.Unassign(channelID)
 		currentScore := p.GlobalUnbalancedScore

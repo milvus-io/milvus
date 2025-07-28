@@ -134,6 +134,12 @@ func (t *l0CompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	switch result.GetState() {
 	case datapb.CompactionTaskState_completed:
+		err = t.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t.GetTaskProto())
+		if err != nil {
+			t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			return
+		}
+
 		if err = t.saveSegmentMeta(result); err != nil {
 			log.Warn("l0CompactionTask failed to save segment meta", zap.Error(err))
 			return
@@ -289,15 +295,6 @@ func (t *l0CompactionTask) CheckCompactionContainsSegment(segmentID int64) bool 
 		}
 	}
 	return false
-}
-
-func (t *l0CompactionTask) PreparePlan() bool {
-	sealedSegments, _ := t.selectSealedSegment()
-	sealedSegmentIDs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) int64 {
-		return info.GetID()
-	})
-	exist, hasStating := t.meta.CheckSegmentsStating(context.TODO(), sealedSegmentIDs)
-	return exist && !hasStating
 }
 
 func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, error) {

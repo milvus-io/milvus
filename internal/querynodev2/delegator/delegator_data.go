@@ -139,7 +139,13 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		if newGrowingSegment {
 			sd.growingSegmentLock.Lock()
 			// check whether segment has been excluded
-			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
+			// all segment in excluded segment should not be add again
+			// don not check excluded ts
+			// because dropped segment in excluded segment may use wrong excluded ts
+			// which use checkpoint ts as excluded ts
+			// but checkpoint_ts < segment_end_ts cause exclueded data is not filtered out at filter node
+			// should be excluded here
+			if ok := sd.VerifyExcludedSegments(segmentID, 0); !ok {
 				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
 				sd.growingSegmentLock.Unlock()
 				growing.Release(context.Background())
@@ -407,6 +413,18 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
 		return merr.WrapErrServiceInternal("load L0 segment is not supported, l0 segment should only be loaded by watchChannel")
 	}
+
+	// pin all segments to prevent delete buffer has been cleaned up during worker load segments
+	// Note: if delete records is pinned, it will skip cleanup during SyncTargetVersion
+	// which means after segment is loaded, then delete buffer will be cleaned up by next SyncTargetVersion call
+	for _, info := range req.GetInfos() {
+		sd.deleteBuffer.Pin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+	}
+	defer func() {
+		for _, info := range req.GetInfos() {
+			sd.deleteBuffer.Unpin(info.GetStartPosition().GetTimestamp(), info.GetSegmentID())
+		}
+	}()
 
 	worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -156,6 +157,67 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 		err := CheckDelegatorDataReady(suite.nodeMgr, mockTargetManager, leadview, meta.CurrentTarget)
 		suite.Error(err)
 	})
+}
+
+func (suite *UtilTestSuite) TestGetChannelRWAndRONodesFor260() {
+	nodes := []int64{1, 2, 3, 4, 5}
+	nodeManager := session.NewNodeManager()
+	r := meta.NewReplica(&querypb.Replica{
+		Nodes: nodes,
+	})
+	rwNodes, roNodes := GetChannelRWAndRONodesFor260(r, nodeManager)
+	suite.ElementsMatch(rwNodes, []int64{})
+	suite.ElementsMatch(roNodes, []int64{1, 2, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.5.0"),
+	}))
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.6.0-dev"),
+	}))
+	rwNodes, roNodes = GetChannelRWAndRONodesFor260(r, nodeManager)
+	suite.ElementsMatch(rwNodes, []int64{})
+	suite.ElementsMatch(roNodes, []int64{1, 3, 4, 5})
+}
+
+func (suite *UtilTestSuite) TestFilterOutNodeLessThan260() {
+	nodes := []int64{1, 2, 3, 4, 5}
+	nodeManager := session.NewNodeManager()
+	filteredNodes := filterNodeLessThan260(nodes, nodeManager)
+	suite.ElementsMatch(filteredNodes, []int64{1, 2, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.5.0"),
+	}))
+	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
+	suite.ElementsMatch(filteredNodes, []int64{1, 2, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.6.0-dev"),
+	}))
+	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
+	suite.ElementsMatch(filteredNodes, []int64{1, 3, 4, 5})
+
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "127.0.0.1:0",
+		Hostname: "localhost",
+		Version:  semver.MustParse("2.6.0"),
+	}))
+	filteredNodes = filterNodeLessThan260(nodes, nodeManager)
+	suite.ElementsMatch(filteredNodes, []int64{1, 4, 5})
 }
 
 func TestUtilSuite(t *testing.T) {

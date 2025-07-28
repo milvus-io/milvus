@@ -84,8 +84,6 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
         if c_name in [None, ""]:
             error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
-        elif c_name == " ":
-            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
         self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -115,8 +113,6 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
         if c_name in [None, ""]:
             error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
-        elif c_name == " ":
-            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
         self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -168,12 +164,11 @@ class TestUtilityParams(TestcaseBase):
     def test_drop_collection_name_value_invalid(self, get_invalid_value_collection_name):
         self._connect()
         c_name = get_invalid_value_collection_name
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
         if c_name in [None, ""]:
             error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
-        elif c_name == " ":
-            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
-        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+            self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+        else:
+            self.utility_wrap.drop_collection(c_name)
 
     # TODO: enable
     @pytest.mark.tags(CaseLabel.L2)
@@ -199,7 +194,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {invalid_name}"}
-        if invalid_name in [None, "", " "]:
+        if invalid_name in [None, ""]:
             error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty"}
         self.utility_wrap.index_building_progress(collection_name=invalid_name,
                                                   check_task=CheckTasks.err_res, check_items=error)
@@ -500,11 +495,9 @@ class TestUtilityParams(TestcaseBase):
         error = {"err_code": 1100, "err_msg": "Invalid collection name"}
         if new_collection_name in [None, ""]:
             error = {"err_code": 999, "err_msg": f"`collection_name` value {new_collection_name} is illegal"}
-        if new_collection_name == " ":
-            error = {"err_code": 999, "err_msg": "collection name should not be empty"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res, check_items=error)
-
+    
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_not_existed_collection(self):
         """
@@ -1101,7 +1094,6 @@ class TestUtilityBase(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix + "new")
         alias = cf.gen_unique_str(prefix + "alias")
         self.utility_wrap.create_alias(old_collection_name, alias)
-        collection_alias = collection_w.aliases
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
         collection_w = self.init_collection_wrap(name=new_collection_name,
                                                  check_task=CheckTasks.check_collection_property,
@@ -1110,7 +1102,7 @@ class TestUtilityBase(TestcaseBase):
         collections = self.utility_wrap.list_collections()[0]
         assert new_collection_name in collections
         assert old_collection_name not in collections
-        assert collection_alias == collection_w.aliases
+        assert [alias] == collection_w.aliases
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collections(self):
@@ -1153,6 +1145,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w_2.aliases[0] == alias_1
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("move to test_milvus_client_v2_rename_back_old_collection")
     def test_rename_back_old_collection(self):
         """
         target: test rename collection function to single collection
@@ -1183,6 +1176,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_alias == collection_w.aliases
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("move to test_milvus_client_v2_rename_back_old_alias")
     def test_rename_back_old_alias(self):
         """
         target: test rename collection function to single collection
@@ -1198,6 +1192,7 @@ class TestUtilityBase(TestcaseBase):
         # 3. create an alias
         self.utility_wrap.create_alias(old_collection_name, alias)
         collection_alias = collection_w.aliases
+        log.info(collection_alias)
         # 4. drop the alias
         self.utility_wrap.drop_alias(collection_alias[0])
         # 5. rename collection to the dropped alias name
@@ -1392,8 +1387,8 @@ class TestUtilityAdvanced(TestcaseBase):
         )
 
         for _ in range(segment_num):
-            # insert random pks, ***start=None will generate random data***
-            data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+            # insert random pks
+            data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
             self.collection_wrap.insert(data)
             self.collection_wrap.flush()
 
@@ -1448,14 +1443,13 @@ class TestUtilityAdvanced(TestcaseBase):
         self.build_multi_index(index_params=DefaultVectorIndexParams.IVF_SQ8(ct.default_float_vec_field_name))
         self.collection_wrap.load()
 
-        # insert random pks, ***start=None will generate random data***
-        data = cf.gen_values(self.collection_wrap.schema, nb=nb, start_id=None)
+        # insert random pks ***
+        data = cf.gen_values(self.collection_wrap.schema, nb=nb, random_pk=True)
         self.collection_wrap.insert(data)
 
         # get_query_segment_info and verify results
         res_sealed, _ = self.utility_wrap.get_query_segment_info(collection_name)
         assert len(res_sealed) == 0
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_sealed_query_segment_info_after_create_index(self):

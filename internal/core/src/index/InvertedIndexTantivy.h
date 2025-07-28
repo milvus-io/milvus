@@ -25,6 +25,8 @@
 
 namespace milvus::index {
 
+const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
+
 inline TantivyDataType
 get_tantivy_data_type(proto::schema::DataType data_type) {
     switch (data_type) {
@@ -54,7 +56,7 @@ get_tantivy_data_type(proto::schema::DataType data_type) {
         }
 
         default:
-            PanicInfo(ErrorCode::NotImplemented,
+            ThrowInfo(ErrorCode::NotImplemented,
                       fmt::format("not implemented data type: {}", data_type));
     }
 }
@@ -89,7 +91,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     void
     Load(const BinarySet& binary_set, const Config& config = {}) override {
-        PanicInfo(ErrorCode::NotImplemented, "load v1 should be deprecated");
+        ThrowInfo(ErrorCode::NotImplemented, "load v1 should be deprecated");
     }
 
     void
@@ -102,7 +104,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     BuildWithDataset(const DatasetPtr& dataset,
                      const Config& config = {}) override {
-        PanicInfo(ErrorCode::NotImplemented,
+        ThrowInfo(ErrorCode::NotImplemented,
                   "BuildWithDataset should be deprecated");
     }
 
@@ -136,7 +138,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
      */
     void
     Build(size_t n, const T* values, const bool* valid_data) override {
-        PanicInfo(ErrorCode::NotImplemented, "Build should not be called");
+        ThrowInfo(ErrorCode::NotImplemented, "Build should not be called");
     }
 
     const TargetBitmap
@@ -179,7 +181,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     std::optional<T>
     Reverse_Lookup(size_t offset) const override {
-        PanicInfo(ErrorCode::NotImplemented,
+        ThrowInfo(ErrorCode::NotImplemented,
                   "Reverse_Lookup should not be handled by inverted index");
     }
 
@@ -216,7 +218,7 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
                 return RegexQuery(regex_pattern);
             }
             default:
-                PanicInfo(
+                ThrowInfo(
                     ErrorCode::OpTypeInvalid,
                     "not supported op type: {} for inverted index PatternMatch",
                     op);
@@ -245,6 +247,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    set_is_growing(bool is_growing) {
+        is_growing_ = is_growing;
+    }
+
  protected:
     void
     finish();
@@ -256,9 +263,21 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual void
     build_index_for_json(
         const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
-        PanicInfo(ErrorCode::NotImplemented,
+        ThrowInfo(ErrorCode::NotImplemented,
                   "build_index_for_json not implemented");
     }
+
+    // Loads the index metas that usually used along with the tantivy index.
+    // For example,  the null offset files of json index.
+    virtual void
+    LoadIndexMetas(const std::vector<std::string>& index_files,
+                   const Config& config);
+
+    // Filters out index files that are not belong to tantivy index.
+    // For example, index files of json index may contain null offset files.
+    // Modifying the index_files in place.
+    virtual void
+    RetainTantivyIndexFiles(std::vector<std::string>& index_files);
 
  protected:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
@@ -300,5 +319,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     // built from a higher version of tantivy which is not supported.
     // Therefore, we should provide a way to allow higher version of milvus to build tantivy index with low version.
     uint32_t tantivy_index_version_{0};
+
+    // for now, only TextMatchIndex and JsonKeyStatsInvertedIndex can be built for growing segment,
+    // and can read and insert concurrently.
+    bool is_growing_{false};
 };
 }  // namespace milvus::index

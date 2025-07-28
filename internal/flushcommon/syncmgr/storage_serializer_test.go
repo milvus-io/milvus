@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -91,7 +92,7 @@ func (s *StorageV1SerializerSuite) SetupSuite() {
 }
 
 func (s *StorageV1SerializerSuite) SetupTest() {
-	s.mockCache.EXPECT().Schema().Return(s.schema).Maybe()
+	s.mockCache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
 
 	var err error
 	s.serializer, err = NewStorageSerializer(s.mockCache, s.schema)

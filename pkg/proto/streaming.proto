@@ -6,6 +6,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
 import "messages.proto";
 import "milvus.proto";
+import "schema.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/any.proto";
 
@@ -60,6 +61,7 @@ message PChannelMeta {
     PChannelMetaState state = 3;  // state of the channel.
     repeated PChannelAssignmentLog histories =
         4;  // keep the meta info assignment log that used to be assigned to.
+    uint64 last_assign_timestamp_seconds = 5; // The last assigned timestamp in seconds.
 }
 
 // StreamingVersion is the version of the streaming service.
@@ -486,12 +488,28 @@ message StreamingNodeManagerRemoveResponse {}
 
 message StreamingNodeManagerCollectStatusRequest {}
 
-message StreamingNodeBalanceAttributes {
-    // TODO: traffic of pchannel or other things.
+message StreamingNodeMetrics {
+    repeated StreamingNodeWALMetrics wals = 1;
+}
+
+message StreamingNodeWALMetrics {
+    PChannelInfo info = 1;
+    oneof metrics {
+        StreamingNodeRWWALMetrics rw = 2;
+        StreamingNodeROWALMetrics ro = 3;
+    };
+}
+
+message StreamingNodeRWWALMetrics {
+    uint64 mvcc_time_tick = 1; // The mvcc time tick of the pchannel.
+    uint64 recovery_time_tick = 2; // The recovery time tick of the pchannel.
+}
+
+message StreamingNodeROWALMetrics {
 }
 
 message StreamingNodeManagerCollectStatusResponse {
-    StreamingNodeBalanceAttributes balance_attributes = 1;
+    StreamingNodeMetrics metrics = 1;
 }
 
 ///
@@ -511,6 +529,14 @@ message VChannelMeta {
 message CollectionInfoOfVChannel {
     int64 collection_id = 1; // collection id.
     repeated PartitionInfoOfVChannel partitions  = 2; // partitions.
+    repeated CollectionSchemaOfVChannel schemas = 3; // The schemas of the vchannel.
+}
+
+// CollectionSchemaOfVChannel is the collection schema in vchannel.
+message CollectionSchemaOfVChannel {
+    schema.CollectionSchema schema = 1; // The schemas of the vchannel.
+    uint64 checkpoint_time_tick = 2; // The timetick of the schema changed, also the version of the schema.
+    VChannelSchemaState state = 3; // The state of the schema.
 }
 
 // PartitionInfoOfVChannel is the partition info in vchannel.
@@ -524,6 +550,13 @@ enum VChannelState {
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
     // VCHANNEL_STATE_SPLITTED = 3; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+}
+
+// VChannelSchemaState is the state of vchannel schema.
+enum VChannelSchemaState {
+    VCHANNEL_SCHEMA_STATE_UNKNOWN = 0; // should never used.
+    VCHANNEL_SCHEMA_STATE_NORMAL = 1; // vchannel schema is normal.
+    VCHANNEL_SCHEMA_STATE_DROPPED = 2; // vchannel schema is dropped.
 }
 
 ///

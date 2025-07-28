@@ -21,12 +21,16 @@
 #include "milvus-storage/common/metadata.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/common/constants.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "storage/ThreadPools.h"
 #include "segcore/memory_planner.h"
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include <unordered_map>
+#include <set>
+#include <algorithm>
 
 #include "arrow/type.h"
 #include "arrow/type_fwd.h"
@@ -42,8 +46,6 @@ GroupChunkTranslator::GroupChunkTranslator(
     FieldDataInfo column_group_info,
     std::vector<std::string> insert_files,
     bool use_mmap,
-    const std::vector<milvus_storage::RowGroupMetadataVector>&
-        row_group_meta_list,
     int64_t num_fields,
     milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
@@ -52,19 +54,44 @@ GroupChunkTranslator::GroupChunkTranslator(
       column_group_info_(column_group_info),
       insert_files_(insert_files),
       use_mmap_(use_mmap),
-      row_group_meta_list_(row_group_meta_list),
       load_priority_(load_priority),
       meta_(
           num_fields,
           use_mmap ? milvus::cachinglayer::StorageType::DISK
                    : milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
           // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it
           // to use the warm up policy of scalar field?
           milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
                                                 /* is_index */ false),
           /* support_eviction */ true) {
-    AssertInfo(insert_files_.size() == row_group_meta_list_.size(),
-               "Number of insert files must match number of row group metas");
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    // Get row group metadata from files
+    for (const auto& file : insert_files_) {
+        auto reader =
+            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+        row_group_meta_list_.push_back(
+            reader->file_metadata()->GetRowGroupMetadataVector());
+        auto status = reader->Close();
+        AssertInfo(status.ok(),
+                   "[StorageV2] translator {} failed to close file reader when "
+                   "get row group "
+                   "metadata from file {} with error {}",
+                   key_,
+                   file + " with error: " + status.ToString());
+    }
+
+    // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
+    file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
+    file_row_group_prefix_sum_.push_back(
+        0);  // Base case: 0 row groups before first file
+    for (const auto& file_metas : row_group_meta_list_) {
+        file_row_group_prefix_sum_.push_back(file_row_group_prefix_sum_.back() +
+                                             file_metas.size());
+    }
+
     meta_.num_rows_until_chunk_.push_back(0);
     for (const auto& row_group_meta : row_group_meta_list_) {
         for (int i = 0; i < row_group_meta.size(); ++i) {
@@ -77,11 +104,12 @@ GroupChunkTranslator::GroupChunkTranslator(
     }
     AssertInfo(
         meta_.num_rows_until_chunk_.back() == column_group_info_.row_count,
-        fmt::format("data lost while loading column group {}: found "
-                    "num rows {} but expected {}",
-                    column_group_info_.field_id,
-                    meta_.num_rows_until_chunk_.back(),
-                    column_group_info_.row_count));
+        fmt::format(
+            "[StorageV2] data lost while loading column group {}: found "
+            "num rows {} but expected {}",
+            column_group_info_.field_id,
+            meta_.num_rows_until_chunk_.back(),
+            column_group_info_.row_count));
 }
 
 GroupChunkTranslator::~GroupChunkTranslator() {
@@ -114,20 +142,46 @@ GroupChunkTranslator::key() const {
 std::pair<size_t, size_t>
 GroupChunkTranslator::get_file_and_row_group_index(
     milvus::cachinglayer::cid_t cid) const {
-    size_t file_idx = 0;
-    size_t remaining_cid = cid;
-
-    for (; file_idx < row_group_meta_list_.size(); ++file_idx) {
-        const auto& file_metas = row_group_meta_list_[file_idx];
-        if (remaining_cid < file_metas.size()) {
-            return {file_idx, remaining_cid};
+    for (size_t file_idx = 0; file_idx < file_row_group_prefix_sum_.size() - 1;
+         ++file_idx) {
+        if (cid < file_row_group_prefix_sum_[file_idx + 1]) {
+            return {file_idx, cid - file_row_group_prefix_sum_[file_idx]};
         }
-        remaining_cid -= file_metas.size();
     }
 
-    return {0, 0};  // Default to first file and first row group if not found
+    AssertInfo(false,
+               fmt::format("[StorageV2] translator {} cid {} is out of range. "
+                           "Total row groups across all files: {}",
+                           key_,
+                           cid,
+                           file_row_group_prefix_sum_.back()));
 }
 
+milvus::cachinglayer::cid_t
+GroupChunkTranslator::get_cid_from_file_and_row_group_index(
+    size_t file_idx, size_t row_group_idx) const {
+    AssertInfo(file_idx < file_row_group_prefix_sum_.size() - 1,
+               fmt::format("[StorageV2] translator {} file_idx {} is out of "
+                           "range. Total files: {}",
+                           key_,
+                           file_idx,
+                           file_row_group_prefix_sum_.size() - 1));
+
+    size_t file_start = file_row_group_prefix_sum_[file_idx];
+    size_t file_end = file_row_group_prefix_sum_[file_idx + 1];
+    AssertInfo(row_group_idx < file_end - file_start,
+               fmt::format("[StorageV2] translator {} row_group_idx {} is out "
+                           "of range for file {}. "
+                           "Total row groups in file: {}",
+                           key_,
+                           row_group_idx,
+                           file_idx,
+                           file_end - file_start));
+
+    return file_start + row_group_idx;
+}
+
+// the returned cids are sorted. It may not follow the order of cids.
 std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>>
 GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     std::vector<std::pair<milvus::cachinglayer::cid_t,
@@ -136,11 +190,7 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
     cells.reserve(cids.size());
 
     // Create row group lists for requested cids
-    std::vector<std::vector<int64_t>> row_group_lists;
-    row_group_lists.reserve(insert_files_.size());
-    for (size_t i = 0; i < insert_files_.size(); ++i) {
-        row_group_lists.emplace_back();
-    }
+    std::vector<std::vector<int64_t>> row_group_lists(insert_files_.size());
 
     for (auto cid : cids) {
         auto [file_idx, row_group_idx] = get_file_and_row_group_index(cid);
@@ -163,27 +213,33 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 nullptr,
                                 load_priority_);
     });
-    LOG_INFO("segment {} submits load column group {} task to thread pool",
-             segment_id_,
-             column_group_info_.field_id);
+    LOG_INFO(
+        "[StorageV2] translator {} submits load column group {} task to thread "
+        "pool",
+        key_,
+        column_group_info_.field_id);
 
     std::shared_ptr<milvus::ArrowDataWrapper> r;
-    int64_t cid_idx = 0;
-    int64_t total_tables = 0;
+    std::unordered_set<cachinglayer::cid_t> filled_cids;
+    filled_cids.reserve(cids.size());
     while (column_group_info_.arrow_reader_channel->pop(r)) {
-        for (const auto& table : r->arrow_tables) {
-            AssertInfo(cid_idx < cids.size(),
-                       "Number of tables exceed number of cids ({})",
-                       cids.size());
-            auto cid = cids[cid_idx++];
-            cells.emplace_back(cid, load_group_chunk(table, cid));
-            total_tables++;
+        for (const auto& table_info : r->arrow_tables) {
+            // Convert file_index and row_group_index to global cid
+            auto cid = get_cid_from_file_and_row_group_index(
+                table_info.file_index, table_info.row_group_index);
+            cells.emplace_back(cid, load_group_chunk(table_info.table, cid));
+            filled_cids.insert(cid);
         }
     }
-    AssertInfo(total_tables == cids.size(),
-               "Number of tables ({}) does not match number of cids ({})",
-               total_tables,
-               cids.size());
+    // Verify all requested cids have been filled
+    for (auto cid : cids) {
+        AssertInfo(filled_cids.find(cid) != filled_cids.end(),
+                   "[StorageV2] translator {} cid {} was not filled, missing "
+                   "row group id {}",
+                   key_,
+                   cid,
+                   cid);
+    }
     return cells;
 }
 
@@ -197,7 +253,9 @@ GroupChunkTranslator::load_group_chunk(
     for (int i = 0; i < table->schema()->num_fields(); ++i) {
         AssertInfo(table->schema()->field(i)->metadata()->Contains(
                        milvus_storage::ARROW_FIELD_ID_KEY),
-                   "field id not found in metadata for field {}",
+                   "[StorageV2] translator {} field id not found in metadata "
+                   "for field {}",
+                   key_,
                    table->schema()->field(i)->name());
         auto field_id = std::stoll(table->schema()
                                        ->field(i)
@@ -211,8 +269,11 @@ GroupChunkTranslator::load_group_chunk(
             continue;
         }
         auto it = field_metas_.find(fid);
-        AssertInfo(it != field_metas_.end(),
-                   "Field id not found in field_metas");
+        AssertInfo(
+            it != field_metas_.end(),
+            "[StorageV2] translator {} field id {} not found in field_metas",
+            key_,
+            fid.get());
         const auto& field_meta = it->second;
         const arrow::ArrayVector& array_vec = table->column(i)->chunks();
         std::unique_ptr<Chunk> chunk;
@@ -227,8 +288,9 @@ GroupChunkTranslator::load_group_chunk(
                 std::to_string(cid);
 
             LOG_INFO(
-                "storage v2 segment {} mmaping field {} chunk {} to path {}",
-                segment_id_,
+                "[StorageV2] translator {} mmaping field {} chunk {} to path "
+                "{}",
+                key_,
                 field_id,
                 cid,
                 filepath.string());
@@ -237,12 +299,12 @@ GroupChunkTranslator::load_group_chunk(
 
             chunk = create_chunk(field_meta, array_vec, filepath.string());
             auto ok = unlink(filepath.c_str());
-            AssertInfo(
-                ok == 0,
-                fmt::format(
-                    "storage v2 failed to unlink mmap data file {}, err: {}",
-                    filepath.c_str(),
-                    strerror(errno)));
+            AssertInfo(ok == 0,
+                       fmt::format("[StorageV2] translator {} failed to unlink "
+                                   "mmap data file {}, err: {}",
+                                   key_,
+                                   filepath.c_str(),
+                                   strerror(errno)));
         }
 
         chunks[fid] = std::move(chunk);

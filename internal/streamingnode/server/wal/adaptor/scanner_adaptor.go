@@ -227,6 +227,12 @@ func (s *scannerAdaptorImpl) consumeEventLoop(msgChan <-chan message.ImmutableMe
 
 // handleUpstream handles the incoming message from the upstream.
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
+	// Filtering the message if needed.
+	// System message should never be filtered.
+	if s.filterFunc != nil && !s.filterFunc(msg) {
+		return
+	}
+
 	// Observe the message.
 	var isTailing bool
 	msg, isTailing = isTailingScanImmutableMessage(msg)
@@ -262,11 +268,6 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	// If the message is not belong to any vchannel, it should be broadcasted to all vchannels.
 	// Otherwise, it should be filtered by vchannel.
 	if msg.VChannel() != "" && s.readOption.VChannel != "" && s.readOption.VChannel != msg.VChannel() {
-		return
-	}
-	// Filtering the message if needed.
-	// System message should never be filtered.
-	if s.filterFunc != nil && !s.filterFunc(msg) {
 		return
 	}
 	// otherwise add message into reorder buffer directly.

@@ -327,7 +327,7 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.statsInspector, s.compactionTriggerManager)
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.compactionTriggerManager)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -664,7 +664,7 @@ func (s *Server) initStatsInspector() {
 }
 
 func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler)
+	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.indexEngineVersionManager)
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.importMeta)
@@ -936,19 +936,8 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	if segment == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
-	// set segment to SegmentState_Flushed
-	var operators []UpdateOperator
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
-		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
-	}
-	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
-	err := s.meta.UpdateSegmentsInfo(ctx, operators...)
-	if err != nil {
-		log.Warn("flush segment complete failed", zap.Error(err))
-		return err
-	}
 
-	if Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if enableSortCompaction() {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
@@ -986,12 +975,40 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 func (s *Server) handleFlushingSegments(ctx context.Context) {
 	segments := s.meta.GetFlushingSegments()
 	for _, segment := range segments {
+		// The old flushing segment may not be flushed, so we need to flush it again.
+		// It should be retry until success
+		if err := s.flushFlushingSegment(ctx, segment.ID); err != nil {
+			log.Warn("flush flushing segment failed", zap.Int64("segmentID", segment.ID), zap.Error(err))
+			return
+		}
+		log.Info("flush flushing segment success", zap.Int64("segmentID", segment.ID))
 		select {
 		case <-ctx.Done():
 			return
 		case s.flushCh <- segment.ID:
 		}
 	}
+}
+
+// flushFlushingSegment flushes a segment to `Flushed` state
+func (s *Server) flushFlushingSegment(ctx context.Context, segmentID UniqueID) error {
+	return retry.Do(ctx, func() error {
+		// set segment to SegmentState_Flushed
+		var operators []UpdateOperator
+		if enableSortCompaction() {
+			operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+		}
+		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
+		if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+			log.Warn("flush segment complete failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// underlying etcd may return context canceled, so we need to return a error to retry.
+			return errors.New("flush segment complete failed")
+		}
+		return nil
+	}, retry.AttemptAlways())
 }
 
 func (s *Server) initMixCoord() error {

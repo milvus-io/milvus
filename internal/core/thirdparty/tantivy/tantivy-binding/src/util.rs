@@ -1,8 +1,14 @@
-use crate::convert_to_rust_slice;
-use core::slice;
-use std::ffi::c_void;
+use std::ffi::CStr;
+use std::ffi::{c_char, c_void};
 use std::ops::Bound;
 use tantivy::{directory::MmapDirectory, Index};
+
+use crate::error::Result;
+
+#[inline]
+pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
+    Ok(unsafe { CStr::from_ptr(ptr) }.to_str()?)
+}
 
 pub fn index_exist(path: &str) -> bool {
     let dir = MmapDirectory::open(path).unwrap();

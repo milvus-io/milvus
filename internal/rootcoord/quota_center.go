@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -568,6 +569,7 @@ func (q *QuotaCenter) collectMetrics() error {
 	}
 	for oldQN := range oldQueryNodes {
 		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(oldQN, 10))
+		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.StreamingNodeRole, strconv.FormatInt(oldQN, 10))
 	}
 	return nil
 }
@@ -918,9 +920,11 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			internalpb.RateType_DMLUpsert, collectionLimiter)
 		q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionDeleteRateMinKey),
 			internalpb.RateType_DMLDelete, collectionLimiter)
-		log.RatedDebug(10, "QuotaCenter cool write rates off done",
-			zap.Int64("collectionID", collection),
-			zap.Float64("factor", factor))
+		if factor < 1.0 {
+			log.RatedDebug(10, "QuotaCenter cool write rates off done",
+				zap.Int64("collectionID", collection),
+				zap.Float64("factor", factor))
+		}
 	}
 
 	if len(ttCollections) > 0 {
@@ -969,6 +973,24 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 			updateCollectionDelay(delay, metric.Effect.CollectionIDs)
 			metrics.RootCoordTtDelay.WithLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(delay.Milliseconds()))
 		}
+		if metric.StreamingQuota != nil {
+			// If the query node is embedded in streaming node,
+			// we also need to use the wal's metrics to calculate the delay.
+			var maxDelay time.Duration
+			for _, wal := range metric.StreamingQuota.WALs {
+				t2, _ := tsoutil.ParseTS(wal.RecoveryTimeTick)
+				delay := t1.Sub(t2)
+				if maxDelay < delay {
+					maxDelay = delay
+				}
+				// Update all collections work on this pchannel.
+				pchannelInfo := channel.StaticPChannelStatsManager.MustGet().GetPChannelStats(wal.Channel)
+				updateCollectionDelay(delay, pchannelInfo.CollectionIDs())
+			}
+			if maxDelay > 0 {
+				metrics.RootCoordTtDelay.WithLabelValues(typeutil.StreamingNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(maxDelay.Milliseconds()))
+			}
+		}
 	}
 	for nodeID, metric := range q.dataNodeMetrics {
 		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
@@ -994,16 +1016,17 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) map[int64]float64 {
 			continue
 		}
 		factor := float64(maxDelay.Nanoseconds()-curMaxDelay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
-		if factor <= 0.9 {
+		if factor <= 0.95 {
 			log.RatedWarn(10, "QuotaCenter: limit writing due to long timeTick delay",
 				zap.Int64("collectionID", collectionID),
 				zap.Time("curTs", t1),
 				zap.Duration("delay", curMaxDelay),
 				zap.Duration("MaxDelay", maxDelay),
 				zap.Float64("factor", factor))
+			collectionFactor[collectionID] = factor
+			continue
 		}
-
-		collectionFactor[collectionID] = factor
+		collectionFactor[collectionID] = 1.0
 	}
 
 	return collectionFactor
@@ -1286,8 +1309,8 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 			}
 		}
 	}
-	initLimiters(q.readableCollections)
-	initLimiters(q.writableCollections)
+	partitions := q.meta.ListAllAvailPartitions(q.ctx)
+	initLimiters(partitions)
 	return nil
 }
 

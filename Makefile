@@ -145,10 +145,13 @@ cppcheck:
 	@#(env bash ${PWD}/scripts/core_build.sh -l)
 	@(env bash ${PWD}/scripts/check_cpp_fmt.sh)
 
-rustcheck:
+rustfmt:
 	@echo  "Running cargo format"
 	@env bash ${PWD}/scripts/run_cargo_format.sh ${PWD}/internal/core/thirdparty/tantivy/tantivy-binding/
 
+rustcheck:
+	@echo  "Running cargo check"
+	@env bash ${PWD}/scripts/run_cargo_format.sh ${PWD}/internal/core/thirdparty/tantivy/tantivy-binding/ --check
 
 fmt:
 ifdef GO_DIFF_FILES

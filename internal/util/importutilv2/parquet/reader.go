@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+const fileReaderBufferSize = int64(32 * 1024 * 1024)
+
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
@@ -57,13 +59,13 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, err
 	}
 	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            int64(bufferSize),
+		BufferSize:            fileReaderBufferSize,
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
 	}
-	log.Info("create parquet reader done", zap.Int("row group num", r.NumRowGroups()),
+	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
 
 	fileReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
@@ -121,10 +123,6 @@ OUTER:
 		if insertData.Data[fieldID].RowNum() == 0 {
 			return nil, io.EOF
 		}
-	}
-	err = common.FillDynamicData(insertData, r.schema)
-	if err != nil {
-		return nil, err
 	}
 	return insertData, nil
 }

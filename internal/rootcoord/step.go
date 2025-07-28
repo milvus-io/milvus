@@ -496,6 +496,7 @@ func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, e
 		Description:        s.collection.Description,
 		AutoID:             s.collection.AutoID,
 		Fields:             model.MarshalFieldModels(s.collection.Fields),
+		StructArrayFields:  model.MarshalStructArrayFieldModels(s.collection.StructArrayFields),
 		Functions:          model.MarshalFunctionModels(s.collection.Functions),
 		EnableDynamicField: s.collection.EnableDynamicField,
 		Properties:         s.collection.Properties,
@@ -507,8 +508,7 @@ func (s *WriteSchemaChangeWALStep) Execute(ctx context.Context) ([]nestedStep, e
 			CollectionId: s.collection.CollectionID,
 		}).
 		WithBody(&message.SchemaChangeMessageBody{
-			Schema:   schema,
-			ModifyTs: s.ts,
+			Schema: schema,
 		}).BuildBroadcast()
 	if err != nil {
 		return nil, err

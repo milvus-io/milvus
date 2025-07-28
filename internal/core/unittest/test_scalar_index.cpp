@@ -376,10 +376,11 @@ TestBuildIndex(int N, int cardinality, int index_type) {
             auto index = std::make_unique<milvus::index::StringIndexMarisa>();
             index->Build(N, raw_data.data());
             return std::move(index);
+        } else {
+            auto index = milvus::index::CreateScalarIndexSort<T>();
+            index->Build(N, raw_data.data());
+            return std::move(index);
         }
-        auto index = milvus::index::CreateScalarIndexSort<T>();
-        index->Build(N, raw_data.data());
-        return std::move(index);
     }
 }
 

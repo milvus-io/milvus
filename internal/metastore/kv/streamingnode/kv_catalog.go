@@ -2,8 +2,11 @@ package streamingnode
 
 import (
 	"context"
+	"fmt"
 	"path"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -14,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // NewCataLog creates a new streaming-node catalog instance.
@@ -26,7 +30,10 @@ import (
 //	│   ├── checkpoint
 //	│   ├── vchannels
 //	│   │   ├── vchannel-1
-//	│   │   └── vchannel-2
+//	│   │   │   ├── schema/version-1
+//	│   │   │   └── schema/version-2
+//	│   │   ├── vchannel-2
+//	│   │   │   └── schema/version-1
 //	│   └── segment-assign
 //	│       ├── 456398247934
 //	│       ├── 456398247936
@@ -58,36 +65,72 @@ func (c *catalog) ListVChannel(ctx context.Context, pchannelName string) ([]*str
 	if err != nil {
 		return nil, err
 	}
-	infos := make([]*streamingpb.VChannelMeta, 0, len(values))
-	for k, value := range values {
-		info := &streamingpb.VChannelMeta{}
-		if err = proto.Unmarshal([]byte(value), info); err != nil {
-			return nil, errors.Wrapf(err, "unmarshal pchannel %s failed", keys[k])
+	return c.newVChannelMetaFromKV(prefix, keys, values)
+}
+
+// newVChannelMetaFromKV groups the vchannel meta by the vchannel name.
+func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []string) ([]*streamingpb.VChannelMeta, error) {
+	keys = removePrefix(prefix, keys)
+	vchannels := make(map[string]*streamingpb.VChannelMeta, len(keys))
+	schemas := make(map[string][]*streamingpb.CollectionSchemaOfVChannel, len(keys))
+	for idx, key := range keys {
+		ks := strings.Split(key, "/")
+		switch len(ks) {
+		case 1:
+			// the vchannel vchannel path.
+			vchannel := &streamingpb.VChannelMeta{}
+			if err := proto.Unmarshal([]byte(values[idx]), vchannel); err != nil {
+				return nil, errors.Wrapf(err, "unmarshal vchannel meta %s failed", key)
+			}
+			vchannels[ks[0]] = vchannel
+		case 3: // {{vchannel}}/schema/{{version}}
+			// the schema path.
+			channelName := ks[0]
+			if ks[1] != DirectorySchema {
+				continue
+			}
+			schema := &streamingpb.CollectionSchemaOfVChannel{}
+			if err := proto.Unmarshal([]byte(values[idx]), schema); err != nil {
+				return nil, errors.Wrapf(err, "unmarshal schema %s failed", key)
+			}
+			if _, ok := schemas[channelName]; !ok {
+				schemas[channelName] = make([]*streamingpb.CollectionSchemaOfVChannel, 0, 2)
+			}
+			schemas[channelName] = append(schemas[channelName], schema)
 		}
-		infos = append(infos, info)
 	}
-	return infos, nil
+	vchannelsWithSchemas := make([]*streamingpb.VChannelMeta, 0, len(vchannels))
+	for vchannelName, vchannel := range vchannels {
+		schemas, ok := schemas[vchannelName]
+		if !ok {
+			panic(fmt.Sprintf("vchannel %s has no schemas in recovery info", vchannelName))
+		}
+		sort.Slice(schemas, func(i, j int) bool {
+			// order by checkpoint time tick.
+			return schemas[i].CheckpointTimeTick < schemas[j].CheckpointTimeTick
+		})
+		vchannel.CollectionInfo.Schemas = schemas
+		vchannelsWithSchemas = append(vchannelsWithSchemas, vchannel)
+	}
+	return vchannelsWithSchemas, nil
 }
 
 // SaveVChannels save vchannel on current pchannel.
 func (c *catalog) SaveVChannels(ctx context.Context, pchannelName string, vchannels map[string]*streamingpb.VChannelMeta) error {
-	kvs := make(map[string]string, len(vchannels))
-	removes := make([]string, 0)
+	kvs := make(map[string]string, 2*len(vchannels))
+	removes := make([]string, 0, 2*len(vchannels))
 	for _, info := range vchannels {
-		key := buildVChannelMetaPathOfVChannel(pchannelName, info.GetVchannel())
-		if info.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-			// Flushed segment should be removed from meta
-			removes = append(removes, key)
-			continue
-		}
-
-		data, err := proto.Marshal(info)
+		r, kv, err := c.getRemovalAndSaveForVChannel(pchannelName, info)
 		if err != nil {
-			return errors.Wrapf(err, "marshal vchannel %d at pchannel %s failed", info.GetVchannel(), pchannelName)
+			return err
 		}
-		kvs[key] = string(data)
+		removes = append(removes, r...)
+		for k, v := range kv {
+			kvs[k] = v
+		}
 	}
 
+	// TODO: We should perform a remove and save as a transaction but current the kv interface doesn't support it.
 	if len(removes) > 0 {
 		if err := etcd.RemoveByBatchWithLimit(removes, util.MaxEtcdTxnNum, func(partialRemoves []string) error {
 			return c.metaKV.MultiRemove(ctx, partialRemoves)
@@ -101,6 +144,49 @@ func (c *catalog) SaveVChannels(ctx context.Context, pchannelName string, vchann
 		})
 	}
 	return nil
+}
+
+// getRemovalAndSaveForVChannel gets the removal and save for vchannel.
+func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *streamingpb.VChannelMeta) ([]string, map[string]string, error) {
+	removes := make([]string, 0, len(info.CollectionInfo.Schemas)+1)
+	kvs := make(map[string]string, len(info.CollectionInfo.Schemas)+1)
+
+	key := buildVChannelMetaPathOfVChannel(pchannelName, info.GetVchannel())
+	if info.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		// Dropped vchannel should be removed from meta
+		for _, schema := range info.GetCollectionInfo().GetSchemas() {
+			// Also remove the schema of the vchannel.
+			removes = append(removes, buildVChannelSchemaPath(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
+		}
+		removes = append(removes, key)
+		return removes, kvs, nil
+	}
+
+	// Save the schema of the vchannel.
+	for _, schema := range info.GetCollectionInfo().GetSchemas() {
+		switch schema.State {
+		case streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED:
+			// Dropped schema should be removed from meta
+			removes = append(removes, buildVChannelSchemaPath(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick()))
+		default:
+			data, err := proto.Marshal(schema)
+			if err != nil {
+				return nil, nil, errors.Wrapf(err, "marshal schema %d at pchannel %s failed", schema.GetCheckpointTimeTick(), pchannelName)
+			}
+			kvs[buildVChannelSchemaPath(pchannelName, info.GetVchannel(), schema.GetCheckpointTimeTick())] = string(data)
+		}
+	}
+	// Schema is saved in the other key, so we don't need to save it in the vchannel meta.
+	// swap it first to marshal the vchannel meta without schema.
+	oldSchema := info.CollectionInfo.Schemas
+	info.CollectionInfo.Schemas = nil
+	data, err := proto.Marshal(info)
+	info.CollectionInfo.Schemas = oldSchema
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "marshal vchannel %d at pchannel %s failed", info.GetVchannel(), pchannelName)
+	}
+	kvs[key] = string(data)
+	return removes, kvs, nil
 }
 
 // ListSegmentAssignment lists the segment assignment info of the pchannel.
@@ -189,9 +275,22 @@ func buildVChannelMetaPath(pChannelName string) string {
 	return path.Join(buildWALDirectory(pChannelName), DirectoryVChannel) + "/"
 }
 
+// removePrefix removes the prefix from the keys.
+func removePrefix(prefix string, keys []string) []string {
+	for idx, key := range keys {
+		keys[idx] = typeutil.After(key, prefix)
+	}
+	return keys
+}
+
 // buildVChannelMetaPathOfVChannel builds the path for vchannel meta
 func buildVChannelMetaPathOfVChannel(pChannelName string, vchannelName string) string {
 	return path.Join(buildVChannelMetaPath(pChannelName), vchannelName)
+}
+
+// buildVChannelSchemaPath builds the path for vchannel schema
+func buildVChannelSchemaPath(pChannelName string, vchannelName string, version uint64) string {
+	return path.Join(buildVChannelMetaPathOfVChannel(pChannelName, vchannelName), DirectorySchema, strconv.FormatUint(version, 10))
 }
 
 // buildSegmentAssignmentMetaPath builds the path for segment assignment

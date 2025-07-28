@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -154,6 +155,17 @@ class SegmentInterface {
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const = 0;
 
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const = 0;
+
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
 
@@ -196,7 +208,7 @@ class SegmentInternalInterface : public SegmentInterface {
             std::vector<Json> res;
             res.reserve(string_views.size());
             for (const auto& str_view : string_views) {
-                res.emplace_back(str_view);
+                res.emplace_back(Json(str_view));
             }
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
@@ -211,7 +223,7 @@ class SegmentInternalInterface : public SegmentInterface {
                     int64_t start_offset,
                     int64_t length) const {
         if (this->type() == SegmentType::Growing) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
         return chunk_view<ViewType>(
@@ -224,7 +236,7 @@ class SegmentInternalInterface : public SegmentInterface {
                          int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const {
         if (this->type() == SegmentType::Growing) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
         auto pw = chunk_view_by_offsets(field_id, chunk_id, offsets);
@@ -367,6 +379,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const override;
+
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
 
  public:
     virtual void
@@ -517,7 +540,7 @@ class SegmentInternalInterface : public SegmentInterface {
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
                      int64_t chunk_id) const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     };
 
     virtual bool
@@ -546,6 +569,9 @@ class SegmentInternalInterface : public SegmentInterface {
     search_pk(const PkType& pk, Timestamp timestamp) const = 0;
 
  protected:
+    // mutex protecting rw options on schema_
+    std::shared_mutex sch_mutex_;
+
     mutable std::shared_mutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>

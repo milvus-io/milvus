@@ -40,8 +40,8 @@ func RecoverWALFlusher(param *RecoverWALFlusherParam) *WALFlusherImpl {
 		logger: resource.Resource().Logger().With(
 			log.FieldComponent("flusher"),
 			zap.String("pchannel", param.ChannelInfo.String())),
-		metrics: newFlusherMetrics(param.ChannelInfo),
-		rs:      param.RecoveryStorage,
+		metrics:         newFlusherMetrics(param.ChannelInfo),
+		RecoveryStorage: param.RecoveryStorage,
 	}
 	go flusher.Execute(param.RecoverySnapshot)
 	return flusher
@@ -53,7 +53,7 @@ type WALFlusherImpl struct {
 	flusherComponents *flusherComponents
 	logger            *log.MLogger
 	metrics           *flusherMetrics
-	rs                recovery.RecoveryStorage
+	recovery.RecoveryStorage
 }
 
 // Execute starts the wal flusher.
@@ -119,7 +119,7 @@ func (impl *WALFlusherImpl) Close() {
 	impl.notifier.BlockUntilFinish()
 
 	impl.logger.Info("wal flusher start to close the recovery storage...")
-	impl.rs.Close()
+	impl.RecoveryStorage.Close()
 	impl.logger.Info("recovery storage closed")
 
 	impl.metrics.Close()
@@ -152,7 +152,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 
 	cpUpdater := util.NewChannelCheckpointUpdaterWithCallback(broker, func(mp *msgpb.MsgPosition) {
 		messageID := adaptor.MustGetMessageIDFromMQWrapperIDBytes(l.WALName(), mp.MsgID)
-		impl.rs.UpdateFlusherCheckpoint(&recovery.WALCheckpoint{
+		impl.RecoveryStorage.UpdateFlusherCheckpoint(mp.ChannelName, &recovery.WALCheckpoint{
 			MessageID: messageID,
 			TimeTick:  mp.Timestamp,
 			Magic:     recovery.RecoveryMagicStreamingInitialized,
@@ -168,6 +168,7 @@ func (impl *WALFlusherImpl) buildFlusherComponents(ctx context.Context, l wal.WA
 		dataServices:               make(map[string]*dataSyncServiceWrapper),
 		logger:                     impl.logger,
 		recoveryCheckPointTimeTick: snapshot.Checkpoint.TimeTick,
+		rs:                         impl.RecoveryStorage,
 	}
 	impl.logger.Info("flusher components intiailizing done")
 	if err := fc.recover(ctx, recoverInfos); err != nil {
@@ -202,7 +203,7 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 	// TODO: We will merge the flusher into recovery storage in future.
 	// Currently, flusher works as a separate component.
 	defer func() {
-		if err = impl.rs.ObserveMessage(impl.notifier.Context(), msg); err != nil {
+		if err = impl.RecoveryStorage.ObserveMessage(impl.notifier.Context(), msg); err != nil {
 			impl.logger.Warn("failed to observe message", zap.Error(err))
 		}
 	}()

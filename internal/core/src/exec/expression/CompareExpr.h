@@ -61,7 +61,7 @@ struct CompareElementFunc {
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
                     res[i] = left[offset] <= right[offset];
                 } else {
-                    PanicInfo(
+                    ThrowInfo(
                         OpTypeInvalid,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
@@ -89,7 +89,7 @@ struct CompareElementFunc {
                 } else if constexpr (op == proto::plan::OpType::LessEqual) {
                     res[i] = left[i] <= right[i];
                 } else {
-                    PanicInfo(
+                    ThrowInfo(
                         OpTypeInvalid,
                         fmt::format(
                             "unsupported op_type:{} for CompareElementFunc",
@@ -118,7 +118,7 @@ struct CompareElementFunc {
             res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
                 left, right, size);
         } else {
-            PanicInfo(OpTypeInvalid,
+            ThrowInfo(OpTypeInvalid,
                       fmt::format(
                           "unsupported op_type:{} for CompareElementFunc", op));
         }
@@ -175,21 +175,36 @@ class PhyCompareFilterExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    MoveCursorForIndexed(int64_t& pos) {
+        pos = pos + batch_size_ >= segment_chunk_reader_.active_count_
+                  ? segment_chunk_reader_.active_count_
+                  : pos + batch_size_;
+    }
+
+    void
     MoveCursor() override {
         if (!has_offset_input_) {
             if (segment_chunk_reader_.segment_->is_chunked()) {
-                segment_chunk_reader_.MoveCursorForMultipleChunk(
-                    left_current_chunk_id_,
-                    left_current_chunk_pos_,
-                    left_field_,
-                    left_num_chunk_,
-                    batch_size_);
-                segment_chunk_reader_.MoveCursorForMultipleChunk(
-                    right_current_chunk_id_,
-                    right_current_chunk_pos_,
-                    right_field_,
-                    right_num_chunk_,
-                    batch_size_);
+                if (is_left_indexed_) {
+                    MoveCursorForIndexed(left_current_chunk_pos_);
+                } else {
+                    segment_chunk_reader_.MoveCursorForMultipleChunk(
+                        left_current_chunk_id_,
+                        left_current_chunk_pos_,
+                        left_field_,
+                        left_num_chunk_,
+                        batch_size_);
+                }
+                if (is_right_indexed_) {
+                    MoveCursorForIndexed(right_current_chunk_pos_);
+                } else {
+                    segment_chunk_reader_.MoveCursorForMultipleChunk(
+                        right_current_chunk_id_,
+                        right_current_chunk_pos_,
+                        right_field_,
+                        right_num_chunk_,
+                        batch_size_);
+                }
             } else {
                 segment_chunk_reader_.MoveCursorForSingleChunk(
                     current_chunk_id_,

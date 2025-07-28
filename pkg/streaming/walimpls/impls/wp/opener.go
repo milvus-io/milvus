@@ -51,8 +51,9 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 
 // Close closes the opener resources.
 func (o *openerImpl) Close() {
-	err := o.c.Close()
+	ctx := context.Background()
+	err := o.c.Close(ctx)
 	if err != nil {
-		log.Ctx(context.Background()).Error("failed to close woodpecker client", zap.Error(err))
+		log.Ctx(ctx).Error("failed to close woodpecker client", zap.Error(err))
 	}
 }

@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
-	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -97,8 +96,8 @@ func (t *importTask) GetSegmentIDs() []int64 {
 	return t.task.Load().GetSegmentIDs()
 }
 
-func (t *importTask) GetStatsSegmentIDs() []int64 {
-	return t.task.Load().GetStatsSegmentIDs()
+func (t *importTask) GetSortedSegmentIDs() []int64 {
+	return t.task.Load().GetSortedSegmentIDs()
 }
 
 func (t *importTask) GetSource() datapb.ImportTaskSourceV2 {
@@ -126,14 +125,7 @@ func (t *importTask) GetTaskNodeID() int64 {
 }
 
 func (t *importTask) GetTaskSlot() int64 {
-	// Consider the following two scenarios:
-	// 1. Importing a large number of small files results in
-	//    a small total data size, making file count unsuitable as a slot number.
-	// 2. Importing a file with many shards number results in many segments and a small total data size,
-	//    making segment count unsuitable as a slot number.
-	// Taking these factors into account, we've decided to use the
-	// minimum value between segment count and file count as the slot number.
-	return int64(funcutil.Min(len(t.GetFileStats()), len(t.GetSegmentIDs())))
+	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
@@ -168,12 +160,12 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		TaskID: t.GetTaskID(),
 	}
 	resp, err := cluster.QueryImport(t.GetNodeID(), req)
-	if err != nil {
+	if err != nil || resp.GetState() == datapb.ImportTaskStateV2_Retry {
 		updateErr := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Pending))
 		if updateErr != nil {
 			log.Warn("failed to update import task state to pending", WrapTaskLog(t, zap.Error(updateErr))...)
 		}
-		log.Info("reset import task state to pending due to error occurs", WrapTaskLog(t, zap.Error(err))...)
+		log.Info("reset import task state to pending due to error occurs", WrapTaskLog(t, zap.Error(err), zap.String("reason", resp.GetReason()))...)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Failed {
@@ -191,23 +183,26 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 		dbName = collInfo.DatabaseName
 	}
 
-	for _, info := range resp.GetImportSegmentsInfo() {
-		segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
-		if info.GetImportedRows() <= segment.GetNumOfRows() {
-			continue // rows not changed, no need to update
-		}
-		diff := info.GetImportedRows() - segment.GetNumOfRows()
-		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
-		err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
-		if err != nil {
-			log.Warn("update import segment rows failed", WrapTaskLog(t, zap.Error(err))...)
-			return
-		}
+	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		for _, info := range resp.GetImportSegmentsInfo() {
+			segment := t.meta.GetSegment(context.TODO(), info.GetSegmentID())
+			if info.GetImportedRows() <= segment.GetNumOfRows() {
+				continue // rows not changed, no need to update
+			}
+			diff := info.GetImportedRows() - segment.GetNumOfRows()
+			op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
+			err = t.meta.UpdateSegmentsInfo(context.TODO(), op)
+			if err != nil {
+				log.Warn("update import segment rows failed", WrapTaskLog(t, zap.Error(err))...)
+				return
+			}
+			log.Info("update import segment rows done", WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Int64("importedRows", info.GetImportedRows()))...)
 
-		metrics.DataCoordBulkVectors.WithLabelValues(
-			dbName,
-			strconv.FormatInt(t.GetCollectionID(), 10),
-		).Add(float64(diff))
+			metrics.DataCoordBulkVectors.WithLabelValues(
+				dbName,
+				strconv.FormatInt(t.GetCollectionID(), 10),
+			).Add(float64(diff))
+		}
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
@@ -229,6 +224,7 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(t, zap.String("err", err.Error()))...)
 				return
 			}
+			log.Info("update import segment info done", WrapTaskLog(t, zap.Int64("segmentID", info.GetSegmentID()), zap.Any("segmentInfo", info))...)
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))

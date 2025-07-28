@@ -333,6 +333,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		return merr.WrapErrServiceQuotaExceeded("compaction handler full")
 	}
 
+	log.Info("handleSignal receive")
 	groups, err := t.getCandidates(signal)
 	if err != nil {
 		log.Warn("handle signal failed, get candidates return error", zap.Error(err))
@@ -376,7 +377,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		expectedSize := getExpectedSegmentSize(t.meta, coll)
+		expectedSize := getExpectedSegmentSize(t.meta, coll.ID, coll.Schema)
 		plans := t.generatePlans(group.segments, signal, ct, expectedSize)
 		for _, plan := range plans {
 			if !signal.isForce && t.inspector.isFull() {
@@ -549,7 +550,8 @@ func (t *compactionTrigger) getCandidates(signal *compactionSignal) ([]chanPartS
 				!segment.GetIsImporting() && // not importing now
 				segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
 				segment.GetLevel() != datapb.SegmentLevel_L2 && // ignore l2 segment
-				!segment.GetIsInvisible()
+				!segment.GetIsInvisible() &&
+				segment.GetIsSorted()
 		}),
 	}
 
@@ -786,10 +788,6 @@ func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
 }
 
-func needSync(segment *SegmentInfo) bool {
-	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing || segment.GetState() == commonpb.SegmentState_Sealed
-}
-
 // buckets will be updated inplace
 func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, buckets [][]*SegmentInfo, expectedSize int64) (remaining []*SegmentInfo) {
 	for i := len(small) - 1; i >= 0; i-- {
@@ -815,4 +813,12 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 
 func getExpandedSize(size int64) int64 {
 	return int64(float64(size) * Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat())
+}
+
+func canTriggerSortCompaction(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed &&
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		!segment.GetIsSorted() &&
+		!segment.GetIsImporting() &&
+		!segment.isCompacting
 }

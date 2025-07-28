@@ -164,11 +164,13 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
          FieldBinlogInfo{0,
                          3000,
                          std::vector<int64_t>{3000},
+                         std::vector<int64_t>{3000},
                          false,
                          std::vector<std::string>{paths[0]}}},
         {1,
          FieldBinlogInfo{1,
                          3000,
+                         std::vector<int64_t>{3000},
                          std::vector<int64_t>{3000},
                          false,
                          std::vector<std::string>{paths[1]}}},
@@ -225,11 +227,11 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
         int64_t current_row_group = 0;
 
         while (channel->pop(wrapper)) {
-            for (const auto& table : wrapper->arrow_tables) {
+            for (const auto& table_info : wrapper->arrow_tables) {
                 // Verify batch size matches row group metadata
-                EXPECT_EQ(table->num_rows(),
+                EXPECT_EQ(table_info.table->num_rows(),
                           row_group_metadata.Get(current_row_group).row_num());
-                total_rows += table->num_rows();
+                total_rows += table_info.table->num_rows();
                 current_row_group++;
             }
         }
@@ -255,15 +257,14 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
 
         std::shared_ptr<milvus::ArrowDataWrapper> wrapper;
         int64_t total_rows = 0;
-        int64_t current_row_group = 0;
 
         while (channel->pop(wrapper)) {
-            for (const auto& table : wrapper->arrow_tables) {
+            for (const auto& table_info : wrapper->arrow_tables) {
                 // Verify batch size matches row group metadata
-                EXPECT_EQ(table->num_rows(),
-                          row_group_metadata.Get(current_row_group).row_num());
-                total_rows += table->num_rows();
-                current_row_group++;
+                EXPECT_EQ(table_info.table->num_rows(),
+                          row_group_metadata.Get(table_info.row_group_index)
+                              .row_num());
+                total_rows += table_info.table->num_rows();
             }
         }
 
@@ -286,17 +287,22 @@ TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
                                           row_group_lists);
 
         total_rows = 0;
-        current_row_group = 0;
         std::vector<int64_t> selected_row_groups = {0, 2};
 
         while (channel->pop(wrapper)) {
-            for (const auto& table : wrapper->arrow_tables) {
-                EXPECT_EQ(table->num_rows(),
-                          row_group_metadata
-                              .Get(selected_row_groups[current_row_group])
+            for (const auto& table_info : wrapper->arrow_tables) {
+                // row_group_index is the actual row group ID (0 or 2), not an index
+                // We need to find its position in selected_row_groups
+                auto it = std::find(selected_row_groups.begin(),
+                                    selected_row_groups.end(),
+                                    table_info.row_group_index);
+                ASSERT_NE(it, selected_row_groups.end())
+                    << "Row group " << table_info.row_group_index
+                    << " not found in selected_row_groups";
+                EXPECT_EQ(table_info.table->num_rows(),
+                          row_group_metadata.Get(table_info.row_group_index)
                               .row_num());
-                total_rows += table->num_rows();
-                current_row_group++;
+                total_rows += table_info.table->num_rows();
             }
         }
 
@@ -360,12 +366,14 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
          FieldBinlogInfo{0,
                          total_rows,
                          std::vector<int64_t>{total_rows},
+                         std::vector<int64_t>{total_rows * 4},
                          false,
                          std::vector<std::string>{paths[0]}}},
         {1,
          FieldBinlogInfo{1,
                          total_rows,
                          std::vector<int64_t>{total_rows},
+                         std::vector<int64_t>{total_rows * 4},
                          false,
                          std::vector<std::string>{paths[1]}}},
     };

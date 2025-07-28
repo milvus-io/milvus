@@ -96,7 +96,7 @@ func TestBulkPackWriter_Write(t *testing.T) {
 
 	mc := metacache.NewMockMetaCache(t)
 	mc.EXPECT().Collection().Return(collectionID).Maybe()
-	mc.EXPECT().Schema().Return(schema).Maybe()
+	mc.EXPECT().GetSchema(mock.Anything).Return(schema).Maybe()
 	mc.EXPECT().GetSegmentByID(segmentID).Return(seg, true).Maybe()
 	mc.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg}).Maybe()
 	mc.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, filters ...metacache.SegmentFilter) {

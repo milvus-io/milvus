@@ -109,12 +109,12 @@ GetValueFromConfig(const Config& cfg, const std::string& key) {
             LOG_WARN("config type mismatch for key {}: {}", key, e.what());
             return std::nullopt;
         }
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "config type error for key {}: {}",
                   key,
                   e.what());
     } catch (const std::exception& e) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "Unexpected error for key {}: {}",
                   key,
                   e.what());

@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 type statsTask struct {
@@ -43,11 +42,10 @@ type statsTask struct {
 
 	times *taskcommon.Times
 
-	meta                *meta
-	handler             Handler
-	allocator           allocator.Allocator
-	compactionInspector CompactionInspector
-	ievm                IndexEngineVersionManager
+	meta      *meta
+	handler   Handler
+	allocator allocator.Allocator
+	ievm      IndexEngineVersionManager
 }
 
 var _ globalTask.Task = (*statsTask)(nil)
@@ -55,20 +53,18 @@ var _ globalTask.Task = (*statsTask)(nil)
 func newStatsTask(t *indexpb.StatsTask,
 	taskSlot int64,
 	mt *meta,
-	inspector CompactionInspector,
 	handler Handler,
 	allocator allocator.Allocator,
 	ievm IndexEngineVersionManager,
 ) *statsTask {
 	return &statsTask{
-		StatsTask:           t,
-		taskSlot:            taskSlot,
-		times:               taskcommon.NewTimes(),
-		meta:                mt,
-		handler:             handler,
-		allocator:           allocator,
-		compactionInspector: inspector,
-		ievm:                ievm,
+		StatsTask: t,
+		taskSlot:  taskSlot,
+		times:     taskcommon.NewTimes(),
+		meta:      mt,
+		handler:   handler,
+		allocator: allocator,
+		ievm:      ievm,
 	}
 }
 
@@ -126,12 +122,6 @@ func (st *statsTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (st *statsTask) resetTask(ctx context.Context, reason string) {
-	// reset isCompacting
-	if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
-		st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
-		st.meta.SetSegmentStating(st.GetSegmentID(), false)
-	}
-
 	// reset state to init
 	st.UpdateStateWithMeta(indexpb.JobState_JobStateInit, reason)
 }
@@ -154,33 +144,9 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		zap.String("subJobType", st.GetSubJobType().String()),
 	)
 
-	// Check segment compaction state
-	if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
-		if exist, canCompact := st.meta.CheckAndSetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}); !exist || !canCompact {
-			log.Warn("segment is not exist or is compacting, skip stats and remove stats task",
-				zap.Bool("exist", exist), zap.Bool("canCompact", canCompact))
-
-			if err := st.meta.statsTaskMeta.DropStatsTask(ctx, st.GetTaskID()); err != nil {
-				log.Warn("remove stats task failed, will retry later", zap.Error(err))
-				return
-			}
-			st.SetState(indexpb.JobState_JobStateNone, "segment is not exist or is compacting")
-			return
-		}
-
-		// Check if segment is part of L0 compaction
-		if !st.compactionInspector.checkAndSetSegmentStating(st.GetInsertChannel(), st.GetSegmentID()) {
-			log.Warn("segment is contained by L0 compaction, skipping stats task")
-			// Reset isCompacting flag
-			st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
-			return
-		}
-	}
-
 	var err error
 	defer func() {
 		if err != nil {
-			// reset isCompacting flag and stating flag
 			st.resetTask(ctx, err.Error())
 		}
 	}()
@@ -336,11 +302,6 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		return nil, fmt.Errorf("failed to get collection info: %w", err)
 	}
 
-	collTtl, err := getCollectionTTL(collInfo.Properties)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get collection TTL: %w", err)
-	}
-
 	// Calculate binlog allocation
 	binlogNum := (segment.getSegmentSize()/Params.DataNodeCfg.BinLogMaxSize.GetAsInt64() + 1) *
 		int64(len(collInfo.Schema.GetFields())) *
@@ -365,19 +326,14 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		SubJobType:      st.GetSubJobType(),
 		TargetSegmentID: st.GetTargetSegmentID(),
 		InsertLogs:      segment.GetBinlogs(),
-		DeltaLogs:       segment.GetDeltalogs(),
 		StartLogID:      start,
 		EndLogID:        end,
 		NumRows:         segment.GetNumOfRows(),
-		CollectionTtl:   collTtl.Nanoseconds(),
-		CurrentTs:       tsoutil.GetCurrentTime(),
 		// update version after check
 		TaskVersion:               st.GetVersion(),
-		BinlogMaxSize:             Params.DataNodeCfg.BinLogMaxSize.GetAsUint64(),
 		EnableJsonKeyStats:        Params.CommonCfg.EnabledJSONKeyStats.GetAsBool(),
 		JsonKeyStatsTantivyMemory: Params.DataCoordCfg.JSONKeyStatsMemoryBudgetInTantivy.GetAsInt64(),
 		JsonKeyStatsDataFormat:    1,
-		EnableJsonKeyStatsInSort:  Params.DataCoordCfg.EnabledJSONKeyStatsInSort.GetAsBool(),
 		TaskSlot:                  st.taskSlot,
 		StorageVersion:            segment.StorageVersion,
 		CurrentScalarIndexVersion: st.ievm.GetCurrentScalarIndexEngineVersion(),
@@ -389,21 +345,6 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResult) error {
 	var err error
 	switch st.GetSubJobType() {
-	case indexpb.StatsSubJob_Sort:
-		// first update segment, failed state cannot generate new segment
-		var metricMutation *segMetricMutation
-		metricMutation, err = st.meta.SaveStatsResultSegment(st.GetSegmentID(), result)
-		if err != nil {
-			log.Ctx(ctx).Warn("save sort stats result failed", zap.Int64("taskID", st.GetTaskID()),
-				zap.Int64("segmentID", st.GetSegmentID()), zap.Error(err))
-			break
-		}
-		metricMutation.commit()
-
-		select {
-		case getBuildIndexChSingleton() <- result.GetSegmentID():
-		default:
-		}
 	case indexpb.StatsSubJob_TextIndexJob:
 		err = st.meta.UpdateSegment(st.GetSegmentID(), SetTextIndexLogs(result.GetTextStatsLogs()))
 		if err != nil {
@@ -419,18 +360,15 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 			break
 		}
 	case indexpb.StatsSubJob_BM25Job:
-		// bm25 logs are generated during with segment flush.
+	// bm25 logs are generated during with segment flush.
+	default:
+		log.Ctx(ctx).Warn("unexpected sub job type", zap.String("type", st.GetSubJobType().String()))
 	}
 
 	// if segment is not found, it means the segment is already dropped,
 	// so we can ignore the error and mark task as finished.
 	if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
 		return err
-	}
-	// Reset isCompacting flag after stats task is finished
-	if st.GetSubJobType() == indexpb.StatsSubJob_Sort {
-		st.meta.SetSegmentsCompacting(ctx, []UniqueID{st.GetSegmentID()}, false)
-		st.meta.SetSegmentStating(st.GetSegmentID(), false)
 	}
 	log.Ctx(ctx).Info("SetJobInfo for stats task success", zap.Int64("taskID", st.GetTaskID()),
 		zap.Int64("oldSegmentID", st.GetSegmentID()), zap.Int64("targetSegmentID", st.GetTargetSegmentID()),

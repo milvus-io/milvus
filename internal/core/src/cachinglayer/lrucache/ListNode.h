@@ -71,20 +71,19 @@ class ListNode {
     std::pair<bool, folly::SemiFuture<NodePin>>
     pin();
 
-    ResourceUsage&
-    size();
+    const ResourceUsage&
+    size() const;
 
     // Manually evicts the cell if it is not pinned.
     // Returns true if the cell ends up in a state other than LOADED.
     bool
     manual_evict();
 
-    // TODO(tiered storage 2): pin on ERROR should re-trigger loading.
-    // NOT_LOADED ---> LOADING ---> ERROR
+    // NOT_LOADED <---> LOADING
     //      ^            |
     //      |            v
     //      |------- LOADED
-    enum class State { NOT_LOADED, LOADING, LOADED, ERROR };
+    enum class State { NOT_LOADED, LOADING, LOADED };
 
  protected:
     // will be called during eviction, implementation should release all resources.
@@ -97,52 +96,59 @@ class ListNode {
     template <typename Fn>
     void
     mark_loaded(Fn&& cb, bool requesting_thread) {
-        std::unique_lock<std::shared_mutex> lock(mtx_);
-        if (requesting_thread) {
-            // requesting thread will promote NOT_LOADED to LOADING and only requesting
-            // thread will set state to ERROR, thus it is not possible for the requesting
-            // thread to see NOT_LOADED or ERROR.
-            AssertInfo(state_ != State::NOT_LOADED && state_ != State::ERROR,
-                       "Programming error: mark_loaded(requesting_thread=true) "
-                       "called on a {} cell",
-                       state_to_string(state_));
-            // no need to touch() here: node is pinned thus not eligible for eviction.
-            // we can delay touch() to when unpin() is called.
-            if (state_ == State::LOADING) {
-                cb();
-                state_ = State::LOADED;
-                load_promise_->setValue(folly::Unit());
-                load_promise_ = nullptr;
+        std::unique_ptr<folly::SharedPromise<folly::Unit>> promise = nullptr;
+        {
+            std::unique_lock<std::shared_mutex> lock(mtx_);
+            if (requesting_thread) {
+                AssertInfo(
+                    state_ != State::NOT_LOADED,
+                    "Programming error: mark_loaded(requesting_thread=true) "
+                    "called on a {} cell",
+                    state_to_string(state_));
+                // no need to touch() here: node is pinned thus not eligible for eviction.
+                // we can delay touch() to when unpin() is called.
+                if (state_ == State::LOADING) {
+                    cb();
+                    state_ = State::LOADED;
+                    promise = std::move(load_promise_);
+                    remove_self_from_loading_resource();
+                } else {
+                    // LOADED: cell has been loaded by another thread, do nothing.
+                    return;
+                }
             } else {
-                // LOADED: cell has been loaded by another thread, do nothing.
-                return;
+                // Even though this thread did not request loading this cell, translator still
+                // decided to download it because the adjacent cells are requested.
+                if (state_ == State::NOT_LOADED) {
+                    state_ = State::LOADED;
+                    cb();
+                    // memory of this cell is not reserved, touch() to track it.
+                    touch(true);
+                } else if (state_ == State::LOADING) {
+                    // another thread has explicitly requested loading this cell, we did it first
+                    // thus we set up the state first.
+                    cb();
+                    state_ = State::LOADED;
+                    promise = std::move(load_promise_);
+                    // the node that marked LOADING has already reserved memory, do not double count.
+                    touch(false);
+                    remove_self_from_loading_resource();
+                } else {
+                    // LOADED: cell has been loaded by another thread, do nothing.
+                    return;
+                }
             }
-        } else {
-            // Even though this thread did not request loading this cell, translator still
-            // decided to download it because the adjacent cells are requested.
-            if (state_ == State::NOT_LOADED || state_ == State::ERROR) {
-                state_ = State::LOADED;
-                cb();
-                // memory of this cell is not reserved, touch() to track it.
-                touch(true);
-            } else if (state_ == State::LOADING) {
-                // another thread has explicitly requested loading this cell, we did it first
-                // thus we set up the state first.
-                cb();
-                state_ = State::LOADED;
-                load_promise_->setValue(folly::Unit());
-                load_promise_ = nullptr;
-                // the node that marked LOADING has already reserved memory, do not double count.
-                touch(false);
-            } else {
-                // LOADED: cell has been loaded by another thread, do nothing.
-                return;
-            }
+        }
+        if (promise) {
+            promise->setValue(folly::Unit());
         }
     }
 
     void
     set_error(folly::exception_wrapper error);
+
+    void
+    remove_self_from_loading_resource();
 
     State state_{State::NOT_LOADED};
 
@@ -182,7 +188,6 @@ class ListNode {
     std::atomic<int> pin_count_{0};
 
     std::unique_ptr<folly::SharedPromise<folly::Unit>> load_promise_{nullptr};
-    folly::exception_wrapper error_;
 };
 
 }  // namespace milvus::cachinglayer::internal

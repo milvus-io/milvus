@@ -95,7 +95,7 @@ class Expr {
 
     virtual std::string
     ToString() const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
     virtual bool
@@ -105,7 +105,7 @@ class Expr {
 
     virtual std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const {
-        PanicInfo(ErrorCode::NotImplemented, "not implemented");
+        ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     }
 
     std::vector<std::shared_ptr<Expr>>&
@@ -836,7 +836,7 @@ class SegmentExpr : public Expr {
             return ProcessAllChunksForMultipleChunk<T>(
                 func, skip_func, res, valid_res, values...);
         } else {
-            PanicInfo(ErrorCode::Unsupported, "unreachable");
+            ThrowInfo(ErrorCode::Unsupported, "unreachable");
         }
     }
 
@@ -974,7 +974,7 @@ class SegmentExpr : public Expr {
                         return ProcessIndexChunksForValid<std::string>();
                     }
                     default:
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
                                   element_type);
                 }
@@ -1037,7 +1037,7 @@ class SegmentExpr : public Expr {
                             use_index, input);
                     }
                     default:
-                        PanicInfo(DataTypeInvalid,
+                        ThrowInfo(DataTypeInvalid,
                                   "unsupported element type: {}",
                                   element_type);
                 }
@@ -1198,43 +1198,6 @@ class SegmentExpr : public Expr {
         return valid_result;
     }
 
-    template <typename FUNC, typename... ValTypes>
-    VectorPtr
-    ProcessTextMatchIndex(FUNC func, ValTypes... values) {
-        TargetBitmap result;
-        TargetBitmap valid_result;
-
-        if (cached_match_res_ == nullptr) {
-            auto index = segment_->GetTextIndex(field_id_);
-            auto res = std::move(func(index, values...));
-            auto valid_res = index->IsNotNull();
-            cached_match_res_ = std::make_shared<TargetBitmap>(std::move(res));
-            cached_index_chunk_valid_res_ = std::move(valid_res);
-            if (cached_match_res_->size() < active_count_) {
-                // some entities are not visible in inverted index.
-                // only happend on growing segment.
-                TargetBitmap tail(active_count_ - cached_match_res_->size());
-                cached_match_res_->append(tail);
-                cached_index_chunk_valid_res_.append(tail);
-            }
-        }
-
-        // return batch size, not sure if we should use the data position.
-        auto real_batch_size =
-            (current_data_chunk_pos_ + batch_size_ > active_count_)
-                ? active_count_ - current_data_chunk_pos_
-                : batch_size_;
-        result.append(
-            *cached_match_res_, current_data_chunk_pos_, real_batch_size);
-        valid_result.append(cached_index_chunk_valid_res_,
-                            current_data_chunk_pos_,
-                            real_batch_size);
-        current_data_chunk_pos_ += real_batch_size;
-
-        return std::make_shared<ColumnVector>(std::move(result),
-                                              std::move(valid_result));
-    }
-
     template <typename T, typename FUNC, typename... ValTypes>
     void
     ProcessIndexChunksV2(FUNC func, ValTypes... values) {
@@ -1320,11 +1283,13 @@ class SegmentExpr : public Expr {
 
     bool
     CanUseNgramIndex(FieldId field_id) const {
-        if (segment_->type() != SegmentType::Sealed) {
-            return false;
-        }
-        auto cast_ptr = dynamic_cast<const segcore::SegmentSealed*>(segment_);
-        return (cast_ptr != nullptr && cast_ptr->HasNgramIndex(field_id));
+        return segment_->HasNgramIndex(field_id);
+    }
+
+    bool
+    CanUseNgramIndexForJson(FieldId field_id,
+                            const std::string& nested_path) const {
+        return segment_->HasNgramIndexForJson(field_id, nested_path);
     }
 
  protected:

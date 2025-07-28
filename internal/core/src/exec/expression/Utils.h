@@ -39,12 +39,12 @@ GetColumnVector(const VectorPtr& result) {
                 convert_vector->child(0))) {
             res = convert_flat_vector;
         } else {
-            PanicInfo(
+            ThrowInfo(
                 UnexpectedError,
                 "RowVector result must have a first ColumnVector children");
         }
     } else {
-        PanicInfo(UnexpectedError,
+        ThrowInfo(UnexpectedError,
                   "expr result must have a ColumnVector or RowVector result");
     }
     return res;
@@ -109,7 +109,7 @@ CompareTwoJsonArray(T arr1, const proto::plan::Array& arr2) {
                 break;
             }
             default:
-                PanicInfo(DataTypeInvalid,
+                ThrowInfo(DataTypeInvalid,
                           "unsupported data type {}",
                           arr2.array(i).val_case());
         }
@@ -152,7 +152,7 @@ GetValueFromProtoInternal(const milvus::proto::plan::GenericValue& value_proto,
     } else if constexpr (std::is_same_v<T, milvus::proto::plan::GenericValue>) {
         return static_cast<T>(value_proto);
     } else {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "unsupported generic value {}",
                   value_proto.DebugString());
     }
@@ -189,123 +189,6 @@ GetValueWithCastNumber(const milvus::proto::plan::GenericValue& value_proto) {
     } else {
         return GetValueFromProto<T>(value_proto);
     }
-}
-
-enum class MatchType {
-    ExactMatch,
-    PrefixMatch,
-    PostfixMatch,
-    // The different between InnerMatch and Match is that InnerMatch is used for
-    // %xxx% while Match could be %xxx%xxx%
-    InnerMatch,
-    Match
-};
-struct ParsedResult {
-    std::string literal;
-    MatchType type;
-};
-
-// Not used now, but may be used in the future for other type of match for ngram index
-inline std::optional<ParsedResult>
-parse_ngram_pattern(const std::string& pattern) {
-    if (pattern.empty()) {
-        return std::nullopt;
-    }
-
-    std::vector<size_t> percent_indices;
-    bool was_escaped = false;
-    for (size_t i = 0; i < pattern.length(); ++i) {
-        char c = pattern[i];
-        if (c == '%' && !was_escaped) {
-            percent_indices.push_back(i);
-        } else if (c == '_' && !was_escaped) {
-            // todo(SpadeA): now not support '_'
-            return std::nullopt;
-        }
-        was_escaped = (c == '\\' && !was_escaped);
-    }
-
-    MatchType match_type;
-    size_t core_start = 0;
-    size_t core_length = 0;
-    size_t percent_count = percent_indices.size();
-
-    if (percent_count == 0) {
-        match_type = MatchType::ExactMatch;
-        core_start = 0;
-        core_length = pattern.length();
-    } else if (percent_count == 1) {
-        if (pattern.length() == 1) {
-            return std::nullopt;
-        }
-
-        size_t idx = percent_indices[0];
-        // case: %xxx
-        if (idx == 0 && pattern.length() > 1) {
-            match_type = MatchType::PrefixMatch;
-            core_start = 1;
-            core_length = pattern.length() - 1;
-        } else if (idx == pattern.length() - 1 && pattern.length() > 1) {
-            // case: xxx%
-            match_type = MatchType::PostfixMatch;
-            core_start = 0;
-            core_length = pattern.length() - 1;
-        } else {
-            // case: xxx%xxx
-            match_type = MatchType::Match;
-        }
-    } else if (percent_count == 2) {
-        size_t idx1 = percent_indices[0];
-        size_t idx2 = percent_indices[1];
-        if (idx1 == 0 && idx2 == pattern.length() - 1 && pattern.length() > 2) {
-            // case: %xxx%
-            match_type = MatchType::InnerMatch;
-            core_start = 1;
-            core_length = pattern.length() - 2;
-        } else {
-            match_type = MatchType::Match;
-        }
-    } else {
-        match_type = MatchType::Match;
-    }
-
-    if (match_type == MatchType::Match) {
-        // not supported now
-        return std::nullopt;
-    }
-
-    // Extract the literal from the pattern
-    std::string_view core_pattern =
-        std::string_view(pattern).substr(core_start, core_length);
-
-    std::string r;
-    r.reserve(2 * core_pattern.size());
-    bool escape_mode = false;
-    for (char c : core_pattern) {
-        if (escape_mode) {
-            if (is_special(c)) {
-                // todo(SpadeA): may not be suitable for ngram? Not use ngram in this case for now.
-                return std::nullopt;
-            }
-            r += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                escape_mode = true;
-            } else if (c == '%') {
-                // should be unreachable
-            } else if (c == '_') {
-                // should be unreachable
-                return std::nullopt;
-            } else {
-                if (is_special(c)) {
-                    r += '\\';
-                }
-                r += c;
-            }
-        }
-    }
-    return std::optional<ParsedResult>{ParsedResult{std::move(r), match_type}};
 }
 
 }  // namespace exec

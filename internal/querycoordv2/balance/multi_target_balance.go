@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -498,8 +499,7 @@ func (b *MultiTargetBalancer) BalanceReplica(ctx context.Context, replica *meta.
 func (b *MultiTargetBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica, stoppingBalance bool) []ChannelAssignPlan {
 	var rwNodes, roNodes []int64
 	if streamingutil.IsStreamingServiceEnabled() {
-		rwNodes, roNodes = replica.GetRWSQNodes(), replica.GetROSQNodes()
-		roNodes = append(roNodes, replica.GetRONodes()...)
+		rwNodes, roNodes = utils.GetChannelRWAndRONodesFor260(replica, b.nodeManager)
 	} else {
 		rwNodes, roNodes = replica.GetRWNodes(), replica.GetRONodes()
 	}

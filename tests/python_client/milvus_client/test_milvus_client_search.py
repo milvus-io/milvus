@@ -99,7 +99,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_data", [1, "12-s","中文", "% $#"])
+    @pytest.mark.parametrize("invalid_data", [1, "12-s", "中文", "% $#"])
     def test_milvus_client_search_invalid_data(self, invalid_data):
         """
         target: test search with invalid data
@@ -120,7 +120,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_limit", [-1, ct.min_limit-1, "1", "12-s", "中文", "%$#"])
+    @pytest.mark.parametrize("invalid_limit", [-1, ct.min_limit - 1, "1", "12-s", "中文", "%$#"])
     def test_milvus_client_search_invalid_limit(self, invalid_limit):
         """
         target: test search with invalid data
@@ -141,7 +141,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_limit", [ct.max_limit+1])
+    @pytest.mark.parametrize("invalid_limit", [ct.max_limit + 1])
     def test_milvus_client_search_limit_out_of_range(self, invalid_limit):
         """
         target: test search with invalid data
@@ -200,7 +200,8 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         error = {ct.err_code: 1,
                  ct.err_msg: f"`output_fields` value {invalid_output_fields} is illegal"}
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, output_fields=invalid_output_fields,
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    output_fields=invalid_output_fields,
                     check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -222,7 +223,8 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors_to_search = rng.random((1, 8))
         error = {ct.err_code: 1,
                  ct.err_msg: f"`search_params` value {invalid_search_params} is illegal"}
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, search_params=invalid_search_params,
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                    search_params=invalid_search_params,
                     check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
@@ -456,7 +458,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
-    def test_milvus_client_search_null_expr_json_key(self, nullable,  null_expr_op):
+    def test_milvus_client_search_null_expr_json_key(self, nullable, null_expr_op):
         """
         target: test search with null expression on each key of json
         method: create connection, collection, insert and search
@@ -479,11 +481,11 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nb, dim)
         if nullable:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
-                    nullable_field_name: {'a': None}} for i in range(default_nb)]
+                     nullable_field_name: {'a': None}} for i in range(default_nb)]
             null_expr = nullable_field_name + "['a']" + " " + null_expr_op
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
-                    nullable_field_name: {'a': 1, 'b': None}} for i in range(default_nb)]
+                     nullable_field_name: {'a': 1, 'b': None}} for i in range(default_nb)]
             null_expr = nullable_field_name + "['b']" + " " + null_expr_op
         self.insert(client, collection_name, rows)
         # 3. search
@@ -517,10 +519,10 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         vectors = cf.gen_vectors(default_nb, dim)
         if nullable:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
-                    nullable_field_name: None} for i in range(default_nb)]
+                     nullable_field_name: None} for i in range(default_nb)]
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: vectors[i],
-                    nullable_field_name: [1, 2, 3]} for i in range(default_nb)]
+                     nullable_field_name: [1, 2, 3]} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. search
         null_expr = nullable_field_name + "[0]" + " " + null_expr_op
@@ -602,7 +604,7 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                 "array_field": [i, i +1]} for i in range(default_nb)]
+                 "array_field": [i, i + 1]} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. search
         my_rerank_fn = Function(
@@ -1591,7 +1593,11 @@ class TestMilvusClientSearchInvalid(TestMilvusClientV2Base):
             }
         )
         vectors_to_search = rng.random((1, dim))
-        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn, group_by_field=ct.default_reranker_field_name)
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn,
+                    group_by_field=ct.default_reranker_field_name)
+        self.add_collection_field(client, collection_name, field_name=ct.default_new_field_name, data_type=DataType.INT64,
+                                  nullable=True)
+        self.search(client, collection_name, vectors_to_search, ranker=my_rerank_fn, group_by_field=ct.default_new_field_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_reranker_on_dynamic_fields(self):
@@ -1670,7 +1676,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         self.using_database(client, "default")
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
         assert collection_name in collections
         self.describe_collection(client, collection_name,
@@ -1776,7 +1782,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -1886,7 +1892,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -1985,7 +1991,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2080,7 +2086,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2175,7 +2181,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2270,7 +2276,7 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                  check_task=CheckTasks.check_describe_collection_property,
                                  check_items={"collection_name": collection_name,
                                               "dim": default_dim,
-                                              "consistency_level": 0})
+                                              "consistency_level": 2})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -2297,7 +2303,8 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         # 5. add field
         default_value = None
         self.add_collection_field(client, collection_name, field_name="field_new", data_type=new_field_data_type,
-                                  nullable=True, element_type=DataType.INT64, max_capacity=12, max_length=100, default_value=default_value)
+                                  nullable=True, element_type=DataType.INT64, max_capacity=12, max_length=100,
+                                  default_value=default_value)
         if is_flush:
             self.flush(client, collection_name)
         # 6. check the old search is not impacted after add field
@@ -2345,88 +2352,8 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("new_field_name", [default_dynamic_field_name, "new_field"])
-    def test_milvus_client_search_query_enable_dynamic_and_add_field(self, new_field_name):
-        """
-        target: test search (high level api) normal case
-        method: create connection, collection, insert, add field(same as dynamic and different as dynamic) and search
-        expected: search/query successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        dim = 8
-        # 1. create collection
-        schema = self.create_schema(client, enable_dynamic_field=True)[0]
-        schema.add_field(default_primary_key_field_name, DataType.INT64, max_length=64, is_primary=True, auto_id=False)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=dim)
-        schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64, is_partition_key=True)
-        schema.add_field(default_float_field_name, DataType.FLOAT, nullable=True)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
-        # 2. insert
-        vectors = cf.gen_vectors(default_nb, dim, vector_data_type=DataType.FLOAT_VECTOR)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i),
-                 default_dynamic_field_name: 1} for i in range(default_nb)]
-        results = self.insert(client, collection_name, rows)[0]
-        assert results['insert_count'] == default_nb
-        # 3. add new field same as dynamic field name
-        default_value = 1
-        self.add_collection_field(client, collection_name, field_name=new_field_name, data_type=DataType.INT64,
-                                  nullable=True, default_value=default_value)
-        vectors_to_search = [vectors[0]]
-        insert_ids = [i for i in range(default_nb)]
-        # 4. check old dynamic data search is not impacted after add new field
-        self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                    filter=f'$meta["{default_dynamic_field_name}"] == 1',
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "limit": default_limit,
-                                 "pk_name": default_primary_key_field_name})
-        # 5. check old dynamic data query is not impacted after add new field
-        for row in rows:
-            row[new_field_name] = default_value
-        self.query(client, collection_name, filter=f'$meta["{default_dynamic_field_name}"] == 1',
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name,
-                                "vector_type": DataType.FLOAT_VECTOR})
-        # 6. search filtered with the new field
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f"{new_field_name} == 1",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": default_limit})
-        self.search(client, collection_name, vectors_to_search,
-                    filter=f"{new_field_name} is null",
-                    check_task=CheckTasks.check_search_results,
-                    check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
-                                 "pk_name": default_primary_key_field_name,
-                                 "limit": 0})
-        # 7. query filtered with the new field
-        self.query(client, collection_name, filter=f"{new_field_name} == 1",
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
-        self.query(client, collection_name, filter=f"{new_field_name} is null",
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: [],
-                                "pk_name": default_primary_key_field_name})
-        self.release_collection(client, collection_name)
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="issue #36484")
     @pytest.mark.parametrize("nullable", [True, False])
     def test_milvus_client_search_query_self_creation_default(self, nullable):
         """
@@ -2466,42 +2393,74 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
         expected: search/query successfully
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
+        old_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Bounded")
+        self.create_collection(client, old_name, default_dim, consistency_level="Strong")
         collections = self.list_collections(client)[0]
-        assert collection_name in collections
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "dim": default_dim,
-                                              "consistency_level": 0})
-        old_name = collection_name
-        new_name = collection_name + "new"
+        assert old_name in collections
+        c_info = self.describe_collection(client, old_name,
+                                          check_task=CheckTasks.check_describe_collection_property,
+                                          check_items={"collection_name": old_name,
+                                                       "dim": default_dim,
+                                                       "consistency_level": 0})[0]
+
+        rows = cf.gen_row_data_by_schema(nb=default_nb, schema=c_info)
+        self.insert(client, old_name, rows)
+        self.flush(client, old_name)
+        self.wait_for_index_ready(client, collection_name=old_name, index_name='vector')
+
+        vectors_to_search = cf.gen_vectors(ct.default_nq, default_dim)
+        insert_ids = [item.get('id') for item in rows]
+        old_search_res = self.search(client, old_name, vectors_to_search,
+                                     check_task=CheckTasks.check_search_results,
+                                     check_items={"enable_milvus_client_api": True,
+                                                  "nq": ct.default_nq,
+                                                  "ids": insert_ids,
+                                                  "pk_name": "id",
+                                                  "limit": default_limit})[0]
+        old_query_res = self.query(client, old_name, filter=default_search_exp,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: rows,
+                                                "with_vec": True})[0]
+
+        new_name = old_name + "new"
         self.rename_collection(client, old_name, new_name)
-        # 2. insert
-        rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.describe_collection(client, new_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": new_name,
+                                              "dim": default_dim})
+
+        # search again after rename collection
+        new_search_res = self.search(client, new_name, vectors_to_search,
+                                     check_task=CheckTasks.check_search_results,
+                                     check_items={"enable_milvus_client_api": True,
+                                                  "nq": ct.default_nq,
+                                                  "ids": insert_ids,
+                                                  "pk_name": "id",
+                                                  "limit": default_limit})[0]
+        new_query_res = self.query(client, new_name, filter=default_search_exp,
+                                   check_task=CheckTasks.check_query_results,
+                                   check_items={exp_res: rows,
+                                                "with_vec": True})[0]
+        assert old_search_res[0].ids == new_search_res[0].ids
+        assert old_query_res == new_query_res
+
+        rows = cf.gen_row_data_by_schema(nb=200, schema=c_info, start=default_nb)
+        error = {ct.err_code: 0, ct.err_msg: f"collection not found"}
+        self.insert(client, old_name, rows,
+                    check_task=CheckTasks.err_res,
+                    check_items=error)
         self.insert(client, new_name, rows)
-        self.flush(client, new_name)
-        # assert self.num_entities(client, collection_name)[0] == default_nb
-        # 3. search
-        vectors_to_search = rng.random((1, default_dim))
-        insert_ids = [i for i in range(default_nb)]
+        new_ids = [item.get('id') for item in rows]
+        insert_ids.extend(new_ids)
         self.search(client, new_name, vectors_to_search,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
-                                 "nq": len(vectors_to_search),
+                                 "nq": ct.default_nq,
                                  "ids": insert_ids,
-                                 "pk_name": default_primary_key_field_name,
+                                 "pk_name": "id",
                                  "limit": default_limit})
-        # 4. query
-        self.query(client, new_name, filter=default_search_exp,
-                   check_task=CheckTasks.check_query_results,
-                   check_items={exp_res: rows,
-                                "with_vec": True,
-                                "pk_name": default_primary_key_field_name})
+
         self.release_collection(client, new_name)
         self.drop_collection(client, new_name)
 
@@ -2733,7 +2692,8 @@ class TestMilvusClientSearchValid(TestMilvusClientV2Base):
                                 "pk_name": default_primary_key_field_name})
         # 6. insert to the new added field
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i), "field_new": i} for i in range(delete_num)]
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i), "field_new": i} for i in
+                range(delete_num)]
         pks = self.insert(client, collection_name, rows)[0]
         # 7. flush
         self.flush(client, collection_name)
@@ -2978,7 +2938,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3068,7 +3028,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3129,7 +3089,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3190,7 +3150,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3228,7 +3188,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                      default_string_field_name: str(i), "nullable_field": None} for i in range(default_nb)]
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                     default_string_field_name: str(i), "nullable_field": i*1.0} for i in range(default_nb)]
+                     default_string_field_name: str(i), "nullable_field": i * 1.0} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. search
         vectors_to_search = rng.random((1, dim))
@@ -3249,7 +3209,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3308,7 +3268,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3367,7 +3327,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3426,7 +3386,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3437,7 +3397,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nullable", [True, False])
     @pytest.mark.parametrize("null_expr_op", ["is null", "IS NULL", "is not null", "IS NOT NULL"])
-    def test_milvus_client_search_null_expr_json(self, nullable, null_expr_op):
+    @pytest.mark.parametrize("json_flat_index", [True, False])
+    def test_milvus_client_search_null_expr_json(self, nullable, null_expr_op, json_flat_index):
         """
         target: test search with null expression on json fields
         method: create connection, collection, insert and search
@@ -3456,12 +3417,20 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         schema.add_field(nullable_field_name, DataType.JSON, nullable=nullable)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
-        index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
-                               params={"json_cast_type": "double",
-                                       "json_path": f"{nullable_field_name}['a']['b']"})
-        index_params.add_index(field_name=nullable_field_name, index_name="json_index_1", index_type="INVERTED",
-                               params={"json_cast_type": "varchar",
-                                       "json_path": f"{nullable_field_name}['a']['c']"})
+        if json_flat_index:
+            index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
+                                params={"json_cast_type": "json",
+                                        "json_path": f"{nullable_field_name}['a']['b']"})
+            index_params.add_index(field_name=nullable_field_name, index_name="json_index_1", index_type="INVERTED",
+                                params={"json_cast_type": "json",
+                                        "json_path": f"{nullable_field_name}['a']['c']"})
+        else:
+            index_params.add_index(field_name=nullable_field_name, index_name="json_index", index_type="INVERTED",
+                                params={"json_cast_type": "double",
+                                        "json_path": f"{nullable_field_name}['a']['b']"})
+            index_params.add_index(field_name=nullable_field_name, index_name="json_index_1", index_type="INVERTED",
+                                params={"json_cast_type": "varchar",
+                                        "json_path": f"{nullable_field_name}['a']['c']"})
         self.create_collection(client, collection_name, dimension=dim, schema=schema, index_params=index_params)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
@@ -3470,7 +3439,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                      default_string_field_name: str(i), nullable_field_name: None} for i in range(default_nb)]
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in range(default_nb)]
+                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in
+                    range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # 3. search
@@ -3492,8 +3462,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    output_fields = [nullable_field_name],
-                    consistency_level = "Strong",
+                    output_fields=[nullable_field_name],
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3533,7 +3503,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                      default_string_field_name: str(i), nullable_field_name: None} for i in range(default_nb)]
         else:
             rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, dim))[0]),
-                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in range(default_nb)]
+                     default_string_field_name: str(i), nullable_field_name: {'a': {'b': i, 'c': None}}} for i in
+                    range(default_nb)]
         self.insert(client, collection_name, rows)
         # 3. flush
         self.flush(client, collection_name)
@@ -3567,8 +3538,8 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
                 limit = 0
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
-                    output_fields = [nullable_field_name],
-                    consistency_level = "Strong",
+                    output_fields=[nullable_field_name],
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3647,7 +3618,7 @@ class TestMilvusClientSearchNullExpr(TestMilvusClientV2Base):
         self.search(client, collection_name, vectors_to_search,
                     filter=null_expr,
                     output_fields=[nullable_field_name],
-                    consistency_level = "Strong",
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3663,7 +3634,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
     def supported_varchar_scalar_index(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["DOUBLE", "VARCHAR", "BOOL", "double", "varchar", "bool"])
+    @pytest.fixture(scope="function", params=["JSON", "VARCHAR", "double", "bool"])
     def supported_json_cast_type(self, request):
         yield request.param
 
@@ -3703,21 +3674,21 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         if not enable_dynamic_field:
             schema.add_field(json_field_name, DataType.JSON)
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(default_vector_field_name, metric_type="COSINE")
+        index_params.add_index(default_vector_field_name, index_type="FLAT", metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+60, default_dim)
+        vectors = cf.gen_vectors(default_nb + 60, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': {"b": i, "b": i}}} for i in
                 range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb+10)]
+                range(default_nb, default_nb + 10)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb+10, default_nb+20)]
+                range(default_nb + 10, default_nb + 20)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
@@ -3740,9 +3711,11 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         # 2. prepare index params
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=default_vector_field_name, index_type="FLAT", metric_type="COSINE")
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name, index_name=index_name + '1',
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -3765,10 +3738,10 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 5. search without filter
         vectors_to_search = [vectors[0]]
-        insert_ids = [i for i in range(default_nb+60)]
+        insert_ids = [i for i in range(default_nb + 60)]
         self.search(client, collection_name, vectors_to_search,
-                    output_fields = [json_field_name],
-                    consistency_level = "Strong",
+                    output_fields=[json_field_name],
+                    consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": len(vectors_to_search),
@@ -3777,7 +3750,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                                  "limit": default_limit})
         # 6. search with filter on json without output_fields
         expr = f"{json_field_name}['a']['b'] == {default_nb / 2}"
-        insert_ids = [default_nb/2]
+        insert_ids = [default_nb / 2]
         self.search(client, collection_name, vectors_to_search,
                     filter=expr,
                     consistency_level="Strong",
@@ -3786,9 +3759,9 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                                  "nq": len(vectors_to_search),
                                  "ids": insert_ids,
                                  "pk_name": default_primary_key_field_name,
-                                 "limit": 1})[0]
+                                 "limit": 1})
         expr = f"{json_field_name} == {default_nb + 5}"
-        insert_ids = [default_nb+5]
+        insert_ids = [default_nb + 5]
         self.search(client, collection_name, vectors_to_search,
                     filter=expr,
                     consistency_level="Strong",
@@ -3834,7 +3807,8 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_milvus_client_search_json_path_index_default_index_name(self, enable_dynamic_field, supported_json_cast_type,
+    def test_milvus_client_search_json_path_index_default_index_name(self, enable_dynamic_field,
+                                                                     supported_json_cast_type,
                                                                      supported_varchar_scalar_index):
         """
         target: test json path index without specifying the index_name parameter
@@ -3846,7 +3820,8 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         # 1. create collection
         json_field_name = "my_json"
         schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field)[0]
-        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, is_primary=True, auto_id=False, max_length=128)
+        schema.add_field(default_primary_key_field_name, DataType.VARCHAR, is_primary=True, auto_id=False,
+                         max_length=128)
         schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
         schema.add_field(default_string_field_name, DataType.VARCHAR, max_length=64)
         if not enable_dynamic_field:
@@ -3864,7 +3839,8 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         # 4. create index
         index_name = json_field_name + '/a/b'
         self.create_index(client, collection_name, index_params)
@@ -3874,7 +3850,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         insert_ids = [str(int(default_nb / 2))]
         self.search(client, collection_name, vectors_to_search,
                     filter=expr,
-                    output_fields = [json_field_name],
+                    output_fields=[json_field_name],
                     consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
@@ -3912,14 +3888,15 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
         index_params.add_index(field_name=default_primary_key_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{default_string_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{default_string_field_name}['a']['b']"})
         # 3. create index
         index_name = default_string_field_name
         self.create_index(client, collection_name, index_params)
         self.describe_index(client, collection_name, index_name,
                             check_task=CheckTasks.check_describe_index_property,
                             check_items={
-                                #"json_cast_type": supported_json_cast_type, # issue 40426
+                                # "json_cast_type": supported_json_cast_type, # issue 40426
                                 "json_path": f"{default_string_field_name}['a']['b']",
                                 "index_type": supported_varchar_scalar_index,
                                 "field_name": default_string_field_name,
@@ -3974,7 +3951,8 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         # 3. prepare index params
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=json_field_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         self.create_index(client, collection_name, index_params)
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=json_field_name,
@@ -4010,8 +3988,10 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("is_flush", [True, False])
     @pytest.mark.parametrize("is_release", [True, False])
-    def test_milvus_client_json_search_index_same_json_path_diff_field(self, enable_dynamic_field, supported_json_cast_type,
-                                                                       supported_varchar_scalar_index, is_flush, is_release):
+    def test_milvus_client_json_search_index_same_json_path_diff_field(self, enable_dynamic_field,
+                                                                       supported_json_cast_type,
+                                                                       supported_varchar_scalar_index, is_flush,
+                                                                       is_release):
         """
         target: test search after creating same json path for different field
         method: Search after creating same json path for different field
@@ -4079,7 +4059,7 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         insert_ids = [i for i in range(default_nb)]
         self.search(client, collection_name, vectors_to_search,
                     filter=expr,
-                    output_fields=[json_field_name+"1"],
+                    output_fields=[json_field_name + "1"],
                     consistency_level="Strong",
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
@@ -4124,18 +4104,18 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         # 2. release collection
         self.release_collection(client, collection_name)
         # 3. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+50, default_dim)
+        vectors = cf.gen_vectors(default_nb + 50, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
                 range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb+10)]
+                range(default_nb, default_nb + 10)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb+10, default_nb+20)]
+                range(default_nb + 10, default_nb + 20)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
@@ -4156,8 +4136,10 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name, index_name=index_name + '1',
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -4228,7 +4210,8 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("is_flush", [True, False])
-    def test_milvus_client_search_json_path_index_after_release_load(self, enable_dynamic_field, supported_json_cast_type,
+    def test_milvus_client_search_json_path_index_after_release_load(self, enable_dynamic_field,
+                                                                     supported_json_cast_type,
                                                                      supported_varchar_scalar_index, is_flush):
         """
         target: test search after creating json path index after release and load
@@ -4260,18 +4243,18 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
         index_params.add_index(default_vector_field_name, metric_type="COSINE")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
         # 2. insert with different data distribution
-        vectors = cf.gen_vectors(default_nb+50, default_dim)
+        vectors = cf.gen_vectors(default_nb + 50, default_dim)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': {"b": i}}} for i in
                 range(default_nb)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: i} for i in
-                range(default_nb, default_nb+10)]
+                range(default_nb, default_nb + 10)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {}} for i in
-                range(default_nb+10, default_nb+20)]
+                range(default_nb + 10, default_nb + 20)]
         self.insert(client, collection_name, rows)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: vectors[i],
                  default_string_field_name: str(i), json_field_name: {'a': [1, 2, 3]}} for i in
@@ -4285,15 +4268,17 @@ class TestMilvusClientSearchJsonPathIndex(TestMilvusClientV2Base):
                  default_string_field_name: str(i), json_field_name: {'a': [{'b': None}, 2, 3]}} for i in
                 range(default_nb + 40, default_nb + 50)]
         self.insert(client, collection_name, rows)
-        #3. flush if specified
+        # 3. flush if specified
         if is_flush:
             self.flush(client, collection_name)
         # 4. prepare index params
         index_name = "json_index"
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index(field_name=json_field_name, index_name=index_name, index_type=supported_varchar_scalar_index,
-                               params={"json_cast_type": supported_json_cast_type, "json_path": f"{json_field_name}['a']['b']"})
+        index_params.add_index(field_name=json_field_name, index_name=index_name,
+                               index_type=supported_varchar_scalar_index,
+                               params={"json_cast_type": supported_json_cast_type,
+                                       "json_path": f"{json_field_name}['a']['b']"})
         index_params.add_index(field_name=json_field_name, index_name=index_name + '1',
                                index_type=supported_varchar_scalar_index,
                                params={"json_cast_type": supported_json_cast_type,
@@ -4376,7 +4361,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
     @pytest.fixture(scope="function", params=["COSINE", "L2"])
     def metric_type(self, request):
         yield request.param
-    
+
     @pytest.fixture(scope="function", params=[DataType.INT8, DataType.INT16, DataType.INT32,
                                               DataType.FLOAT, DataType.DOUBLE])
     def rerank_fields(self, request):
@@ -4385,7 +4370,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
             if request.param not in [DataType.INT8, DataType.FLOAT]:
                 pytest.skip(f"skip rerank field type {request.param}")
         yield request.param
-    
+
     @pytest.fixture(scope="function", params=["STL_SORT", "INVERTED", "AUTOINDEX", ""])
     def scalar_index(self, request):
         tags = request.config.getoption("--tags", default=['L0', 'L1', 'L2'], skip=True)
@@ -4399,6 +4384,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
     #  The following are valid base cases
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("function", ["gauss", "linear", "exp"])
     @pytest.mark.parametrize("scale", [100, 10000, 100.0])
@@ -4430,7 +4416,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
                  ct.default_reranker_field_name: i} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         if is_flush:
-            self.flush(client,collection_name)
+            self.flush(client, collection_name)
         # 3. search
         my_rerank_fn = Function(
             name="my_reranker",
@@ -4689,7 +4675,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
             elif rerank_fields == DataType.DOUBLE:
                 value = np.float64(i)
             single_row = {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
-                 ct.default_reranker_field_name: value}
+                          ct.default_reranker_field_name: value}
             rows.append(single_row)
         self.insert(client, collection_name, rows)
         # 3. compact
@@ -4787,7 +4773,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
             elif rerank_fields == DataType.DOUBLE:
                 value = np.float64(i)
             single_row = {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, dim))[0]),
-                 ct.default_reranker_field_name: value}
+                          ct.default_reranker_field_name: value}
             rows.append(single_row)
         self.insert(client, collection_name, rows)
         # flush
@@ -4878,6 +4864,7 @@ class TestMilvusClientSearchDecayRerank(TestMilvusClientV2Base):
                                  "limit": default_limit}
                     )
 
+
 class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
     @pytest.fixture(scope="function")
@@ -4889,7 +4876,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         fake = Faker()
         dense_metric_type = "COSINE"
-        
+
         # 1. create schema with embedding and bm25 functions
         schema = client.create_schema(enable_dynamic_field=False, auto_id=True)
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -4898,7 +4885,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field("dense", DataType.FLOAT_VECTOR, dim=768)
         schema.add_field("bm25", DataType.SPARSE_FLOAT_VECTOR)
-        
+
         # add bm25 function
         bm25_function = Function(
             name="bm25",
@@ -4907,7 +4894,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             function_type=FunctionType.BM25,
         )
         schema.add_function(bm25_function)
-        
+
         # 2. prepare index params
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="dense", index_type="FLAT", metric_type=dense_metric_type)
@@ -4922,7 +4909,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             metric_type="BM25",
             params={"bm25_k1": 1.2, "bm25_b": 0.75},
         )
-        
+
         # 3. create collection
         client.create_collection(
             collection_name,
@@ -4930,7 +4917,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             index_params=index_params,
             consistency_level="Strong",
         )
-        
+
         # 4. insert data
         rows = []
         data_size = 3000
@@ -4942,7 +4929,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 "dense": [random.random() for _ in range(768)]
             })
         client.insert(collection_name, rows)
-        
+
         return collection_name
 
     def merge_and_dedup_hybrid_searchresults(self, result_a, result_b):
@@ -4966,18 +4953,18 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         url = f"{tei_reranker_endpoint}/rerank"
 
         payload = json.dumps({
-        "query": query_texts,
-        "texts": document_texts
+            "query": query_texts,
+            "texts": document_texts
         })
         if enable_truncate:
             payload = json.dumps({
-            "query": query_texts,
-            "texts": document_texts,
-            "truncate": True,
-            "truncation_direction": "Right"
+                "query": query_texts,
+                "texts": document_texts,
+                "truncate": True,
+                "truncation_direction": "Right"
             })
         headers = {
-        'Content-Type': 'application/json'
+            'Content-Type': 'application/json'
         }
 
         response = requests.request("POST", url, headers=headers, data=payload)
@@ -5000,17 +4987,17 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         url = f"{vllm_reranker_endpoint}/v2/rerank"
 
         payload = json.dumps({
-        "query": query_texts,
-        "documents": document_texts
+            "query": query_texts,
+            "documents": document_texts
         })
         if enable_truncate:
             payload = json.dumps({
-            "query": query_texts,
-            "documents": document_texts,
-            "truncate_prompt_tokens": 512
+                "query": query_texts,
+                "documents": document_texts,
+                "truncate_prompt_tokens": 512
             })
         headers = {
-        'Content-Type': 'application/json'
+            'Content-Type': 'application/json'
         }
 
         response = requests.request("POST", url, headers=headers, data=payload)
@@ -5030,47 +5017,47 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
         return reranked_results
 
-
-
     def display_side_by_side_comparison(self, query_text, milvus_results, gt_results):
         """
         Display side by side comparison of Milvus rerank results and ground truth results
         """
-        log.info(f"\n{'='*120}")
+        log.info(f"\n{'=' * 120}")
         log.info(f"Query: {query_text}")
-        log.info(f"{'='*120}")
-        
+        log.info(f"{'=' * 120}")
+
         # Display side by side comparison
         log.info(f"\n{'Milvus Rerank Results':<58} | {'Ground Truth Results':<58}")
-        log.info(f"{'-'*58} | {'-'*58}")
-        
+        log.info(f"{'-' * 58} | {'-' * 58}")
+
         max_len = max(len(milvus_results), len(gt_results))
-        
+
         for i in range(max_len):
-            log.info(f"\nRank {i+1}:")
-            
+            log.info(f"\nRank {i + 1}:")
+
             # Milvus result
             if i < len(milvus_results):
-                milvus_doc = milvus_results[i].replace('\n', ' ')[:55] + "..." if len(milvus_results[i]) > 55 else milvus_results[i].replace('\n', ' ')
+                milvus_doc = milvus_results[i].replace('\n', ' ')[:55] + "..." if len(milvus_results[i]) > 55 else \
+                milvus_results[i].replace('\n', ' ')
                 log.info(f"{milvus_doc:<58}".ljust(58) + " | " + " " * 58)
             else:
                 log.info(f"{'(no more results)':<58}".ljust(58) + " | " + " " * 58)
-            
+
             # Ground truth result
             if i < len(gt_results):
-                gt_doc = gt_results[i].replace('\n', ' ')[:55] + "..." if len(gt_results[i]) > 55 else gt_results[i].replace('\n', ' ')
+                gt_doc = gt_results[i].replace('\n', ' ')[:55] + "..." if len(gt_results[i]) > 55 else gt_results[
+                    i].replace('\n', ' ')
                 log.info(f"{' ' * 58} | {gt_doc:<58}")
             else:
                 log.info(f"{' ' * 58} | {'(no more results)':<58}")
-            
-            # Check if documents are the same
-            if (i < len(milvus_results) and i < len(gt_results) and 
-                milvus_results[i] == gt_results[i]):
-                log.info(f"{'✓ Same document':<58} | {'✓ Same document':<58}")
-            
-            log.info(f"{'-'*58} | {'-'*58}")
 
-    def compare_milvus_rerank_with_origin_rerank(self,query_texts, rerank_results, results_without_rerank,
+            # Check if documents are the same
+            if (i < len(milvus_results) and i < len(gt_results) and
+                    milvus_results[i] == gt_results[i]):
+                log.info(f"{'✓ Same document':<58} | {'✓ Same document':<58}")
+
+            log.info(f"{'-' * 58} | {'-' * 58}")
+
+    def compare_milvus_rerank_with_origin_rerank(self, query_texts, rerank_results, results_without_rerank,
                                                  enable_truncate=False,
                                                  tei_reranker_endpoint=None,
                                                  vllm_reranker_endpoint=None):
@@ -5090,7 +5077,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             query_text = query_texts[i]
             document_texts = [x["document"] for x in results_without_rerank[i]]
             distances_without_rerank = [x["distance"] for x in results_without_rerank[i]]
-            
+
             # Create mapping from document to original data (including pk)
             doc_to_original = {}
             for original_item in results_without_rerank[i]:
@@ -5102,34 +5089,36 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             log.debug(f"distances_without_rerank: {distances_without_rerank}")
             limit = len(actual_rerank_results)
             if tei_reranker_endpoint is not None:
-                raw_gt = self.get_tei_rerank_results(query_text, document_texts, tei_reranker_endpoint, enable_truncate=enable_truncate)[:limit]
+                raw_gt = self.get_tei_rerank_results(query_text, document_texts, tei_reranker_endpoint,
+                                                     enable_truncate=enable_truncate)[:limit]
             if vllm_reranker_endpoint is not None:
-                raw_gt = self.get_vllm_rerank_results(query_text, document_texts, vllm_reranker_endpoint, enable_truncate=enable_truncate)[:limit]
-            
+                raw_gt = self.get_vllm_rerank_results(query_text, document_texts, vllm_reranker_endpoint,
+                                                      enable_truncate=enable_truncate)[:limit]
+
             # Create list of (distance, pk, document) tuples for sorting
             gt_with_info = []
             for doc in raw_gt:
                 original_item = doc_to_original.get(doc["text"])
                 if original_item:
-                    gt_with_info.append(( doc["score"], original_item["id"], doc["text"]))
-            
+                    gt_with_info.append((doc["score"], original_item["id"], doc["text"]))
+
             # Sort by score descending first, then by pk (id) ascending when scores are equal
             gt_with_info.sort(key=lambda x: (-x[0], x[1]))
-            
+
             # Extract the sorted documents
             gt = [item[2] for item in gt_with_info]
-            
+
             # Side by side comparison of documents
             self.display_side_by_side_comparison(query_text, actual_rerank_results, gt)
             assert gt == actual_rerank_results, "Rerank result is different from ground truth rerank result"
 
-
     @pytest.mark.parametrize("ranker_model", [
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
         pytest.param("vllm", marks=pytest.mark.tags(CaseLabel.L3))
-    ]) # vllm set as L3 because it needs GPU resources, so not run in CI and nightly test
+    ])  # vllm set as L3 because it needs GPU resources, so not run in CI and nightly test
     @pytest.mark.parametrize("enable_truncate", [False, True])
-    def test_milvus_client_single_vector_search_with_model_rerank(self, setup_collection, ranker_model, enable_truncate,  tei_reranker_endpoint, vllm_reranker_endpoint):
+    def test_milvus_client_single_vector_search_with_model_rerank(self, setup_collection, ranker_model, enable_truncate,
+                                                                  tei_reranker_endpoint, vllm_reranker_endpoint):
         """
         target: test single vector search with model rerank using SciFact dataset
         method: test dense/sparse/bm25 search with model reranker separately and compare results with origin reranker
@@ -5140,13 +5129,13 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         client = self._client()
         collection_name = setup_collection
         fake = Faker()
-        
+
         # 5. prepare search parameters for reranker
         nq = 2
         query_texts = [fake.text() for _ in range(nq)]
         if enable_truncate:
             # make query texts larger
-            query_texts = [" ".join([fake.word() for _ in range(1024)])   for _ in range(nq)]
+            query_texts = [" ".join([fake.word() for _ in range(1024)]) for _ in range(nq)]
         tei_ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5174,7 +5163,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
 
             },
         )
-        
+
         # 6. execute search with reranker
         if ranker_model == "tei":
             ranker = tei_ranker
@@ -5185,7 +5174,6 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
             rerank_results = []
             results_without_rerank = None
             if search_type == "dense":
-
 
                 data = [[random.random() for _ in range(768)] for _ in range(nq)]
                 rerank_results = client.search(
@@ -5206,7 +5194,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 )
 
             elif search_type == "sparse":
-                data=[{random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)]
+                data = [{random.randint(1, 10000): random.random() for _ in range(100)} for _ in range(nq)]
                 rerank_results = client.search(
                     collection_name,
                     data=data,
@@ -5247,14 +5235,15 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                                                               tei_reranker_endpoint=tei_reranker_endpoint)
             if ranker_model == "vllm":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
-                                                            enable_truncate=enable_truncate,
-                                                            vllm_reranker_endpoint=vllm_reranker_endpoint)
+                                                              enable_truncate=enable_truncate,
+                                                              vllm_reranker_endpoint=vllm_reranker_endpoint)
 
     @pytest.mark.parametrize("ranker_model", [
         pytest.param("tei", marks=pytest.mark.tags(CaseLabel.L1)),
         pytest.param("vllm", marks=pytest.mark.tags(CaseLabel.L3))
-    ]) # vllm set as L3 because it needs GPU resources, so not run in CI and nightly test
-    def test_milvus_client_hybrid_vector_search_with_model_rerank(self, setup_collection, ranker_model, tei_reranker_endpoint, vllm_reranker_endpoint):
+    ])  # vllm set as L3 because it needs GPU resources, so not run in CI and nightly test
+    def test_milvus_client_hybrid_vector_search_with_model_rerank(self, setup_collection, ranker_model,
+                                                                  tei_reranker_endpoint, vllm_reranker_endpoint):
         """
         target: test hybrid vector search with model rerank
         method: test dense+sparse/dense+bm25/sparse+bm25 search with model reranker
@@ -5265,7 +5254,7 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
         client = self._client()
         collection_name = setup_collection
         fake = Faker()
-        
+
         # 5. prepare search parameters for reranker
         nq = 2
         query_texts = [fake.text() for _ in range(nq)]
@@ -5404,11 +5393,11 @@ class TestMilvusClientSearchModelRerank(TestMilvusClientV2Base):
                 results_without_rerank = self.merge_and_dedup_hybrid_searchresults(sparse_results, bm25_results)
             if ranker_model == "tei":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
-                                                            tei_reranker_endpoint=tei_reranker_endpoint)
+                                                              tei_reranker_endpoint=tei_reranker_endpoint)
             if ranker_model == "vllm":
                 self.compare_milvus_rerank_with_origin_rerank(query_texts, rerank_results, results_without_rerank,
-                                                            vllm_reranker_endpoint=vllm_reranker_endpoint)
-                                                      
+                                                              vllm_reranker_endpoint=vllm_reranker_endpoint)
+
 
 class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
     """ Test case of model rerank negative scenarios """
@@ -5421,18 +5410,18 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         fake = Faker()
-        
+
         # 1. create schema
         schema = client.create_schema(enable_dynamic_field=False, auto_id=True)
         schema.add_field("id", DataType.INT64, is_primary=True)
         schema.add_field("doc_id", DataType.VARCHAR, max_length=100)
         schema.add_field("document", DataType.VARCHAR, max_length=10000)
         schema.add_field("dense", DataType.FLOAT_VECTOR, dim=128)
-        
+
         # 2. prepare index params
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="dense", index_type="FLAT", metric_type="L2")
-        
+
         # 3. create collection
         client.create_collection(
             collection_name,
@@ -5440,7 +5429,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
             index_params=index_params,
             consistency_level="Strong",
         )
-        
+
         # 4. insert data
         rows = []
         for i in range(100):
@@ -5450,15 +5439,16 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "dense": [random.random() for _ in range(128)]
             })
         client.insert(collection_name, rows)
-        
+
         yield client, collection_name
-        
+
         # cleanup
         client.drop_collection(collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_provider", ["invalid_provider", "openai", "huggingface", "", None, 123])
-    def test_milvus_client_search_with_model_rerank_invalid_provider(self, setup_collection, invalid_provider, tei_reranker_endpoint):
+    def test_milvus_client_search_with_model_rerank_invalid_provider(self, setup_collection, invalid_provider,
+                                                                     tei_reranker_endpoint):
         """
         target: test model rerank with invalid provider
         method: use invalid provider values
@@ -5466,7 +5456,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5478,11 +5468,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[random.random() for _ in range(128)]]
         error = {ct.err_code: 65535, ct.err_msg: "Unknow rerank provider"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_endpoint", ["", "invalid_url", "ftp://invalid.com", "localhost", None])
@@ -5494,7 +5484,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5506,11 +5496,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": invalid_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "not a valid http/https link"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_unreachable_endpoint(self, setup_collection):
@@ -5521,7 +5511,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5533,22 +5523,23 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": "http://192.168.999.999:8080",  # unreachable IP
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Call rerank model failed"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_queries", [None, "", 123, {"key": "value"}])
-    def test_milvus_client_search_with_model_rerank_invalid_queries(self, setup_collection, invalid_queries, tei_reranker_endpoint):
+    def test_milvus_client_search_with_model_rerank_invalid_queries(self, setup_collection, invalid_queries,
+                                                                    tei_reranker_endpoint):
         """
         target: test model rerank with invalid queries parameter
         method: use invalid queries values
         expected: raise exception
         """
         client, collection_name = setup_collection
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5560,11 +5551,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Parse rerank params [queries] failed"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_missing_queries(self, setup_collection, tei_reranker_endpoint):
@@ -5574,7 +5565,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         expected: raise exception for missing required parameter
         """
         client, collection_name = setup_collection
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5586,11 +5577,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 # missing "queries" parameter
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Rerank function lost params queries"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_missing_endpoint(self, setup_collection):
@@ -5601,7 +5592,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5613,15 +5604,16 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 # missing "endpoint" parameter
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Rerank function lost params endpoint"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("invalid_reranker_type", ["invalid", "", None, 123])
-    def test_milvus_client_search_with_invalid_reranker_type(self, setup_collection, invalid_reranker_type, tei_reranker_endpoint):
+    def test_milvus_client_search_with_invalid_reranker_type(self, setup_collection, invalid_reranker_type,
+                                                             tei_reranker_endpoint):
         """
         target: test model rerank with invalid reranker type
         method: use invalid reranker type values
@@ -5629,7 +5621,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5641,11 +5633,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Unsupported rerank function"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_query_mismatch(self, setup_collection, tei_reranker_endpoint):
@@ -5656,7 +5648,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["query1", "query2", "query3"]  # 3 queries
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5668,11 +5660,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]  # single search data
         error = {ct.err_code: 65535, ct.err_msg: "nq must equal to queries size"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_non_text_field(self, setup_collection, tei_reranker_endpoint):
@@ -5683,7 +5675,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["id"],  # numeric field instead of text
@@ -5695,11 +5687,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Rerank model only support varchar"}
         self.search(client, collection_name, data, anns_field="dense", limit=5, output_fields=["doc_id", "document"],
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_nonexistent_field(self, setup_collection, tei_reranker_endpoint):
@@ -5710,7 +5702,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["nonexistent_field"],
@@ -5722,14 +5714,15 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 1, ct.err_msg: "field not found"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_search_with_model_rerank_multiple_input_fields(self, setup_collection, tei_reranker_endpoint):
+    def test_milvus_client_search_with_model_rerank_multiple_input_fields(self, setup_collection,
+                                                                          tei_reranker_endpoint):
         """
         target: test model rerank with multiple input fields
         method: specify multiple fields for reranking input
@@ -5737,7 +5730,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document", "doc_id"],  # multiple fields
@@ -5749,11 +5742,11 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "endpoint": tei_reranker_endpoint,
             },
         )
-        
+
         data = [[0.1] * 128]
         error = {ct.err_code: 65535, ct.err_msg: "Rerank model only supports single input"}
-        self.search(client, collection_name, data, anns_field="dense", limit=5, 
-                   ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
+        self.search(client, collection_name, data, anns_field="dense", limit=5,
+                    ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_search_with_model_rerank_extra_params(self, setup_collection, tei_reranker_endpoint):
@@ -5764,7 +5757,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         """
         client, collection_name = setup_collection
         query_texts = ["test query"]
-        
+
         ranker = Function(
             name="rerank_model",
             input_field_names=["document"],
@@ -5778,7 +5771,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
                 "another_param": 123,
             },
         )
-        
+
         data = [[0.1] * 128]
         # This might succeed with warning, or fail depending on implementation
         res, result = self.search(
@@ -5803,7 +5796,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         fake = Faker()
         dense_metric_type = "COSINE"
-        
+
         # 1. create schema with embedding and bm25 functions
         schema = client.create_schema(enable_dynamic_field=False, auto_id=True)
         schema.add_field("id", DataType.INT64, is_primary=True)
@@ -5812,7 +5805,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
         schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field("dense", DataType.FLOAT_VECTOR, dim=768)
         schema.add_field("bm25", DataType.SPARSE_FLOAT_VECTOR)
-        
+
         # add bm25 function
         bm25_function = Function(
             name="bm25",
@@ -5821,7 +5814,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
             function_type=FunctionType.BM25,
         )
         schema.add_function(bm25_function)
-        
+
         # 2. prepare index params
         index_params = client.prepare_index_params()
         index_params.add_index(field_name="dense", index_type="FLAT", metric_type=dense_metric_type)
@@ -5836,7 +5829,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
             metric_type="BM25",
             params={"bm25_k1": 1.2, "bm25_b": 0.75},
         )
-        
+
         # 3. create collection
         client.create_collection(
             collection_name,
@@ -5844,7 +5837,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
             index_params=index_params,
             consistency_level="Strong",
         )
-        
+
         # 4. insert data
         rows = []
         data_size = 3000
@@ -5856,7 +5849,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
                 "dense": [random.random() for _ in range(768)]
             })
         client.insert(collection_name, rows)
-        
+
         return collection_name
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -5873,7 +5866,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
         client = self._client()
         collection_name = setup_collection
         fake = Faker()
-        
+
         # 5. prepare search parameters for reranker
         query_texts = [fake.text() for _ in range(10)]
         rrf_func_ranker = Function(
@@ -5930,7 +5923,7 @@ class TestMilvusClientSearchRRFWeightedRerank(TestMilvusClientV2Base):
             }
             bm25 = AnnSearchRequest(**bm25_search_param)
 
-            sparse = AnnSearchRequest(**sparse_search_param)            
+            sparse = AnnSearchRequest(**sparse_search_param)
             if search_type == "dense+sparse":
 
                 function_rerank_results = client.hybrid_search(

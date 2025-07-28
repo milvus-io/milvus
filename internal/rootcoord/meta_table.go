@@ -67,6 +67,9 @@ type IMetaTable interface {
 	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
+	// ListAllAvailPartitions returns the partition ids of all available collections.
+	// The key of the map is the database id, and the value is a map of collection id to partition ids.
+	ListAllAvailPartitions(ctx context.Context) map[int64]map[int64][]int64
 	ListCollectionPhysicalChannels(ctx context.Context) map[typeutil.UniqueID][]string
 	GetCollectionVirtualChannels(ctx context.Context, colID int64) []string
 	GetPChannelInfo(ctx context.Context, pchannel string) *rootcoordpb.GetPChannelInfoResponse
@@ -540,11 +543,12 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	aliases := mt.listAliasesByID(collectionID)
 	newColl := &model.Collection{
-		CollectionID: collectionID,
-		Partitions:   model.ClonePartitions(coll.Partitions),
-		Fields:       model.CloneFields(coll.Fields),
-		Aliases:      aliases,
-		DBID:         coll.DBID,
+		CollectionID:      collectionID,
+		Partitions:        model.ClonePartitions(coll.Partitions),
+		Fields:            model.CloneFields(coll.Fields),
+		StructArrayFields: model.CloneStructArrayFields(coll.StructArrayFields),
+		Aliases:           aliases,
+		DBID:              coll.DBID,
 	}
 	if err := mt.catalog.DropCollection(ctx1, newColl, ts); err != nil {
 		return err
@@ -752,6 +756,31 @@ func (mt *MetaTable) ListAllAvailCollections(ctx context.Context) map[int64][]in
 	return ret
 }
 
+func (mt *MetaTable) ListAllAvailPartitions(ctx context.Context) map[int64]map[int64][]int64 {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	ret := make(map[int64]map[int64][]int64, len(mt.dbName2Meta))
+	for _, dbMeta := range mt.dbName2Meta {
+		// Database may not have available collections.
+		ret[dbMeta.ID] = make(map[int64][]int64, 64)
+	}
+	for _, collMeta := range mt.collID2Meta {
+		if !collMeta.Available() {
+			continue
+		}
+		dbID := collMeta.DBID
+		if dbID == util.NonDBID {
+			dbID = util.DefaultDBID
+		}
+		if _, ok := ret[dbID]; !ok {
+			ret[dbID] = make(map[int64][]int64, 64)
+		}
+		ret[dbID][collMeta.CollectionID] = lo.Map(collMeta.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })
+	}
+	return ret
+}
+
 func (mt *MetaTable) ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -904,9 +933,16 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	newColl.Name = newName
 	newColl.DBName = dbName
 	newColl.DBID = targetDB.ID
-	if err := mt.catalog.AlterCollectionDB(ctx, oldColl, newColl, ts); err != nil {
-		log.Warn("alter collectionDB by catalog failed", zap.Error(err))
-		return err
+	if oldColl.DBID == newColl.DBID {
+		if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts, false); err != nil {
+			log.Warn("alter collection by catalog failed", zap.Error(err))
+			return err
+		}
+	} else {
+		if err := mt.catalog.AlterCollectionDB(ctx, oldColl, newColl, ts); err != nil {
+			log.Warn("alter collectionDB by catalog failed", zap.Error(err))
+			return err
+		}
 	}
 
 	mt.names.insert(newDBName, newName, oldColl.CollectionID)
@@ -939,9 +975,10 @@ func (mt *MetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *root
 		Collections: make([]*rootcoordpb.CollectionInfoOnPChannel, 0),
 	}
 	for _, collInfo := range mt.collID2Meta {
-		if collInfo.State != pb.CollectionState_CollectionCreated {
-			// streamingnode, skip non-created collections when recovering
+		if collInfo.State != pb.CollectionState_CollectionCreated && collInfo.State != pb.CollectionState_CollectionDropping {
 			// streamingnode will receive the createCollectionMessage to recover if the collection is creating.
+			// streamingnode use it to recover the collection state at first time streaming arch enabled.
+			// streamingnode will get the dropping collection and drop it before streaming arch enabled.
 			continue
 		}
 		if idx := lo.IndexOf(collInfo.PhysicalChannelNames, pchannel); idx >= 0 {
@@ -955,6 +992,7 @@ func (mt *MetaTable) GetPChannelInfo(ctx context.Context, pchannel string) *root
 				CollectionId: collInfo.CollectionID,
 				Partitions:   partitions,
 				Vchannel:     collInfo.VirtualChannelNames[idx],
+				State:        collInfo.State,
 			})
 		}
 	}

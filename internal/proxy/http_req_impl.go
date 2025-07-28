@@ -169,7 +169,7 @@ func buildReqParams(c *gin.Context, metricsType string, customParams ...*commonp
 
 func getQueryComponentMetrics(node *Proxy, metricsType string, customParams ...*commonpb.KeyValuePair) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		params := buildReqParams(c, metricsType)
+		params := buildReqParams(c, metricsType, metricsinfo.RequestProcessInQCRole)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -191,7 +191,7 @@ func getQueryComponentMetrics(node *Proxy, metricsType string, customParams ...*
 
 func getDataComponentMetrics(node *Proxy, metricsType string, customParams ...*commonpb.KeyValuePair) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		params := buildReqParams(c, metricsType)
+		params := buildReqParams(c, metricsType, metricsinfo.RequestProcessInDCRole)
 		req, err := metricsinfo.ConstructGetMetricsRequest(params)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -355,6 +355,7 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 			PartitionInfos:       metricsinfo.NewPartitionInfos(describePartitionResp),
 			EnableDynamicField:   describeCollectionResp.Schema.EnableDynamicField,
 			Fields:               metricsinfo.NewFields(describeCollectionResp.GetSchema()),
+			StructArrayFields:    metricsinfo.NewStructArrayFields(describeCollectionResp.GetSchema()),
 		}
 
 		// Marshal the collection struct to JSON

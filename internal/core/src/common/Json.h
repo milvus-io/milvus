@@ -48,7 +48,7 @@ ExtractSubJson(const std::string& json, const std::vector<std::string>& keys) {
     rapidjson::Document doc;
     doc.Parse(json.c_str());
     if (doc.HasParseError()) {
-        PanicInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(ErrorCode::UnexpectedError,
                   "json parse failed, error:{}",
                   rapidjson::GetParseError_En(doc.GetParseError()));
     }
@@ -88,6 +88,13 @@ class Json {
             "create json without enough memory size for SIMD, len={}, cap={}",
             len,
             cap);
+    }
+
+    // WARN: this is used for fast non-copy construction,
+    // MUST make sure there at least SIMDJSON_PADDING bytes allocated
+    // after the string_view
+    explicit Json(const std::string_view& data)
+        : Json(data.data(), data.size()) {
     }
 
     // WARN: this is used for fast non-copy construction,

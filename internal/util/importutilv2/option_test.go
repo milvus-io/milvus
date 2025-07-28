@@ -154,3 +154,62 @@ func TestOption_SkipDiskQuotaCheck(t *testing.T) {
 	}
 	assert.True(t, SkipDiskQuotaCheck(options))
 }
+
+func TestOption_GetCSVSep(t *testing.T) {
+	options := []*commonpb.KeyValuePair{}
+	r, err := GetCSVSep(options)
+	assert.NoError(t, err)
+	assert.Equal(t, ',', r)
+
+	options = []*commonpb.KeyValuePair{
+		{Key: CSVSep, Value: "|"},
+	}
+	r, err = GetCSVSep(options)
+	assert.NoError(t, err)
+	assert.Equal(t, '|', r)
+
+	unsupportedSep := []rune{0, '\n', '\r', '"', 0xFFFD}
+	for _, sep := range unsupportedSep {
+		options = []*commonpb.KeyValuePair{
+			{Key: CSVSep, Value: string(sep)},
+		}
+		_, err = GetCSVSep(options)
+		assert.Error(t, err)
+	}
+}
+
+func TestOption_GetCSVNullKey(t *testing.T) {
+	options := []*commonpb.KeyValuePair{}
+	nullKey, err := GetCSVNullKey(options)
+	assert.NoError(t, err)
+	assert.Equal(t, "", nullKey)
+
+	options = []*commonpb.KeyValuePair{
+		{Key: CSVNullKey, Value: "ABC"},
+	}
+	nullKey, err = GetCSVNullKey(options)
+	assert.NoError(t, err)
+	assert.Equal(t, "ABC", nullKey)
+}
+
+func TestOption_GetStorageVersion(t *testing.T) {
+	// Test case 1: No storage_version option set, should return StorageV1 by default
+	options := []*commonpb.KeyValuePair{}
+	version, err := GetStorageVersion(options)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), version) // StorageV1 = 0
+
+	// Test case 2: storage_version set to "2", should return StorageV2
+	options = []*commonpb.KeyValuePair{
+		{Key: StorageVersion, Value: "2"},
+	}
+	version, err = GetStorageVersion(options)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), version) // StorageV2 = 2
+}
+
+func TestSimple(t *testing.T) {
+	// Simple test to verify the test environment works
+	assert.Equal(t, 1, 1)
+	assert.Equal(t, "test", "test")
+}

@@ -97,6 +97,11 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 			collection.schema.Store(schema)
 			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
 			collection.schemaVersion = loadMeta.GetSchemaVersion()
+			log.Info("update collection schema",
+				zap.Int64("collectionID", collectionID),
+				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
+				zap.Any("schema", schema),
+			)
 		}
 		collection.Ref(1)
 		return nil
@@ -287,6 +292,11 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		loadFieldIDs = typeutil.NewSet(loadMetaInfo.GetLoadFields()...)
 	} else {
 		loadFieldIDs = typeutil.NewSet(lo.Map(loadSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 { return field.GetFieldID() })...)
+		for _, structArrayField := range loadSchema.GetStructArrayFields() {
+			for _, subField := range structArrayField.GetFields() {
+				loadFieldIDs.Insert(subField.GetFieldID())
+			}
+		}
 	}
 
 	isGpuIndex := false

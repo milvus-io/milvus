@@ -51,7 +51,7 @@ struct ExprInfo {
                 case GenericValue::VAL_NOT_SET:
                     return true;
                 default:
-                    PanicInfo(NotImplemented,
+                    ThrowInfo(NotImplemented,
                               "Not supported GenericValue type");
             }
         }
@@ -78,7 +78,7 @@ struct ExprInfo {
                 case GenericValue::VAL_NOT_SET:
                     break;
                 default:
-                    PanicInfo(NotImplemented,
+                    ThrowInfo(NotImplemented,
                               "Not supported GenericValue type");
             }
             return h;
@@ -134,6 +134,18 @@ struct ColumnInfo {
         : field_id_(field_id),
           data_type_(data_type),
           element_type_(DataType::NONE),
+          nested_path_(std::move(nested_path)),
+          nullable_(nullable) {
+    }
+
+    ColumnInfo(FieldId field_id,
+               DataType data_type,
+               DataType element_type,
+               std::vector<std::string> nested_path = {},
+               bool nullable = false)
+        : field_id_(field_id),
+          data_type_(data_type),
+          element_type_(element_type),
           nested_path_(std::move(nested_path)),
           nullable_(nullable) {
     }

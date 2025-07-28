@@ -222,7 +222,7 @@ func mustAsSpecializedMutableMessage[H proto.Message, B proto.Message](msg Basic
 	smsg, err := asSpecializedMutableMessage[H, B](msg)
 	if err != nil {
 		panic(
-			fmt.Sprintf("failed to parse immutable message: %s @ %s, %d, %d",
+			fmt.Sprintf("failed to parse mutable message: %s @ %s, %d, %d",
 				err.Error(),
 				msg.MessageType(),
 				msg.TimeTick(),
@@ -236,6 +236,9 @@ func mustAsSpecializedMutableMessage[H proto.Message, B proto.Message](msg Basic
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return specializedMutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
 func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMessage) (specializedMutableMessage[H, B], error) {
+	if already, ok := msg.(specializedMutableMessage[H, B]); ok {
+		return already, nil
+	}
 	underlying := msg.(*messageImpl)
 
 	var header H
@@ -289,6 +292,9 @@ func mustAsSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Imm
 // Return nil, error if the message is the target specialized message but failed to decode the specialized header.
 // Return asSpecializedImmutableMessage, nil if the message is the target specialized message and successfully decoded the specialized header.
 func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg ImmutableMessage) (specializedImmutableMessage[H, B], error) {
+	if already, ok := msg.(specializedImmutableMessage[H, B]); ok {
+		return already, nil
+	}
 	underlying, ok := msg.(*immutableMessageImpl)
 	if !ok {
 		// maybe a txn message.
