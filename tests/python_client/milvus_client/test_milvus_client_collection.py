@@ -866,9 +866,9 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_drop_collection_not_existed(self):
         """
-        target: test if collection not created
-        method: random a nonexisted name, assert the exception raised returned by drp_collection method
-        expected: False
+        target: test fast create collection normal case
+        method: create collection
+        expected: drop successfully
         """
         client = self._client()
         collection_name = cf.gen_unique_str("nonexisted")
