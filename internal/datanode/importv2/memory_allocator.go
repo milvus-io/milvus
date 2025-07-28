@@ -75,26 +75,9 @@ func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
 	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
 
-	// Check if we can allocate immediately
-	if ma.usedMemory+size <= memoryLimit {
-		ma.usedMemory += size
-		log.Info("memory allocated successfully",
-			zap.Int64("taskID", taskID),
-			zap.Int64("allocatedSize", size),
-			zap.Int64("usedMemory", ma.usedMemory),
-			zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-		return
-	}
-
-	log.Info("task waiting for memory allocation",
-		zap.Int64("taskID", taskID),
-		zap.Int64("requestedSize", size),
-		zap.Int64("usedMemory", ma.usedMemory),
-		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-
 	// Wait until enough memory is available
 	for ma.usedMemory+size > memoryLimit {
-		log.Warn("task still waiting for memory allocation...",
+		log.Warn("task waiting for memory allocation...",
 			zap.Int64("taskID", taskID),
 			zap.Int64("requestedSize", size),
 			zap.Int64("usedMemory", ma.usedMemory),
