@@ -260,9 +260,11 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
     }
 
     std::vector<ListNode*> to_evict;
+    to_evict.reserve(32);
     // items are evicted because they are not used for a while, thus it should be ok to lock them
     // a little bit longer.
     std::vector<std::unique_lock<std::shared_mutex>> item_locks;
+    item_locks.reserve(32);
 
     ResourceUsage size_to_evict;
 
@@ -319,12 +321,11 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
             item_locks.pop_back();
         }
 
-        // Check if we should stop traversing
-        // Stop if:
-        // 1. We're evicting expired items AND current node time has passed threshold
-        // 2. OR we've collected enough eviction size
-        if ((evict_expired_items && current_node_time >= time_threshold) ||
-            size_to_evict.CanHold(expected_eviction)) {
+        // Check if we should stop traversing:
+        // Stop if we've collected enough eviction size,
+        // and either we are not evicting expired items or the current node is expired.
+        if (size_to_evict.CanHold(expected_eviction) &&
+            (!evict_expired_items || current_node_time >= time_threshold)) {
             break;
         }
     }
