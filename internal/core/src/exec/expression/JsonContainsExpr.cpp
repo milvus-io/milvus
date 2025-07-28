@@ -25,7 +25,6 @@ void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-
     if (expr_->vals_.empty()) {
         auto next_batch_size = GetNextBatchSize();
         auto real_batch_size = has_offset_input_
