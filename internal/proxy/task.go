@@ -1254,7 +1254,7 @@ func (t *alterCollectionFieldTask) SetID(uid UniqueID) {
 }
 
 func (t *alterCollectionFieldTask) Name() string {
-	return AlterCollectionTaskName
+	return AlterCollectionFieldTaskName
 }
 
 func (t *alterCollectionFieldTask) Type() commonpb.MsgType {
