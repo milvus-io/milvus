@@ -5555,14 +5555,14 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.import.memoryLimitPercentage",
 		Version:      "2.5.15",
 		Doc:          "The percentage of memory limit for import/pre-import tasks.",
-		DefaultValue: "20",
+		DefaultValue: "10",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(v string) string {
 			percentage := getAsFloat(v)
 			if percentage <= 0 || percentage > 100 {
-				log.Warn("invalid import memory limit percentage, using default 20%")
-				return "20"
+				log.Warn("invalid import memory limit percentage, using default 10%")
+				return "10"
 			}
 			return fmt.Sprintf("%f", percentage)
 		},
