@@ -714,18 +714,19 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 		}
 
 		info := &querypb.SegmentInfo{
-			SegmentID:    segment.ID(),
-			SegmentState: segment.Type(),
-			DmChannel:    segment.Shard().VirtualName(),
-			PartitionID:  segment.Partition(),
-			CollectionID: segment.Collection(),
-			NodeID:       node.GetNodeID(),
-			NodeIds:      []int64{node.GetNodeID()},
-			MemSize:      segment.MemSize(),
-			NumRows:      segment.InsertCount(),
-			IndexName:    indexName,
-			IndexID:      indexID,
-			IndexInfos:   indexInfos,
+			SegmentID:      segment.ID(),
+			SegmentState:   segment.Type(),
+			DmChannel:      segment.Shard().VirtualName(),
+			PartitionID:    segment.Partition(),
+			CollectionID:   segment.Collection(),
+			NodeID:         node.GetNodeID(),
+			NodeIds:        []int64{node.GetNodeID()},
+			MemSize:        segment.MemSize(),
+			NumRows:        segment.InsertCount(),
+			IndexName:      indexName,
+			IndexID:        indexID,
+			IndexInfos:     indexInfos,
+			StorageVersion: segment.LoadInfo().GetStorageVersion(),
 		}
 		segmentInfos = append(segmentInfos, info)
 	}

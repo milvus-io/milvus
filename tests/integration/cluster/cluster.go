@@ -650,7 +650,7 @@ func (c *MiniClusterV3) getOptions() []process.Option {
 	env := map[string]string{
 		"QUOTAANDLIMITS_ENABLED":  "false", // disable the quota limits by default to avoid rpc failure.
 		"PROXY_IP":                "localhost",
-		"STRAEMINGNODE_IP":        "localhost",
+		"STREAMINGNODE_IP":        "localhost",
 		"QUERYNODE_IP":            "localhost",
 		"DATANODE_IP":             "localhost",
 		"ROOTCOORD_IP":            "localhost",

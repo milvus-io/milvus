@@ -53,7 +53,8 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 			panic("insert message should only have one partition")
 		}
 		for _, partition := range h.Partitions {
-			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(h.CollectionId, partition.PartitionId)
+			uniqueKey := shards.PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: partition.PartitionId}
+			ready, err := r.shardManager.WaitUntilGrowingSegmentReady(uniqueKey)
 			if err != nil {
 				return err
 			}

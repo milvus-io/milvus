@@ -50,16 +50,16 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
  public:
     void
-    AddText(const std::string& text, const bool valid, int64_t offset);
+    AddTextSealed(const std::string& text, const bool valid, int64_t offset);
 
     void
-    AddNull(int64_t offset);
+    AddNullSealed(int64_t offset);
 
     void
-    AddTexts(size_t n,
-             const std::string* texts,
-             const bool* valids,
-             int64_t offset_begin);
+    AddTextsGrowing(size_t n,
+                    const std::string* texts,
+                    const bool* valids,
+                    int64_t offset_begin);
 
     void
     BuildIndexFromFieldData(const std::vector<FieldDataPtr>& field_datas,

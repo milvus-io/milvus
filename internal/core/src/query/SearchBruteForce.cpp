@@ -149,14 +149,14 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
             res = knowhere::BruteForce::RangeSearch<int8>(
                 base_dataset, query_dataset, search_cfg, bitset);
         } else {
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::Unsupported,
                 "Unsupported dataType for chunk brute force range search:{}",
                 data_type);
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
-            PanicInfo(KnowhereError,
+            ThrowInfo(KnowhereError,
                       "Brute force range search fail: {}, {}",
                       KnowhereStatusString(res.error()),
                       res.what());
@@ -219,13 +219,13 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                 search_cfg,
                 bitset);
         } else {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force search:{}",
                       data_type);
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
-            PanicInfo(KnowhereError,
+            ThrowInfo(KnowhereError,
                       "Brute force search fail: " + KnowhereStatusString(stat));
         }
     }
@@ -257,7 +257,7 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
             return knowhere::BruteForce::AnnIterator<int8>(
                 base_dataset, query_dataset, config, bitset);
         default:
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",
                       data_type);
     }
@@ -306,7 +306,7 @@ PackBruteForceSearchIteratorsIntoSubResult(
         LOG_ERROR(
             "Failed to get valid knowhere brute-force-iterators from chunk, "
             "terminate search_group_by operation");
-        PanicInfo(ErrorCode::Unsupported,
+        ThrowInfo(ErrorCode::Unsupported,
                   "Returned knowhere brute-force-iterator has non-ready "
                   "iterators inside, terminate search_group_by operation");
     }

@@ -40,7 +40,7 @@ func TestPackedSerde(t *testing.T) {
 			blobs, err := generateTestData(size)
 			assert.NoError(t, err)
 
-			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+			reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 			assert.NoError(t, err)
 
 			group := storagecommon.ColumnGroup{GroupID: storagecommon.DefaultShortColumnGroupID}
@@ -70,7 +70,7 @@ func TestPackedSerde(t *testing.T) {
 			prepareChunkData(chunkPaths, size)
 		}
 
-		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize)
+		reader, err := NewPackedDeserializeReader(paths, schema, bufferSize, false)
 		assert.NoError(t, err)
 		defer reader.Close()
 

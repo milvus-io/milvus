@@ -76,7 +76,13 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 	return
 }
 
-func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
+func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = fmt.Errorf("unsupported expression: %s", exprStr)
+		}
+	}()
+
 	if isEmptyExpression(exprStr) {
 		return trueLiteral
 	}

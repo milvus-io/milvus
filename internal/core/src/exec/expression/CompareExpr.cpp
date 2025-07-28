@@ -250,7 +250,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForHybridSegment(
             // case OpType::PostfixMatch: {
             // }
         default: {
-            PanicInfo(OpTypeInvalid, "unsupported optype: {}", expr_->op_type_);
+            ThrowInfo(OpTypeInvalid, "unsupported optype: {}", expr_->op_type_);
         }
     }
 }
@@ -274,7 +274,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcherForBothDataSegment(
         case DataType::DOUBLE:
             return ExecCompareLeftType<double>(context);
         default:
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("unsupported left datatype:{} of compare expr",
                             expr_->left_data_type_));
@@ -300,7 +300,7 @@ PhyCompareFilterExpr::ExecCompareLeftType(EvalCtx& context) {
         case DataType::DOUBLE:
             return ExecCompareRightType<T, double>(context);
         default:
-            PanicInfo(
+            ThrowInfo(
                 DataTypeInvalid,
                 fmt::format("unsupported right datatype:{} of compare expr",
                             expr_->right_data_type_));
@@ -407,7 +407,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                 break;
             }
             default:
-                PanicInfo(OpTypeInvalid,
+                ThrowInfo(OpTypeInvalid,
                           fmt::format("unsupported operator type for "
                                       "compare column expr: {}",
                                       expr_type));

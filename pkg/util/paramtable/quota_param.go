@@ -1684,12 +1684,12 @@ specific conditions, such as memory of nodes to water marker), ` + "true" + ` me
 	p.TtProtectionEnabled = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.ttProtection.enabled",
 		Version:      "2.2.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.TtProtectionEnabled.Init(base.mgr)
 
-	const defaultMaxTtDelay = "300.0"
+	const defaultMaxTtDelay = "1200.0"
 	p.MaxTimeTickDelay = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.ttProtection.maxTimeTickDelay",
 		Version:      "2.2.0",

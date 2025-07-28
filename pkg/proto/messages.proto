@@ -218,7 +218,6 @@ message SchemaChangeMessageHeader{
 // SchemaChangeMessageBody is the body of CollectionSchema update message.
 message SchemaChangeMessageBody{
     schema.CollectionSchema schema = 1;
-    uint64 modify_ts = 2;
 }
 
 ///

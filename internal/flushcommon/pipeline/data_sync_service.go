@@ -23,7 +23,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
@@ -137,15 +136,15 @@ func (dsService *DataSyncService) GetMetaCache() metacache.MetaCache {
 }
 
 func getMetaCacheForStreaming(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
-	return initMetaCache(initCtx, params.ChunkManager, info, nil, unflushed, flushed)
+	return initMetaCache(initCtx, params.ChunkManager, info, nil, unflushed, flushed, params.SchemaManager)
 }
 
 func getMetaCacheWithTickler(initCtx context.Context, params *util.PipelineParams, info *datapb.ChannelWatchInfo, tickler *util.Tickler, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
 	tickler.SetTotal(int32(len(unflushed) + len(flushed)))
-	return initMetaCache(initCtx, params.ChunkManager, info, tickler, unflushed, flushed)
+	return initMetaCache(initCtx, params.ChunkManager, info, tickler, unflushed, flushed, params.SchemaManager)
 }
 
-func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo) (metacache.MetaCache, error) {
+func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, info *datapb.ChannelWatchInfo, tickler interface{ Inc() }, unflushed, flushed []*datapb.SegmentInfo, schemaManager metacache.SchemaManager) (metacache.MetaCache, error) {
 	// tickler will update addSegment progress to watchInfo
 	futures := make([]*conc.Future[any], 0, len(unflushed)+len(flushed))
 	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
@@ -174,7 +173,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 				}
 
 				if segType == "growing" && len(segment.GetBm25Statslogs()) > 0 {
-					bm25stats, err := compaction.LoadBM25Stats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetBm25Statslogs())
+					bm25stats, err := compaction.LoadBM25Stats(initCtx, chunkManager, segment.GetID(), segment.GetBm25Statslogs())
 					if err != nil {
 						return nil, err
 					}
@@ -217,7 +216,7 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 		return segmentStats
 	}
 	// return channel, nil
-	metacache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor)
+	metacache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor, schemaManager)
 
 	return metacache, nil
 }
@@ -417,13 +416,12 @@ func NewEmptyStreamingNodeDataSyncService(
 	pipelineParams *util.PipelineParams,
 	input <-chan *msgstream.MsgPack,
 	vchannelInfo *datapb.VchannelInfo,
-	schema *schemapb.CollectionSchema,
 	wbTaskObserverCallback writebuffer.TaskObserverCallback,
 	dropCallback func(),
 ) *DataSyncService {
 	watchInfo := &datapb.ChannelWatchInfo{
 		Vchan:  vchannelInfo,
-		Schema: schema,
+		Schema: pipelineParams.SchemaManager.GetSchema(0), // use the latest schema.
 	}
 	metaCache, err := getMetaCacheForStreaming(initCtx, pipelineParams, watchInfo, make([]*datapb.SegmentInfo, 0), make([]*datapb.SegmentInfo, 0))
 	if err != nil {

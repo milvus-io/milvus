@@ -41,10 +41,10 @@
 
 using namespace milvus;
 CStatus
-CreateIndexV0(enum CDataType dtype,
-              const char* serialized_type_params,
-              const char* serialized_index_params,
-              CIndex* res_index) {
+CreateIndexForUT(enum CDataType dtype,
+                 const char* serialized_type_params,
+                 const char* serialized_index_params,
+                 CIndex* res_index) {
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();
@@ -240,9 +240,10 @@ CreateIndex(CIndex* res_index,
             index_non_encoding};
         auto chunk_manager =
             milvus::storage::CreateChunkManager(storage_config);
+        auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -320,7 +321,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
         auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         auto field_schema =
             FieldMeta::ParseFrom(build_index_info->field_schema());
@@ -393,7 +394,7 @@ BuildTextIndex(ProtoLayoutInterface result,
         auto fs = milvus::storage::InitArrowFileSystem(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
-            field_meta, index_meta, chunk_manager);
+            field_meta, index_meta, chunk_manager, fs);
 
         auto scalar_index_engine_version =
             build_index_info->current_scalar_index_version();

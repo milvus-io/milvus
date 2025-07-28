@@ -58,7 +58,7 @@ FieldMeta::enable_analyzer() const {
 TokenizerParams
 FieldMeta::get_analyzer_params() const {
     if (!enable_analyzer()) {
-        PanicInfo(
+        ThrowInfo(
             Unsupported,
             fmt::format("unsupported text index when not enable analyzer"));
     }

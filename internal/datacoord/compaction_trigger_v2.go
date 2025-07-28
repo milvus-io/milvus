@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -40,6 +41,7 @@ const (
 	TriggerTypeSegmentSizeViewChange
 	TriggerTypeClustering
 	TriggerTypeSingle
+	TriggerTypeSort
 )
 
 func (t CompactionTriggerType) String() string {
@@ -275,6 +277,14 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 					m.notify(ctx, triggerType, views)
 				}
 			}
+		case segID := <-getStatsTaskChSingleton():
+			log.Info("receive new segment to trigger sort compaction", zap.Int64("segmentID", segID))
+			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
+			if view == nil {
+				log.Warn("segment no need to do sort compaction", zap.Int64("segmentID", segID))
+				continue
+			}
+			m.notify(ctx, TriggerTypeSort, []CompactionView{view})
 		}
 	}
 }
@@ -317,7 +327,9 @@ func (m *CompactionTriggerManager) notify(ctx context.Context, eventType Compact
 			case TriggerTypeClustering:
 				m.SubmitClusteringViewToScheduler(ctx, outView)
 			case TriggerTypeSingle:
-				m.SubmitSingleViewToScheduler(ctx, outView)
+				m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_MixCompaction)
+			case TriggerTypeSort:
+				m.SubmitSingleViewToScheduler(ctx, outView, datapb.CompactionType_SortCompaction)
 			}
 		}
 	}
@@ -442,7 +454,7 @@ func (m *CompactionTriggerManager) addL0ImportTaskForImport(ctx context.Context,
 						},
 					},
 				},
-			}, job, m.allocator, m.meta, m.importMeta)
+			}, job, m.allocator, m.meta, m.importMeta, paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt())
 			if err != nil {
 				log.Warn("new import tasks failed", zap.Error(err))
 				return err
@@ -473,7 +485,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 
-	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection)
+	expectedSegmentSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	totalRows, maxSegmentRows, preferSegmentRows, err := calculateClusteringCompactionConfig(collection, view, expectedSegmentSize)
 	if err != nil {
 		log.Warn("Failed to calculate cluster compaction config fail", zap.Error(err))
@@ -528,7 +540,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	)
 }
 
-func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView) {
+func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Context, view CompactionView, compactionType datapb.CompactionType) {
 	log := log.Ctx(ctx).With(zap.String("view", view.String()))
 	// TODO[GOOSE], 11 = 1 planID + 10 segmentID, this is a hack need to be removed.
 	// Any plan that output segment number greater than 10 will be marked as invalid plan for now.
@@ -549,7 +561,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		totalRows += s.NumOfRows
 	}
 
-	expectedSize := getExpectedSegmentSize(m.meta, collection)
+	expectedSize := getExpectedSegmentSize(m.meta, collection.ID, collection.Schema)
 	task := &datapb.CompactionTask{
 		PlanID:             startID,
 		TriggerID:          view.(*MixSegmentView).triggerID,
@@ -557,7 +569,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 		StartTime:          time.Now().Unix(),
 		CollectionTtl:      view.(*MixSegmentView).collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),
-		Type:               datapb.CompactionType_MixCompaction, // todo: use SingleCompaction
+		Type:               compactionType, // todo: use SingleCompaction
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,
@@ -587,13 +599,13 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	)
 }
 
-func getExpectedSegmentSize(meta *meta, collInfo *collectionInfo) int64 {
-	allDiskIndex := meta.indexMeta.AreAllDiskIndex(collInfo.ID, collInfo.Schema)
+func getExpectedSegmentSize(meta *meta, collectionID int64, schema *schemapb.CollectionSchema) int64 {
+	allDiskIndex := meta.indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 	if allDiskIndex {
-		// Only if all vector fields index type are DiskANN, recalc segment max size here.
+		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
 		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
-	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
+	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
 	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 

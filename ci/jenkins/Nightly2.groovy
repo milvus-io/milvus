@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == 'master' ? '50 4 * * * ' : ''
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
 
-def milvus_helm_chart_version = '4.2.53'
+def milvus_helm_chart_version = '4.2.56'
 
 pipeline {
     triggers {
@@ -62,7 +62,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: "make clean && make install use_disk_index=ON",
+                                              make_cmd: "make clean && make jobs=8 install use_disk_index=ON",
                                               images: '["milvus","pytest","helm"]',
                                               tekton_log_timeout: '30m'
 

@@ -13,12 +13,15 @@
 #include <opentelemetry/exporters/otlp/otlp_http_exporter_factory.h>
 #include <opentelemetry/exporters/otlp/otlp_http_exporter_options.h>
 #include "log/Log.h"
-
+#include "nlohmann/json.hpp"
 #include <atomic>
 #include <cstddef>
 #include <iomanip>
 #include <iostream>
 #include <utility>
+#include <sstream>
+#include <algorithm>
+#include <cctype>
 
 #include "opentelemetry/exporters/jaeger/jaeger_exporter_factory.h"
 #include "opentelemetry/exporters/ostream/span_exporter_factory.h"
@@ -64,12 +67,27 @@ initTelemetry(const TraceConfig& cfg) {
         if (cfg.otlpMethod == "http") {
             auto opts = otlp::OtlpHttpExporterOptions{};
             opts.url = cfg.otlpEndpoint;
+            auto headers_map = parseHeaders(cfg.otlpHeaders);
+            if (!headers_map.empty()) {
+                for (const auto& pair : headers_map) {
+                    opts.http_headers.insert(
+                        std::pair<std::string, std::string>(pair.first,
+                                                            pair.second));
+                }
+            }
             exporter = otlp::OtlpHttpExporterFactory::Create(opts);
             LOG_INFO("init otlp http exporter, endpoint: {}", opts.url);
         } else if (cfg.otlpMethod == "grpc" ||
                    cfg.otlpMethod == "") {  // legacy configuration
             auto opts = otlp::OtlpGrpcExporterOptions{};
             opts.endpoint = cfg.otlpEndpoint;
+            auto headers_map = parseHeaders(cfg.otlpHeaders);
+            if (!headers_map.empty()) {
+                for (const auto& pair : headers_map) {
+                    opts.metadata.insert(std::pair<std::string, std::string>(
+                        pair.first, pair.second));
+                }
+            }
             opts.use_ssl_credentials = cfg.oltpSecure;
             exporter = otlp::OtlpGrpcExporterFactory::Create(opts);
             LOG_INFO("init otlp grpc exporter, endpoint: {}", opts.endpoint);
@@ -274,6 +292,24 @@ AutoSpan::~AutoSpan() {
     }
     if (is_root_span_) {
         CloseRootSpan();
+    }
+}
+
+std::map<std::string, std::string>
+parseHeaders(const std::string& headers) {
+    if (headers.empty()) {
+        return {};
+    }
+
+    try {
+        nlohmann::json json = nlohmann::json::parse(headers);
+        return json.get<std::map<std::string, std::string>>();
+    } catch (const std::exception& e) {
+        // Log the parsing error and return empty map
+        LOG_ERROR("Failed to parse headers as JSON: {}, error: {}",
+                  headers,
+                  e.what());
+        return {};
     }
 }
 

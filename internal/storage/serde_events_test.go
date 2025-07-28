@@ -47,7 +47,7 @@ func TestBinlogDeserializeReader(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
 		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
-		})
+		}, false)
 		assert.NoError(t, err)
 		defer reader.Close()
 		_, err = reader.NextValue()
@@ -58,7 +58,7 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		size := 3
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
-		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 		assert.NoError(t, err)
 		defer reader.Close()
 
@@ -77,7 +77,7 @@ func TestBinlogDeserializeReader(t *testing.T) {
 		size := 3
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
-		reader, err := NewBinlogDeserializeReader(generateTestAddedFieldSchema(), MakeBlobsReader(blobs))
+		reader, err := NewBinlogDeserializeReader(generateTestAddedFieldSchema(), MakeBlobsReader(blobs), false)
 		assert.NoError(t, err)
 		defer reader.Close()
 
@@ -146,7 +146,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		size := 100
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
-		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 		assert.NoError(t, err)
 		defer reader.Close()
 
@@ -187,7 +187,7 @@ func TestBinlogValueWriter(t *testing.T) {
 	t.Run("test empty data", func(t *testing.T) {
 		reader, err := NewBinlogDeserializeReader(generateTestSchema(), func() ([]*Blob, error) {
 			return nil, io.EOF
-		})
+		}, false)
 		assert.NoError(t, err)
 		defer reader.Close()
 		_, err = reader.NextValue()
@@ -198,13 +198,13 @@ func TestBinlogValueWriter(t *testing.T) {
 		size := 16
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
-		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 		assert.NoError(t, err)
 		defer reader.Close()
 
 		schema := generateTestSchema()
 		// Copy write the generated data
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
@@ -245,7 +245,7 @@ func TestBinlogValueWriter(t *testing.T) {
 		assert.Less(t, writers[0].buf.Len(), writers[13].buf.Len())
 
 		// assert.Equal(t, blobs[0].Value, newblobs[0].Value)
-		reader, err = NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(newblobs))
+		reader, err = NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(newblobs), false)
 		assert.NoError(t, err)
 		defer reader.Close()
 		for i := 1; i <= size; i++ {
@@ -269,7 +269,7 @@ func TestSize(t *testing.T) {
 			},
 		}}
 
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
@@ -307,7 +307,7 @@ func TestSize(t *testing.T) {
 			},
 		}}
 
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
@@ -394,7 +394,7 @@ func BenchmarkSerializeWriter(b *testing.B) {
 	for _, s := range sizes {
 		b.Run(fmt.Sprintf("batch size=%d", s), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+				writers := NewBinlogStreamWriters(0, 0, 0, schema)
 				writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, s)
 				assert.NoError(b, err)
 				for _, v := range values {
@@ -411,7 +411,7 @@ func TestNull(t *testing.T) {
 	t.Run("test null", func(t *testing.T) {
 		schema := generateTestSchema()
 		// Copy write the generated data
-		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writers := NewBinlogStreamWriters(0, 0, 0, schema)
 		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 1024)
 		assert.NoError(t, err)
 
@@ -445,7 +445,7 @@ func TestNull(t *testing.T) {
 			blobs[i] = blob
 			i++
 		}
-		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs))
+		reader, err := NewBinlogDeserializeReader(generateTestSchema(), MakeBlobsReader(blobs), false)
 		assert.NoError(t, err)
 		defer reader.Close()
 		v, err := reader.NextValue()

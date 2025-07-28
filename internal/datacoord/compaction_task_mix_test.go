@@ -53,7 +53,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		State:          datapb.CompactionTaskState_executing,
 		InputSegments:  []int64{200, 201},
 		ResultSegments: []int64{100, 200},
-	}, nil, s.mockMeta)
+	}, nil, s.mockMeta, newMockVersionManager())
 	alloc := allocator.NewMockAllocator(s.T())
 	alloc.EXPECT().AllocN(mock.Anything).Return(100, 200, nil)
 	task.allocator = alloc
@@ -84,7 +84,7 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_MixSegmentNotFound() {
 			NodeID:         1,
 			InputSegments:  []int64{200, 201},
 			ResultSegments: []int64{100, 200},
-		}, nil, s.mockMeta)
+		}, nil, s.mockMeta, newMockVersionManager())
 		_, err := task.BuildCompactionRequest()
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
@@ -108,7 +108,7 @@ func (s *MixCompactionTaskSuite) TestProcess() {
 			task := newMixCompactionTask(&datapb.CompactionTask{
 				PlanID: 1,
 				State:  tc.state,
-			}, nil, s.mockMeta)
+			}, nil, s.mockMeta, newMockVersionManager())
 			res := task.Process()
 			s.Equal(tc.processResult, res)
 		}

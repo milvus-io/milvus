@@ -102,7 +102,7 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 	}
 
 	g, _ := errgroup.WithContext(ctx)
-	g.SetLimit(10)
+	g.SetLimit(16)
 	var mu sync.Mutex
 	result := make(map[int64]*types.StreamingNodeStatus, len(state.State.Addresses))
 	for serverID, session := range state.Sessions() {
@@ -113,24 +113,24 @@ func (c *managerClientImpl) getAllStreamingNodeStatus(ctx context.Context, state
 			resp, err := manager.CollectStatus(ctx, &streamingpb.StreamingNodeManagerCollectStatusRequest{})
 			mu.Lock()
 			defer mu.Unlock()
+
+			if err != nil {
+				log.Warn("collect status failed, skip", zap.Int64("serverID", serverID), zap.Error(err))
+				return err
+			}
 			result[serverID] = &types.StreamingNodeStatus{
 				StreamingNodeInfo: types.StreamingNodeInfo{
 					ServerID: serverID,
 					Address:  address,
 				},
-				Err: err,
-			}
-
-			if err != nil {
-				log.Warn("collect status failed, skip", zap.Int64("serverID", serverID), zap.Error(err))
-				return err
+				Metrics: types.NewStreamingNodeBalanceAttrsFromProto(resp.Metrics),
+				Err:     err,
 			}
 			log.Debug("collect status success", zap.Int64("serverID", serverID), zap.Any("status", resp))
 			return nil
 		})
 	}
 	g.Wait()
-
 	return result, nil
 }
 

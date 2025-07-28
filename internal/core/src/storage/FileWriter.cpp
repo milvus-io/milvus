@@ -39,7 +39,7 @@ FileWriter::FileWriter(std::string filename) : filename_(std::move(filename)) {
         auto err = posix_memalign(&aligned_buf_, ALIGNMENT_BYTES, capacity_);
         if (err != 0) {
             aligned_buf_ = nullptr;
-            PanicInfo(
+            ThrowInfo(
                 ErrorCode::MemAllocateFailed,
                 "Failed to allocate aligned buffer for direct io, error: {}",
                 strerror(err));
@@ -52,7 +52,7 @@ FileWriter::FileWriter(std::string filename) : filename_(std::move(filename)) {
     fd_ = open(filename_.c_str(), open_flags, S_IRUSR | S_IWUSR);
     if (fd_ == -1) {
         Cleanup();
-        PanicInfo(ErrorCode::FileCreateFailed,
+        ThrowInfo(ErrorCode::FileCreateFailed,
                   "Failed to open file: {}, error: {}",
                   filename_,
                   strerror(errno));
@@ -63,7 +63,7 @@ FileWriter::FileWriter(std::string filename) : filename_(std::move(filename)) {
         auto ret = fcntl(fd_, F_NOCACHE, 1);
         if (ret == -1) {
             Cleanup();
-            PanicInfo(ErrorCode::FileCreateFailed,
+            ThrowInfo(ErrorCode::FileCreateFailed,
                       "Failed to set F_NOCACHE on file: {}, error: {}",
                       filename_,
                       strerror(errno));
@@ -117,7 +117,7 @@ FileWriter::PositionedWriteWithCheck(const void* data,
                                      size_t file_offset) {
     if (!PositionedWrite(data, nbyte, file_offset)) {
         Cleanup();
-        PanicInfo(ErrorCode::FileWriteFailed,
+        ThrowInfo(ErrorCode::FileWriteFailed,
                   "Failed to write to file: {}, error: {}",
                   filename_,
                   strerror(errno));
@@ -218,7 +218,7 @@ FileWriter::Write(const void* data, size_t nbyte) {
             future.wait();
         } catch (const std::exception& e) {
             Cleanup();
-            PanicInfo(ErrorCode::FileWriteFailed,
+            ThrowInfo(ErrorCode::FileWriteFailed,
                       "Failed to write to file: {}, error: {}",
                       filename_,
                       e.what());
@@ -245,7 +245,7 @@ FileWriter::FlushWithDirectIO() {
     // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
     if (ftruncate(fd_, file_size_) != 0) {
         Cleanup();
-        PanicInfo(ErrorCode::FileWriteFailed,
+        ThrowInfo(ErrorCode::FileWriteFailed,
                   "Failed to truncate file: {}, error: {}",
                   filename_,
                   strerror(errno));
@@ -278,7 +278,7 @@ FileWriter::Finish() {
                 future.wait();
             } catch (const std::exception& e) {
                 Cleanup();
-                PanicInfo(ErrorCode::FileWriteFailed,
+                ThrowInfo(ErrorCode::FileWriteFailed,
                           "Failed to flush file: {}, error: {}",
                           filename_,
                           e.what());

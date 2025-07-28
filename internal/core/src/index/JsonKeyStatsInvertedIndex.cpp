@@ -235,7 +235,7 @@ JsonKeyStatsInvertedIndex::AddJson(
     jsmn_parser parser;
     jsmntok_t* tokens = (jsmntok_t*)malloc(16 * sizeof(jsmntok_t));
     if (!tokens) {
-        PanicInfo(ErrorCode::UnexpectedError, "alloc jsmn token failed");
+        ThrowInfo(ErrorCode::UnexpectedError, "alloc jsmn token failed");
         return;
     }
     int num_tokens = 0;
@@ -252,12 +252,12 @@ JsonKeyStatsInvertedIndex::AddJson(
                 tokens = (jsmntok_t*)realloc(
                     tokens, token_capacity * sizeof(jsmntok_t));
                 if (!tokens) {
-                    PanicInfo(ErrorCode::UnexpectedError, "realloc failed");
+                    ThrowInfo(ErrorCode::UnexpectedError, "realloc failed");
                 }
                 continue;
             } else {
                 free(tokens);
-                PanicInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::UnexpectedError,
                           "Failed to parse Json: {}, error: {}",
                           json,
                           int(r));
@@ -309,6 +309,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
       last_commit_time_(stdclock::now()) {
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, "", TANTIVY_INDEX_LATEST_VERSION, true /* in_ram */);
+    set_is_growing(true);
 }
 
 JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
@@ -323,6 +324,7 @@ JsonKeyStatsInvertedIndex::JsonKeyStatsInvertedIndex(
     boost::filesystem::create_directories(path_);
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         unique_id, path_.c_str(), TANTIVY_INDEX_LATEST_VERSION);
+    set_is_growing(true);
 }
 
 IndexStatsPtr

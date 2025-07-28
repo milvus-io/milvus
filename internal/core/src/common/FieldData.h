@@ -89,7 +89,7 @@ class FieldData<VectorArray> : public FieldDataVectorArrayImpl {
 
     int64_t
     get_dim() const override {
-        PanicInfo(Unsupported,
+        ThrowInfo(Unsupported,
                   "Call get_dim on FieldData<VectorArray> is not supported");
     }
 };

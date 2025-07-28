@@ -188,7 +188,7 @@ woodpecker:
       queueSize: 10000 # The size of the queue for pending messages to be sent of each log.
       maxRetries: 3 # Maximum number of retries for segment append operations.
     segmentRollingPolicy:
-      maxSize: 2GB # Maximum size of a segment, default is 2GB
+      maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
@@ -196,14 +196,14 @@ woodpecker:
     segmentSyncPolicy:
       maxInterval: 200ms # Maximum interval between two sync operations, default is 200 milliseconds.
       maxIntervalForLocalStorage: 10ms # Maximum interval between two sync operations local storage backend, default is 10 milliseconds.
-      maxBytes: 128M # Maximum size of write buffer in bytes.
+      maxBytes: 256M # Maximum size of write buffer in bytes.
       maxEntries: 10000 # Maximum entries number of write buffer.
       maxFlushRetries: 5 # Maximum size of write buffer in bytes.
       retryInterval: 1000ms # Maximum interval between two retries. default is 1000 milliseconds.
-      maxFlushSize: 4M # Maximum size of a fragment in bytes to flush, default is 4M.
+      maxFlushSize: 2M # Maximum size of a fragment in bytes to flush.
       maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
-      maxSize: 8M # The maximum size of the merged files, default is 8M.
+      maxSize: 2M # The maximum size of the merged files.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
@@ -316,7 +316,8 @@ proxy:
   # maximum number of result entries, typically Nq * TopK * GroupSize. 
   # It costs additional memory and time to process a large number of result entries. 
   # If the number of result entries exceeds this limit, the search will be rejected.
-  maxResultEntries: 1000000
+  # Disabled if the value is less or equal to 0.
+  maxResultEntries: -1
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -464,15 +465,13 @@ queryNode:
         vectorIndex: sync
       # If evictionEnabled is true, a background thread will run every evictionIntervalMs to determine if an
       # eviction is necessary and the amount of data to evict from memory/disk.
-      # - The max ratio is the max amount of memory/disk that can be used for cache.
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
+      # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
       memoryLowWatermarkRatio: 0.6
       memoryHighWatermarkRatio: 0.8
-      memoryMaxRatio: 0.9
       diskLowWatermarkRatio: 0.6
       diskHighWatermarkRatio: 0.8
-      diskMaxRatio: 0.9
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
@@ -677,8 +676,8 @@ dataCoord:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
     missingTolerance: 86400 # The retention duration of the unrecorded binary log (binlog) files. Setting a reasonably large value for this parameter avoids erroneously deleting the newly created binlog files that lack metadata. Unit: second.
     dropTolerance: 10800 # The retention duration of the binlog files of the deleted segments before they are cleared, unit: second.
-    removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # orphan file (file on oss but has not been registered on meta) on object storage garbage collection scanning interval in hours
+    slowDownCPUUsageThreshold: 0.6 # The CPU usage threshold at which the garbage collection will be slowed down
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   autoBalance: true # Enable auto balance
@@ -686,13 +685,15 @@ dataCoord:
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
-    maxSizeInMBPerImportTask: 6144 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
+    maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
+    fileNumPerSlot: 1 # The files number per slot for pre-import/import task.
+    memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
     clusteringCompactionUsage: 65536 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
@@ -703,7 +704,6 @@ dataCoord:
     analyzeTaskSlotUsage: 65535 # slot usage of analyze task
   jsonStatsTriggerCount: 10 # jsonkey stats task count per trigger
   jsonStatsTriggerInterval: 10 # jsonkey task interval per trigger
-  enabledJSONKeyStatsInSort: false # Indicates whether to enable JSON key stats task with sort
   jsonKeyStatsMemoryBudgetInTantivy: 16777216 # the memory budget for the JSON index In Tantivy, the unit is bytes
   ip:  # TCP/IP address of dataCoord. If not specified, use the first unicastable address
   port: 13333 # TCP port of dataCoord
@@ -718,7 +718,7 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncMgrTasks: 64 # The max concurrent sync task number of datanode sync mgr globally
+    maxParallelSyncMgrTasksPerCPUCore: 16 # The max concurrent sync task number of datanode sync mgr per CPU core
     skipMode:
       enable: true # Support skip some timetick message to reduce CPU usage
       skipNum: 4 # Consume one for every n records skipped
@@ -750,15 +750,15 @@ dataNode:
     maxChannelCheckpointsPerPRC: 128 # The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.
     channelCheckpointUpdateTickInSeconds: 10 # The frequency, in seconds, at which the channel checkpoint updater executes updates.
   import:
-    maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
-    readBufferSizeInMB: 64 # The insert buffer size (in MB) during import.
+    readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
-    maxTaskSlotNum: 16 # The maximum number of slots occupied by each import/pre-import task.
+    memoryLimitPercentage: 20 # The percentage of memory limit for import/pre-import tasks.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
-    useMergeSort: false # Whether to enable mergeSort mode when performing mixCompaction.
+    useMergeSort: true # Whether to enable mergeSort mode when performing mixCompaction.
     maxSegmentMergeSort: 30 # The maximum number of segments to be merged in mergeSort mode.
   gracefulStopTimeout: 1800 # seconds. force stop node without graceful stop
   slot:
@@ -957,7 +957,6 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    scheme: s3
     enablev2: false
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
@@ -1134,12 +1133,12 @@ quotaAndLimits:
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
     forceDeny: false
     ttProtection:
-      enabled: false
+      enabled: true
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
       # seconds
-      maxTimeTickDelay: 300
+      maxTimeTickDelay: 1200
     memProtection:
       # When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
       # When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
@@ -1194,6 +1193,7 @@ trace:
     endpoint:  # example: "127.0.0.1:4317" for grpc, "127.0.0.1:4318" for http
     method:  # otlp export method, acceptable values: ["grpc", "http"],  using "grpc" by default
     secure: true
+    headers:  # otlp header that encoded in base64
   initTimeoutSeconds: 10 # segcore initialization timeout in seconds, preventing otlp grpc hangs forever
 
 #when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
@@ -1235,6 +1235,13 @@ streaming:
     operationTimeout: 30s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
+      # Whether to allow rebalance, true by default.
+      # If the rebalance is not allowed, only the lost wal recovery will be executed, the rebalance (move a pchannel from one node to another node) will be skipped.
+      allowRebalance: true
+      minRebalanceIntervalThreshold: 5m # The max interval of rebalance for each wal, 5m by default.
+      # The threshold of recovery lag for rebalance, 1s by default.
+      # If the recovery lag is greater than this threshold, the rebalance of current pchannel is not allowed.
+      allowRebalanceRecoveryLagThreshold: 1s
       vchannelFair:
         # The weight of pchannel count in vchannelFair balance policy,
         # the pchannel count will more evenly distributed if the weight is greater, 0.4 by default

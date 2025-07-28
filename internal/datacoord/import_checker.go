@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -48,7 +47,8 @@ type importChecker struct {
 	broker              broker.Broker
 	alloc               allocator.Allocator
 	importMeta          ImportMeta
-	si                  StatsInspector
+	ci                  CompactionInspector
+	handler             Handler
 	l0CompactionTrigger TriggerManager
 
 	closeOnce sync.Once
@@ -60,7 +60,8 @@ func NewImportChecker(ctx context.Context,
 	broker broker.Broker,
 	alloc allocator.Allocator,
 	importMeta ImportMeta,
-	si StatsInspector,
+	ci CompactionInspector,
+	handler Handler,
 	l0CompactionTrigger TriggerManager,
 ) ImportChecker {
 	return &importChecker{
@@ -69,8 +70,9 @@ func NewImportChecker(ctx context.Context,
 		broker:              broker,
 		alloc:               alloc,
 		importMeta:          importMeta,
-		si:                  si,
+		ci:                  ci,
 		l0CompactionTrigger: l0CompactionTrigger,
+		handler:             handler,
 		closeChan:           make(chan struct{}),
 	}
 }
@@ -106,8 +108,8 @@ func (c *importChecker) Start() {
 					c.checkPreImportingJob(job)
 				case internalpb.ImportJobState_Importing:
 					c.checkImportingJob(job)
-				case internalpb.ImportJobState_Stats:
-					c.checkStatsJob(job)
+				case internalpb.ImportJobState_Sorting:
+					c.checkSortingJob(job)
 				case internalpb.ImportJobState_IndexBuilding:
 					c.checkIndexBuildingJob(job)
 				case internalpb.ImportJobState_Failed:
@@ -226,7 +228,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 			log.Warn("add preimport task failed", WrapTaskLog(t, zap.Error(err))...)
 			return
 		}
-		log.Info("add new preimport task", WrapTaskLog(t)...)
+		log.Info("add new preimport task", WrapTaskLog(t, zap.Any("fileStats", t.GetFileStats()))...)
 	}
 
 	err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
@@ -284,9 +286,9 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 		return
 	}
 
-	allDiskIndex := c.meta.indexMeta.AreAllDiskIndex(job.GetCollectionID(), job.GetSchema())
-	groups := RegroupImportFiles(job, lacks, allDiskIndex)
-	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta, c.importMeta)
+	segmentMaxSize := GetSegmentMaxSize(job, c.meta)
+	groups := RegroupImportFiles(job, lacks, segmentMaxSize)
+	newTasks, err := NewImportTasks(groups, job, c.alloc, c.meta, c.importMeta, segmentMaxSize)
 	if err != nil {
 		log.Warn("new import tasks failed", zap.Error(err))
 		return
@@ -298,7 +300,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 			updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(err.Error()))
 			return
 		}
-		log.Info("add new import task", WrapTaskLog(t)...)
+		log.Info("add new import task", WrapTaskLog(t, zap.Any("fileStats", t.GetFileStats()))...)
 	}
 
 	updateJobState(internalpb.ImportJobState_Importing, UpdateRequestedDiskSize(requestSize))
@@ -312,7 +314,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 			return
 		}
 	}
-	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Stats))
+	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Sorting))
 	if err != nil {
 		log.Warn("failed to update job state to Stats", zap.Error(err))
 		return
@@ -322,7 +324,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 	log.Info("import job import done", zap.Duration("jobTimeCost/import", importDuration))
 }
 
-func (c *importChecker) checkStatsJob(job ImportJob) {
+func (c *importChecker) checkSortingJob(job ImportJob) {
 	log := log.With(zap.Int64("jobID", job.GetJobID()))
 	updateJobState := func(state internalpb.ImportJobState, reason string) {
 		err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(state), UpdateJobReason(reason))
@@ -336,7 +338,8 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 	}
 
 	// Skip stats stage if not enable stats or is l0 import.
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() || importutilv2.IsL0Import(job.GetOptions()) {
+	if !enableSortCompaction() ||
+		importutilv2.IsL0Import(job.GetOptions()) {
 		updateJobState(internalpb.ImportJobState_IndexBuilding, "")
 		return
 	}
@@ -349,28 +352,37 @@ func (c *importChecker) checkStatsJob(job ImportJob) {
 	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
 	for _, task := range tasks {
 		originSegmentIDs := task.(*importTask).GetSegmentIDs()
-		statsSegmentIDs := task.(*importTask).GetStatsSegmentIDs()
+		sortSegmentIDs := task.(*importTask).GetSortedSegmentIDs()
 		taskCnt += len(originSegmentIDs)
 		for i, originSegmentID := range originSegmentIDs {
-			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("stats", statsSegmentIDs[i]))
-			t := c.si.GetStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
-			switch t.GetState() {
-			case indexpb.JobState_JobStateNone:
-				err := c.si.SubmitStatsTask(originSegmentID, statsSegmentIDs[i], indexpb.StatsSubJob_Sort, false)
+			taskLogFields := WrapTaskLog(task, zap.Int64("origin", originSegmentID), zap.Int64("target", sortSegmentIDs[i]))
+			originSegment := c.meta.GetHealthySegment(c.ctx, originSegmentID)
+			targetSegment := c.meta.GetHealthySegment(c.ctx, sortSegmentIDs[i])
+			if originSegment == nil {
+				// import zero num rows segment
+				doneCnt++
+				continue
+			}
+			if targetSegment == nil {
+				compactionTask, err := createSortCompactionTask(c.ctx, originSegment, sortSegmentIDs[i], c.meta, c.handler, c.alloc)
 				if err != nil {
-					log.Warn("submit stats task failed", zap.Error(err))
+					log.Warn("create sort compaction task failed", zap.Int64("segmentID", originSegmentID), zap.Error(err))
 					continue
 				}
-				log.Info("submit stats task done", taskLogFields...)
-			case indexpb.JobState_JobStateInit, indexpb.JobState_JobStateRetry, indexpb.JobState_JobStateInProgress:
-				log.Debug("waiting for stats task...", taskLogFields...)
-			case indexpb.JobState_JobStateFailed:
-				log.Warn("import job stats failed", taskLogFields...)
-				updateJobState(internalpb.ImportJobState_Failed, t.GetFailReason())
-				return
-			case indexpb.JobState_JobStateFinished:
-				doneCnt++
+				if compactionTask == nil {
+					log.Info("maybe it no need to create sort compaction task", zap.Int64("segmentID", originSegmentID))
+					doneCnt++
+					continue
+				}
+				log.Info("create sort compaction task success", taskLogFields...)
+				err = c.ci.enqueueCompaction(compactionTask)
+				if err != nil {
+					log.Warn("sort compaction task enqueue failed", zap.Error(err))
+					continue
+				}
+				continue
 			}
+			doneCnt++
 		}
 	}
 
@@ -387,11 +399,11 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		return t.(*importTask).GetSegmentIDs()
 	})
 	statsSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetStatsSegmentIDs()
+		return t.(*importTask).GetSortedSegmentIDs()
 	})
 
 	targetSegmentIDs := statsSegmentIDs
-	if !Params.DataCoordCfg.EnableStatsTask.GetAsBool() {
+	if !enableSortCompaction() {
 		targetSegmentIDs = originSegmentIDs
 	}
 
@@ -438,6 +450,8 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
 	<-c.l0CompactionTrigger.GetResumeCompactionChan(job.GetJobID(), job.GetCollectionID())
+
+	LogResultSegmentsInfo(job.GetJobID(), c.meta, targetSegmentIDs)
 	log.Info("import job all completed", zap.Duration("jobTimeCost/total", totalDuration))
 }
 
@@ -490,17 +504,6 @@ func (c *importChecker) updateSegmentState(originSegmentIDs, statsSegmentIDs []i
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {
-	tasks := c.importMeta.GetTaskBy(c.ctx, WithType(ImportTaskType), WithJob(job.GetJobID()))
-	originSegmentIDs := lo.FlatMap(tasks, func(t ImportTask, _ int) []int64 {
-		return t.(*importTask).GetSegmentIDs()
-	})
-	for _, originSegmentID := range originSegmentIDs {
-		err := c.si.DropStatsTask(originSegmentID, indexpb.StatsSubJob_Sort)
-		if err != nil {
-			log.Warn("Drop stats task failed", zap.Int64("jobID", job.GetJobID()))
-			return
-		}
-	}
 	c.tryFailingTasks(job)
 }
 
@@ -576,7 +579,7 @@ func (c *importChecker) checkGC(job ImportJob) {
 		shouldRemoveJob := true
 		for _, task := range tasks {
 			if job.GetState() == internalpb.ImportJobState_Failed && task.GetType() == ImportTaskType {
-				if len(task.(*importTask).GetSegmentIDs()) != 0 || len(task.(*importTask).GetStatsSegmentIDs()) != 0 {
+				if len(task.(*importTask).GetSegmentIDs()) != 0 || len(task.(*importTask).GetSortedSegmentIDs()) != 0 {
 					shouldRemoveJob = false
 					continue
 				}

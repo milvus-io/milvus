@@ -51,7 +51,7 @@ type globalTaskScheduler struct {
 	wg     sync.WaitGroup
 
 	mu           *lock.KeyLock[int64]
-	pendingTasks FIFOQueue
+	pendingTasks PriorityQueue
 	runningTasks *typeutil.ConcurrentMap[int64, Task]
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
@@ -138,23 +138,19 @@ func (s *globalTaskScheduler) Stop() {
 }
 
 func (s *globalTaskScheduler) pickNode(workerSlots map[int64]*session.WorkerSlots, taskSlot int64) int64 {
-	var fallbackNodeID int64 = NullNodeID
 	var maxAvailable int64 = -1
+	var nodeID int64 = NullNodeID
 
-	for nodeID, ws := range workerSlots {
-		if ws.AvailableSlots >= taskSlot {
-			ws.AvailableSlots -= taskSlot
-			return nodeID
-		}
+	for id, ws := range workerSlots {
 		if ws.AvailableSlots > maxAvailable && ws.AvailableSlots > 0 {
 			maxAvailable = ws.AvailableSlots
-			fallbackNodeID = nodeID
+			nodeID = id
 		}
 	}
 
-	if fallbackNodeID != NullNodeID {
-		workerSlots[fallbackNodeID].AvailableSlots = 0
-		return fallbackNodeID
+	if nodeID != NullNodeID {
+		workerSlots[nodeID].AvailableSlots = 0
+		return nodeID
 	}
 	return NullNodeID
 }
@@ -324,7 +320,7 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		cancel:       cancel,
 		wg:           sync.WaitGroup{},
 		mu:           lock.NewKeyLock[int64](),
-		pendingTasks: NewFIFOQueue(),
+		pendingTasks: NewPriorityQueuePolicy(),
 		runningTasks: typeutil.NewConcurrentMap[int64, Task](),
 		execPool:     execPool,
 		checkPool:    checkPool,

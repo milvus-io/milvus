@@ -182,7 +182,8 @@ func TestWAL(t *testing.T) {
 
 	w.Close()
 
-	w.GetLatestMVCCTimestampIfLocal(ctx, vChannel1)
+	w.Local().GetLatestMVCCTimestampIfLocal(ctx, vChannel1)
+	w.Local().GetMetricsIfLocal(ctx)
 
 	resp = w.AppendMessages(ctx, newInsertMessage(vChannel1))
 	assert.Error(t, resp.UnwrapFirstError())

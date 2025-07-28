@@ -167,7 +167,8 @@ std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
-                           int64_t dim);
+                           int64_t dim,
+                           milvus_storage::ArrowFileSystemPtr fs);
 
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
@@ -248,6 +249,16 @@ SortByPath(std::vector<std::pair<std::string, int64_t>>& paths) {
             return std::stol(a.first.substr(a.first.find_last_of("/") + 1)) <
                    std::stol(b.first.substr(b.first.find_last_of("/") + 1));
         });
+}
+
+template <typename T>
+inline void
+SortByPath(std::vector<T>& paths) {
+    std::sort(paths.begin(), paths.end(), [](const T& a, const T& b) {
+        return std::stol(
+                   a.file_path.substr(a.file_path.find_last_of("/") + 1)) <
+               std::stol(b.file_path.substr(b.file_path.find_last_of("/") + 1));
+    });
 }
 
 std::vector<FieldDataPtr>

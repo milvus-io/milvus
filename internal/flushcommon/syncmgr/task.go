@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/retry"
@@ -82,6 +82,10 @@ type SyncTask struct {
 	execTime            time.Duration
 	multiPartUploadSize int64
 	syncBufferSize      int64
+
+	// storage config used in pooled tasks, optional
+	// use singleton config for non-pooled tasks
+	storageConfig *indexpb.StorageConfig
 }
 
 func (t *SyncTask) getLogger() *log.MLogger {
@@ -121,14 +125,14 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 			log.Info("segment dropped, discard sync task")
 			return nil
 		}
-		log.Warn("failed to sync data, segment not found in metacache")
-		err := merr.WrapErrSegmentNotFound(t.segmentID)
-		return err
+		log.Warn("segment not found in metacache, may be already synced")
+		return nil
 	}
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
-		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, t.syncBufferSize, t.multiPartUploadSize, t.writeRetryOpts...)
+		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, t.syncBufferSize,
+			t.multiPartUploadSize, t.storageConfig, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))

@@ -13,9 +13,9 @@
 #include <thread>
 
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "fmt/format.h"
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
 
 #include "common/SystemProperty.h"
 #include "segcore/FieldIndexing.h"
@@ -101,50 +101,6 @@ VectorFieldIndexing::recreate_index(DataType data_type,
     }
 }
 
-void
-VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
-                                     int64_t ack_end,
-                                     const VectorBase* vec_base) {
-    // No BuildIndexRange support for sparse vector.
-    AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT ||
-                   field_meta_.get_data_type() == DataType::VECTOR_FLOAT16 ||
-                   field_meta_.get_data_type() == DataType::VECTOR_BFLOAT16,
-               "Data type of vector field is not in (VECTOR_FLOAT, "
-               "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
-    auto dim = field_meta_.get_dim();
-    AssertInfo(
-        ConcurrentDenseVectorCheck(vec_base, field_meta_.get_data_type()),
-        "vec_base can't cast to ConcurrentVector type");
-    auto num_chunk = vec_base->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "ack_end is bigger than num_chunk");
-    auto conf = get_build_params(field_meta_.get_data_type());
-    data_.grow_to_at_least(ack_end);
-    for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk_data = vec_base->get_chunk_data(chunk_id);
-        std::unique_ptr<index::VectorIndex> indexing = nullptr;
-        if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT) {
-            indexing = std::make_unique<index::VectorMemIndex<float>>(
-                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
-        } else if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT16) {
-            indexing = std::make_unique<index::VectorMemIndex<float16>>(
-                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
-        } else {
-            indexing = std::make_unique<index::VectorMemIndex<bfloat16>>(
-                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                knowhere::metric::L2,
-                knowhere::Version::GetCurrentVersion().VersionNumber());
-        }
-        auto dataset = knowhere::GenDataSet(
-            vec_base->get_size_per_chunk(), dim, chunk_data);
-        indexing->BuildWithDataset(dataset, conf);
-        data_[chunk_id] = std::move(indexing);
-    }
-}
-
 // for sparse float vector:
 //   * element_size is not used
 //   * output_raw pooints at a milvus::schema::proto::SparseFloatArray.
@@ -158,7 +114,7 @@ VectorFieldIndexing::GetDataFromIndex(const int64_t* seg_offsets,
     ids_ds->SetDim(1);
     ids_ds->SetIds(seg_offsets);
     ids_ds->SetIsOwner(false);
-    if (field_meta_.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
+    if (IsSparseFloatVectorDataType(get_data_type())) {
         auto vector = index_->GetSparseVector(ids_ds);
         SparseRowsToProto(
             [vec_ptr = vector.get()](size_t i) { return vec_ptr + i; },
@@ -176,7 +132,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                                               int64_t new_data_dim,
                                               const VectorBase* field_raw_data,
                                               const void* data_source) {
-    auto conf = get_build_params(field_meta_.get_data_type());
+    auto conf = get_build_params(get_data_type());
     auto source = dynamic_cast<const ConcurrentVector<SparseFloatVector>*>(
         field_raw_data);
     AssertInfo(source,
@@ -203,7 +159,7 @@ VectorFieldIndexing::AppendSegmentIndexSparse(int64_t reserved_offset,
                 }
             } catch (SegcoreError& error) {
                 LOG_ERROR("growing sparse index build error: {}", error.what());
-                recreate_index(field_meta_.get_data_type(), nullptr);
+                recreate_index(get_data_type(), nullptr);
                 index_cur_ = 0;
                 return;
             }
@@ -230,23 +186,22 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
                                              int64_t size,
                                              const VectorBase* field_raw_data,
                                              const void* data_source) {
-    AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT ||
-                   field_meta_.get_data_type() == DataType::VECTOR_FLOAT16 ||
-                   field_meta_.get_data_type() == DataType::VECTOR_BFLOAT16,
+    AssertInfo(get_data_type() == DataType::VECTOR_FLOAT ||
+                   get_data_type() == DataType::VECTOR_FLOAT16 ||
+                   get_data_type() == DataType::VECTOR_BFLOAT16,
                "Data type of vector field is not in (VECTOR_FLOAT, "
                "VECTOR_FLOAT16,VECTOR_BFLOAT16)");
-    auto dim = field_meta_.get_dim();
-    auto conf = get_build_params(field_meta_.get_data_type());
+    auto dim = get_dim();
+    auto conf = get_build_params(get_data_type());
     auto size_per_chunk = field_raw_data->get_size_per_chunk();
     //append vector [vector_id_beg, vector_id_end] into index
     //build index [vector_id_beg, build_threshold) when index not exist
-    AssertInfo(
-        ConcurrentDenseVectorCheck(field_raw_data, field_meta_.get_data_type()),
-        "vec_base can't cast to ConcurrentVector type");
+    AssertInfo(ConcurrentDenseVectorCheck(field_raw_data, get_data_type()),
+               "vec_base can't cast to ConcurrentVector type");
     size_t vec_length;
-    if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT) {
+    if (get_data_type() == DataType::VECTOR_FLOAT) {
         vec_length = dim * sizeof(float);
-    } else if (field_meta_.get_data_type() == DataType::VECTOR_FLOAT16) {
+    } else if (get_data_type() == DataType::VECTOR_FLOAT16) {
         vec_length = dim * sizeof(float16);
     } else {
         vec_length = dim * sizeof(bfloat16);
@@ -293,7 +248,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
             index_->BuildWithDataset(dataset, conf);
         } catch (SegcoreError& error) {
             LOG_ERROR("growing index build error: {}", error.what());
-            recreate_index(field_meta_.get_data_type(), field_raw_data);
+            recreate_index(get_data_type(), field_raw_data);
             return;
         }
         index_cur_.fetch_add(vec_num);
@@ -341,8 +296,8 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
 knowhere::Json
 VectorFieldIndexing::get_build_params(DataType data_type) const {
     auto config = config_->GetBuildBaseParams(data_type);
-    if (!IsSparseFloatVectorDataType(field_meta_.get_data_type())) {
-        config[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
+    if (!IsSparseFloatVectorDataType(get_data_type())) {
+        config[knowhere::meta::DIM] = std::to_string(get_dim());
     }
     config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
     // for sparse float vector: drop_ratio_build config is not allowed to be set
@@ -366,35 +321,6 @@ VectorFieldIndexing::has_raw_data() const {
     return index_->HasRawData();
 }
 
-template <typename T>
-void
-ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
-                                        int64_t ack_end,
-                                        const VectorBase* vec_base) {
-    auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
-    AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
-    auto num_chunk = source->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
-    data_.grow_to_at_least(ack_end);
-    for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        auto chunk_data = source->get_chunk_data(chunk_id);
-        // build index for chunk
-        // seem no lint, not pass valid_data here
-        // TODO
-        if constexpr (std::is_same_v<T, std::string>) {
-            auto indexing = index::CreateStringIndexSort();
-            indexing->Build(vec_base->get_size_per_chunk(),
-                            static_cast<const T*>(chunk_data));
-            data_[chunk_id] = std::move(indexing);
-        } else {
-            auto indexing = index::CreateScalarIndexSort<T>();
-            indexing->Build(vec_base->get_size_per_chunk(),
-                            static_cast<const T*>(chunk_data));
-            data_[chunk_id] = std::move(indexing);
-        }
-    }
-}
-
 std::unique_ptr<FieldIndexing>
 CreateIndex(const FieldMeta& field_meta,
             const FieldIndexMeta& field_index_meta,
@@ -413,7 +339,7 @@ CreateIndex(const FieldMeta& field_meta,
                                                          segcore_config,
                                                          field_raw_data);
         } else {
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported vector type in index: {}",
                                   field_meta.get_data_type()));
         }
@@ -444,7 +370,7 @@ CreateIndex(const FieldMeta& field_meta,
             return std::make_unique<ScalarFieldIndexing<std::string>>(
                 field_meta, segcore_config);
         default:
-            PanicInfo(DataTypeInvalid,
+            ThrowInfo(DataTypeInvalid,
                       fmt::format("unsupported scalar type in index: {}",
                                   field_meta.get_data_type()));
     }

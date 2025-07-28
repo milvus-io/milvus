@@ -46,6 +46,7 @@ var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration
 	datapb.CompactionType_MixCompaction:          30 * time.Minute,
 	datapb.CompactionType_Level0DeleteCompaction: 30 * time.Minute,
 	datapb.CompactionType_ClusteringCompaction:   60 * time.Minute,
+	datapb.CompactionType_SortCompaction:         20 * time.Minute,
 }
 
 type CompactionInspector interface {
@@ -59,7 +60,6 @@ type CompactionInspector interface {
 	getCompactionTasksNumBySignalID(signalID int64) int
 	getCompactionInfo(ctx context.Context, signalID int64) *compactionInfo
 	removeTasksByChannel(channel string)
-	checkAndSetSegmentStating(channel string, segmentID int64) bool
 	getCompactionTasksNum(filters ...compactionTaskFilter) int
 }
 
@@ -94,6 +94,7 @@ type compactionInspector struct {
 	analyzeScheduler task.GlobalScheduler
 	handler          Handler
 	scheduler        task.GlobalScheduler
+	ievm             IndexEngineVersionManager
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -167,21 +168,6 @@ func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *co
 	return ret
 }
 
-func (c *compactionInspector) checkAndSetSegmentStating(channel string, segmentID int64) bool {
-	c.executingGuard.Lock()
-	defer c.executingGuard.Unlock()
-
-	for _, t := range c.executingTasks {
-		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
-			if t.GetTaskProto().GetChannel() == channel && t.CheckCompactionContainsSegment(segmentID) {
-				return false
-			}
-		}
-	}
-	c.meta.SetSegmentStating(segmentID, true)
-	return true
-}
-
 func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) int {
 	cnt := 0
 	c.queueTasks.ForEach(func(ct CompactionTask) {
@@ -200,7 +186,7 @@ func (c *compactionInspector) getCompactionTasksNumBySignalID(triggerID int64) i
 }
 
 func newCompactionInspector(meta CompactionMeta,
-	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler,
+	allocator allocator.Allocator, handler Handler, scheduler task.GlobalScheduler, ievm IndexEngineVersionManager,
 ) *compactionInspector {
 	// Higher capacity will have better ordering in priority, but consumes more memory.
 	// TODO[GOOSE]: Higher capacity makes tasks waiting longer, which need to be get rid of.
@@ -214,6 +200,7 @@ func newCompactionInspector(meta CompactionMeta,
 		cleaningTasks:  make(map[int64]CompactionTask),
 		handler:        handler,
 		scheduler:      scheduler,
+		ievm:           ievm,
 	}
 }
 
@@ -243,7 +230,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -284,7 +271,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
@@ -305,17 +292,15 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		}
 
 		c.executingGuard.Lock()
-		// Do not move this check logic outside the lock; it needs to remain mutually exclusive with the stats task.
-		if t.GetTaskProto().GetType() == datapb.CompactionType_Level0DeleteCompaction {
-			if !t.PreparePlan() {
-				selected = selected[:len(selected)-1]
-				excluded = append(excluded, t)
-				c.executingGuard.Unlock()
-				continue
-			}
-		}
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.scheduler.Enqueue(t)
+		log.Info("compaction task enqueued",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.String("type", t.GetTaskProto().GetType().String()),
+			zap.String("channel", t.GetTaskProto().GetChannel()),
+			zap.String("label", t.GetLabel()),
+			zap.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
+		)
 		c.executingGuard.Unlock()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
@@ -609,8 +594,8 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction:
-		task = newMixCompactionTask(t, c.allocator, c.meta)
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = newL0CompactionTask(t, c.allocator, c.meta)
 	case datapb.CompactionType_ClusteringCompaction:
@@ -652,6 +637,16 @@ func (c *compactionInspector) checkCompaction() error {
 	c.executingGuard.Lock()
 	for _, t := range finishedTasks {
 		delete(c.executingTasks, t.GetTaskProto().GetPlanID())
+		log.Info("compaction task finished",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.String("type", t.GetTaskProto().GetType().String()),
+			zap.String("state", t.GetTaskProto().GetState().String()),
+			zap.String("channel", t.GetTaskProto().GetChannel()),
+			zap.String("label", t.GetLabel()),
+			zap.Int64("nodeID", t.GetTaskProto().GetNodeID()),
+			zap.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
+			zap.String("reason", t.GetTaskProto().GetFailReason()),
+		)
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
 	}

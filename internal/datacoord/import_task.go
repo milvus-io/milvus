@@ -140,7 +140,7 @@ func UpdateSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 func UpdateStatsSegmentIDs(segmentIDs []UniqueID) UpdateAction {
 	return func(t ImportTask) {
 		if task, ok := t.(*importTask); ok {
-			task.task.Load().StatsSegmentIDs = segmentIDs
+			task.task.Load().SortedSegmentIDs = segmentIDs
 		}
 	}
 }

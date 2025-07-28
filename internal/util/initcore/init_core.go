@@ -29,6 +29,7 @@ package initcore
 import "C"
 
 import (
+	"encoding/base64"
 	"fmt"
 	"path"
 	"time"
@@ -55,10 +56,12 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
 	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
+	otlpHeaders := C.CString(serializeHeaders(params.TraceCfg.OtlpHeaders.GetValue()))
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
 	defer C.free(unsafe.Pointer(otlpMethod))
+	defer C.free(unsafe.Pointer(otlpHeaders))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
@@ -66,6 +69,7 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
+		otlpHeaders:    otlpHeaders,
 		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
@@ -86,10 +90,12 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
 	otlpMethod := C.CString(params.TraceCfg.OtlpMethod.GetValue())
 	otlpSecure := params.TraceCfg.OtlpSecure.GetAsBool()
+	otlpHeaders := C.CString(serializeHeaders(params.TraceCfg.OtlpHeaders.GetValue()))
 	defer C.free(unsafe.Pointer(exporter))
 	defer C.free(unsafe.Pointer(jaegerURL))
 	defer C.free(unsafe.Pointer(endpoint))
 	defer C.free(unsafe.Pointer(otlpMethod))
+	defer C.free(unsafe.Pointer(otlpHeaders))
 
 	config := C.CTraceConfig{
 		exporter:       exporter,
@@ -97,6 +103,7 @@ func ResetTraceConfig(params *paramtable.ComponentParam) {
 		jaegerURL:      jaegerURL,
 		otlpEndpoint:   endpoint,
 		otlpMethod:     otlpMethod,
+		otlpHeaders:    otlpHeaders,
 		oltpSecure:     (C.bool)(otlpSecure),
 		nodeID:         nodeID,
 	}
@@ -332,4 +339,15 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
 	log.Warn(logMsg)
 	return errors.New(finalMsg)
+}
+
+func serializeHeaders(headerstr string) string {
+	if len(headerstr) == 0 {
+		return ""
+	}
+	decodeheaders, err := base64.StdEncoding.DecodeString(headerstr)
+	if err != nil {
+		return headerstr
+	}
+	return string(decodeheaders)
 }

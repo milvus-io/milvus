@@ -66,6 +66,13 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 			sendCh = m.channel
 		}
 
+		// If there's no pending msgPack and no upstream message,
+		// return it immediately to ask for more message from upstream to avoid blocking.
+		if sendCh == nil && param.Upstream == nil {
+			return message.HandleResult{
+				MessageHandled: messageHandled,
+			}
+		}
 		select {
 		case <-param.Ctx.Done():
 			return message.HandleResult{
@@ -121,6 +128,13 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 			if msg.TimeTick() > m.Pendings[0].TimeTick() {
 				m.addMsgPackIntoPending(m.Pendings...)
 				m.Pendings = nil
+			} else if msg.TimeTick() < m.Pendings[0].TimeTick() {
+				m.Logger.Warn("message time tick is less than pendings",
+					zap.String("messageID", msg.MessageID().String()),
+					zap.String("pendingMessageID", m.Pendings[0].MessageID().String()),
+					zap.Uint64("timeTick", msg.TimeTick()),
+					zap.Uint64("pendingTimeTick", m.Pendings[0].TimeTick()))
+				return
 			}
 		}
 		m.Pendings = append(m.Pendings, msg)
@@ -137,7 +151,23 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 
 // addMsgPackIntoPending add message into pending msgPack.
 func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.ImmutableMessage) {
-	newPack, err := NewMsgPackFromMessage(msgs...)
+	// Because the old version message may have same time tick,
+	// So we may read the same message multiple times on same time tick because of the auto-resuming by ResumableConsumer.
+	// we need to filter out the duplicate messages here.
+	dedupMessages := make([]message.ImmutableMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		exist := false
+		for _, existMsg := range dedupMessages {
+			if msg.MessageID().EQ(existMsg.MessageID()) {
+				exist = true
+				break
+			}
+		}
+		if !exist {
+			dedupMessages = append(dedupMessages, msg)
+		}
+	}
+	newPack, err := NewMsgPackFromMessage(dedupMessages...)
 	if err != nil {
 		m.Logger.Warn("failed to convert message to msgpack", zap.Error(err))
 	}

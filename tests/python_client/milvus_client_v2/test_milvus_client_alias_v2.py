@@ -48,7 +48,7 @@ class TestMilvusClientV2AliasInvalid(TestMilvusClientV2Base):
         
         # 2. create alias with invalid name
         error = {ct.err_code: 1100, ct.err_msg: "Invalid collection alias"}
-        if alias_name is None or alias_name.strip() == "":
+        if alias_name is None or alias_name == "":
             error = {ct.err_code: 1100, ct.err_msg: "collection alias should not be empty"}
         self.create_alias(client, collection_name, alias_name,
                           check_task=CheckTasks.err_res, check_items=error)
@@ -80,7 +80,8 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
         collection_name1 = cf.gen_unique_str("collection1")
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=default_vector_field_name, metric_type="L2")
-        self.create_collection(client, collection_name1, default_dim, consistency_level="Bounded", index_params=index_params)
+        self.create_collection(client, collection_name1, default_dim, consistency_level="Bounded",
+                               index_params=index_params)
         
         # 2. create alias and insert data
         alias_name = cf.gen_unique_str(prefix)
@@ -103,11 +104,11 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
         # 5. verify search using alias works on collection1
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(client, alias_name, search_vectors, limit=default_limit,
-                   check_task=CheckTasks.check_search_results,
-                   check_items={"enable_milvus_client_api": True,
-                              "nq": len(search_vectors),
-                              "pk_name": default_primary_key_field_name,
-                              "limit": default_limit})
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(search_vectors),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
         
         # 6. create collection2 with index and load
         collection_name2 = cf.gen_unique_str("collection2")
@@ -133,11 +134,11 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
         # 10. verify search using alias works on collection2
         search_vectors = cf.gen_vectors(1, default_dim)
         self.search(client, alias_name, search_vectors, limit=default_limit,
-                   check_task=CheckTasks.check_search_results,
-                   check_items={"enable_milvus_client_api": True,
-                              "nq": len(search_vectors),
-                              "pk_name": default_primary_key_field_name,
-                              "limit": default_limit})
+                    check_task=CheckTasks.check_search_results,
+                    check_items={"enable_milvus_client_api": True,
+                                 "nq": len(search_vectors),
+                                 "pk_name": default_primary_key_field_name,
+                                 "limit": default_limit})
         
         # 11. verify operations on collection1 still work
         res1 = self.query(client, collection_name1, filter="", output_fields=["count(*)"])
@@ -198,8 +199,8 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
         error = {ct.err_code: 0,
                  ct.err_msg: f"can't find collection[database=default][collection={alias_name}]"}
         self.describe_collection(client, alias_name,
-                               check_task=CheckTasks.err_res,
-                               check_items=error)
+                                 check_task=CheckTasks.err_res,
+                                 check_items=error)
         
         # 8. verify collection still exists and unchanged
         assert self.has_collection(client, collection_name)[0]
@@ -239,9 +240,77 @@ class TestMilvusClientV2AliasOperation(TestMilvusClientV2Base):
         error = {ct.err_code: 1,
                  ct.err_msg: f"cannot drop the collection via alias = {alias_name}"}
         self.drop_collection(client, alias_name,
-                           check_task=CheckTasks.err_res,
-                           check_items=error)
+                             check_task=CheckTasks.err_res,
+                             check_items=error)
         
+        # cleanup
+        self.drop_alias(client, alias_name)
+        self.drop_collection(client, collection_name)
+        assert not self.has_collection(client, collection_name)[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_v2_rename_back_old_alias(self):
+        """
+        target: test collection operations using alias
+        method:
+                1. create collection with alias
+                2. drop the alias
+                3. rename collection to the dropped alias name
+        expected:
+                1. rename collection successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("collection")
+
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. create alias
+        alias_name = cf.gen_unique_str(prefix)
+        self.create_alias(client, collection_name, alias_name)
+
+        # 3. drop the alias
+        self.drop_alias(client, alias_name)
+        assert self.list_aliases(client, collection_name)[0]["aliases"] == []
+
+        # 4. rename collection to the dropped alias name
+        self.rename_collection(client, collection_name, alias_name)
+
+        # cleanup
+        self.drop_collection(client, alias_name)
+        assert not self.has_collection(client, alias_name)[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_v2_rename_back_old_collection(self):
+        """
+        target: test collection operations using alias
+        method:
+                1. create collection with alias
+                2. rename collection
+                3. rename back to old collection name
+        expected:
+                1. rename collection successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("collection")
+
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+
+        # 2. create alias
+        alias_name = cf.gen_unique_str(prefix)
+        self.create_alias(client, collection_name, alias_name)
+
+        # 3. rename collection
+        new_collection_name = cf.gen_unique_str("collection")
+        self.rename_collection(client, collection_name, new_collection_name)
+
+        # 4. rename back to old collection name
+        self.rename_collection(client, new_collection_name, collection_name)
+        assert self.has_collection(client, collection_name)[0]
+        assert not self.has_collection(client, new_collection_name)[0]
+        assert alias_name in self.list_aliases(client, collection_name)[0]["aliases"]
+
         # cleanup
         self.drop_alias(client, alias_name)
         self.drop_collection(client, collection_name)
@@ -276,8 +345,8 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1,
                  ct.err_msg: f"{alias_name} is alias to another collection: {collection_name1}"}
         self.create_alias(client, collection_name2, alias_name,
-                         check_task=CheckTasks.err_res,
-                         check_items=error)
+                          check_task=CheckTasks.err_res,
+                          check_items=error)
         
         # cleanup
         self.drop_alias(client, alias_name)
@@ -306,8 +375,8 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1600,
                  ct.err_msg: f"alias not found[database=default][alias={non_exist_alias}]"}
         self.alter_alias(client, collection_name, non_exist_alias,
-                        check_task=CheckTasks.err_res,
-                        check_items=error)
+                         check_task=CheckTasks.err_res,
+                         check_items=error)
         
         # 4. cleanup
         self.drop_alias(client, alias_name)
@@ -374,8 +443,8 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
                  ct.err_msg: f"collection name [{alias_name}] conflicts with an existing alias,"
                              " please choose a unique name"}
         self.create_collection(client, alias_name, default_dim, consistency_level="Bounded",
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+                               check_task=CheckTasks.err_res,
+                               check_items=error)
         
         # cleanup
         self.drop_alias(client, alias_name)
@@ -447,8 +516,8 @@ class TestMilvusClientV2AliasOperationInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 999,
                  ct.err_msg: f"cannot rename collection to an existing alias: {alias_name}"}
         self.rename_collection(client, collection_name2, alias_name,
-                             check_task=CheckTasks.err_res,
-                             check_items=error)
+                               check_task=CheckTasks.err_res,
+                               check_items=error)
         
         # cleanup
         self.drop_alias(client, alias_name)

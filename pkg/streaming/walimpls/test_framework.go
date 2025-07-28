@@ -63,7 +63,7 @@ func (f walImplsTestFramework) Run() {
 	wg.Add(pchannelCnt)
 	for i := 0; i < pchannelCnt; i++ {
 		// construct pChannel
-		name := fmt.Sprintf("test_%d_%s", i, randString(4))
+		name := fmt.Sprintf("test_%d_%s", i, randString(10))
 		go func(name string) {
 			defer wg.Done()
 			newTestOneWALImpls(f.t, o, name, f.messageCount).Run()
@@ -128,6 +128,7 @@ func (f *testOneWALImplsFramework) Run() {
 		assert.Panics(f.t, func() {
 			w.Truncate(ctx, nil)
 		})
+		w.Close()
 	}
 
 	// Test truncate on a wal that is not in read-write mode.

@@ -29,17 +29,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type reader struct {
-	ctx    context.Context
-	cm     storage.ChunkManager
-	schema *schemapb.CollectionSchema
+	ctx            context.Context
+	cm             storage.ChunkManager
+	schema         *schemapb.CollectionSchema
+	storageVersion int64
 
 	fileSize   *atomic.Int64
+	bufferSize int
 	deleteData map[any]typeutil.Timestamp // pk2ts
 	insertLogs map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
 
@@ -50,9 +52,12 @@ type reader struct {
 func NewReader(ctx context.Context,
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	storageVersion int64,
 	paths []string,
 	tsStart,
 	tsEnd uint64,
+	bufferSize int,
 ) (*reader, error) {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
@@ -65,25 +70,29 @@ func NewReader(ctx context.Context,
 		schema = typeutil.AppendSystemFields(schema)
 	}
 	r := &reader{
-		ctx:      ctx,
-		cm:       cm,
-		schema:   schema,
-		fileSize: atomic.NewInt64(0),
+		ctx:            ctx,
+		cm:             cm,
+		schema:         schema,
+		storageVersion: storageVersion,
+		fileSize:       atomic.NewInt64(0),
+		bufferSize:     bufferSize,
 	}
-	err := r.init(paths, tsStart, tsEnd)
+	err := r.init(paths, tsStart, tsEnd, storageConfig)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
+func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *indexpb.StorageConfig) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
 	if len(paths) == 0 {
 		return merr.WrapErrImportFailed("no insert binlogs to import")
 	}
+	// the "paths" has one or two paths, the first is the binlog path of a segment
+	// the other is optional, is the delta path of a segment
 	if len(paths) > 2 {
 		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
 			"Valid paths length should be one or two, but got paths:%s", paths))
@@ -92,37 +101,32 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if err != nil {
 		return err
 	}
-	err = verify(r.schema, insertLogs)
+
+	validInsertLogs, cloneschema, err := verify(r.schema, r.storageVersion, insertLogs)
 	if err != nil {
 		return err
 	}
-	r.insertLogs = insertLogs
+	binlogs := createFieldBinlogList(validInsertLogs)
+	r.insertLogs = validInsertLogs
+	r.schema = cloneschema
 
-	binlogs := lo.Map(r.schema.Fields, func(field *schemapb.FieldSchema, _ int) *datapb.FieldBinlog {
-		id := field.GetFieldID()
-		return &datapb.FieldBinlog{
-			FieldID: id,
-			Binlogs: lo.Map(r.insertLogs[id], func(path string, _ int) *datapb.Binlog {
-				return &datapb.Binlog{
-					LogPath: path,
-				}
-			}),
-		}
-	})
+	validIDs := lo.Keys(r.insertLogs)
+	log.Info("create binlog reader for these fields", zap.Any("validIDs", validIDs))
 
-	storageVersion := storage.GuessStorageVersion(binlogs, r.schema)
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema,
-		storage.WithVersion(storageVersion),
+		storage.WithVersion(r.storageVersion),
 		storage.WithBufferSize(32*1024*1024),
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return r.cm.MultiRead(ctx, paths)
 		}),
+		storage.WithStorageConfig(storageConfig),
 	)
 	if err != nil {
 		return err
 	}
+
 	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(record, v, r.schema.Fields)
+		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
 	})
 
 	if len(paths) < 2 {
@@ -192,8 +196,8 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	for range 4096 {
+	rowNum := 0
+	for {
 		v, err := r.dr.NextValue()
 		if err == io.EOF {
 			if insertData.GetRowNum() == 0 {
@@ -219,6 +223,11 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			if err != nil {
 				return nil, err
 			}
+			rowNum++
+		}
+		if rowNum%100 == 0 && // Prevent frequent memory check
+			insertData.GetMemorySize() >= r.bufferSize {
+			break
 		}
 	}
 	insertData, err = r.filter(insertData)

@@ -33,7 +33,7 @@ JsonCastType
 JsonCastType::FromString(const std::string& str) {
     auto it = json_cast_type_map_.find(str);
     if (it == json_cast_type_map_.end()) {
-        PanicInfo(Unsupported, "Invalid json cast type: " + str);
+        ThrowInfo(Unsupported, "Invalid json cast type: " + str);
     }
     return it->second;
 }
@@ -62,7 +62,7 @@ JsonCastType::ToTantivyType() const {
         case JsonCastType::DataType::VARCHAR:
             return TantivyDataType::Keyword;
         default:
-            PanicInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
     }
 }
 
@@ -76,7 +76,7 @@ JsonCastType::ToMilvusDataType() const {
         case JsonCastType::DataType::VARCHAR:
             return MilvusDataType::VARCHAR;
         default:
-            PanicInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
+            ThrowInfo(DataTypeInvalid, "Invalid data type:{}", element_type());
     }
 }
 

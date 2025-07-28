@@ -13,7 +13,7 @@
 #include <string>
 #include <boost/filesystem.hpp>
 #include <optional>
-
+#include "index/JsonInvertedIndex.h"
 #include "index/InvertedIndexTantivy.h"
 
 namespace milvus::exec {
@@ -23,8 +23,14 @@ class SegmentExpr;
 namespace milvus::index {
 class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
  public:
+    // for string/varchar type
     explicit NgramInvertedIndex(const storage::FileManagerContext& ctx,
                                 const NgramParams& params);
+
+    // for json type
+    explicit NgramInvertedIndex(const storage::FileManagerContext& ctx,
+                                const NgramParams& params,
+                                const std::string& nested_path);
 
     IndexStatsPtr
     Upload(const Config& config = {}) override;
@@ -35,13 +41,44 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
+    void
+    BuildWithJsonFieldData(const std::vector<FieldDataPtr>& datas);
+
     std::optional<TargetBitmap>
-    InnerMatchQuery(const std::string& literal, exec::SegmentExpr* segment);
+    ExecuteQuery(const std::string& literal,
+                 proto::plan::OpType op_type,
+                 exec::SegmentExpr* segment);
+
+    void
+    finish() {
+        this->wrapper_->finish();
+    }
+
+    void
+    create_reader(SetBitsetFn set_bitset) {
+        this->wrapper_->create_reader(set_bitset);
+    }
+
+ private:
+    template <typename T>
+    std::optional<TargetBitmap>
+    ExecuteQueryWithPredicate(const std::string& literal,
+                              exec::SegmentExpr* segment,
+                              std::function<bool(const T&)> predicate,
+                              bool need_post_filter);
+
+    // Match is something like xxx%xxx%xxx, xxx%xxx, %xxx%xxx, xxx_x etc.
+    std::optional<TargetBitmap>
+    MatchQuery(const std::string& literal, exec::SegmentExpr* segment);
 
  private:
     uintptr_t min_gram_{0};
     uintptr_t max_gram_{0};
     int64_t field_id_{0};
     std::chrono::time_point<std::chrono::system_clock> index_build_begin_;
+
+    // for json type
+    std::string nested_path_;
+    JsonInvertedIndexParseErrorRecorder error_recorder_;
 };
 }  // namespace milvus::index

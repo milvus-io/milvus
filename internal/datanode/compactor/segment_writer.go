@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -68,6 +67,7 @@ type MultiSegmentWriter struct {
 	// DONOT leave it empty of all segments are deleted, just return a segment with zero meta for datacoord
 
 	storageVersion int64
+	params         compaction.Params
 	rwOption       []storage.RwOption
 }
 
@@ -91,12 +91,6 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 	schema *schemapb.CollectionSchema, params compaction.Params,
 	maxRows int64, partitionID, collectionID int64, channel string, batchSize int, rwOption ...storage.RwOption,
 ) (*MultiSegmentWriter, error) {
-	storageVersion := storage.StorageV1
-
-	if params.EnableStorageV2 {
-		storageVersion = storage.StorageV2
-	}
-
 	rwOpts := rwOption
 	if len(rwOption) == 0 {
 		rwOpts = make([]storage.RwOption, 0)
@@ -114,7 +108,8 @@ func NewMultiSegmentWriter(ctx context.Context, binlogIO io.BinlogIO, allocator 
 		batchSize:      batchSize,
 		binLogMaxSize:  params.BinLogMaxSize,
 		res:            make([]*datapb.CompactionSegment, 0),
-		storageVersion: storageVersion,
+		storageVersion: params.StorageVersion,
+		params:         params,
 		rwOption:       rwOpts,
 	}, nil
 }
@@ -162,7 +157,6 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 	w.currentSegmentID = newSegmentID
 
 	chunkSize := w.binLogMaxSize
-	rootPath := binlog.GetRootPath()
 
 	w.rwOption = append(w.rwOption,
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
@@ -170,10 +164,8 @@ func (w *MultiSegmentWriter) rotateWriter() error {
 		}),
 		storage.WithVersion(w.storageVersion),
 	)
-	// TODO bucketName shall be passed via StorageConfig like index/stats task
-	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 	rw, err := storage.NewBinlogRecordWriter(w.ctx, w.collectionID, w.partitionID, newSegmentID,
-		w.schema, w.allocator.logIDAlloc, chunkSize, bucketName, rootPath, w.maxRows, w.rwOption...,
+		w.schema, w.allocator.logIDAlloc, chunkSize, w.maxRows, w.rwOption...,
 	)
 	if err != nil {
 		return err
@@ -218,6 +210,16 @@ func (w *MultiSegmentWriter) WriteValue(v *storage.Value) error {
 	}
 
 	return w.writer.WriteValue(v)
+}
+
+// Flush calls storage.SerializeWriter.Flush(), it is used for serialize the value buffer to record and write to binlog.
+// Note: the record is not written to binlog immediately, it will be written when the buffer is full or the writer is closed.
+// Call this function before record iteration to avoid the underlying record be released.
+func (w *MultiSegmentWriter) Flush() error {
+	if w.writer == nil {
+		return nil
+	}
+	return w.writer.Flush()
 }
 
 func (w *MultiSegmentWriter) FlushChunk() error {
@@ -554,7 +556,7 @@ func NewSegmentWriter(sch *schemapb.CollectionSchema, maxCount int64, batchSize 
 
 func newBinlogWriter(collID, partID, segID int64, schema *schemapb.CollectionSchema, batchSize int,
 ) (writer *storage.BinlogSerializeWriter, closers []func() (*storage.Blob, error), err error) {
-	fieldWriters := storage.NewBinlogStreamWriters(collID, partID, segID, schema.Fields)
+	fieldWriters := storage.NewBinlogStreamWriters(collID, partID, segID, schema)
 	closers = make([]func() (*storage.Blob, error), 0, len(fieldWriters))
 	for _, w := range fieldWriters {
 		closers = append(closers, w.Finalize)

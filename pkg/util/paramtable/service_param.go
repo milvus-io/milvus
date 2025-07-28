@@ -729,8 +729,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SegmentRollingMaxSize = ParamItem{
 		Key:          "woodpecker.client.segmentRollingPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "2GB",
-		Doc:          "Maximum size of a segment, default is 2GB",
+		DefaultValue: "256M",
+		Doc:          "Maximum size of a segment.",
 		Export:       true,
 	}
 	p.SegmentRollingMaxSize.Init(base.mgr)
@@ -783,7 +783,7 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.SyncMaxBytes = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxBytes",
 		Version:      "2.6.0",
-		DefaultValue: "128M",
+		DefaultValue: "256M",
 		Doc:          "Maximum size of write buffer in bytes.",
 		Export:       true,
 	}
@@ -801,8 +801,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.FlushMaxSize = ParamItem{
 		Key:          "woodpecker.logstore.segmentSyncPolicy.maxFlushSize",
 		Version:      "2.6.0",
-		DefaultValue: "4M",
-		Doc:          "Maximum size of a fragment in bytes to flush, default is 4M.",
+		DefaultValue: "2M",
+		Doc:          "Maximum size of a fragment in bytes to flush.",
 		Export:       true,
 	}
 	p.FlushMaxSize.Init(base.mgr)
@@ -828,8 +828,8 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 	p.CompactionSize = ParamItem{
 		Key:          "woodpecker.logstore.segmentCompactionPolicy.maxSize",
 		Version:      "2.6.0",
-		DefaultValue: "8M",
-		Doc:          "The maximum size of the merged files, default is 8M.",
+		DefaultValue: "2M",
+		Doc:          "The maximum size of the merged files.",
 		Export:       true,
 	}
 	p.CompactionSize.Init(base.mgr)

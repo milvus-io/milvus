@@ -29,13 +29,13 @@ RelationalImpl(const T& t, const U& u, FundamentalTag, FundamentalTag) {
 template <typename Op, typename T, typename U>
 bool
 RelationalImpl(const T& t, const U& u, FundamentalTag, StringTag) {
-    PanicInfo(DataTypeInvalid, "incompitible data type");
+    ThrowInfo(DataTypeInvalid, "incompitible data type");
 }
 
 template <typename Op, typename T, typename U>
 bool
 RelationalImpl(const T& t, const U& u, StringTag, FundamentalTag) {
-    PanicInfo(DataTypeInvalid, "incompitible data type");
+    ThrowInfo(DataTypeInvalid, "incompitible data type");
 }
 
 template <typename Op, typename T, typename U>
@@ -58,7 +58,7 @@ struct Relational {
     template <typename... T>
     bool
     operator()(const T&...) const {
-        PanicInfo(OpTypeInvalid, "incompatible operands");
+        ThrowInfo(OpTypeInvalid, "incompatible operands");
     }
 };
 

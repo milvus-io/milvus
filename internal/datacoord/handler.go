@@ -593,11 +593,6 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err
 	}
-	err = h.s.meta.DropChannelCheckpoint(channel)
-	if err != nil {
-		log.Warn("DropChannel failed to drop channel checkpoint", zap.String("channel", channel), zap.Error(err))
-		return err
-	}
 	log.Info("DropChannel succeeded", zap.String("channel", channel))
 	// Channel checkpoints are cleaned up during garbage collection.
 

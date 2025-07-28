@@ -12,11 +12,19 @@
 #pragma once
 
 #include <memory>
+#include <utility>
 
 #include "common/Channel.h"
 #include "parquet/arrow/reader.h"
 
 namespace milvus {
+
+struct ArrowTableInfo {
+    size_t file_index;       // file index in the file list
+    size_t row_group_index;  // row group index in the file, start from 0
+    std::shared_ptr<arrow::Table>
+        table;  // the arrow table of the row group at row group index in the file index file
+};
 
 struct ArrowDataWrapper {
     ArrowDataWrapper() = default;
@@ -32,7 +40,7 @@ struct ArrowDataWrapper {
     std::shared_ptr<parquet::arrow::FileReader> arrow_reader;
     // underlying file data memory, must outlive the arrow reader
     std::shared_ptr<uint8_t[]> file_data;
-    std::vector<std::shared_ptr<arrow::Table>> arrow_tables;
+    std::vector<ArrowTableInfo> arrow_tables;
 };
 using ArrowReaderChannel = Channel<std::shared_ptr<milvus::ArrowDataWrapper>>;
 

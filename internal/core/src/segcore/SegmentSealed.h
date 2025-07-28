@@ -107,8 +107,16 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual bool
     HasNgramIndex(FieldId field_id) const = 0;
 
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override = 0;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override = 0;
 
     SegmentType
     type() const override {
@@ -137,12 +145,14 @@ class SegmentSealed : public SegmentInternalInterface {
                     return path.substr(0, index.nested_path.length()) ==
                            index.nested_path;
                 }
+                if (index.nested_path != path) {
+                    return false;
+                }
                 if (any_type) {
                     return true;
                 }
-                return index.nested_path == path &&
-                       milvus::index::json::IsDataTypeSupported(
-                           index.cast_type, data_type, is_json_contain);
+                return milvus::index::json::IsDataTypeSupported(
+                    index.cast_type, data_type, is_json_contain);
             });
         return it != json_indices.end();
     }

@@ -196,59 +196,49 @@ func (_c *MockWALAccesser_Broadcast_Call) RunAndReturn(run func() streaming.Broa
 	return _c
 }
 
-// GetLatestMVCCTimestampIfLocal provides a mock function with given fields: ctx, vchannel
-func (_m *MockWALAccesser) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
-	ret := _m.Called(ctx, vchannel)
+// Local provides a mock function with no fields
+func (_m *MockWALAccesser) Local() streaming.Local {
+	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetLatestMVCCTimestampIfLocal")
+		panic("no return value specified for Local")
 	}
 
-	var r0 uint64
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (uint64, error)); ok {
-		return rf(ctx, vchannel)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) uint64); ok {
-		r0 = rf(ctx, vchannel)
+	var r0 streaming.Local
+	if rf, ok := ret.Get(0).(func() streaming.Local); ok {
+		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(uint64)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.Local)
+		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, vchannel)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
+	return r0
 }
 
-// MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLatestMVCCTimestampIfLocal'
-type MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call struct {
+// MockWALAccesser_Local_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Local'
+type MockWALAccesser_Local_Call struct {
 	*mock.Call
 }
 
-// GetLatestMVCCTimestampIfLocal is a helper method to define mock.On call
-//   - ctx context.Context
-//   - vchannel string
-func (_e *MockWALAccesser_Expecter) GetLatestMVCCTimestampIfLocal(ctx interface{}, vchannel interface{}) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
-	return &MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call{Call: _e.mock.On("GetLatestMVCCTimestampIfLocal", ctx, vchannel)}
+// Local is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) Local() *MockWALAccesser_Local_Call {
+	return &MockWALAccesser_Local_Call{Call: _e.mock.On("Local")}
 }
 
-func (_c *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call) Run(run func(ctx context.Context, vchannel string)) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
+func (_c *MockWALAccesser_Local_Call) Run(run func()) *MockWALAccesser_Local_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call) Return(_a0 uint64, _a1 error) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockWALAccesser_Local_Call) Return(_a0 streaming.Local) *MockWALAccesser_Local_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call) RunAndReturn(run func(context.Context, string) (uint64, error)) *MockWALAccesser_GetLatestMVCCTimestampIfLocal_Call {
+func (_c *MockWALAccesser_Local_Call) RunAndReturn(run func() streaming.Local) *MockWALAccesser_Local_Call {
 	_c.Call.Return(run)
 	return _c
 }

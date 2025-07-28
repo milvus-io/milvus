@@ -305,7 +305,7 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 }
 
 // Search preforms search operation on shard.
-func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry) ([]*internalpb.SearchResults, error) {
+func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
 	if req.Req.IgnoreGrowing {
 		growing = []SegmentEntry{}
@@ -355,7 +355,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
 		return nil, err
 	}
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
 		resp, err := worker.SearchSegments(ctx, req)
 		status, ok := status.FromError(err)
 		if ok && status.Code() == codes.Unavailable {
@@ -368,7 +368,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 
-	log.Debug("Delegator search done")
+	log.Debug("Delegator search done", zap.Int("results", len(results)))
 
 	return results, nil
 }
@@ -421,7 +421,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to search, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -471,7 +471,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					searchReq.GetReq().MvccTimestamp = tSafe
 				}
 				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing)
+				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
 				if err != nil {
 					return nil, err
 				}
@@ -502,7 +502,7 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 		}
 		return results, nil
 	}
-	return sd.search(ctx, req, sealed, growing)
+	return sd.search(ctx, req, sealed, growing, sealedRowCount)
 }
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
@@ -540,7 +540,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return err
@@ -561,7 +561,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 		return err
 	}
 
-	_, err = executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
 		err := worker.QueryStreamSegments(ctx, req, srv)
 		status, ok := status.FromError(err)
 		if ok && status.Code() == codes.Unavailable {
@@ -626,7 +626,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(partialResultRequiredDataRatio, req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to query, current distribution is not serviceable", zap.Error(err))
 		return nil, err
@@ -647,6 +647,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("query segments...",
+		zap.Uint64("mvcc", req.GetReq().GetMvccTimestamp()),
 		zap.Int("sealedNum", sealedNum),
 		zap.Int("growingNum", len(growing)),
 	)
@@ -656,7 +657,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		return nil, err
 	}
 
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
 		resp, err := worker.QuerySegments(ctx, req)
 		status, ok := status.FromError(err)
 		if ok && status.Code() == codes.Unavailable {
@@ -684,7 +685,6 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		log.Debug("execute count on segments...",
 			zap.Int64s("sealedIDs", sealedIDs),
 			zap.Int64s("growingIDs", growingIDs),
-			zap.Int64("targetVersion", sd.distribution.queryView.version),
 		)
 	}
 
@@ -713,7 +713,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	sealed, growing, version, err := sd.distribution.PinReadableSegments(1.0, req.Req.GetPartitionIDs()...)
+	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(1.0, req.Req.GetPartitionIDs()...)
 	if err != nil {
 		log.Warn("delegator failed to GetStatistics, current distribution is not servicable")
 		return nil, merr.WrapErrChannelNotAvailable(sd.vchannelName, "distribution is not serviceable")
@@ -733,7 +733,7 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 		return nil, err
 	}
 
-	results, err := executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.GetStatisticsRequest, worker cluster.Worker) (*internalpb.GetStatisticsResponse, error) {
+	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.GetStatisticsRequest, worker cluster.Worker) (*internalpb.GetStatisticsResponse, error) {
 		return worker.GetStatistics(ctx, req)
 	}, "GetStatistics", log)
 	if err != nil {
@@ -807,7 +807,7 @@ func organizeSubTask[T any](ctx context.Context,
 
 func executeSubTasks[T any, R interface {
 	GetStatus() *commonpb.Status
-}](ctx context.Context, tasks []subTask[T], execute func(context.Context, T, cluster.Worker) (R, error), taskType string, log *log.MLogger,
+}](ctx context.Context, tasks []subTask[T], evaluator PartialResultEvaluator, execute func(context.Context, T, cluster.Worker) (R, error), taskType string, log *log.MLogger,
 ) ([]R, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -883,15 +883,15 @@ func executeSubTasks[T any, R interface {
 	}
 	close(resultCh)
 
-	successSegmentList := []int64{}
-	failureSegmentList := []int64{}
+	successSegmentList := typeutil.NewSet[int64]()
+	failureSegmentList := make([]int64, 0)
 	var errors []error
 
 	// Collect results
 	results := make([]R, 0, len(tasks))
 	for item := range resultCh {
 		if item.err == nil {
-			successSegmentList = append(successSegmentList, item.segments...)
+			successSegmentList.Insert(item.segments...)
 			results = append(results, item.result)
 		} else {
 			failureSegmentList = append(failureSegmentList, item.segments...)
@@ -899,25 +899,24 @@ func executeSubTasks[T any, R interface {
 		}
 	}
 
-	accessDataRatio := 1.0
-	totalSegments := len(successSegmentList) + len(failureSegmentList)
-	if totalSegments > 0 {
-		accessDataRatio = float64(len(successSegmentList)) / float64(totalSegments)
-		if accessDataRatio < 1.0 {
+	if len(errors) == 0 {
+		return results, nil
+	}
+
+	// Use evaluator to determine if partial results should be returned
+	if evaluator != nil {
+		shouldReturnPartial, accessedDataRatio := evaluator(taskType, successSegmentList, failureSegmentList, errors)
+		if shouldReturnPartial {
 			log.Info("partial result executed successfully",
 				zap.String("taskType", taskType),
-				zap.Float64("successRatio", accessDataRatio),
-				zap.Float64("partialResultRequiredDataRatio", partialResultRequiredDataRatio),
-				zap.Int("totalSegments", totalSegments),
+				zap.Float64("accessedDataRatio", accessedDataRatio),
 				zap.Int64s("failureSegmentList", failureSegmentList),
 			)
+			return results, nil
 		}
 	}
 
-	if accessDataRatio < partialResultRequiredDataRatio {
-		return nil, merr.Combine(errors...)
-	}
-	return results, nil
+	return nil, merr.Combine(errors...)
 }
 
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
@@ -936,7 +935,7 @@ func (sd *shardDelegator) speedupGuranteeTS(
 		return guaranteeTS
 	}
 	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
-	if mvcc, err := streaming.WAL().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
+	if mvcc, err := streaming.WAL().Local().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
 		return mvcc
 	}
 	return guaranteeTS
@@ -1055,7 +1054,7 @@ func (sd *shardDelegator) UpdateSchema(ctx context.Context, schema *schemapb.Col
 		return err
 	}
 
-	_, err = executeSubTasks(ctx, tasks, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
+	_, err = executeSubTasks(ctx, tasks, nil, func(ctx context.Context, req *querypb.UpdateSchemaRequest, worker cluster.Worker) (*StatusWrapper, error) {
 		status, err := worker.UpdateSchema(ctx, req)
 		return (*StatusWrapper)(status), err
 	}, "UpdateSchema", log)
@@ -1261,4 +1260,49 @@ func (sd *shardDelegator) RunAnalyzer(ctx context.Context, req *querypb.RunAnaly
 			Tokens: tokens,
 		}
 	}), nil
+}
+
+// PartialResultEvaluator evaluates whether partial results should be returned
+// Parameters:
+//   - taskType: the type of task being executed (Search, Query, etc.)
+//   - successSegments: list of segments that were successfully processed
+//   - failureSegments: list of segments that failed to process
+//   - errors: list of errors that occurred
+//
+// Returns:
+//   - bool: whether to return partial results
+//   - float64: actual accessed data ratio (for logging)
+type PartialResultEvaluator func(taskType string, successSegments typeutil.Set[int64], failureSegments []int64, errors []error) (bool, float64)
+
+// NewRowCountBasedEvaluator creates a PartialResultEvaluator based on row count
+func NewRowCountBasedEvaluator(sealedRowCount map[int64]int64) PartialResultEvaluator {
+	return func(taskType string, successSegments typeutil.Set[int64], failureSegments []int64, errors []error) (bool, float64) {
+		var partialResultRequiredDataRatio float64
+		if taskType == "Query" || taskType == "Search" {
+			partialResultRequiredDataRatio = paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.GetAsFloat()
+		} else {
+			partialResultRequiredDataRatio = 1.0
+		}
+
+		if partialResultRequiredDataRatio >= 1.0 || len(sealedRowCount) == 0 {
+			return false, 0.0
+		}
+
+		// Calculate accessed data ratio for partial result
+		successRowCount := int64(0)
+		totalRowCount := int64(0)
+		for sid, rowCount := range sealedRowCount {
+			if successSegments.Contain(sid) {
+				successRowCount += rowCount
+			}
+			totalRowCount += rowCount
+		}
+
+		if totalRowCount == 0 {
+			return false, 1.0
+		}
+
+		accessedDataRatio := float64(successRowCount) / float64(totalRowCount)
+		return accessedDataRatio > partialResultRequiredDataRatio, accessedDataRatio
+	}
 }

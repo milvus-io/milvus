@@ -167,7 +167,7 @@ func (s *L0WriteBufferSuite) composeDeleteMsg(pks []storage.PrimaryKey) *msgstre
 func (s *L0WriteBufferSuite) SetupTest() {
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.metacache = metacache.NewMockMetaCache(s.T())
-	s.metacache.EXPECT().Schema().Return(s.collSchema).Maybe()
+	s.metacache.EXPECT().GetSchema(mock.Anything).Return(s.collSchema).Maybe()
 	s.metacache.EXPECT().Collection().Return(s.collID).Maybe()
 	s.allocator = allocator.NewMockGIDAllocator()
 	s.allocator.AllocOneF = func() (int64, error) { return int64(tsoutil.ComposeTSByTime(time.Now(), 0)), nil }

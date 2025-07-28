@@ -40,7 +40,7 @@ run() {
     assert(w.count() == l);
 
     {
-        auto hits = w.term_query<T>(2);
+        auto hits = w.terms_query<T>(2);
         hits.debug();
     }
 
@@ -90,7 +90,7 @@ run<bool>() {
     assert(w.count() == l);
 
     {
-        auto hits = w.term_query<bool>(true);
+        auto hits = w.terms_query<bool>(true);
         hits.debug();
     }
 }
@@ -125,7 +125,7 @@ run<std::string>() {
     assert(w.count() == l);
 
     {
-        auto hits = w.term_query<std::string>("a");
+        auto hits = w.terms_query<std::string>("a");
         hits.debug();
     }
 
@@ -193,7 +193,7 @@ test_32717() {
     assert(w.count() == l);
 
     for (int16_t term = 1; term < 1000; term += 10) {
-        auto hits = w.term_query(term);
+        auto hits = w.terms_query(term);
         for (size_t i = 0; i < hits.array_.len; i++) {
             assert(arr[hits.array_.array[i]] == term);
         }
@@ -243,7 +243,7 @@ test_array_int() {
 
     auto inverted_index = build_inverted_index(vec_of_array);
     for (const auto& [term, posting_list] : inverted_index) {
-        auto hits = to_set(w.term_query(term));
+        auto hits = to_set(w.terms_query(term));
         assert(posting_list == hits);
     }
 }
@@ -274,7 +274,7 @@ test_array_string() {
 
     auto inverted_index = build_inverted_index(vec_of_array);
     for (const auto& [term, posting_list] : inverted_index) {
-        auto hits = to_set(w.term_query(term));
+        auto hits = to_set(w.terms_query(term));
         assert(posting_list == hits);
     }
 }

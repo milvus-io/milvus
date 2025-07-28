@@ -181,6 +181,7 @@ func (s *L0CompactionTaskSuite) TestBuildCompactionRequestFailed_AllocFailed() {
 	task = &mixCompactionTask{
 		allocator: s.mockAlloc,
 		meta:      meta,
+		ievm:      newMockVersionManager(),
 	}
 	task.SetTask(&datapb.CompactionTask{})
 	_, err = task.BuildCompactionRequest()
@@ -349,6 +350,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
+		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 		s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Once()
@@ -369,6 +371,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
+		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(errors.New("mock error")).Once()
 
@@ -388,6 +391,7 @@ func (s *L0CompactionTaskSuite) TestPorcessStateTrans() {
 				State:  datapb.CompactionTaskState_completed,
 			}, nil).Once()
 
+		s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 		s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 

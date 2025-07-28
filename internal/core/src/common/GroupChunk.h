@@ -48,7 +48,7 @@ class GroupChunk {
     void
     AddChunk(FieldId field_id, std::shared_ptr<Chunk> chunk) {
         if (chunks_.find(field_id) != chunks_.end()) {
-            PanicInfo(ErrorCode::FieldAlreadyExist,
+            ThrowInfo(ErrorCode::FieldAlreadyExist,
                       "Field {} already exists in GroupChunk",
                       field_id.get());
         }

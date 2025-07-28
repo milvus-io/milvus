@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
@@ -21,6 +22,11 @@ type RecoverySnapshot struct {
 type BuildRecoveryStreamParam struct {
 	StartCheckpoint message.MessageID
 	EndTimeTick     uint64
+}
+
+// RecoveryMetrics is the metrics of the recovery info.
+type RecoveryMetrics struct {
+	RecoveryTimeTick uint64
 }
 
 // RecoveryStreamBuilder is an interface that is used to build a recovery stream from the WAL.
@@ -60,12 +66,19 @@ type RecoveryStream interface {
 
 // RecoveryStorage is an interface that is used to observe the messages from the WAL.
 type RecoveryStorage interface {
+	// Metrics gets the metrics of the recovery storage.
+	Metrics() RecoveryMetrics
+
+	// TODO: should be removed in future,
+	// GetSchema gets last schema of the collection which timetick is less than the given timetick.
+	GetSchema(ctx context.Context, vchannel string, timetick uint64) (*schemapb.CollectionSchema, error)
+
 	// ObserveMessage observes the message from the WAL.
 	ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error
 
 	// UpdateFlusherCheckpoint updates the checkpoint of flusher.
 	// TODO: should be removed in future, after merge the flusher logic into recovery storage.
-	UpdateFlusherCheckpoint(checkpoint *WALCheckpoint)
+	UpdateFlusherCheckpoint(vchannel string, checkpoint *WALCheckpoint)
 
 	// Close closes the recovery storage.
 	Close()

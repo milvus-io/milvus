@@ -812,7 +812,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
                                              nullable=True)
         # import data
         t0 = time.time()
@@ -920,6 +920,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert len(res) == 0
             expr_field = df.pk_field
             expr = f"{expr_field} >= 0"
+        
+        if add_field:
+            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
+            assert len(res) == 0           
 
         res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[expr_field, df.int_field])
         assert len(res) == entities
@@ -969,8 +973,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             pytest.skip("include_meta only works with enable_dynamic_field")
         if nullable is True:
             pytest.skip("not support bulk insert numpy files in field which set nullable == true")
-        if add_field is True:
-            pytest.skip("https://github.com/milvus-io/milvus/issues/42173")
         float_vec_field_dim = dim
         binary_vec_field_dim = ((dim+random.randint(-16, 32)) // 8) * 8
         bf16_vec_field_dim = dim+random.randint(-16, 32)
@@ -1005,7 +1007,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
                                              nullable=True)
         # import data
         t0 = time.time()
@@ -1105,6 +1107,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
         # query data
+        if add_field:
+            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
+            assert len(res) == 0
         res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
         assert len(res) == entities
         query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
@@ -1183,7 +1188,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
                                              nullable=True)
 
         # import data
@@ -1292,7 +1297,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert len(res) == 0
             expr_field = df.pk_field
             expr = f"{expr_field} >= 0"
-
+        if add_field:
+            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
+            assert len(res) == 0   
         res, _ = self.collection_wrap.query(expr=f"{expr}", output_fields=[df.string_field])
         assert len(res) == entities
         query_data = [r[expr_field] for r in res][:len(self.collection_wrap.partitions)]
@@ -2174,8 +2181,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                                                  nullable, add_field):
         """
         """
-        if add_field is True and auto_id is False:
-            pytest.skip("https://github.com/milvus-io/milvus/issues/42714")
         self._connect()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
@@ -2238,7 +2243,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             files = remote_writer.batch_files
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
                                              nullable=True)
         # import data
         for f in files:
@@ -2309,9 +2314,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert len(res) == int(entities/len(json_value))
         else:
             assert 0 < len(res) < int(entities/len(json_value))
-
-
-
+        if add_field:
+            res, _ = self.collection_wrap.query(expr=f"{df.new_field} is not null", output_fields=[df.string_field, df.int_field, df.new_field])
+            assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("auto_id", [True])
@@ -2728,8 +2733,6 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
                 3. verify embeddings are generated
         expected: embeddings should be generated after import
         """
-        if add_field is True and file_format == "numpy":
-            pytest.skip("https://github.com/milvus-io/milvus/issues/42173")
         dim = 768
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
@@ -2778,7 +2781,7 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
             files = remote_writer.batch_files
         if add_field:
             self._connect(enable_milvus_client_api=True)
-            self.client.add_collection_field(collection_name=c_name, field_name="field_new", data_type=DataType.INT64,
+            self.client.add_collection_field(collection_name=c_name, field_name=df.new_field, data_type=DataType.INT64,
                                              nullable=True)
         # import data
         for f in files:
@@ -2811,6 +2814,9 @@ class TestImportWithTextEmbeddingFunction(TestcaseBase):
         for r in res:
             assert "dense" in r
             assert len(r["dense"]) == dim
+        if add_field:
+            res, _ = collection_w.query(expr=f"{df.new_field} is not null", output_fields=[df.new_field])
+            assert len(res) == 0
 
 
 class TestImportWithFunctionNegative(TestcaseBase):

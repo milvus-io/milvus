@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -353,19 +354,32 @@ func (m *ChannelDistManager) GetShardLeader(channelName string, replica *Replica
 				// Prioritize serviceability first, then version number
 				candidatesServiceable := candidates.IsServiceable()
 				channelServiceable := channel.IsServiceable()
+				streamingNodes := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
+				candidateIsStreamingNode := streamingNodes.Contain(candidates.Node)
+				channelIsStreamingNode := streamingNodes.Contain(channel.Node)
 
-				updateNeeded := false
-				switch {
-				case !candidatesServiceable && channelServiceable:
-					// Current candidate is not serviceable but new channel is
-					updateNeeded = true
-				case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
-					// Same service status but higher version
-					updateNeeded = true
-				}
-
-				if updateNeeded {
+				if channelIsStreamingNode && !candidateIsStreamingNode {
+					// When upgrading from 2.5 to 2.6, the delegator leader may not locate at streaming node.
+					// We always use the streaming node as the delegator leader to avoid the delete data lost when loading segment.
 					candidates = channel
+				} else if !channelIsStreamingNode && candidateIsStreamingNode {
+					// When downgrading from 2.6 to 2.5, the delegator leader may locate at non-streaming node.
+					// We always use the non-streaming node as the delegator leader to avoid the delete data lost when loading segment.
+					continue
+				} else {
+					updateNeeded := false
+					switch {
+					case !candidatesServiceable && channelServiceable:
+						// Current candidate is not serviceable but new channel is
+						updateNeeded = true
+					case candidatesServiceable == channelServiceable && channel.Version > candidates.Version:
+						// Same service status but higher version
+						updateNeeded = true
+					}
+
+					if updateNeeded {
+						candidates = channel
+					}
 				}
 			}
 		}
