@@ -1775,7 +1775,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         schema (Schema): Collection schema or collection info. If None, uses default schema.
         start (int): Starting value for primary key fields. Defaults to 0.
         random_pk (bool, optional): Whether to generate random primary key values (default: False)
-        skip_field_names(list, optitional): whether to skip some field to gen data manually (default: [])
+        skip_field_names(list, optional): whether to skip some field to gen data manually (default: [])
 
     Returns:
         list[dict]: List of dictionaries where each dictionary represents a row,

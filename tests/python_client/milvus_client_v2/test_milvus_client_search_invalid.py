@@ -993,7 +993,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
         # 3. load and search
         collection_w.load()
-        search_params = {}.update(cf.get_search_params_params(index))
+        search_params = cf.get_search_params_params(index)
         collection_w.search(vectors[:default_nq], field_name, search_params,
                             default_limit, output_fields=[field_name],
                             check_task=CheckTasks.err_res,

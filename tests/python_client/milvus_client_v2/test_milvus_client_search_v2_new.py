@@ -471,8 +471,6 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         client = self._client()
         collection_name = self.collection_name
         collection_info = self.describe_collection(client, collection_name)[0]
-        fields = collection_info.get('fields', None)
-        field_names = [field.get('name') for field in fields]
         partition_name = self.partition_names[0]
 
         # Generate vectors to search
@@ -480,8 +478,9 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         search_params = {"metric_type": self.float_vector_metric, "params": {"nprobe": 100}}
 
         # search with output fields
-        output_fields = cf.get_wildcard_output_field_names(collection_info, wildcard_output_fields)
-        log.info(f"search with output fields: {output_fields}")
+        expected_outputs = cf.get_wildcard_output_field_names(collection_info, wildcard_output_fields)
+        expected_outputs.extend([self.dyna_filed_name1, self.dyna_filed_name2])
+        log.info(f"search with output fields: {wildcard_output_fields}")
         search_res, _ = self.search(
             client,
             collection_name,
@@ -490,13 +489,13 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
             anns_field=self.float_vector_field_name,
             search_params=search_params,
             limit=default_limit,
-            output_fields=output_fields,
+            output_fields=wildcard_output_fields,
             check_task=CheckTasks.check_search_results,
             check_items={"enable_milvus_client_api": True,
                          "nq": default_nq,
                          "pk_name": self.pk_field_name,
                          "limit": default_limit,
-                         "output_fields": field_names.extend([self.dyna_filed_name1, self.dyna_filed_name2])})
+                         "output_fields": expected_outputs})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_invalid_output_fields(self):
