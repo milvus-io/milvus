@@ -397,6 +397,7 @@ message SaveBinlogPathsRequest {
   int64 partitionID =14; // report partitionID for create L0 segment
   int64 storageVersion = 15;
   repeated FieldBinlog field2Bm25logPaths = 16;
+  bool with_full_binlogs = 17; // report with full data for verification.
 }
 
 message CheckPoint {

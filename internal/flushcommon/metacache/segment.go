@@ -39,6 +39,10 @@ type SegmentInfo struct {
 	level            datapb.SegmentLevel
 	syncingTasks     int32
 	storageVersion   int64
+	binlogs          []*datapb.FieldBinlog
+	statslogs        []*datapb.FieldBinlog
+	deltalogs        []*datapb.FieldBinlog
+	bm25logs         []*datapb.FieldBinlog
 }
 
 func (s *SegmentInfo) SegmentID() int64 {
@@ -100,6 +104,22 @@ func (s *SegmentInfo) GetStorageVersion() int64 {
 	return s.storageVersion
 }
 
+func (s *SegmentInfo) Binlogs() []*datapb.FieldBinlog {
+	return s.binlogs
+}
+
+func (s *SegmentInfo) Statslogs() []*datapb.FieldBinlog {
+	return s.statslogs
+}
+
+func (s *SegmentInfo) Deltalogs() []*datapb.FieldBinlog {
+	return s.deltalogs
+}
+
+func (s *SegmentInfo) Bm25logs() []*datapb.FieldBinlog {
+	return s.bm25logs
+}
+
 func (s *SegmentInfo) Clone() *SegmentInfo {
 	return &SegmentInfo{
 		segmentID:        s.segmentID,
@@ -116,6 +136,10 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		syncingTasks:     s.syncingTasks,
 		bm25stats:        s.bm25stats,
 		storageVersion:   s.storageVersion,
+		binlogs:          s.binlogs,
+		statslogs:        s.statslogs,
+		deltalogs:        s.deltalogs,
+		bm25logs:         s.bm25logs,
 	}
 }
 
@@ -136,5 +160,9 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		bfs:              bfs,
 		bm25stats:        bm25Stats,
 		storageVersion:   info.GetStorageVersion(),
+		binlogs:          info.GetBinlogs(),
+		statslogs:        info.GetStatslogs(),
+		deltalogs:        info.GetDeltalogs(),
+		bm25logs:         info.GetBm25Statslogs(),
 	}
 }
