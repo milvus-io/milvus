@@ -69,6 +69,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasFieldData(FieldId field_id) const override;
 
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
+    GetFieldDataIfExist(FieldId field_id) const;
+
     bool
     Contain(const PkType& pk) const override {
         return insert_record_.contain(pk);
@@ -123,8 +126,21 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return ngram_fields_.find(field_id) != ngram_fields_.end();
     }
 
+    bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override {
+        std::shared_lock lck(mutex_);
+        return ngram_indexings_.find(field_id) != ngram_indexings_.end() &&
+               ngram_indexings_.at(field_id).find(nested_path) !=
+                   ngram_indexings_.at(field_id).end();
+    }
+
     PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
+
+    PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
 
     // TODO(tiered storage 1): should return a PinWrapper
     void
@@ -431,6 +447,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // TODO: generate index for scalar
     std::optional<int64_t> num_rows_;
+
+    // ngram indexings for json type
+    std::unordered_map<
+        FieldId,
+        std::unordered_map<std::string, index::CacheIndexBasePtr>>
+        ngram_indexings_;
 
     // fields that has ngram index
     std::unordered_set<FieldId> ngram_fields_{};

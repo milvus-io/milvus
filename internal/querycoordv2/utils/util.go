@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -248,4 +249,29 @@ func filterDupLeaders(ctx context.Context, replicaManager *meta.ReplicaManager, 
 		result[v.ID] = v
 	}
 	return result
+}
+
+// GetChannelRWAndRONodesFor260 gets the RW and RO nodes of the channel.
+func GetChannelRWAndRONodesFor260(replica *meta.Replica, nodeManager *session.NodeManager) ([]int64, []int64) {
+	rwNodes, roNodes := replica.GetRWSQNodes(), replica.GetROSQNodes()
+	if rwQueryNodesLessThan260 := filterNodeLessThan260(replica.GetRWNodes(), nodeManager); len(rwQueryNodesLessThan260) > 0 {
+		// Add rwNodes to roNodes to balance channels from querynode to streamingnode forcely.
+		roNodes = append(roNodes, rwQueryNodesLessThan260...)
+		log.Debug("find querynode need to balance channel to streamingnode", zap.Int64s("rwQueryNodesLessThan260", rwQueryNodesLessThan260))
+	}
+	roNodes = append(roNodes, replica.GetRONodes()...)
+	return rwNodes, roNodes
+}
+
+// filterNodeLessThan260 filter the query nodes that version is less than 2.6.0
+func filterNodeLessThan260(nodes []int64, nodeManager *session.NodeManager) []int64 {
+	checker := semver.MustParseRange(">=2.6.0-dev")
+	filteredNodes := make([]int64, 0)
+	for _, nodeID := range nodes {
+		if session := nodeManager.Get(nodeID); session != nil && checker(session.Version()) {
+			continue
+		}
+		filteredNodes = append(filteredNodes, nodeID)
+	}
+	return filteredNodes
 }

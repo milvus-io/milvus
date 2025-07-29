@@ -39,9 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -98,7 +96,7 @@ func NewSyncTask(ctx context.Context,
 	task := syncmgr.NewSyncTask().
 		WithAllocator(allocator).
 		WithMetaCache(metaCache).
-		WithSchema(metaCache.Schema()). // TODO specify import schema if needed
+		WithSchema(metaCache.GetSchema(0)). // TODO specify import schema if needed
 		WithSyncPack(syncPack).
 		WithStorageConfig(storageConfig)
 	return task, nil
@@ -491,6 +489,12 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			fields[subField.GetFieldID()] = subField
+		}
+	}
+
 	for fieldID, fd := range data.Data {
 		if fd == nil {
 			// normaly is impossible, just to avoid potential crash here
@@ -551,20 +555,4 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 		metaCaches[channel] = metaCache
 	}
 	return metaCaches
-}
-
-// GetBufferSize returns the memory buffer size required by this task
-func GetTaskBufferSize(task Task) int64 {
-	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
-	vchannelNum := len(task.GetVchannels())
-	partitionNum := len(task.GetPartitionIDs())
-	totalBufferSize := int64(baseBufferSize * vchannelNum * partitionNum)
-
-	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
-	memoryLimit := int64(float64(hardware.GetMemoryCount()) * percentage / 100.0)
-
-	if totalBufferSize > memoryLimit {
-		return memoryLimit
-	}
-	return totalBufferSize
 }

@@ -95,6 +95,11 @@ func (pr *packedRecordReader) Next() (Record, error) {
 	}
 }
 
+func (pr *packedRecordReader) SetNeededFields(fields typeutil.Set[int64]) {
+	// TODO, push down SetNeededFields to packedReader after implemented
+	// no-op for now
+}
+
 func (pr *packedRecordReader) Close() error {
 	if pr.reader != nil {
 		return pr.reader.Close()
@@ -104,7 +109,7 @@ func (pr *packedRecordReader) Close() error {
 
 func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig,
 ) (*packedRecordReader, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
@@ -122,15 +127,14 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 }
 
 func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
-	bufferSize int64,
+	bufferSize int64, shouldCopy bool,
 ) (*DeserializeReaderImpl[*Value], error) {
 	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil)
 	if err != nil {
 		return nil, err
 	}
-
 	return NewDeserializeReader(reader, func(r Record, v []*Value) error {
-		return ValueDeserializer(r, v, schema.Fields)
+		return ValueDeserializerWithSchema(r, v, schema, shouldCopy)
 	}), nil
 }
 
@@ -207,7 +211,7 @@ func (pw *packedRecordWriter) Close() error {
 }
 
 func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig) (*packedRecordWriter, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternal(
 			fmt.Sprintf("can not convert collection schema %s to arrow schema: %s", schema.Name, err.Error()))
@@ -262,7 +266,7 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 			fmt.Sprintf("can not new packed record writer %s", err.Error()))
 	}
 	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema.Fields)
+		return ValueSerializer(v, schema)
 	}, batchSize), nil
 }
 
@@ -533,7 +537,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 ) (*PackedBinlogRecordWriter, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema.Fields)
+	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalid("convert collection schema [%s] to arrow schema error: %s", schema.Name, err.Error())
 	}
@@ -572,5 +576,8 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		pkstats:             stats,
 		bm25Stats:           bm25Stats,
 		storageConfig:       storageConfig,
+
+		tsFrom: typeutil.MaxTimestamp,
+		tsTo:   0,
 	}, nil
 }

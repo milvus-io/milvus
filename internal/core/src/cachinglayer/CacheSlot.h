@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <exception>
 #include <memory>
+#include <numeric>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -32,7 +33,6 @@
 #include "common/type_c.h"
 #include "log/Log.h"
 #include "monitor/prometheus_client.h"
-#include "storage/ThreadPools.h"
 
 namespace milvus::cachinglayer {
 
@@ -51,9 +51,8 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         "CellT must have a CellByteSize() method that returns a size_t "
         "representing the memory consumption of the cell");
 
-    CacheSlot(
-        std::unique_ptr<Translator<CellT>> translator,
-        internal::DList* dlist)
+    CacheSlot(std::unique_ptr<Translator<CellT>> translator,
+              internal::DList* dlist)
         : translator_(std::move(translator)),
           cell_id_mapping_mode_(translator_->meta()->cell_id_mapping_mode),
           cells_(translator_->num_cells()),
@@ -94,47 +93,48 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
-    PinAllCells() {
-        return folly::makeSemiFuture().deferValue([this](auto&&) {
+    PinAllCells(
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
+        return folly::makeSemiFuture().deferValue([this, timeout](auto&&) {
             std::vector<cid_t> cids;
             cids.resize(cells_.size());
             std::iota(cids.begin(), cids.end(), 0);
-            return PinInternal(cids);
+            return PinInternal(cids, timeout);
         });
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
-    PinCells(const std::vector<uid_t>& uids) {
-        return folly::makeSemiFuture().deferValue([this,
-                                                   uids = std::vector<uid_t>(
-                                                       uids)](auto&&)
-                                                      -> std::shared_ptr<
-                                                          CellAccessor<CellT>> {
-            auto count = std::min(uids.size(), cells_.size());
-            ska::flat_hash_set<cid_t> involved_cids;
-            involved_cids.reserve(count);
-            switch (cell_id_mapping_mode_) {
-                case CellIdMappingMode::IDENTICAL: {
-                    for (auto& uid : uids) {
-                        involved_cids.insert(uid);
+    PinCells(
+        const std::vector<uid_t>& uids,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
+        return folly::makeSemiFuture().deferValue(
+            [this, uids = std::vector<uid_t>(uids), timeout](
+                auto&&) -> std::shared_ptr<CellAccessor<CellT>> {
+                auto count = std::min(uids.size(), cells_.size());
+                ska::flat_hash_set<cid_t> involved_cids;
+                involved_cids.reserve(count);
+                switch (cell_id_mapping_mode_) {
+                    case CellIdMappingMode::IDENTICAL: {
+                        for (auto& uid : uids) {
+                            involved_cids.insert(uid);
+                        }
+                        break;
                     }
-                    break;
-                }
-                case CellIdMappingMode::ALWAYS_ZERO: {
-                    if (uids.size() > 0) {
-                        involved_cids.insert(0);
+                    case CellIdMappingMode::ALWAYS_ZERO: {
+                        if (uids.size() > 0) {
+                            involved_cids.insert(0);
+                        }
+                        break;
                     }
-                    break;
-                }
-                default: {
-                    for (auto& uid : uids) {
-                        auto cid = cell_id_of(uid);
-                        involved_cids.insert(cid);
+                    default: {
+                        for (auto& uid : uids) {
+                            auto cid = cell_id_of(uid);
+                            involved_cids.insert(cid);
+                        }
                     }
                 }
-            }
-            return PinInternal(involved_cids);
-        });
+                return PinInternal(involved_cids, timeout);
+            });
     }
 
     // Manually evicts the cell if it is LOADED and not pinned.
@@ -186,7 +186,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
 
     template <typename CidsT>
     std::shared_ptr<CellAccessor<CellT>>
-    PinInternal(const CidsT& cids) {
+    PinInternal(const CidsT& cids, std::chrono::milliseconds timeout) {
         std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
         std::unordered_set<cid_t> need_load_cids;
         futures.reserve(cids.size());
@@ -194,7 +194,11 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         auto resource_needed = ResourceUsage{0, 0};
         for (const auto& cid : cids) {
             if (cid >= cells_.size()) {
-                throw std::invalid_argument(fmt::format("cid {} out of range, slot has {} cells", cid, cells_.size()));
+                ThrowInfo(ErrorCode::OutOfRange,
+                          "cid {} out of range, slot has {} cells. key={}",
+                          cid,
+                          cells_.size(),
+                          translator_->key());
             }
         }
         for (const auto& cid : cids) {
@@ -206,7 +210,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             }
         }
         if (!need_load_cids.empty()) {
-            RunLoad(std::move(need_load_cids), resource_needed);
+            RunLoad(std::move(need_load_cids), resource_needed, timeout);
         }
 
         auto pins = SemiInlineGet(folly::collect(futures));
@@ -227,22 +231,42 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     }
 
     void
-    RunLoad(std::unordered_set<cid_t>&& cids, ResourceUsage resource_needed) {
+    RunLoad(std::unordered_set<cid_t>&& cids,
+            ResourceUsage resource_needed,
+            std::chrono::milliseconds timeout) {
         bool reserve_resource_failure = false;
         try {
             auto start = std::chrono::high_resolution_clock::now();
             std::vector<cid_t> cids_vec(cids.begin(), cids.end());
 
-            if (dlist_ && !dlist_->reserveMemory(resource_needed)) {
-                auto error_msg = fmt::format(
-                    "[MCL] CacheSlot failed to reserve memory for cells: "
-                    "key={}, cell_ids=[{}], total resource_needed={}",
-                    translator_->key(),
-                    fmt::join(cids_vec, ","),
-                    resource_needed.ToString());
-                LOG_ERROR(error_msg);
-                reserve_resource_failure = true;
-                throw std::runtime_error(error_msg);
+            if (dlist_) {
+                bool reservation_success = false;
+
+                auto now = std::chrono::steady_clock::now();
+                reservation_success = SemiInlineGet(
+                    dlist_->reserveMemoryWithTimeout(resource_needed, timeout));
+                LOG_TRACE(
+                    "[MCL] CacheSlot reserveMemoryWithTimeout {} sec "
+                    "result: {} time: {} sec",
+                    timeout.count() / 1000.0,
+                    reservation_success ? "success" : "failed",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - now)
+                            .count() *
+                        1.0 / 1000);
+
+                if (!reservation_success) {
+                    auto error_msg = fmt::format(
+                        "[MCL] CacheSlot failed to reserve memory for "
+                        "cells: key={}, cell_ids=[{}], total "
+                        "resource_needed={}",
+                        translator_->key(),
+                        fmt::join(cids_vec, ","),
+                        resource_needed.ToString());
+                    LOG_ERROR(error_msg);
+                    reserve_resource_failure = true;
+                    ThrowInfo(ErrorCode::InsufficientResource, error_msg);
+                }
             }
 
             auto results = translator_->get_cells(cids_vec);

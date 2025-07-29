@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -36,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -107,7 +110,27 @@ func (t *ImportTask) GetSlots() int64 {
 }
 
 func (t *ImportTask) GetBufferSize() int64 {
-	return GetTaskBufferSize(t)
+	// Calculate the task buffer size based on the number of vchannels and partitions
+	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
+	vchannelNum := len(t.GetVchannels())
+	partitionNum := len(t.GetPartitionIDs())
+	taskBufferSize := int64(baseBufferSize * vchannelNum * partitionNum)
+
+	// If the file size is smaller than the task buffer size, use the file size
+	fileSize := lo.MaxBy(t.GetFileStats(), func(a, b *datapb.ImportFileStats) bool {
+		return a.GetTotalMemorySize() > b.GetTotalMemorySize()
+	}).GetTotalMemorySize()
+	if fileSize != 0 && fileSize < taskBufferSize {
+		taskBufferSize = fileSize
+	}
+
+	// Task buffer size should not exceed the memory limit
+	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
+	memoryLimit := int64(float64(hardware.GetMemoryCount()) * percentage / 100.0)
+	if taskBufferSize > memoryLimit {
+		return memoryLimit
+	}
+	return taskBufferSize
 }
 
 func (t *ImportTask) Cancel() {
@@ -130,22 +153,28 @@ func (t *ImportTask) Clone() Task {
 		cancel:       cancel,
 		segmentsInfo: infos,
 		req:          t.req,
+		allocator:    t.allocator,
+		manager:      t.manager,
+		syncMgr:      t.syncMgr,
+		cm:           t.cm,
 		metaCaches:   t.metaCaches,
 	}
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
-	bufferSize := int(t.GetBufferSize())
+	bufferSize := t.GetBufferSize()
 	log.Info("start to import", WrapLogFields(t,
-		zap.Int("bufferSize", bufferSize),
+		zap.Int64("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("schema", t.GetSchema()))...)
+		zap.Any("files", t.req.GetFiles()),
+		zap.Any("schema", t.GetSchema()),
+	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req
 
 	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), bufferSize, t.req.GetStorageConfig())
+		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
 		if err != nil {
 			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -170,6 +199,12 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	for _, file := range req.GetFiles() {
 		file := file
 		f := GetExecPool().Submit(func() (any, error) {
+			// Use blocking allocation - this will wait until memory is available
+			GetMemoryAllocator().BlockingAllocate(t.GetTaskID(), bufferSize)
+			defer func() {
+				GetMemoryAllocator().Release(t.GetTaskID(), bufferSize)
+				debug.FreeOSMemory()
+			}()
 			err := fn(file)
 			return err, err
 		})

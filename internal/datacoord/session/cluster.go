@@ -220,9 +220,9 @@ func (c *cluster) QueryCompaction(nodeID int64, in *datapb.CompactionStateReques
 		return nil, err
 	}
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return &datapb.CompactionPlanResult{State: taskcommon.ToCompactionState(state)}, nil
-	case taskcommon.Finished, taskcommon.Failed:
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
 		result := &datapb.CompactionStateResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -290,9 +290,9 @@ func (c *cluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest)
 	}
 	reason := resProperties.GetTaskReason()
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return &datapb.QueryPreImportResponse{State: taskcommon.ToImportState(state), Reason: reason}, nil
-	case taskcommon.Finished, taskcommon.Failed:
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
 		result := &datapb.QueryPreImportResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -321,9 +321,9 @@ func (c *cluster) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*dat
 	}
 	reason := resProperties.GetTaskReason()
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return &datapb.QueryImportResponse{State: taskcommon.ToImportState(state), Reason: reason}, nil
-	case taskcommon.Finished, taskcommon.Failed:
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
 		result := &datapb.QueryImportResponse{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -371,7 +371,7 @@ func (c *cluster) QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 	}
 	reason := resProperties.GetTaskReason()
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return &workerpb.IndexJobResults{
 			Results: []*workerpb.IndexTaskInfo{
 				{
@@ -381,7 +381,7 @@ func (c *cluster) QueryIndex(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 				},
 			},
 		}, nil
-	case taskcommon.Finished, taskcommon.Failed:
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
 		result := &workerpb.QueryJobsV2Response{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -430,7 +430,7 @@ func (c *cluster) QueryStats(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 	}
 	reason := resProperties.GetTaskReason()
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return &workerpb.StatsResults{
 			Results: []*workerpb.StatsResult{
 				{
@@ -440,7 +440,7 @@ func (c *cluster) QueryStats(nodeID int64, in *workerpb.QueryJobsRequest) (*work
 				},
 			},
 		}, nil
-	case taskcommon.Finished, taskcommon.Failed:
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
 		result := &workerpb.QueryJobsV2Response{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {
@@ -487,7 +487,7 @@ func (c *cluster) QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*wo
 	}
 	reason := resProperties.GetTaskReason()
 	switch state {
-	case taskcommon.None, taskcommon.Init, taskcommon.InProgress, taskcommon.Retry:
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
 		return &workerpb.AnalyzeResults{
 			Results: []*workerpb.AnalyzeResult{
 				{
@@ -497,7 +497,7 @@ func (c *cluster) QueryAnalyze(nodeID int64, in *workerpb.QueryJobsRequest) (*wo
 				},
 			},
 		}, nil
-	case taskcommon.Finished, taskcommon.Failed:
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
 		result := &workerpb.QueryJobsV2Response{}
 		err = proto.Unmarshal(resp.GetPayload(), result)
 		if err != nil {

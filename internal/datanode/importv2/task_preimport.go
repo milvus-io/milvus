@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -107,8 +108,9 @@ func (t *PreImportTask) GetSlots() int64 {
 	return t.req.GetTaskSlot()
 }
 
+// PreImportTask buffer size is fixed
 func (t *PreImportTask) GetBufferSize() int64 {
-	return GetTaskBufferSize(t)
+	return paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
 }
 
 func (t *PreImportTask) Cancel() {
@@ -125,6 +127,9 @@ func (t *PreImportTask) Clone() Task {
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
 		options:       t.options,
+		req:           t.req,
+		manager:       t.manager,
+		cm:            t.cm,
 	}
 }
 
@@ -133,7 +138,9 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 	log.Info("start to preimport", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("schema", t.GetSchema()))...)
+		zap.Any("files", t.req.GetImportFiles()),
+		zap.Any("schema", t.GetSchema()),
+	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
@@ -167,6 +174,9 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		i := i
 		file := file
 		f := GetExecPool().Submit(func() (any, error) {
+			defer func() {
+				debug.FreeOSMemory()
+			}()
 			err := fn(i, file)
 			return err, err
 		})

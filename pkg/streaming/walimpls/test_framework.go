@@ -63,7 +63,7 @@ func (f walImplsTestFramework) Run() {
 	wg.Add(pchannelCnt)
 	for i := 0; i < pchannelCnt; i++ {
 		// construct pChannel
-		name := fmt.Sprintf("test_%d_%s", i, randString(4))
+		name := fmt.Sprintf("test_%d_%s", i, randString(10))
 		go func(name string) {
 			defer wg.Done()
 			newTestOneWALImpls(f.t, o, name, f.messageCount).Run()

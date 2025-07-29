@@ -3147,11 +3147,11 @@ eviction is necessary and the amount of data to evict from memory/disk.
 	p.TieredLoadingMemoryFactor = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.loadingMemoryFactor",
 		Version:      "2.6.0",
-		DefaultValue: "2.5",
+		DefaultValue: "3.5",
 		Formatter: func(v string) string {
 			factor := getAsFloat(v)
 			if factor < 1.0 {
-				return "2.5"
+				return "3.5"
 			}
 			return fmt.Sprintf("%.2f", factor)
 		},
@@ -5217,7 +5217,6 @@ type dataNodeConfig struct {
 	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
 	ImportBaseBufferSize        ParamItem `refreshable:"true"`
 	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
-	MaxTaskSlotNum              ParamItem `refreshable:"true"`
 	ImportMemoryLimitPercentage ParamItem `refreshable:"true"`
 
 	// Compaction
@@ -5552,28 +5551,18 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ImportDeleteBufferSize.Init(base.mgr)
 
-	p.MaxTaskSlotNum = ParamItem{
-		Key:          "dataNode.import.maxTaskSlotNum",
-		Version:      "2.4.13",
-		Doc:          "The maximum number of slots occupied by each import/pre-import task.",
-		DefaultValue: "16",
-		PanicIfEmpty: false,
-		Export:       true,
-	}
-	p.MaxTaskSlotNum.Init(base.mgr)
-
 	p.ImportMemoryLimitPercentage = ParamItem{
 		Key:          "dataNode.import.memoryLimitPercentage",
 		Version:      "2.5.15",
 		Doc:          "The percentage of memory limit for import/pre-import tasks.",
-		DefaultValue: "20",
+		DefaultValue: "10",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(v string) string {
 			percentage := getAsFloat(v)
 			if percentage <= 0 || percentage > 100 {
-				log.Warn("invalid import memory limit percentage, using default 20%")
-				return "20"
+				log.Warn("invalid import memory limit percentage, using default 10%")
+				return "10"
 			}
 			return fmt.Sprintf("%f", percentage)
 		},

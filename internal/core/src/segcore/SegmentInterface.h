@@ -155,6 +155,17 @@ class SegmentInterface {
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const = 0;
 
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const = 0;
+
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
 
@@ -368,6 +379,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const override;
+
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
 
  public:
     virtual void

@@ -272,6 +272,8 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     LOG_INFO("construct binary set...");
     BinarySet binary_set;
     AssembleIndexDatas(index_data_codecs, binary_set);
+    // clear index_data_codecs to free memory early
+    index_data_codecs.clear();
 
     // start engine load index span
     auto span_load_engine =
@@ -517,8 +519,10 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 
 template <typename T>
 void VectorMemIndex<T>::LoadFromFile(const Config& config) {
-    auto local_filepath = GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
-    AssertInfo(local_filepath.has_value(), "mmap filepath is empty when load index");
+    auto local_filepath =
+        GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+    AssertInfo(local_filepath.has_value(),
+               "mmap filepath is empty when load index");
 
     std::filesystem::create_directories(
         std::filesystem::path(local_filepath.value()).parent_path());
@@ -541,7 +545,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     // try to read slice meta first
     std::string slice_meta_filepath;
     for (auto& idx_filepath : pending_index_files) {
-        auto file_name = idx_filepath.substr(idx_filepath.find_last_of('/') + 1);
+        auto file_name =
+            idx_filepath.substr(idx_filepath.find_last_of('/') + 1);
         if (file_name == INDEX_FILE_SLICE_META) {
             slice_meta_filepath = idx_filepath;
             pending_index_files.erase(idx_filepath);
@@ -615,7 +620,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
         //2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
         for (auto& [_, index_data] : result) {
-            file_writer.Write(index_data->PayloadData(), index_data->PayloadSize());
+            file_writer.Write(index_data->PayloadData(),
+                              index_data->PayloadSize());
         }
         write_disk_duration_sum +=
             (std::chrono::system_clock::now() - start_write_file);

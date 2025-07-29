@@ -1309,7 +1309,9 @@ func genDynamicFields(fields []string, list []*schemapb.FieldData) []string {
 	return dynamicFields
 }
 
-func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs, scores []float32, enableInt64 bool) ([]map[string]interface{}, error) {
+func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) ([]map[string]interface{}, error) {
 	columnNum := len(fieldDataList)
 	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
@@ -1369,6 +1371,17 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
 	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+
+	pkFieldName := DefaultPrimaryFieldName
+	if collectionSchema != nil {
+		fieldsSchema := collectionSchema.GetFields()
+		for _, field := range fieldsSchema {
+			if field.GetIsPrimaryKey() {
+				pkFieldName = field.GetName()
+				break
+			}
+		}
+	}
 	for i := int64(0); i < rowsNum; i++ {
 		row := map[string]interface{}{}
 		if columnNum > 0 {
@@ -1489,13 +1502,13 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case *schemapb.IDs_IntId:
 				int64Pks := ids.GetIntId().GetData()
 				if enableInt64 {
-					row[DefaultPrimaryFieldName] = int64Pks[i]
+					row[pkFieldName] = int64Pks[i]
 				} else {
-					row[DefaultPrimaryFieldName] = strconv.FormatInt(int64Pks[i], 10)
+					row[pkFieldName] = strconv.FormatInt(int64Pks[i], 10)
 				}
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
-				row[DefaultPrimaryFieldName] = stringPks[i]
+				row[pkFieldName] = stringPks[i]
 			default:
 				return nil, errors.New("the type of primary key(id) is not supported, use other sdk please")
 			}
@@ -1663,7 +1676,7 @@ func convertToExtraParams(indexParam IndexParam) ([]*commonpb.KeyValuePair, erro
 		if err != nil {
 			return nil, err
 		}
-		params = append(params, &commonpb.KeyValuePair{Key: common.IndexParamsKey, Value: string(v)})
+		params = append(params, &commonpb.KeyValuePair{Key: common.ParamsKey, Value: string(v)})
 	}
 	return params, nil
 }

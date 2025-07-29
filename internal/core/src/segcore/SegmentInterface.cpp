@@ -325,7 +325,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto schema = get_schema();
+    auto& schema = get_schema();
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 
@@ -348,7 +348,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto schema = get_schema();
+    auto& schema = get_schema();
     auto& field_meta = schema[field_id];
     auto data_type = field_meta.get_data_type();
 
@@ -540,6 +540,23 @@ SegmentInternalInterface::GetJsonKeyIndex(FieldId field_id) const {
 PinWrapper<index::NgramInvertedIndex*>
 SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+}
+
+PinWrapper<index::NgramInvertedIndex*>
+SegmentInternalInterface::GetNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+}
+
+bool
+SegmentInternalInterface::HasNgramIndex(FieldId field_id) const {
+    return false;
+}
+
+bool
+SegmentInternalInterface::HasNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    return false;
 }
 
 }  // namespace milvus::segcore

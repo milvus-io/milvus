@@ -271,7 +271,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
 			if l0ChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
 				continue
@@ -294,6 +294,13 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		c.executingGuard.Lock()
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.scheduler.Enqueue(t)
+		log.Info("compaction task enqueued",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.String("type", t.GetTaskProto().GetType().String()),
+			zap.String("channel", t.GetTaskProto().GetChannel()),
+			zap.String("label", t.GetLabel()),
+			zap.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
+		)
 		c.executingGuard.Unlock()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Inc()
@@ -630,6 +637,16 @@ func (c *compactionInspector) checkCompaction() error {
 	c.executingGuard.Lock()
 	for _, t := range finishedTasks {
 		delete(c.executingTasks, t.GetTaskProto().GetPlanID())
+		log.Info("compaction task finished",
+			zap.Int64("planID", t.GetTaskProto().GetPlanID()),
+			zap.String("type", t.GetTaskProto().GetType().String()),
+			zap.String("state", t.GetTaskProto().GetState().String()),
+			zap.String("channel", t.GetTaskProto().GetChannel()),
+			zap.String("label", t.GetLabel()),
+			zap.Int64("nodeID", t.GetTaskProto().GetNodeID()),
+			zap.Int64s("inputSegments", t.GetTaskProto().GetInputSegments()),
+			zap.String("reason", t.GetTaskProto().GetFailReason()),
+		)
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
 	}

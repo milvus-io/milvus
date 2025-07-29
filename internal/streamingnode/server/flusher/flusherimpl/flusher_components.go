@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -36,10 +37,13 @@ type flusherComponents struct {
 	dataServices               map[string]*dataSyncServiceWrapper
 	logger                     *log.MLogger
 	recoveryCheckPointTimeTick uint64 // The time tick of the recovery storage.
+	rs                         recovery.RecoveryStorage
 }
 
 // WhenCreateCollection handles the create collection message.
 func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.ImmutableCreateCollectionMessageV1) {
+	// because we need to get the schema from the recovery storage, we need to observe the message at recovery storage first.
+	impl.rs.ObserveMessage(context.Background(), createCollectionMsg)
 	if _, ok := impl.dataServices[createCollectionMsg.VChannel()]; ok {
 		impl.logger.Info("the data sync service of current vchannel is built, skip it", zap.String("vchannel", createCollectionMsg.VChannel()))
 		// May repeated consumed, so we ignore the message.
@@ -76,6 +80,7 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
+			SchemaManager:      newVersionedSchemaManager(createCollectionMsg.VChannel(), impl.rs),
 		},
 		msgChan,
 		&datapb.VchannelInfo{
@@ -89,7 +94,6 @@ func (impl *flusherComponents) WhenCreateCollection(createCollectionMsg message.
 				Timestamp: createCollectionMsg.TimeTick(),
 			},
 		},
-		schema,
 		func(t syncmgr.Task, err error) {
 			if err != nil || t == nil {
 				return
@@ -145,7 +149,7 @@ func (impl *flusherComponents) addNewDataSyncService(
 	input chan<- *msgstream.MsgPack,
 	ds *pipeline.DataSyncService,
 ) {
-	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds)
+	newDS := newDataSyncServiceWrapper(createCollectionMsg.VChannel(), input, ds, createCollectionMsg.TimeTick())
 	newDS.Start()
 	impl.dataServices[createCollectionMsg.VChannel()] = newDS
 	impl.logger.Info("create data sync service done", zap.String("vchannel", createCollectionMsg.VChannel()))
@@ -244,6 +248,8 @@ func (impl *flusherComponents) buildDataSyncServiceWithRetry(ctx context.Context
 func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recoverInfo *datapb.GetChannelRecoveryInfoResponse) (*dataSyncServiceWrapper, error) {
 	// Build and add pipeline.
 	input := make(chan *msgstream.MsgPack, 10)
+	schemaManager := newVersionedSchemaManager(recoverInfo.GetInfo().GetChannelName(), impl.rs)
+	schema := schemaManager.GetSchema(0)
 	ds, err := pipeline.NewStreamingNodeDataSyncService(ctx,
 		&util.PipelineParams{
 			Ctx:                context.Background(),
@@ -254,8 +260,9 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 			CheckpointUpdater:  impl.cpUpdater,
 			Allocator:          idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			MsgHandler:         newMsgHandler(resource.Resource().WriteBufferManager()),
+			SchemaManager:      newVersionedSchemaManager(recoverInfo.GetInfo().GetChannelName(), impl.rs),
 		},
-		&datapb.ChannelWatchInfo{Vchan: recoverInfo.GetInfo(), Schema: recoverInfo.GetSchema()},
+		&datapb.ChannelWatchInfo{Vchan: recoverInfo.GetInfo(), Schema: schema},
 		input,
 		func(t syncmgr.Task, err error) {
 			if err != nil || t == nil {
@@ -274,5 +281,5 @@ func (impl *flusherComponents) buildDataSyncService(ctx context.Context, recover
 	if err != nil {
 		return nil, err
 	}
-	return newDataSyncServiceWrapper(recoverInfo.Info.ChannelName, input, ds), nil
+	return newDataSyncServiceWrapper(recoverInfo.Info.ChannelName, input, ds, recoverInfo.Info.GetSeekPosition().GetTimestamp()), nil
 }

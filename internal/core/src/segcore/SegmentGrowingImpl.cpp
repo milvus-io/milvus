@@ -449,10 +449,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
             FieldDataInfo(column_group_id.get(), num_rows, infos.mmap_dir_path);
         column_group_info.arrow_reader_channel->set_capacity(parallel_degree);
 
-        LOG_INFO("segment {} loads column group {} with num_rows {}",
-                 this->get_segment_id(),
-                 column_group_id.get(),
-                 num_rows);
+        LOG_INFO(
+            "[StorageV2] segment {} loads column group {} with num_rows {}",
+            this->get_segment_id(),
+            column_group_id.get(),
+            num_rows);
 
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
@@ -469,10 +470,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "failed to close file reader when get row group "
-                       "metadata from file: " +
-                           file + " with error: " + status.ToString());
+            AssertInfo(
+                status.ok(),
+                "[StorageV2] failed to close file reader when get row group "
+                "metadata from file {} with error {}",
+                file,
+                status.ToString());
         }
 
         // create parallel degree split strategy
@@ -489,23 +492,30 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     infos.load_priority);
         });
 
-        LOG_INFO("segment {} submits load column group {} task to thread pool",
-                 this->get_segment_id(),
-                 info.field_id);
+        LOG_INFO(
+            "[StorageV2] segment {} submits load column group {} task to "
+            "thread pool",
+            this->get_segment_id(),
+            column_group_id.get());
 
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
         std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
         while (column_group_info.arrow_reader_channel->pop(r)) {
-            for (const auto& table : r->arrow_tables) {
-                size_t batch_num_rows = table->num_rows();
-                for (int i = 0; i < table->schema()->num_fields(); ++i) {
-                    AssertInfo(table->schema()->field(i)->metadata()->Contains(
-                                   milvus_storage::ARROW_FIELD_ID_KEY),
-                               "field id not found in metadata for field {}",
-                               table->schema()->field(i)->name());
+            for (const auto& table_info : r->arrow_tables) {
+                size_t batch_num_rows = table_info.table->num_rows();
+                for (int i = 0; i < table_info.table->schema()->num_fields();
+                     ++i) {
+                    AssertInfo(
+                        table_info.table->schema()
+                            ->field(i)
+                            ->metadata()
+                            ->Contains(milvus_storage::ARROW_FIELD_ID_KEY),
+                        "[StorageV2] field id not found in metadata for field "
+                        "{}",
+                        table_info.table->schema()->field(i)->name());
                     auto field_id =
-                        std::stoll(table->schema()
+                        std::stoll(table_info.table->schema()
                                        ->field(i)
                                        ->metadata()
                                        ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
@@ -523,7 +533,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                 ? field.second.get_dim()
                                 : 1,
                             batch_num_rows);
-                        field_data->FillFieldData(table->column(i));
+                        field_data->FillFieldData(table_info.table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
                     }
                 }
@@ -1270,13 +1280,16 @@ void
 SegmentGrowingImpl::Reopen(SchemaPtr sch) {
     std::unique_lock lck(sch_mutex_);
 
-    auto absent_fields = sch->AbsentFields(*schema_);
+    // double check condition, avoid multiple assignment
+    if (sch->get_schema_version() > schema_->get_schema_version()) {
+        auto absent_fields = sch->AbsentFields(*schema_);
 
-    for (const auto& field_meta : *absent_fields) {
-        fill_empty_field(field_meta);
+        for (const auto& field_meta : *absent_fields) {
+            fill_empty_field(field_meta);
+        }
+
+        schema_ = sch;
     }
-
-    schema_ = sch;
 }
 
 void

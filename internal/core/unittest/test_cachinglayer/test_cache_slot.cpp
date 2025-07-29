@@ -46,9 +46,10 @@ class MockTranslator : public Translator<TestCell> {
                    bool for_concurrent_test = false)
         : uid_to_cid_map_(std::move(uid_to_cid_map)),
           key_(key),
-          meta_(
-              storage_type, CellIdMappingMode::CUSTOMIZED,
-              CacheWarmupPolicy::CacheWarmupPolicy_Disable, true),
+          meta_(storage_type,
+                CellIdMappingMode::CUSTOMIZED,
+                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                true),
           num_unique_cids_(cell_sizes.size()),
           for_concurrent_test_(for_concurrent_test) {
         cid_set_.reserve(cell_sizes.size());
@@ -218,6 +219,8 @@ class CacheSlotTest : public ::testing::Test {
     static constexpr int64_t DISK_LIMIT = 0;
     const std::string SLOT_KEY = "test_slot";
 
+    CacheSlotTest() = default;
+
     void
     SetUp() override {
         auto limit = ResourceUsage{MEMORY_LIMIT, DISK_LIMIT};
@@ -345,7 +348,7 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
         {
             try {
                 SemiInlineGet(std::move(future));
-            } catch (const std::invalid_argument& e) {
+            } catch (const milvus::SegcoreError& e) {
                 std::string error_what = e.what();
                 EXPECT_TRUE(error_what.find("out of range") !=
                                 std::string::npos ||
@@ -353,7 +356,7 @@ TEST_F(CacheSlotTest, PinInvalidUid) {
                 throw;
             }
         },
-        std::invalid_argument);
+        milvus::SegcoreError);
 
     EXPECT_EQ(translator_->GetCellsCallCount(), 0);
 }

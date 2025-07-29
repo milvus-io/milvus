@@ -23,9 +23,8 @@ func newNgramIndexChecker() *NgramIndexChecker {
 }
 
 func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
-	if dataType != schemapb.DataType_VarChar {
-		// todo(SpadeA): we may support it for json in the future
-		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR field")
+	if dataType != schemapb.DataType_VarChar && dataType != schemapb.DataType_JSON {
+		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR or JSON field")
 	}
 
 	minGramStr, minGramExist := params[MinGramKey]
@@ -53,8 +52,8 @@ func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, params map[st
 
 func (c *NgramIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dType := field.GetDataType()
-	if !typeutil.IsStringType(dType) {
-		return fmt.Errorf("ngram index can only be created on VARCHAR field")
+	if !typeutil.IsStringType(dType) && dType != schemapb.DataType_JSON {
+		return fmt.Errorf("ngram index can only be created on VARCHAR or JSON field")
 	}
 	return nil
 }

@@ -172,14 +172,27 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     if (field_meta.get_data_type() == DataType::JSON) {
         auto path = info.index_params.at(JSON_PATH);
-        JsonIndex index;
-        index.nested_path = path;
-        index.field_id = field_id;
-        index.index = std::move(const_cast<LoadIndexInfo&>(info).cache_index);
-        index.cast_type =
-            JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
-        json_indices.push_back(std::move(index));
-        return;
+        if (auto it = info.index_params.find(index::INDEX_TYPE);
+            it != info.index_params.end() &&
+            it->second == index::NGRAM_INDEX_TYPE) {
+            if (ngram_indexings_.find(field_id) == ngram_indexings_.end()) {
+                ngram_indexings_[field_id] =
+                    std::unordered_map<std::string, index::CacheIndexBasePtr>();
+            }
+            ngram_indexings_[field_id][path] =
+                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            return;
+        } else {
+            JsonIndex index;
+            index.nested_path = path;
+            index.field_id = field_id;
+            index.index =
+                std::move(const_cast<LoadIndexInfo&>(info).cache_index);
+            index.cast_type =
+                JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+            json_indices.push_back(std::move(index));
+            return;
+        }
     }
 
     if (auto it = info.index_params.find(index::INDEX_TYPE);
@@ -239,11 +252,11 @@ ChunkedSegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& load_info) {
                 }
                 init_timestamp_index(timestamps, num_rows);
                 system_ready_count_++;
-                AssertInfo(
-                    offset == num_rows,
-                    "timestamp total row count {} not equal to expected {}",
-                    offset,
-                    num_rows);
+                AssertInfo(offset == num_rows,
+                           "[StorageV2] timestamp total row count {} not equal "
+                           "to expected {}",
+                           offset,
+                           num_rows);
             }
             break;
         default:
@@ -259,7 +272,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
     ArrowSchemaPtr arrow_schema = schema_->ConvertToArrowSchema();
 
     for (auto& [id, info] : load_info.field_infos) {
-        AssertInfo(info.row_count > 0, "The row count of field data is 0");
+        AssertInfo(info.row_count > 0,
+                   "[StorageV2] The row count of field data is 0");
 
         auto column_group_id = FieldId(id);
         auto insert_files = info.insert_files;
@@ -269,19 +283,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
             column_group_id, insert_files[0], arrow_schema, fs);
-
-        std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list;
-        for (const auto& file : insert_files) {
-            auto reader =
-                std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
-            row_group_meta_list.push_back(
-                reader->file_metadata()->GetRowGroupMetadataVector());
-            auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "failed to close file reader when get row group "
-                       "metadata from file: " +
-                           file + " with error: " + status.ToString());
-        }
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
@@ -299,7 +300,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                load_info.mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
-            "segment {} loads column group {} with field ids {} with "
+            "[StorageV2] segment {} loads column group {} with field ids {} "
+            "with "
             "num_rows "
             "{}",
             this->get_segment_id(),
@@ -316,7 +318,6 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 column_group_info,
                 insert_files,
                 info.enable_mmap,
-                row_group_meta_list,
                 milvus_field_ids.size(),
                 load_info.load_priority);
 
@@ -651,6 +652,29 @@ ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
+PinWrapper<index::NgramInvertedIndex*>
+ChunkedSegmentSealedImpl::GetNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    std::shared_lock lck(mutex_);
+    auto iter = ngram_indexings_.find(field_id);
+    if (iter == ngram_indexings_.end() ||
+        iter->second.find(nested_path) == iter->second.end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+
+    auto slot = iter->second.at(nested_path).get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache for json is corrupted, field_id: {}, "
+               "nested_path: {}",
+               field_id.get(),
+               nested_path);
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
+}
+
 int64_t
 ChunkedSegmentSealedImpl::get_row_count() const {
     std::shared_lock lck(mutex_);
@@ -764,11 +788,8 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
                "vector index is not ready");
     auto field_indexing = vector_indexings_.get_field_indexing(field_id);
     auto cache_index = field_indexing->indexing_;
-    auto vec_index = dynamic_cast<index::VectorIndex*>(
-        cache_index->PinCells({0})
-            .via(&folly::InlineExecutor::instance())
-            .get()
-            ->get_cell_of(0));
+    auto ca = SemiInlineGet(cache_index->PinCells({0}));
+    auto vec_index = dynamic_cast<index::VectorIndex*>(ca->get_cell_of(0));
     AssertInfo(vec_index, "invalid vector indexing");
 
     auto index_type = vec_index->GetIndexType();
@@ -1063,8 +1084,7 @@ ChunkedSegmentSealedImpl::bulk_subscript_impl(ChunkedColumnInterface* field,
                                               T* dst) {
     static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
     // use field->data_type_ to determine the type of dst
-    field->BulkPrimitiveValueAt(
-        static_cast<void*>(dst), seg_offsets, count);
+    field->BulkPrimitiveValueAt(static_cast<void*>(dst), seg_offsets, count);
 }
 
 // for dense vector
@@ -1144,6 +1164,7 @@ ChunkedSegmentSealedImpl::ClearData() {
         ngram_fields_.clear();
         scalar_indexings_.clear();
         vector_indexings_.clear();
+        ngram_indexings_.clear();
         insert_record_.clear();
         fields_.clear();
         variable_fields_avg_size_.clear();
@@ -1460,7 +1481,9 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         return fill_with_empty(field_id, count);
     }
 
-    if (HasFieldData(field_id)) {
+    // hold field shared_ptr here, preventing field got destroyed
+    auto [field, exist] = GetFieldDataIfExist(field_id);
+    if (exist) {
         Assert(get_bit(field_data_ready_bitset_, field_id));
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
@@ -1543,6 +1566,24 @@ ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
     } else {
         return get_bit(field_data_ready_bitset_, field_id);
     }
+}
+
+std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
+ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    bool exists;
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        exists = is_system_field_ready();
+    } else {
+        exists = get_bit(field_data_ready_bitset_, field_id);
+    }
+    if (!exists) {
+        return {nullptr, false};
+    }
+    AssertInfo(fields_.find(field_id) != fields_.end(),
+               "field {} must exist if bitset is set",
+               field_id.get());
+    return {fields_.at(field_id), exists};
 }
 
 bool

@@ -104,54 +104,42 @@ ParallelDegreeSplitStrategy::split(
         return blocks;
     }
 
-    // If row group size is less than parallel degree, split non-continuous groups
-    if (sorted_row_groups.size() <= actual_parallel_degree) {
+    // Helper function to create continuous blocks
+    auto create_continuous_blocks = [&](size_t max_block_size = SIZE_MAX) {
+        std::vector<RowGroupBlock> continuous_blocks;
         int64_t current_start = sorted_row_groups[0];
         int64_t current_count = 1;
 
         for (size_t i = 1; i < sorted_row_groups.size(); ++i) {
             int64_t next_row_group = sorted_row_groups[i];
 
-            if (next_row_group == current_start + current_count) {
+            if (next_row_group == current_start + current_count &&
+                current_count < max_block_size) {
                 current_count++;
                 continue;
             }
-            blocks.push_back({current_start, current_count});
+            continuous_blocks.push_back({current_start, current_count});
             current_start = next_row_group;
             current_count = 1;
         }
 
         if (current_count > 0) {
-            blocks.push_back({current_start, current_count});
+            continuous_blocks.push_back({current_start, current_count});
         }
-        return blocks;
+        return continuous_blocks;
+    };
+
+    // If row group size is less than parallel degree, split non-continuous groups
+    if (sorted_row_groups.size() <= actual_parallel_degree) {
+        return create_continuous_blocks();
     }
 
     // Otherwise, split based on parallel degree
     size_t avg_block_size =
         (sorted_row_groups.size() + actual_parallel_degree - 1) /
         actual_parallel_degree;
-    int64_t current_start = sorted_row_groups[0];
-    int64_t current_count = 1;
 
-    for (size_t i = 1; i < sorted_row_groups.size(); ++i) {
-        int64_t next_row_group = sorted_row_groups[i];
-
-        if (next_row_group == current_start + current_count &&
-            current_count < avg_block_size) {
-            current_count++;
-        } else {
-            blocks.push_back({current_start, current_count});
-            current_start = next_row_group;
-            current_count = 1;
-        }
-    }
-
-    if (current_count > 0) {
-        blocks.push_back({current_start, current_count});
-    }
-
-    return blocks;
+    return create_continuous_blocks(avg_block_size);
 }
 
 void
@@ -163,9 +151,9 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const std::shared_ptr<arrow::Schema> schema,
                  milvus::proto::common::LoadPriority priority) {
     try {
-        AssertInfo(
-            remote_files.size() == row_group_lists.size(),
-            "Number of remote files must match number of row group lists");
+        AssertInfo(remote_files.size() == row_group_lists.size(),
+                   "[StorageV2] Number of remote files must match number of "
+                   "row group lists");
         auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                       .GetArrowFileSystem();
         auto& pool =
@@ -182,46 +170,60 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             // Use provided strategy to split row groups
             auto blocks = strategy->split(row_groups);
 
+            LOG_INFO("[StorageV2] split row groups into blocks: {} for file {}",
+                     blocks.size(),
+                     file);
+
             // Create and submit tasks for each block
             std::vector<std::future<std::shared_ptr<milvus::ArrowDataWrapper>>>
                 futures;
             futures.reserve(blocks.size());
 
-            // split memory limit for each block, check if it's greater than 0
-            auto reader_memory_limit = memory_limit / blocks.size();
-            if (reader_memory_limit < FILE_SLICE_SIZE) {
-                reader_memory_limit = FILE_SLICE_SIZE;
-            }
+            auto reader_memory_limit = std::max<int64_t>(
+                memory_limit / blocks.size(), FILE_SLICE_SIZE);
 
             for (const auto& block : blocks) {
                 futures.emplace_back(pool.Submit([block,
                                                   fs,
                                                   file,
+                                                  file_idx,
                                                   schema,
-                                                  memory_limit]() {
-                    AssertInfo(fs != nullptr, "file system is nullptr");
+                                                  reader_memory_limit]() {
+                    AssertInfo(fs != nullptr,
+                               "[StorageV2] file system is nullptr");
                     auto row_group_reader =
                         std::make_shared<milvus_storage::FileRowGroupReader>(
-                            fs, file, schema, memory_limit);
+                            fs, file, schema, reader_memory_limit);
                     AssertInfo(row_group_reader != nullptr,
-                               "row group reader is nullptr");
+                               "[StorageV2] row group reader is nullptr");
                     row_group_reader->SetRowGroupOffsetAndCount(block.offset,
                                                                 block.count);
+                    LOG_INFO(
+                        "[StorageV2] read row groups from file {} with offset "
+                        "{} and count "
+                        "{}",
+                        file,
+                        block.offset,
+                        block.count);
                     auto ret = std::make_shared<ArrowDataWrapper>();
                     for (int64_t i = 0; i < block.count; ++i) {
                         std::shared_ptr<arrow::Table> table;
                         auto status =
                             row_group_reader->ReadNextRowGroup(&table);
                         AssertInfo(status.ok(),
-                                   "Failed to read row group " +
+                                   "[StorageV2] Failed to read row group " +
                                        std::to_string(block.offset + i) +
                                        " from file " + file + " with error " +
                                        status.ToString());
-                        ret->arrow_tables.push_back(table);
+                        ret->arrow_tables.push_back(
+                            {file_idx,
+                             static_cast<size_t>(block.offset + i),
+                             table});
                     }
                     auto close_status = row_group_reader->Close();
                     AssertInfo(close_status.ok(),
-                               "Failed to close row group reader for file " +
+                               "[StorageV2] Failed to close row group reader "
+                               "for file " +
                                    file + " with error " +
                                    close_status.ToString());
                     return ret;
@@ -236,8 +238,9 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
 
         channel->close();
     } catch (std::exception& e) {
-        LOG_INFO("failed to load data from remote: {}", e.what());
+        LOG_INFO("[StorageV2] failed to load data from remote: {}", e.what());
         channel->close();
+        throw e;
     }
 }
 

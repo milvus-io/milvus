@@ -124,6 +124,13 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			if err := v.checkArrayFieldData(field, fieldSchema); err != nil {
 				return err
 			}
+		case schemapb.DataType_ArrayOfVector:
+			if err := v.checkArrayOfVectorFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+
+		case schemapb.DataType_ArrayOfStruct:
+			panic("unreachable, array of struct should have been flattened")
 
 		default:
 		}
@@ -332,71 +339,59 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 		return err
 	}
 
+	if !fieldSchema.GetNullable() {
+		return nil
+	}
+
 	switch field.Field.(type) {
 	case *schemapb.FieldData_Scalars:
 		switch sd := field.GetScalars().GetData().(type) {
 		case *schemapb.ScalarField_BoolData:
-			if fieldSchema.GetNullable() {
-				sd.BoolData.Data, err = fillWithNullValueImpl(sd.BoolData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.BoolData.Data, err = fillWithNullValueImpl(sd.BoolData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_IntData:
-			if fieldSchema.GetNullable() {
-				sd.IntData.Data, err = fillWithNullValueImpl(sd.IntData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.IntData.Data, err = fillWithNullValueImpl(sd.IntData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_LongData:
-			if fieldSchema.GetNullable() {
-				sd.LongData.Data, err = fillWithNullValueImpl(sd.LongData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.LongData.Data, err = fillWithNullValueImpl(sd.LongData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_FloatData:
-			if fieldSchema.GetNullable() {
-				sd.FloatData.Data, err = fillWithNullValueImpl(sd.FloatData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.FloatData.Data, err = fillWithNullValueImpl(sd.FloatData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_DoubleData:
-			if fieldSchema.GetNullable() {
-				sd.DoubleData.Data, err = fillWithNullValueImpl(sd.DoubleData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.DoubleData.Data, err = fillWithNullValueImpl(sd.DoubleData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_StringData:
-			if fieldSchema.GetNullable() {
-				sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_ArrayData:
-			if fieldSchema.GetNullable() {
-				sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.ArrayData.Data, err = fillWithNullValueImpl(sd.ArrayData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		case *schemapb.ScalarField_JsonData:
-			if fieldSchema.GetNullable() {
-				sd.JsonData.Data, err = fillWithNullValueImpl(sd.JsonData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
+			sd.JsonData.Data, err = fillWithNullValueImpl(sd.JsonData.Data, field.GetValidData())
+			if err != nil {
+				return err
 			}
 
 		default:
@@ -893,6 +888,33 @@ func (v *validateUtil) checkArrayFieldData(field *schemapb.FieldData, fieldSchem
 		}
 	}
 	return v.checkArrayElement(data, fieldSchema)
+}
+
+func (v *validateUtil) checkArrayOfVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetVectors().GetVectorArray()
+	if data == nil {
+		elementTypeStr := fieldSchema.GetElementType().String()
+		msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+		expectStr := fmt.Sprintf("need %s array", elementTypeStr)
+		return merr.WrapErrParameterInvalid(expectStr, "got nil", msg)
+	}
+
+	switch fieldSchema.GetElementType() {
+	case schemapb.DataType_FloatVector:
+		for _, vector := range data.GetData() {
+			floatVector := vector.GetFloatVector()
+			if floatVector == nil {
+				msg := fmt.Sprintf("array of vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+				return merr.WrapErrParameterInvalid("need float vector array", "got nil", msg)
+			}
+			if v.checkNAN {
+				return typeutil.VerifyFloats32(floatVector.GetData())
+			}
+		}
+		return nil
+	default:
+		panic("not implemented")
+	}
 }
 
 func verifyLengthPerRow[E interface{ ~string | ~[]byte }](strArr []E, maxLength int64) (int, bool) {

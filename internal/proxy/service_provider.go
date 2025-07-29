@@ -153,6 +153,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		Fields: lo.Filter(c.schema.CollectionSchema.Fields, func(field *schemapb.FieldSchema, _ int) bool {
 			return !field.IsDynamic
 		}),
+		StructArrayFields:  c.schema.CollectionSchema.StructArrayFields,
 		EnableDynamicField: c.schema.CollectionSchema.EnableDynamicField,
 		Properties:         c.schema.CollectionSchema.Properties,
 		Functions:          c.schema.CollectionSchema.Functions,

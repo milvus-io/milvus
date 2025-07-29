@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -79,11 +78,6 @@ const (
 
 	MaxEtcdTxnNum = 128
 	GB            = 1024 * 1024 * 1024
-)
-
-const (
-	// ParamsKeyToParse is the key of the param to build index.
-	ParamsKeyToParse = common.IndexParamsKey
 )
 
 var (

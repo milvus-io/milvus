@@ -72,6 +72,7 @@ const (
 	testBinaryVecField   = "bvec"
 	testFloat16VecField  = "f16vec"
 	testBFloat16VecField = "bf16vec"
+	testStructArrayField = "structArray"
 	testVecDim           = 128
 	testMaxVarCharLength = 100
 )
@@ -87,6 +88,7 @@ func genCollectionSchema(collectionName string) *schemapb.CollectionSchema {
 		testBinaryVecField,
 		testFloat16VecField,
 		testBFloat16VecField,
+		testStructArrayField,
 		testVecDim,
 		collectionName)
 }
@@ -234,7 +236,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 
 func constructCollectionSchemaWithAllType(
 	boolField, int32Field, int64Field, floatField, doubleField string,
-	floatVecField, binaryVecField, float16VecField, bfloat16VecField string,
+	floatVecField, binaryVecField, float16VecField, bfloat16VecField, structArrayField string,
 	dim int,
 	collectionName string,
 ) *schemapb.CollectionSchema {
@@ -349,30 +351,70 @@ func constructCollectionSchemaWithAllType(
 		AutoID:      false,
 	}
 
-	if enableMultipleVectorFields {
-		return &schemapb.CollectionSchema{
-			Name:        collectionName,
-			Description: "",
-			AutoID:      false,
+	// StructArrayField schema for testing
+	structArrayFields := []*schemapb.StructArrayFieldSchema{
+		{
+			FieldID:     0,
+			Name:        structArrayField,
+			Description: "test struct array field",
 			Fields: []*schemapb.FieldSchema{
-				b,
-				i32,
-				i64,
-				f,
-				d,
-				fVec,
-				bVec,
-				f16Vec,
-				bf16Vec,
+				{
+					FieldID:     0,
+					Name:        "sub_varchar_array",
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.MaxLengthKey,
+							Value: strconv.Itoa(testMaxVarCharLength),
+						},
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "100",
+						},
+					},
+				},
+				{
+					FieldID:     0,
+					Name:        "sub_vector_array",
+					DataType:    schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: strconv.Itoa(dim),
+						},
+						{
+							Key:   common.MaxCapacityKey,
+							Value: "10",
+						},
+					},
+				},
 			},
-		}
+		},
 	}
 
-	return &schemapb.CollectionSchema{
-		Name:        collectionName,
-		Description: "",
-		AutoID:      false,
-		Fields: []*schemapb.FieldSchema{
+	schema := &schemapb.CollectionSchema{
+		Name:              collectionName,
+		Description:       "",
+		AutoID:            false,
+		StructArrayFields: structArrayFields,
+	}
+
+	if enableMultipleVectorFields {
+		schema.Fields = []*schemapb.FieldSchema{
+			b,
+			i32,
+			i64,
+			f,
+			d,
+			fVec,
+			bVec,
+			f16Vec,
+			bf16Vec,
+		}
+	} else {
+		schema.Fields = []*schemapb.FieldSchema{
 			b,
 			i32,
 			i64,
@@ -380,8 +422,10 @@ func constructCollectionSchemaWithAllType(
 			d,
 			fVec,
 			// bVec,
-		},
+		}
 	}
+
+	return schema
 }
 
 func constructPlaceholderGroup(
@@ -446,7 +490,7 @@ func constructSearchRequest(
 				Value: metric.L2,
 			},
 			{
-				Key:   SearchParamsKey,
+				Key:   ParamsKey,
 				Value: string(b),
 			},
 			{
@@ -1280,6 +1324,48 @@ func TestCreateCollectionTask(t *testing.T) {
 		} else {
 			assert.Error(t, err)
 		}
+
+		task.CreateCollectionRequest = reqBackup
+
+		// Test StructArrayField validation
+		structArrayFieldSchema := constructCollectionSchemaWithStructArrayField(collectionName+"_struct", testStructArrayField, false)
+
+		// Test valid StructArrayField
+		validStructSchema, err := proto.Marshal(structArrayFieldSchema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = validStructSchema
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		// Test invalid StructArrayField - empty fields
+		invalidStructSchema := proto.Clone(structArrayFieldSchema).(*schemapb.CollectionSchema)
+		invalidStructSchema.StructArrayFields[0].Fields = []*schemapb.FieldSchema{} // Empty fields
+		invalidStructSchemaBytes, err := proto.Marshal(invalidStructSchema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = invalidStructSchemaBytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		// Test invalid StructArrayField - invalid field name
+		invalidStructSchema2 := proto.Clone(structArrayFieldSchema).(*schemapb.CollectionSchema)
+		invalidStructSchema2.StructArrayFields[0].Fields[0].Name = "$invalid" // Invalid field name
+		invalidStructSchema2Bytes, err := proto.Marshal(invalidStructSchema2)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = invalidStructSchema2Bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		// Test invalid StructArrayField - non-array/non-vector-array sub-field
+		invalidStructSchema3 := proto.Clone(structArrayFieldSchema).(*schemapb.CollectionSchema)
+		invalidStructSchema3.StructArrayFields[0].Fields[0].DataType = schemapb.DataType_Int64 // Should be Array or ArrayOfVector
+		invalidStructSchema3Bytes, err := proto.Marshal(invalidStructSchema3)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = invalidStructSchema3Bytes
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		// Restore original schema for remaining tests
+		task.CreateCollectionRequest = reqBackup
 	})
 
 	t.Run("specify dynamic field", func(t *testing.T) {
@@ -4911,4 +4997,264 @@ func TestAlterCollectionField(t *testing.T) {
 			}
 		})
 	}
+}
+
+// constructCollectionSchemaWithStructArrayField constructs a collection schema specifically for testing StructArrayField
+func constructCollectionSchemaWithStructArrayField(collectionName string, structArrayFieldName string, autoID bool) *schemapb.CollectionSchema {
+	// Primary key field
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         testInt64Field,
+		IsPrimaryKey: true,
+		Description:  "primary key field",
+		DataType:     schemapb.DataType_Int64,
+		AutoID:       autoID,
+	}
+
+	// Vector field
+	vecField := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         testFloatVecField,
+		IsPrimaryKey: false,
+		Description:  "float vector field",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: strconv.Itoa(testVecDim),
+			},
+		},
+	}
+
+	// StructArrayField with various sub-fields for comprehensive testing
+	structArrayField := &schemapb.StructArrayFieldSchema{
+		FieldID:     102,
+		Name:        structArrayFieldName,
+		Description: "struct array field for testing",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:     1021,
+				Name:        "sub_text_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxLengthKey,
+						Value: strconv.Itoa(testMaxVarCharLength),
+					},
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "50",
+					},
+				},
+			},
+			{
+				FieldID:     1022,
+				Name:        "sub_int_array",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int32,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "20",
+					},
+				},
+			},
+			{
+				FieldID:     1023,
+				Name:        "sub_float_vector_array",
+				DataType:    schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: strconv.Itoa(testVecDim),
+					},
+					{
+						Key:   common.MaxCapacityKey,
+						Value: "5",
+					},
+				},
+			},
+		},
+	}
+
+	return &schemapb.CollectionSchema{
+		Name:              collectionName,
+		Description:       "test collection with struct array field",
+		AutoID:            autoID,
+		Fields:            []*schemapb.FieldSchema{pkField, vecField},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{structArrayField},
+	}
+}
+
+// TestCreateCollectionTaskWithStructArrayField tests creating collections with StructArrayField
+func TestCreateCollectionTaskWithStructArrayField(t *testing.T) {
+	mix := NewMixCoordMock()
+	ctx := context.Background()
+	shardsNum := common.DefaultShardsNum
+	prefix := "TestCreateCollectionTaskWithStructArrayField"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	// Test with StructArrayField
+	schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, false)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	task := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+		result:   nil,
+		schema:   nil,
+	}
+
+	t.Run("create collection with struct array field", func(t *testing.T) {
+		err := task.OnEnqueue()
+		assert.NoError(t, err)
+
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		// Verify schema contains StructArrayFields
+		assert.NotNil(t, task.schema)
+		assert.Len(t, task.schema.StructArrayFields, 1)
+
+		structArrayField := task.schema.StructArrayFields[0]
+		assert.Equal(t, testStructArrayField, structArrayField.Name)
+		assert.Len(t, structArrayField.Fields, 3)
+
+		// Verify sub-fields in StructArrayField
+		subFields := structArrayField.Fields
+
+		// sub_text_array
+		assert.Equal(t, "sub_text_array", subFields[0].Name)
+		assert.Equal(t, schemapb.DataType_Array, subFields[0].DataType)
+		assert.Equal(t, schemapb.DataType_VarChar, subFields[0].ElementType)
+
+		// sub_int_array
+		assert.Equal(t, "sub_int_array", subFields[1].Name)
+		assert.Equal(t, schemapb.DataType_Array, subFields[1].DataType)
+		assert.Equal(t, schemapb.DataType_Int32, subFields[1].ElementType)
+
+		// sub_float_vector_array
+		assert.Equal(t, "sub_float_vector_array", subFields[2].Name)
+		assert.Equal(t, schemapb.DataType_ArrayOfVector, subFields[2].DataType)
+		assert.Equal(t, schemapb.DataType_FloatVector, subFields[2].ElementType)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+
+		err = task.PostExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("validate struct array field constraints", func(t *testing.T) {
+		// Test invalid sub-field in StructArrayField
+		invalidSchema := constructCollectionSchemaWithStructArrayField(collectionName+"_invalid", testStructArrayField, false)
+
+		// Add an invalid sub-field (nested array)
+		invalidSubField := &schemapb.FieldSchema{
+			FieldID:     1024,
+			Name:        "invalid_nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, // This should be invalid - nested arrays
+		}
+		invalidSchema.StructArrayFields[0].Fields = append(invalidSchema.StructArrayFields[0].Fields, invalidSubField)
+
+		invalidMarshaledSchema, err := proto.Marshal(invalidSchema)
+		assert.NoError(t, err)
+
+		invalidTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
+				DbName:         dbName,
+				CollectionName: collectionName + "_invalid",
+				Schema:         invalidMarshaledSchema,
+				ShardsNum:      shardsNum,
+			},
+			ctx:      ctx,
+			mixCoord: mix,
+			result:   nil,
+			schema:   nil,
+		}
+
+		err = invalidTask.OnEnqueue()
+		assert.NoError(t, err)
+
+		err = invalidTask.PreExecute(ctx)
+		assert.Error(t, err) // Should fail due to nested array validation
+	})
+}
+
+// TestDescribeCollectionTaskWithStructArrayField tests describing collections with StructArrayField
+func TestDescribeCollectionTaskWithStructArrayField(t *testing.T) {
+	mix := NewMixCoordMock()
+	ctx := context.Background()
+	prefix := "TestDescribeCollectionTaskWithStructArrayField"
+	collectionName := prefix + funcutil.GenRandomStr()
+
+	// Create collection with StructArrayField first
+	schema := constructCollectionSchemaWithStructArrayField(collectionName, testStructArrayField, true)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createTask := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	err = createTask.OnEnqueue()
+	assert.NoError(t, err)
+	err = createTask.PreExecute(ctx)
+	assert.NoError(t, err)
+	err = createTask.Execute(ctx)
+	assert.NoError(t, err)
+
+	// Now test describe collection
+	describeTask := &describeCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
+			CollectionName: collectionName,
+		},
+		ctx:      ctx,
+		mixCoord: mix,
+	}
+
+	t.Run("describe collection with struct array field", func(t *testing.T) {
+		err := describeTask.PreExecute(ctx)
+		assert.NoError(t, err)
+
+		err = describeTask.Execute(ctx)
+		assert.NoError(t, err)
+		assert.NotNil(t, describeTask.result)
+		assert.Equal(t, commonpb.ErrorCode_Success, describeTask.result.Status.ErrorCode)
+
+		// Verify StructArrayFields are returned in describe response
+		resultSchema := describeTask.result.Schema
+		assert.NotNil(t, resultSchema)
+		assert.Len(t, resultSchema.StructArrayFields, 1)
+
+		structArrayField := resultSchema.StructArrayFields[0]
+		assert.Equal(t, testStructArrayField, structArrayField.Name)
+		assert.Len(t, structArrayField.Fields, 3)
+
+		err = describeTask.PostExecute(ctx)
+		assert.NoError(t, err)
+	})
 }

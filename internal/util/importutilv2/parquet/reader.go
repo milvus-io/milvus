@@ -35,6 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
+const fileReaderBufferSize = int64(32 * 1024 * 1024)
+
 type reader struct {
 	ctx    context.Context
 	cm     storage.ChunkManager
@@ -57,7 +59,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, err
 	}
 	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            int64(bufferSize),
+		BufferSize:            fileReaderBufferSize,
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
@@ -66,16 +68,20 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	log.Info("parquet file info", zap.Int("row group num", r.NumRowGroups()),
 		zap.Int64("num rows", r.NumRows()))
 
-	fileReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
+	if err != nil {
+		return nil, err
+	}
+
+	readProps := pqarrow.ArrowReadProperties{
+		BatchSize: count,
+	}
+	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)
-	if err != nil {
-		return nil, err
-	}
-	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}

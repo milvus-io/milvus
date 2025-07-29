@@ -819,15 +819,22 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 	}
 
 	// Calculate memory-based slots
+	var taskBufferSize int
 	baseBufferSize := paramtable.Get().DataNodeCfg.ImportBaseBufferSize.GetAsInt()
-	totalBufferSize := baseBufferSize * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+	if task.GetType() == ImportTaskType {
+		// ImportTask use dynamic buffer size calculated by vchannels and partitions
+		taskBufferSize = int(baseBufferSize) * len(job.GetVchannels()) * len(job.GetPartitionIDs())
+	} else {
+		// PreImportTask use fixed buffer size
+		taskBufferSize = baseBufferSize
+	}
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	if isL0Import {
-		// L0 import won't hash the data by channel or partition
-		totalBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
+		// L0 import use fixed buffer size
+		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
 	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
-	memoryBasedSlots := totalBufferSize / memoryLimitPerSlot
+	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
 
 	// Return the larger value to ensure both CPU and memory constraints are satisfied
 	if cpuBasedSlots > memoryBasedSlots {

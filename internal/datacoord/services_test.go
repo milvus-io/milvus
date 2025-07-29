@@ -280,7 +280,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		expectedState commonpb.SegmentState
 	}{
 		{"segID=0, flushed to dropped", 0, true, false, 100, commonpb.SegmentState_Dropped},
-		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushing},
+		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushed},
 		// empty segment flush should be dropped directly.
 		{"segID=2, sealed to dropped", 2, false, true, 0, commonpb.SegmentState_Dropped},
 	}
@@ -307,12 +307,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.EqualValues(0, len(segment.GetBinlogs()))
 			s.EqualValues(segment.NumOfRows, test.numOfRows)
 
-			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
-			if lo.Contains(flushing, test.expectedState) {
-				s.True(lo.Contains(flushing, segment.GetState()))
-			} else {
-				s.Equal(test.expectedState, segment.GetState())
-			}
+			s.Equal(test.expectedState, segment.GetState())
 		})
 	}
 }
@@ -1035,7 +1030,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
-			SegmentID:    0,
+			SegmentID:    10087,
 			CollectionID: 0,
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
@@ -1076,8 +1071,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 					},
 				},
 			},
+			Flushed: true,
 		}
-		segment := createSegment(0, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
+		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -1104,6 +1100,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.channelManager.Watch(context.Background(), &channelMeta{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1117,7 +1116,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.Status))
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetSegments()))
-		assert.EqualValues(t, 0, resp.GetSegments()[0].GetID())
+		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 0, len(resp.GetSegments()[0].GetBinlogs()))
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
@@ -1522,13 +1521,7 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 
 	// get collection failed
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
 	s.broker = broker
-	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
-		Vchannel: "ch-1",
-	})
-	assert.NoError(t, err)
-	assert.Error(t, merr.Error(resp.GetStatus()))
 
 	// normal case
 	channelInfo := &datapb.VchannelInfo{
@@ -1541,12 +1534,6 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 		IndexedSegmentIds:   []int64{4},
 	}
 
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Unset()
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			Schema: &schemapb.CollectionSchema{},
-		}, nil)
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
@@ -1567,7 +1554,7 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(0), resp.GetStatus().GetCode())
-	assert.NotNil(t, resp.GetSchema())
+	assert.Nil(t, resp.GetSchema())
 	assert.Equal(t, channelInfo, resp.GetInfo())
 }
 
