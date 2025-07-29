@@ -93,6 +93,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context, req *milvuspb.GetComp
 		StateCode: code,
 	}
 	stats.State = info
+	//hc--test
 	return stats, nil
 }
 

@@ -30,6 +30,8 @@ if [[ ! ${jobs+1} ]]; then
         jobs=4
     fi
 fi
+echo "hc==original jobs: ${jobs}"
+jobs=2
 
 function get_cpu_arch {
   local CPU_ARCH=$1
@@ -295,6 +297,7 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 else
   # compile and build
+  echo "hc==make jobs: ${jobs}"
   make -j ${jobs} install || exit 1
 fi
 
