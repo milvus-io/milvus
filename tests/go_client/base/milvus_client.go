@@ -323,6 +323,11 @@ func (mc *MilvusClient) HybridSearch(ctx context.Context, option client.HybridSe
 	return resultSets, err
 }
 
+func (mc *MilvusClient) SearchIterator(ctx context.Context, option client.SearchIteratorOption, callOptions ...grpc.CallOption) (client.SearchIterator, error) {
+	searchIterator, err := mc.mClient.SearchIterator(ctx, option, callOptions...)
+	return searchIterator, err
+}
+
 // ListResourceGroups list all resource groups
 func (mc *MilvusClient) ListResourceGroups(ctx context.Context, option client.ListResourceGroupsOption, callOptions ...grpc.CallOption) ([]string, error) {
 	resourceGroups, err := mc.mClient.ListResourceGroups(ctx, option, callOptions...)

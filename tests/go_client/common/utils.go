@@ -137,7 +137,7 @@ type InvalidExprStruct struct {
 }
 
 var InvalidExpressions = []InvalidExprStruct{
-	{Expr: "id in [0]", ErrNil: true, ErrMsg: "fieldName(id) not found"},                                          // not exist field but no error
+	{Expr: "id in [0]", ErrNil: true, ErrMsg: "fieldName(id) not found"},                                          // not exist field but no error, because enable dynamic
 	{Expr: "int64 in not [0]", ErrNil: false, ErrMsg: "cannot parse expression"},                                  // wrong term expr keyword
 	{Expr: "int64 < floatVec", ErrNil: false, ErrMsg: "not supported"},                                            // unsupported compare field
 	{Expr: "floatVec in [0]", ErrNil: false, ErrMsg: "cannot be casted to FloatVector"},                           // value and field type mismatch
@@ -222,4 +222,16 @@ func GenText(lang string) string {
 
 func IsZeroValue(value interface{}) bool {
 	return reflect.DeepEqual(value, reflect.Zero(reflect.TypeOf(value)).Interface())
+}
+
+func EqualIntSlice(a []int, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
