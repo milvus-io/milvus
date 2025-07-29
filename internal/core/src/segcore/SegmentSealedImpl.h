@@ -436,6 +436,7 @@ CreateSealedSegment(
     bool is_sorted_by_pk = false,
     bool is_multi_chunk = false) {
     if (!is_multi_chunk) {
+        LOG_INFO("hc====CreateSealedSegment SingleChunkSegmentSealedImpl");
         return std::make_unique<SegmentSealedImpl>(schema,
                                                    index_meta,
                                                    segcore_config,
@@ -443,6 +444,7 @@ CreateSealedSegment(
                                                    TEST_skip_index_for_retrieve,
                                                    is_sorted_by_pk);
     } else {
+        LOG_INFO("hc====CreateSealedSegment ChunkedSegmentSealedImpl");
         return std::make_unique<ChunkedSegmentSealedImpl>(
             schema,
             index_meta,

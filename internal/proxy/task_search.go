@@ -1016,7 +1016,9 @@ func (t *searchTask) Requery(span trace.Span) error {
 		}
 		typeutil.AppendFieldData(t.result.Results.FieldsData, queryResult.GetFieldsData(), int64(offsets[id]))
 	}
-
+	log.Debug("hc===requery result", zap.Any("fieldsData.len", len(t.result.Results.FieldsData)),
+		zap.Any("translatedOutputFields.len", len(t.translatedOutputFields)),
+		zap.Any("queryResult.FieldsData.len", len(queryResult.GetFieldsData())))
 	t.result.Results.FieldsData = lo.Filter(t.result.Results.FieldsData, func(fieldData *schemapb.FieldData, i int) bool {
 		return lo.Contains(t.translatedOutputFields, fieldData.GetFieldName())
 	})

@@ -25,7 +25,7 @@ void
 PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-
+    LOG_INFO("hc====PhyJsonContainsFilterExpr");
     if (expr_->vals_.empty()) {
         auto next_batch_size = GetNextBatchSize();
         auto real_batch_size = has_offset_input_
@@ -52,6 +52,7 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     switch (expr_->column_.data_type_) {
         case DataType::ARRAY: {
+            LOG_INFO("hc====eval array contains");
             if (is_index_mode_ && !has_offset_input_) {
                 result = EvalArrayContainsForIndexSegment(
                     expr_->column_.element_type_);
@@ -90,6 +91,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
                         return ExecArrayContains<bool>(context);
                     }
                     case proto::plan::GenericValue::kInt64Val: {
+                        LOG_INFO("hc====eval array contains");
                         return ExecArrayContains<int64_t>(context);
                     }
                     case proto::plan::GenericValue::kFloatVal: {
@@ -192,6 +194,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
 template <typename ExprValueType>
 VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
+    LOG_INFO("hc====PhyJsonContainsFilterExpr");
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
