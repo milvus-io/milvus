@@ -203,10 +203,11 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
         std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
 
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    auto channel = std::make_shared<ArrowReaderChannel>();
 
     auto load_future = pool.Submit([&]() {
         return LoadWithStrategy(insert_files_,
-                                column_group_info_.arrow_reader_channel,
+                                channel,
                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                 std::move(strategy),
                                 row_group_lists,
