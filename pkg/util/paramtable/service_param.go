@@ -667,11 +667,12 @@ type WoodpeckerConfig struct {
 	MetaPrefix ParamItem `refreshable:"false"`
 
 	// client
-	AppendQueueSize       ParamItem `refreshable:"true"`
-	AppendMaxRetries      ParamItem `refreshable:"true"`
-	SegmentRollingMaxSize ParamItem `refreshable:"true"`
-	SegmentRollingMaxTime ParamItem `refreshable:"true"`
-	AuditorMaxInterval    ParamItem `refreshable:"true"`
+	AppendQueueSize         ParamItem `refreshable:"true"`
+	AppendMaxRetries        ParamItem `refreshable:"true"`
+	SegmentRollingMaxSize   ParamItem `refreshable:"true"`
+	SegmentRollingMaxTime   ParamItem `refreshable:"true"`
+	SegmentRollingMaxBlocks ParamItem `refreshable:"true"`
+	AuditorMaxInterval      ParamItem `refreshable:"true"`
 
 	// logstore
 	SyncMaxInterval                ParamItem `refreshable:"true"`
@@ -683,6 +684,10 @@ type WoodpeckerConfig struct {
 	FlushMaxSize                   ParamItem `refreshable:"true"`
 	FlushMaxThreads                ParamItem `refreshable:"true"`
 	CompactionSize                 ParamItem `refreshable:"true"`
+	CompactionMaxParallelUploads   ParamItem `refreshable:"true"`
+	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
+	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
+	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
 
 	// storage
 	StorageType ParamItem `refreshable:"false"`
@@ -743,6 +748,15 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.SegmentRollingMaxTime.Init(base.mgr)
+
+	p.SegmentRollingMaxBlocks = ParamItem{
+		Key:          "woodpecker.client.segmentRollingPolicy.maxBlocks",
+		Version:      "2.6.0",
+		DefaultValue: "1000",
+		Doc:          "Maximum number of blocks in a segment",
+		Export:       true,
+	}
+	p.SegmentRollingMaxBlocks.Init(base.mgr)
 
 	p.AuditorMaxInterval = ParamItem{
 		Key:          "woodpecker.client.auditor.maxInterval",
@@ -833,6 +847,42 @@ func (p *WoodpeckerConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CompactionSize.Init(base.mgr)
+
+	p.CompactionMaxParallelUploads = ParamItem{
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.maxParallelUploads",
+		Version:      "2.6.0",
+		DefaultValue: "4",
+		Doc:          "The maximum number of parallel upload threads for compaction.",
+		Export:       true,
+	}
+	p.CompactionMaxParallelUploads.Init(base.mgr)
+
+	p.CompactionMaxParallelReads = ParamItem{
+		Key:          "woodpecker.logstore.segmentCompactionPolicy.maxParallelReads",
+		Version:      "2.6.0",
+		DefaultValue: "8",
+		Doc:          "The maximum number of parallel read threads for compaction.",
+		Export:       true,
+	}
+	p.CompactionMaxParallelReads.Init(base.mgr)
+
+	p.ReaderMaxBatchSize = ParamItem{
+		Key:          "woodpecker.logstore.segmentReadPolicy.maxBatchSize",
+		Version:      "2.6.0",
+		DefaultValue: "16M",
+		Doc:          "Maximum size of a batch in bytes.",
+		Export:       true,
+	}
+	p.ReaderMaxBatchSize.Init(base.mgr)
+
+	p.ReaderMaxFetchThreads = ParamItem{
+		Key:          "woodpecker.logstore.segmentReadPolicy.maxFetchThreads",
+		Version:      "2.6.0",
+		DefaultValue: "32",
+		Doc:          "Maximum number of threads to fetch data.",
+		Export:       true,
+	}
+	p.ReaderMaxFetchThreads.Init(base.mgr)
 
 	p.StorageType = ParamItem{
 		Key:          "woodpecker.storage.type",
