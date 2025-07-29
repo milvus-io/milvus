@@ -78,6 +78,7 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 
 	// if some channel doesn't own nodes, exit exclusive mode
 	if !exclusiveMode {
+		br.AddRecord(StrRecordf("no exclusive mode in replica %d", replica.GetID()))
 		return b.ScoreBasedBalancer.BalanceReplica(ctx, replica)
 	}
 
@@ -85,35 +86,38 @@ func (b *ChannelLevelScoreBalancer) BalanceReplica(ctx context.Context, replica 
 	segmentPlans = make([]SegmentAssignPlan, 0)
 	for channelName := range channels {
 		if replica.NodesCount() == 0 {
+			br.AddRecord(StrRecordf("no node in replica %d", replica.GetID()))
 			return nil, nil
 		}
 
 		rwNodes := replica.GetChannelRWNodes(channelName)
-		roNodes := replica.GetRONodes()
+		roNodesSet := typeutil.NewUniqueSet(replica.GetRONodes()...)
 
 		// mark channel's outbound access node as offline
 		channelRWNode := typeutil.NewUniqueSet(rwNodes...)
 		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channelName), meta.WithReplica2Channel(replica))
 		for _, channel := range channelDist {
 			if !channelRWNode.Contain(channel.Node) {
-				roNodes = append(roNodes, channel.Node)
+				roNodesSet.Insert(channel.Node)
 			}
 		}
 		segmentDist := b.dist.SegmentDistManager.GetByFilter(meta.WithChannel(channelName), meta.WithReplica(replica))
 		for _, segment := range segmentDist {
 			if !channelRWNode.Contain(segment.Node) {
-				roNodes = append(roNodes, segment.Node)
+				roNodesSet.Insert(segment.Node)
 			}
 		}
+		roNodes := roNodesSet.Collect()
 
 		if len(rwNodes) == 0 {
+			br.AddRecord(StrRecordf("no available nodes to balance in replica %d", replica.GetID()))
 			// no available nodes to balance
 			return nil, nil
 		}
 
 		if len(roNodes) != 0 {
 			if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-				log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
+				br.AddRecord(StrRecordf("stopping balance is disabled, skipping stopping nodes %v", roNodes))
 				return nil, nil
 			}
 
