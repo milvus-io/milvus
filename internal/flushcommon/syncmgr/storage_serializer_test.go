@@ -93,6 +93,7 @@ func (s *StorageV1SerializerSuite) SetupSuite() {
 
 func (s *StorageV1SerializerSuite) SetupTest() {
 	s.mockCache.EXPECT().GetSchema(mock.Anything).Return(s.schema).Maybe()
+	s.mockCache.EXPECT().Collection().Return(s.collectionID).Once()
 
 	var err error
 	s.serializer, err = NewStorageSerializer(s.mockCache, s.schema)
