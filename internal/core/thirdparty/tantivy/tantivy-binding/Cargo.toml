@@ -42,6 +42,7 @@ icu_segmenter = "2.0.0-beta2"
 whatlang = "0.16.4"
 lingua = "1.7.1"
 fancy-regex = "0.14.0"
+unicode-general-category = "1.0.0"
 
 # lindera dependencies for fetch and prepare dictionary online.
 tokio = { version = "1.45.0", features = [
