@@ -908,15 +908,15 @@ ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
 
     switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
         case DataType::INT64: {
-            for (size_t i = 0; i < pks.size(); i++) {
-                // get int64 pks
-                auto target = std::get<int64_t>(pks[i]);
-                auto timestamp = timestamps[i];
-                auto num_chunk = pk_column->num_chunks();
-                for (int i = 0; i < num_chunk; ++i) {
-                    auto pw = pk_column->DataOfChunk(i);
-                    auto src = reinterpret_cast<const int64_t*>(pw.get());
-                    auto chunk_row_num = pk_column->chunk_row_nums(i);
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto pw = pk_column->DataOfChunk(i);
+                auto src = reinterpret_cast<const int64_t*>(pw.get());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                for (size_t j = 0; j < pks.size(); j++) {
+                    // get int64 pks
+                    auto target = std::get<int64_t>(pks[j]);
+                    auto timestamp = timestamps[j];
                     auto it = std::lower_bound(
                         src,
                         src + chunk_row_num,
@@ -938,18 +938,16 @@ ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
             break;
         }
         case DataType::VARCHAR: {
-            for (size_t i = 0; i < pks.size(); i++) {
-                // get varchar pks
-                auto target = std::get<std::string>(pks[i]);
-                auto timestamp = timestamps[i];
-
-                auto num_chunk = pk_column->num_chunks();
-                for (int i = 0; i < num_chunk; ++i) {
-                    // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
-                    auto num_rows_until_chunk =
-                        pk_column->GetNumRowsUntilChunk(i);
-                    auto pw = pk_column->GetChunk(i);
-                    auto string_chunk = static_cast<StringChunk*>(pw.get());
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                auto pw = pk_column->GetChunk(i);
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                for (size_t j = 0; j < pks.size(); ++j) {
+                    // get varchar pks
+                    auto& target = std::get<std::string>(pks[j]);
+                    auto timestamp = timestamps[j];
                     auto offset = string_chunk->binary_search_string(target);
                     for (; offset != -1 && offset < string_chunk->RowNums() &&
                            string_chunk->operator[](offset) == target;
