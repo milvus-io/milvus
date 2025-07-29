@@ -899,12 +899,21 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
 std::vector<std::pair<SegOffset, Timestamp>>
 ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
                                            const Timestamp* timestamps) const {
-    AssertInfo(is_sorted_by_pk_,
-               "search_batch_pks only works on pk sorted segment");
+    std::vector<std::pair<SegOffset, Timestamp>> pk_offsets;
+    // handle unsorted case
+    if (!is_sorted_by_pk_) {
+        for (size_t i = 0; i < pks.size(); i++) {
+            auto offsets = insert_record_.search_pk(pks[i], timestamps[i]);
+            for (auto offset : offsets) {
+                pk_offsets.emplace_back(offset, timestamps[i]);
+            }
+        }
+        return pk_offsets;
+    }
+
     auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
     auto pk_column = fields_.at(pk_field_id);
-    std::vector<std::pair<SegOffset, Timestamp>> pk_offsets;
 
     switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
         case DataType::INT64: {
