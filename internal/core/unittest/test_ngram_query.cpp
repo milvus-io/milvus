@@ -211,6 +211,11 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
         BitsetType final;
         final = ExecuteQueryExpr(parsed, segment.get(), nb, MAX_TIMESTAMP);
         for (size_t i = 0; i < nb; i++) {
+            if (final[i] != expected_result[i]) {
+                std::cout << "final[" << i << "] = " << final[i]
+                          << ", expected_result[" << i
+                          << "] = " << expected_result[i] << std::endl;
+            }
             ASSERT_EQ(final[i], expected_result[i]);
         }
     }

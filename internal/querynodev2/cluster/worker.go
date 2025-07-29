@@ -46,6 +46,7 @@ type Worker interface {
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error)
+	DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error
 
 	IsHealthy() bool
 	Stop()
@@ -252,6 +253,15 @@ func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatis
 func (w *remoteWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	client := w.getClient()
 	return client.UpdateSchema(ctx, req)
+}
+
+func (w *remoteWorker) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
+	client := w.getClient()
+	status, err := client.DropIndex(ctx, req)
+	if err = merr.CheckRPCCall(status, err); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *remoteWorker) IsHealthy() bool {

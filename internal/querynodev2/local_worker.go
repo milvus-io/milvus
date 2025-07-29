@@ -82,5 +82,10 @@ func (w *LocalWorker) IsHealthy() bool {
 	return true
 }
 
+func (w *LocalWorker) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
+	status, err := w.node.DropIndex(ctx, req)
+	return merr.CheckRPCCall(status, err)
+}
+
 func (w *LocalWorker) Stop() {
 }

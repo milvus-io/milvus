@@ -898,6 +898,17 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				return err
 			}
 		}
+
+		if !storagecommon.IsVectorDataType(field.GetDataType()) &&
+			!segment.HasFieldData(fieldID) &&
+			loadInfo.GetStorageVersion() != storage.StorageV2 {
+			// Lazy load raw data to avoid search failure after dropping index.
+			// storage v2 will load all scalar fields so we don't need to load raw data for them.
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
+				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+				return err
+			}
+		}
 	}
 	complementScalarDataSpan := tr.RecordSpan()
 	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {

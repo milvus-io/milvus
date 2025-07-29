@@ -550,17 +550,6 @@ SegmentInternalInterface::GetNgramIndexForJson(
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
-bool
-SegmentInternalInterface::HasNgramIndex(FieldId field_id) const {
-    return false;
-}
-
-bool
-SegmentInternalInterface::HasNgramIndexForJson(
-    FieldId field_id, const std::string& nested_path) const {
-    return false;
-}
-
 index::JsonKeyStats*
 SegmentInternalInterface::GetJsonStats(FieldId field_id) const {
     std::shared_lock lock(mutex_);

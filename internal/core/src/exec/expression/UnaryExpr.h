@@ -752,6 +752,26 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       batch_size,
                       consistency_level),
           expr_(expr) {
+        auto val_type = FromValCase(expr_->val_.val_case());
+        if ((val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
+            (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
+             expr_->op_type_ == proto::plan::OpType::Match ||
+             expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
+             expr_->op_type_ == proto::plan::OpType::PostfixMatch)) {
+            // try to pin ngram index for json
+            auto field_id = expr_->column_.field_id_;
+            auto schema = segment->get_schema();
+            auto field_meta = schema[field_id];
+
+            if (field_meta.is_json()) {
+                auto pointer =
+                    milvus::Json::pointer(expr_->column_.nested_path_);
+                pinned_ngram_index_ =
+                    segment->GetNgramIndexForJson(field_id, pointer);
+            } else {
+                pinned_ngram_index_ = segment->GetNgramIndex(field_id);
+            }
+        }
     }
 
     void
@@ -858,10 +878,10 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     ExecTextMatch();
 
     bool
-    CanExecNgramMatch(proto::plan::OpType op_type);
+    CanExecNgramMatch();
 
     bool
-    CanExecNgramMatchForJson(DataType val_type);
+    CanExecNgramMatchForJson();
 
     std::optional<VectorPtr>
     ExecNgramMatch();
@@ -874,6 +894,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
+    PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
 };
 }  // namespace exec
 }  // namespace milvus

@@ -37,8 +37,7 @@ PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
     using Index = index::ScalarIndex<IndexInnerType>;
 
     for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto pw = segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
-        auto index_ptr = const_cast<Index*>(pw.get());
+        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
 
         if (index_ptr->GetIndexType() ==
                 milvus::index::ScalarIndexType::HYBRID ||
@@ -201,8 +200,7 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
             auto val_type_inner = FromValCase(val_type);
-            if (CanExecNgramMatchForJson(val_type_inner) &&
-                !has_offset_input_) {
+            if (CanExecNgramMatchForJson() && !has_offset_input_) {
                 auto res = ExecNgramMatch();
                 // If nullopt is returned, it means the query cannot be
                 // optimized by ngram index. Forward it to the normal path.
@@ -1250,7 +1248,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
                 fmt::format("match query does not support iterative filter"));
         }
         return ExecTextMatch();
-    } else if (CanExecNgramMatch(expr_->op_type_)) {
+    } else if (CanExecNgramMatch()) {
         auto res = ExecNgramMatch();
         // If nullopt is returned, it means the query cannot be
         // optimized by ngram index. Forward it to the normal path.
@@ -1705,16 +1703,13 @@ PhyUnaryRangeFilterExpr::CanUseIndex() {
         is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_) &&
         // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
         // TODO: if multiple indexes are supported, this logic should be changed
-        !segment_->HasNgramIndex(field_id_);
+        pinned_ngram_index_.get() == nullptr;
     return use_index_;
 }
 
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForJson(DataType val_type) {
-    auto has_index =
-        segment_->HasIndex(field_id_,
-                           milvus::Json::pointer(expr_->column_.nested_path_),
-                           val_type);
+    bool has_index = pinned_index_.size() > 0;
     switch (val_type) {
         case DataType::STRING:
         case DataType::VARCHAR:
@@ -1832,24 +1827,13 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 };
 
 bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatch(proto::plan::OpType op_type) {
-    return (op_type == proto::plan::OpType::InnerMatch ||
-            op_type == proto::plan::OpType::Match ||
-            op_type == proto::plan::OpType::PrefixMatch ||
-            op_type == proto::plan::OpType::PostfixMatch) &&
-           !has_offset_input_ && CanUseNgramIndex(field_id_);
+PhyUnaryRangeFilterExpr::CanExecNgramMatch() {
+    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 
 bool
-PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson(DataType val_type) {
-    return (val_type == DataType::STRING || val_type == DataType::VARCHAR) &&
-           (expr_->op_type_ == proto::plan::OpType::InnerMatch ||
-            expr_->op_type_ == proto::plan::OpType::Match ||
-            expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
-            expr_->op_type_ == proto::plan::OpType::PostfixMatch) &&
-           !has_offset_input_ &&
-           CanUseNgramIndexForJson(
-               field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
+PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson() {
+    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 
 std::optional<VectorPtr>
@@ -1866,14 +1850,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        PinWrapper<index::NgramInvertedIndex*> pinned_index;
-        if (expr_->column_.data_type_ == DataType::JSON) {
-            pinned_index = segment_->GetNgramIndexForJson(
-                field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
-        } else {
-            pinned_index = segment_->GetNgramIndex(field_id_);
-        }
-        index::NgramInvertedIndex* index = pinned_index.get();
+        auto index = pinned_ngram_index_.get();
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
