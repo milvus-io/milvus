@@ -1045,15 +1045,6 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	}
 	dit.collectionID = collID
 
-	loaded, err := isCollectionLoaded(ctx, dit.mixCoord, collID)
-	if err != nil {
-		return err
-	}
-
-	if loaded {
-		return errors.New("index cannot be dropped, collection is loaded, please release it first")
-	}
-
 	return nil
 }
 
