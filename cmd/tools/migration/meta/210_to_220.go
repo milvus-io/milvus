@@ -161,7 +161,7 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 			}
 			newIndexParamsMap := make(map[string]string)
 			for _, kv := range indexInfo.IndexParams {
-				if kv.Key == common.IndexParamsKey {
+				if kv.Key == common.ParamsKey {
 					params, err := funcutil.JSONToMap(kv.Value)
 					if err != nil {
 						return nil, err

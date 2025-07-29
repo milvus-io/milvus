@@ -135,7 +135,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	flushSegmentIDs := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		if segment != nil &&
-			(isFlushState(segment.GetState())) &&
+			isFlushState(segment.GetState()) &&
 			segment.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			!sealedSegmentsIDDict[segment.GetID()] {
 			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
@@ -569,6 +569,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
+		if segment.State == commonpb.SegmentState_Flushed && !req.Dropped {
+			log.Info("save to flushed segment, ignore this request")
+			return merr.Success(), nil
+		}
+
 		if segment.State == commonpb.SegmentState_Dropped {
 			log.Info("save to dropped segment, ignore this request")
 			return merr.Success(), nil
@@ -590,8 +595,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
 			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
-			// set segment to SegmentState_Flushing
-			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushing))
+			if enableSortCompaction() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+				operators = append(operators, SetSegmentIsInvisible(req.GetSegmentID(), true))
+			}
+			// set segment to SegmentState_Flushed
+			operators = append(operators, UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Flushed))
 		}
 	}
 

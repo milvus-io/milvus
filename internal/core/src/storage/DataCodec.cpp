@@ -103,6 +103,9 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
             index_data->set_index_meta(index_meta);
             index_data->SetTimestamps(index_event_data.start_timestamp,
                                       index_event_data.end_timestamp);
+            // DataCodec must keep the input_data alive for zero-copy usage,
+            // otherwise segmentation violation will occur
+            index_data->SetData(input_data);
             return index_data;
         }
         default:

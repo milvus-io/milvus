@@ -179,7 +179,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("duplicated index param (key=%s) (value=%s) found", kv.GetKey(), kv.GetValue())
 		}
 		keys.Insert(kv.GetKey())
-		if kv.Key == common.IndexParamsKey {
+		if kv.Key == common.ParamsKey {
 			params, err := funcutil.JSONToMap(kv.Value)
 			if err != nil {
 				return err

@@ -467,7 +467,8 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
             T key = ParseKey(&data_ptr);
 
             roaring::Roaring value;
-            value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+            value =
+                roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
             for (const auto& v : value) {
                 valid_bitset_.set(v);
             }

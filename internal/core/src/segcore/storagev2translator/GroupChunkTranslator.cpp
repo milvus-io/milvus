@@ -231,6 +231,10 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
             filled_cids.insert(cid);
         }
     }
+
+    // access underlying feature to get exception if any
+    load_future.get();
+
     // Verify all requested cids have been filled
     for (auto cid : cids) {
         AssertInfo(filled_cids.find(cid) != filled_cids.end(),

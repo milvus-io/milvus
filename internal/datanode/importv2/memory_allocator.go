@@ -22,14 +22,28 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
+var (
+	globalMemoryAllocator     MemoryAllocator
+	globalMemoryAllocatorOnce sync.Once
+)
+
+// GetMemoryAllocator returns the global memory allocator instance
+func GetMemoryAllocator() MemoryAllocator {
+	globalMemoryAllocatorOnce.Do(func() {
+		globalMemoryAllocator = NewMemoryAllocator(int64(hardware.GetMemoryCount()))
+	})
+	return globalMemoryAllocator
+}
+
 // MemoryAllocator handles memory allocation and deallocation for import tasks
 type MemoryAllocator interface {
-	// TryAllocate attempts to allocate memory of the specified size
-	// Returns true if allocation is successful, false if insufficient memory
-	TryAllocate(taskID int64, size int64) bool
+	// BlockingAllocate blocks until memory is available and then allocates
+	// This method will block until memory becomes available
+	BlockingAllocate(taskID int64, size int64)
 
 	// Release releases memory of the specified size
 	Release(taskID int64, size int64)
@@ -39,43 +53,46 @@ type memoryAllocator struct {
 	systemTotalMemory int64
 	usedMemory        int64
 	mutex             sync.RWMutex
+	cond              *sync.Cond
 }
 
 // NewMemoryAllocator creates a new MemoryAllocator instance
 func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	log.Info("new import memory allocator", zap.Int64("systemTotalMemory", systemTotalMemory))
 	ma := &memoryAllocator{
-		systemTotalMemory: int64(systemTotalMemory),
+		systemTotalMemory: systemTotalMemory,
 		usedMemory:        0,
 	}
+	ma.cond = sync.NewCond(&ma.mutex)
 	return ma
 }
 
-// TryAllocate attempts to allocate memory of the specified size
-func (ma *memoryAllocator) TryAllocate(taskID int64, size int64) bool {
+// BlockingAllocate blocks until memory is available and then allocates
+func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
 	ma.mutex.Lock()
 	defer ma.mutex.Unlock()
 
 	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
 	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
 
-	if ma.usedMemory+size > memoryLimit {
-		log.Info("memory allocation failed, insufficient memory",
+	// Wait until enough memory is available
+	for ma.usedMemory+size > memoryLimit {
+		log.Warn("task waiting for memory allocation...",
 			zap.Int64("taskID", taskID),
 			zap.Int64("requestedSize", size),
 			zap.Int64("usedMemory", ma.usedMemory),
 			zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-		return false
+
+		ma.cond.Wait()
 	}
 
+	// Allocate memory
 	ma.usedMemory += size
 	log.Info("memory allocated successfully",
 		zap.Int64("taskID", taskID),
 		zap.Int64("allocatedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory),
 		zap.Int64("availableMemory", memoryLimit-ma.usedMemory))
-
-	return true
 }
 
 // Release releases memory of the specified size
@@ -95,4 +112,7 @@ func (ma *memoryAllocator) Release(taskID int64, size int64) {
 		zap.Int64("taskID", taskID),
 		zap.Int64("releasedSize", size),
 		zap.Int64("usedMemory", ma.usedMemory))
+
+	// Wake up waiting tasks after memory is released
+	ma.cond.Broadcast()
 }

@@ -597,7 +597,7 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 			Value: metric.L2,
 		},
 		{
-			Key:   SearchParamsKey,
+			Key:   ParamsKey,
 			Value: `{"nprobe": 10}`,
 		},
 		{
@@ -3080,7 +3080,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		noMetricTypeParams := getBaseSearchParams()
 		noMetricTypeParams = append(noMetricTypeParams, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
+			Key:   ParamsKey,
 			Value: `{"nprobe": 10}`,
 		})
 
@@ -3226,7 +3226,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 
 		// no roundDecimal is valid
 		noRoundDecimal := append(spNoSearchParams, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
+			Key:   ParamsKey,
 			Value: `{"nprobe": 10}`,
 		})
 
@@ -3304,7 +3304,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 	})
 	t.Run("check range-search and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
-		resetSearchParamsValue(normalParam, SearchParamsKey, `{"nprobe": 10, "radius":0.2}`)
+		resetSearchParamsValue(normalParam, ParamsKey, `{"nprobe": 10, "radius":0.2}`)
 		normalParam = append(normalParam, &commonpb.KeyValuePair{
 			Key:   GroupByFieldKey,
 			Value: "string_field",

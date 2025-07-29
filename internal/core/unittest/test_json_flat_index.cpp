@@ -41,50 +41,6 @@
 using namespace milvus;
 
 namespace milvus::test {
-auto
-generate_field_meta(int64_t collection_id = 1,
-                    int64_t partition_id = 2,
-                    int64_t segment_id = 3,
-                    int64_t field_id = 101,
-                    DataType data_type = DataType::NONE,
-                    DataType element_type = DataType::NONE,
-                    bool nullable = false) -> storage::FieldDataMeta {
-    auto meta = storage::FieldDataMeta{
-        .collection_id = collection_id,
-        .partition_id = partition_id,
-        .segment_id = segment_id,
-        .field_id = field_id,
-    };
-    meta.field_schema.set_data_type(
-        static_cast<proto::schema::DataType>(data_type));
-    meta.field_schema.set_element_type(
-        static_cast<proto::schema::DataType>(element_type));
-    meta.field_schema.set_nullable(nullable);
-    return meta;
-}
-
-auto
-generate_index_meta(int64_t segment_id = 3,
-                    int64_t field_id = 101,
-                    int64_t index_build_id = 1000,
-                    int64_t index_version = 10000) -> storage::IndexMeta {
-    return storage::IndexMeta{
-        .segment_id = segment_id,
-        .field_id = field_id,
-        .build_id = index_build_id,
-        .index_version = index_version,
-    };
-}
-
-auto
-generate_local_storage_config(const std::string& root_path)
-    -> storage::StorageConfig {
-    auto ret = storage::StorageConfig{};
-    ret.storage_type = "local";
-    ret.root_path = root_path;
-    return ret;
-}
-
 struct ChunkManagerWrapper {
     ChunkManagerWrapper(storage::ChunkManagerPtr cm) : cm_(cm) {
     }
@@ -118,13 +74,13 @@ class JsonFlatIndexTest : public ::testing::Test {
         int64_t index_build_id = 4000;
         int64_t index_version = 4000;
 
-        field_meta_ = test::generate_field_meta(
+        field_meta_ = milvus::segcore::gen_field_meta(
             collection_id, partition_id, segment_id, field_id, DataType::JSON);
-        index_meta_ = test::generate_index_meta(
-            segment_id, field_id, index_build_id, index_version);
+        index_meta_ =
+            gen_index_meta(segment_id, field_id, index_build_id, index_version);
 
         std::string root_path = "/tmp/test-json-flat-index/";
-        auto storage_config = test::generate_local_storage_config(root_path);
+        auto storage_config = gen_local_storage_config(root_path);
         cm_ = storage::CreateChunkManager(storage_config);
 
         json_data_ = {

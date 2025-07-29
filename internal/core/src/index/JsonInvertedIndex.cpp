@@ -52,15 +52,13 @@ JsonInvertedIndex<T>::build_index_for_json(
         cast_type_,
         cast_function_,
         // add data
-        [this](const folly::fbvector<T>& values, int64_t offset) {
-            this->wrapper_->template add_array_data<T>(
-                values.data(), values.size(), offset);
+        [this](const T* data, int64_t size, int64_t offset) {
+            this->wrapper_->template add_array_data<T>(data, size, offset);
         },
         // handle null
-        [this](int64_t offset) {
-            this->null_offset_.push_back(offset);
-            this->wrapper_->template add_array_data<T>(nullptr, 0, offset);
-        },
+        [this](int64_t offset) { this->null_offset_.push_back(offset); },
+        // handle non exist
+        [this](int64_t offset) { this->non_exist_offsets_.push_back(offset); },
         // handle error
         [this](const Json& json,
                const std::string& nested_path,
@@ -69,6 +67,97 @@ JsonInvertedIndex<T>::build_index_for_json(
         });
 
     error_recorder_.PrintErrStats();
+}
+
+template <typename T>
+const TargetBitmap
+JsonInvertedIndex<T>::Exists() {
+    int64_t count = this->Count();
+    TargetBitmap bitset(count, true);
+
+    auto fill_bitset = [this, count, &bitset]() {
+        auto end = std::lower_bound(
+            non_exist_offsets_.begin(), non_exist_offsets_.end(), count);
+        for (auto iter = non_exist_offsets_.begin(); iter != end; ++iter) {
+            bitset.reset(*iter);
+        }
+    };
+
+    if (this->is_growing_) {
+        folly::SharedMutex::ReadHolder lock(this->mutex_);
+        fill_bitset();
+    } else {
+        fill_bitset();
+    }
+
+    return bitset;
+}
+
+template <typename T>
+void
+JsonInvertedIndex<T>::LoadIndexMetas(
+    const std::vector<std::string>& index_files, const Config& config) {
+    auto fill_non_exist_offset = [&](const uint8_t* data, int64_t size) {
+        non_exist_offsets_.resize((size_t)size / sizeof(size_t));
+        memcpy(non_exist_offsets_.data(), data, (size_t)size);
+    };
+    auto non_exist_offset_file_itr = std::find_if(
+        index_files.begin(), index_files.end(), [&](const std::string& file) {
+            return boost::filesystem::path(file).filename().string() ==
+                   INDEX_NON_EXIST_OFFSET_FILE_NAME;
+        });
+
+    if (non_exist_offset_file_itr != index_files.end()) {
+        // null offset file is not sliced
+        auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
+            {*non_exist_offset_file_itr}, config[milvus::LOAD_PRIORITY]);
+        auto non_exist_offset_data =
+            std::move(index_datas.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
+        fill_non_exist_offset(non_exist_offset_data->PayloadData(),
+                              non_exist_offset_data->PayloadSize());
+        return;
+    }
+    std::vector<std::string> non_exist_offset_files;
+    for (auto& file : index_files) {
+        auto file_name = boost::filesystem::path(file).filename().string();
+        if (file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+            std::string::npos) {
+            non_exist_offset_files.push_back(file);
+        }
+    }
+    if (non_exist_offset_files.size() > 0) {
+        // null offset file is sliced
+        auto index_datas = this->mem_file_manager_->LoadIndexToMemory(
+            non_exist_offset_files, config[milvus::LOAD_PRIORITY]);
+
+        auto non_exist_offset_data = CompactIndexDatas(index_datas);
+        auto non_exist_offset_data_codecs = std::move(
+            non_exist_offset_data.at(INDEX_NON_EXIST_OFFSET_FILE_NAME));
+        for (auto&& non_exist_offset_codec :
+             non_exist_offset_data_codecs.codecs_) {
+            fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
+                                  non_exist_offset_codec->PayloadSize());
+        }
+    }
+    InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
+}
+
+template <typename T>
+void
+JsonInvertedIndex<T>::RetainTantivyIndexFiles(
+    std::vector<std::string>& index_files) {
+    index_files.erase(
+        std::remove_if(
+            index_files.begin(),
+            index_files.end(),
+            [&](const std::string& file) {
+                auto file_name =
+                    boost::filesystem::path(file).filename().string();
+                return file_name.find(INDEX_NON_EXIST_OFFSET_FILE_NAME) !=
+                       std::string::npos;
+            }),
+        index_files.end());
+    InvertedIndexTantivy<T>::RetainTantivyIndexFiles(index_files);
 }
 
 template class JsonInvertedIndex<bool>;
