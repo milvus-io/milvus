@@ -41,13 +41,13 @@ ThreadPools::GetThreadPool(milvus::ThreadPoolPriority priority) {
         float coefficient = 1.0;
         switch (priority) {
             case milvus::ThreadPoolPriority::HIGH:
-                coefficient = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
+                coefficient = HIGH_PRIORITY_THREAD_CORE_COEFFICIENT.load();
                 break;
             case milvus::ThreadPoolPriority::MIDDLE:
-                coefficient = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+                coefficient = MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT.load();
                 break;
             default:
-                coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
+                coefficient = LOW_PRIORITY_THREAD_CORE_COEFFICIENT.load();
                 break;
         }
         std::string name = name_map()[priority];
