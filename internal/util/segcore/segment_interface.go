@@ -37,6 +37,11 @@ type SealedSegment interface {
 
 	// AddFieldDataInfo adds field data info into the segment.
 	AddFieldDataInfo(ctx context.Context, request *AddFieldDataInfoRequest) (*AddFieldDataInfoResult, error)
+
+	// DropIndex drops the index of the segment.
+	DropIndex(ctx context.Context, fieldID int64) error
+
+	DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error
 }
 
 // basicSegmentMethodSet is the basic method set of a segment.

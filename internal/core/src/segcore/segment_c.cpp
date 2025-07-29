@@ -595,6 +595,25 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
 }
 
 CStatus
+DropSealedSegmentJSONIndex(CSegmentInterface c_segment,
+                           int64_t field_id,
+                           const char* nested_path) {
+    SCOPE_CGO_CALL_METRIC();
+
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->DropJSONIndex(milvus::FieldId(field_id), nested_path);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 AddFieldDataInfoForSealed(CSegmentInterface c_segment,
                           CLoadFieldDataInfo c_load_field_data_info) {
     SCOPE_CGO_CALL_METRIC();

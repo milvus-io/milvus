@@ -889,6 +889,12 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
+		} else if segment.HasRawData(fieldID) {
+			// Lazy load raw data to avoid search failure after dropping index
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
+				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+				return err
+			}
 		}
 	}
 	complementScalarDataSpan := tr.RecordSpan()
