@@ -481,6 +481,10 @@ queryNode:
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
+      # Time in seconds after which an unaccessed cache cell will be evicted. 
+      # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
+      # If set to 0, time based eviction is disabled.
+      cacheTtl: 0
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
