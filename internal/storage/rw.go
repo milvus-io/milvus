@@ -242,9 +242,19 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 
 	binlogReaderOpts := []BinlogReaderOption{}
+	var pluginContext *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
 		if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID); ez != nil {
 			binlogReaderOpts = append(binlogReaderOpts, WithReaderDecryptionContext(ez.EzID, ez.CollectionID))
+
+			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+			if len(unsafe) > 0 {
+				pluginContext = &indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    string(unsafe),
+				}
+			}
 		}
 	}
 	switch rwOptions.version {
@@ -276,7 +286,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 				paths[j] = append(paths[j], logPath)
 			}
 		}
-		rr, err = newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig)
+		rr, err = newPackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext)
 	default:
 		return nil, merr.WrapErrServiceInternal(fmt.Sprintf("unsupported storage version %d", rwOptions.version))
 	}
@@ -310,7 +320,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	}
 
 	opts := []StreamWriterOption{}
-	pluginContext := &indexcgopb.StoragePluginContext{}
+	var pluginContext *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
 		if ez != nil {
@@ -322,9 +332,11 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 			if len(unsafe) > 0 {
-				pluginContext.EncryptionZoneId = ez.EzID
-				pluginContext.CollectionId = ez.CollectionID
-				pluginContext.EncryptionKey = string(unsafe)
+				pluginContext = &indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    string(unsafe),
+				}
 			}
 		}
 	}

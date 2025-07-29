@@ -53,6 +53,9 @@ public:
     virtual ~IDecryptor() = default;
     virtual std::string
     Decrypt(const std::string& ciphertext) = 0;
+
+    virtual std::string
+    GetKey() = 0;
 };
 
 

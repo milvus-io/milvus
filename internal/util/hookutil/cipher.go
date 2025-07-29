@@ -60,6 +60,7 @@ const (
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
 	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
+	CipherConfigUnsafeEZK      = "cipher.ezk"
 )
 
 type EZ struct {
@@ -78,6 +79,7 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 			zap.Any("insertCodec collID", collectionID),
 			zap.Any("properties", collProperties),
 		)
+		return nil
 	}
 	for _, property := range collProperties {
 		if property.Key == EncryptionEzIDKey {
@@ -91,14 +93,14 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 	return nil
 }
 
-func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) error {
 	if IsDBEncyptionEnabled(dbProperties) {
 		if !IsClusterEncyptionEnabled() {
-			return nil, ErrCipherPluginMissing
+			return ErrCipherPluginMissing
 		}
 		for _, property := range dbProperties {
 			if property.Key == EncryptionRootKeyKey {
-				return dbProperties, nil
+				return nil
 			}
 		}
 
@@ -108,7 +110,7 @@ func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) ([]*commonpb.
 			Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
 		})
 	}
-	return dbProperties, nil
+	return nil
 }
 
 func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {

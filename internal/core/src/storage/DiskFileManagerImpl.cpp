@@ -498,7 +498,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
                                                   GetFieldDataMeta().field_id,
                                                   data_type.value(),
                                                   dim,
-                                                  fs_);
+                                                  fs_,
+                                                  plugin_context_);
     for (auto& field_data : field_datas) {
         num_rows += uint32_t(field_data->get_num_rows());
         cache_raw_data_to_disk_common<T>(field_data,
