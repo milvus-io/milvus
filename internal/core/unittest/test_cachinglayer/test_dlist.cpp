@@ -641,7 +641,7 @@ TEST_F(DListTest, EvictedNodeDestroyed) {
     ASSERT_EQ(memory_after_eviction, usage2);
 
     // destroy node1 by removing its shared_ptr
-    // node1's destructor should not decrement used_memory_ again
+    // node1's destructor should not decrement used_resources_ again
     auto it = std::find_if(managed_nodes.begin(),
                            managed_nodes.end(),
                            [&](const auto& ptr) { return ptr.get() == node1; });
@@ -663,7 +663,7 @@ TEST_F(DListTest, NodeInListDestroyed) {
     ASSERT_EQ(memory_before_destroy, usage1 + usage2);
 
     // destroy node1 by removing its shared_ptr
-    // node1's destructor should decrement used_memory_ by node1->size() and remove node1 from the list
+    // node1's destructor should decrement used_resources_ by node1->size() and remove node1 from the list
     auto it = std::find_if(managed_nodes.begin(),
                            managed_nodes.end(),
                            [&](const auto& ptr) { return ptr.get() == node1; });
