@@ -29,6 +29,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
+#include "pb/common.pb.h"
 #ifdef AZURE_BUILD_DIR
 #include "storage/azure/AzureChunkManager.h"
 #endif
@@ -49,6 +50,7 @@
 #include "storage/ThreadPools.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/KeyRetriever.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "milvus-storage/format/parquet/file_reader.h"
@@ -1068,7 +1070,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs) {
+                           milvus_storage::ArrowFileSystemPtr fs, 
+                           std::shared_ptr<CPluginContext> plugin_context) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
@@ -1097,7 +1100,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 
     // find column offset
     milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
+        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs, plugin_context);
     size_t col_offset = -1;
     for (size_t i = 0; i < field_id_list.size(); ++i) {
         if (field_id_list.Get(i) == field_id) {
@@ -1130,7 +1133,10 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
         auto reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-            fs, column_group_file);
+            fs,
+            column_group_file,
+            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+            GetReaderProperties(plugin_context));
 
         auto row_group_num =
             reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1156,7 +1162,9 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
                                     std::move(strategy),
                                     row_group_lists,
-                                    nullptr);
+                                    nullptr,
+                                    milvus::proto::common::LoadPriority::HIGH,
+                                    plugin_context);
         });
         // read field data from channel
         std::shared_ptr<milvus::ArrowDataWrapper> r;
@@ -1233,14 +1241,17 @@ milvus_storage::FieldIDList
 GetFieldIDList(FieldId column_group_id,
                const std::string& filepath,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
-               milvus_storage::ArrowFileSystemPtr fs) {
+               milvus_storage::ArrowFileSystemPtr fs,
+               std::shared_ptr<CPluginContext> plugin_context) {
     milvus_storage::FieldIDList field_id_list;
     if (column_group_id >= FieldId(START_USER_FIELDID)) {
         field_id_list.Add(column_group_id.get());
         return field_id_list;
     }
     auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
-        fs, filepath, arrow_schema);
+        fs, filepath, arrow_schema,
+        milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+        GetReaderProperties(plugin_context));
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());

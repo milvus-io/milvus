@@ -72,13 +72,16 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	var cPackedWriter C.CPackedWriter
 	var status C.CStatus
 
-	var pluginContext C.CPluginContext
+	var pluginContextPtr *C.CPluginContext
 	if storagePluginContext != nil {
 		ckey := C.CString(storagePluginContext.EncryptionKey)
 		defer C.free(unsafe.Pointer(ckey))
+
+		var pluginContext C.CPluginContext
 		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
 		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
 		pluginContext.key = ckey
+		pluginContextPtr = &pluginContext
 	}
 
 	if storageConfig != nil {
@@ -113,9 +116,9 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter, pluginContext)
+		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter, pluginContextPtr)
 	} else {
-		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContext)
+		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

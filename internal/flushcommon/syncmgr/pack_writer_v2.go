@@ -148,20 +148,23 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 
 	bucketName := paramtable.Get().ServiceParam.MinioCfg.BucketName.GetValue()
 
-	pluginContext := &indexcgopb.StoragePluginContext{}
+	var pluginContextPtr *indexcgopb.StoragePluginContext
 	if hookutil.IsClusterEncyptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(bw.schema.GetProperties(), pack.collectionID)
 		if ez != nil {
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
 			if len(unsafe) > 0 {
-				pluginContext.EncryptionZoneId = ez.EzID
-				pluginContext.CollectionId = ez.CollectionID
-				pluginContext.EncryptionKey = string(unsafe)
+				pluginContext := indexcgopb.StoragePluginContext{
+					EncryptionZoneId: ez.EzID,
+					CollectionId:     ez.CollectionID,
+					EncryptionKey:    string(unsafe),
+				}
+				pluginContextPtr = &pluginContext
 			}
 		}
 	}
 
-	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContext)
+	w, err := storage.NewPackedRecordWriter(bucketName, paths, bw.schema, bw.bufferSize, bw.multiPartUploadSize, columnGroups, bw.storageConfig, pluginContextPtr)
 	if err != nil {
 		return nil, err
 	}

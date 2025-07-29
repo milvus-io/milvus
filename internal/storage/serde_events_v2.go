@@ -47,10 +47,11 @@ type packedRecordReader struct {
 	chunk  int
 	reader *packed.PackedReader
 
-	bufferSize    int64
-	arrowSchema   *arrow.Schema
-	field2Col     map[FieldID]int
-	storageConfig *indexpb.StorageConfig
+	bufferSize           int64
+	arrowSchema          *arrow.Schema
+	field2Col            map[FieldID]int
+	storageConfig        *indexpb.StorageConfig
+	storagePluginContext *indexcgopb.StoragePluginContext
 }
 
 var _ RecordReader = (*packedRecordReader)(nil)
@@ -66,10 +67,10 @@ func (pr *packedRecordReader) iterateNextBatch() error {
 		return io.EOF
 	}
 
-	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize, pr.storageConfig)
+	reader, err := packed.NewPackedReader(pr.paths[pr.chunk], pr.arrowSchema, pr.bufferSize, pr.storageConfig, pr.storagePluginContext)
 	pr.chunk++
 	if err != nil {
-		return merr.WrapErrParameterInvalid("New binlog record packed reader error: %s", err.Error())
+		return errors.Newf("New binlog record packed reader error: %w", err)
 	}
 	pr.reader = reader
 	return nil
@@ -108,7 +109,7 @@ func (pr *packedRecordReader) Close() error {
 	return nil
 }
 
-func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig,
+func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema)
 	if err != nil {
@@ -119,18 +120,20 @@ func newPackedRecordReader(paths [][]string, schema *schemapb.CollectionSchema, 
 		field2Col[field.FieldID] = i
 	}
 	return &packedRecordReader{
-		paths:         paths,
-		bufferSize:    bufferSize,
-		arrowSchema:   arrowSchema,
-		field2Col:     field2Col,
-		storageConfig: storageConfig,
+		paths:                paths,
+		bufferSize:           bufferSize,
+		arrowSchema:          arrowSchema,
+		field2Col:            field2Col,
+		storageConfig:        storageConfig,
+		storagePluginContext: storagePluginContext,
 	}, nil
 }
 
+// Deprecated
 func NewPackedDeserializeReader(paths [][]string, schema *schemapb.CollectionSchema,
 	bufferSize int64, shouldCopy bool,
 ) (*DeserializeReaderImpl[*Value], error) {
-	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil)
+	reader, err := newPackedRecordReader(paths, schema, bufferSize, nil, nil)
 	if err != nil {
 		return nil, err
 	}
