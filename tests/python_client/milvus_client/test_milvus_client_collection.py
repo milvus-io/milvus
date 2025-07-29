@@ -213,6 +213,42 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "metric type not found or not supported, supported: [L2 IP COSINE HAMMING JACCARD]"}
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_empty_fields(self):
+        """
+        target: test create collection with empty fields
+        method: create collection with schema that has no fields
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create an empty schema (no fields added)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_dup_field(self):
+        """
+        target: test create collection with duplicate field names
+        method: create schema with two fields having the same name
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with duplicate field names
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("int64_field", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("int64_field", DataType.INT64)
+        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
+
+        error = {ct.err_code: 1100, ct.err_msg: "duplicated field name"}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
+        has_collection = self.has_collection(client, collection_name)[0]
+        assert not has_collection
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_add_field_as_primary(self):
@@ -802,28 +838,28 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_dup_name_drop(self):
         """
-        target: test create duplicate collection and drop
-        method: 1. create collection with default params
-                2. create same collection again
-                3. drop collection and verify deletion
-        expected: duplicate creation succeeds, collection remains single instance, drop operation succeeds
+        target: test collection with dup name, and drop
+        method: 1. create collection with client1
+                2. create collection with client2 with same name
+                3. use client2 to drop collection
+                4. verify collection is dropped and client1 operations fail
+        expected: collection is successfully dropped and subsequent operations from the first client should fail with collection not found error
         """
-        client = self._client()
+        client1 = self._client(alias="client1")
+        client2 = self._client(alias="client2") 
         collection_name = cf.gen_collection_name_by_testcase_name()
-        # 1. Create collection
-        self.create_collection(client, collection_name, default_dim)
-        # 2. Create collection with same default params
-        self.create_collection(client, collection_name, default_dim)
-        collections = self.list_collections(client)[0]
-        assert collection_name in collections
+        # 1. Create collection with client1
+        self.create_collection(client1, collection_name, default_dim)
+        # 2. Create collection with client2 using same name
+        self.create_collection(client2, collection_name, default_dim)
         # 3. Use client2 to drop collection
-        self.drop_collection(client, collection_name)
+        self.drop_collection(client2, collection_name)
         # 4. Verify collection is deleted
-        has_collection = self.has_collection(client, collection_name)[0]
+        has_collection = self.has_collection(client1, collection_name)[0]
         assert not has_collection
         error = {ct.err_code: 100, ct.err_msg:  f"can't find collection[database=default]"
                                                 f"[collection={collection_name}]"}
-        self.describe_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
+        self.describe_collection(client1, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_long_desc(self):
@@ -929,11 +965,7 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
         """
         client = self._client()
         # Set different error messages based on collection_name value
-        if collection_name == '':
-            expected_msg = 'collection_name value  is illegal'
-        elif collection_name is None:
-            expected_msg = 'collection_name value None is illegal'
-        error = {ct.err_code: 1, ct.err_msg: expected_msg}
+        error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
         self.drop_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
 class TestMilvusClientReleaseCollectionInvalid(TestMilvusClientV2Base):

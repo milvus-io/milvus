@@ -66,170 +66,6 @@ class TestCollectionParams(TestcaseBase):
     def get_invalid_dim(self, request):
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection(self):
-        """
-        target: test collection with default schema
-        method: create collection with default schema
-        expected: assert collection property
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        self.collection_wrap.init_collection(c_name, schema=default_schema,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema, exp_num: 0,
-                                                          exp_primary: ct.default_int64_field_name})
-        assert c_name in self.utility_wrap.list_collections()[0]
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("name", ct.valid_resource_names)
-    def test_collection_naming_rules(self, name):
-        """
-        target: test collection with valid name
-        method: 1. connect milvus
-                2. Create a field with a name which uses all the supported elements in the naming rules
-                3. Create a collection with a name which uses all the supported elements in the naming rules
-        expected: Collection created successfully
-        """
-        self._connect()
-        fields = [cf.gen_int64_field(), cf.gen_int64_field("_1nt"), cf.gen_float_vec_field("f10at_")]
-        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_int64_field_name)
-        self.collection_wrap.init_collection(name, schema=schema,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: name, exp_schema: schema})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("name", ct.invalid_resource_names)
-    def test_collection_invalid_name(self, name):
-        """
-        target: test collection with invalid name
-        method: create collection with invalid name
-        expected: raise exception
-        """
-        self._connect()
-        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {name}"}
-        if name in [None]:
-            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {name} is illegal"}
-        if name in [""]:
-            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value  is illegal"}
-        self.collection_wrap.init_collection(name, schema=default_schema, check_task=CheckTasks.err_res,
-                                             check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_dup_name(self):
-        """
-        target: test collection with dup name
-        method: create collection with dup name and none schema and data
-        expected: collection properties consistent
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        self.collection_wrap.init_collection(collection_w.name)
-        assert collection_w.name == self.collection_wrap.name
-        assert collection_w.schema == self.collection_wrap.schema
-        assert collection_w.num_entities == self.collection_wrap.num_entities
-        assert collection_w.name in self.utility_wrap.list_collections()[0]
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_dup_name_with_desc(self):
-        """
-        target: test collection with dup name
-        method: 1. default schema with desc 2. dup name collection
-        expected: desc consistent
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(description=ct.collection_desc)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: schema})
-        self.collection_wrap.init_collection(c_name,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: schema})
-        assert collection_w.description == self.collection_wrap.description
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_new_schema(self):
-        """
-        target: test collection with dup name and new schema
-        method: 1.create collection with default schema
-                2. collection with dup name and new schema
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
-                                  check_items={exp_name: c_name, exp_schema: default_schema})
-        fields = [cf.gen_int64_field(is_primary=True)]
-        schema = cf.gen_collection_schema(fields=fields)
-        error = {ct.err_code: 999, ct.err_msg: "The collection already exist, but the schema is not the same as the "
-                                               "schema passed in."}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_dup_name_new_primary(self):
-        """
-        target: test collection with dup name and new primary_field schema
-        method: 1.collection with default schema
-                2. collection with same fields and new primary_field schema
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        int_field_one = cf.gen_int64_field()
-        int_field_two = cf.gen_int64_field(name="int2")
-        fields = [int_field_one, int_field_two, cf.gen_float_vec_field()]
-        schema = cf.gen_collection_schema(fields, primary_field=int_field_one.name)
-        collection_w = self.init_collection_wrap(name=c_name, schema=schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: schema,
-                                                              exp_primary: int_field_one.name})
-        new_schema = cf.gen_collection_schema(fields, primary_field=int_field_two.name)
-        error = {ct.err_code: 0, ct.err_msg: "The collection already exist, but the schema is not the same as the "
-                                             "schema passed in."}
-        self.collection_wrap.init_collection(c_name, schema=new_schema, check_task=CheckTasks.err_res,
-                                             check_items=error)
-        assert collection_w.primary_field.name == int_field_one.name
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_new_dim(self):
-        """
-        target: test collection with dup name and new dim schema
-        method: 1. default schema 2. schema with new dim
-        expected: raise exception
-        """
-        self._connect()
-        new_dim = 120
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        schema = cf.gen_default_collection_schema()
-        new_fields = cf.gen_float_vec_field(dim=new_dim)
-        schema.fields[-1] = new_fields
-        error = {ct.err_code: 0, ct.err_msg: "The collection already exist, but the schema is not the same as the "
-                                             "schema passed in."}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-        dim = collection_w.schema.fields[-1].params['dim']
-        assert dim == ct.default_dim
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_invalid_schema_multi_pk(self):
-        """
-        target: test collection with a schema with 2 pk fields
-        method: create collection with non-CollectionSchema type schema
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        field1, _ = self.field_schema_wrap.init_field_schema(name="field1", dtype=DataType.INT64, is_primary=True)
-        field2, _ = self.field_schema_wrap.init_field_schema(name="field2", dtype=DataType.INT64, is_primary=True)
-        vector_field = cf.gen_float_vec_field(dim=32)
-        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
-        self.collection_schema_wrap.init_collection_schema(fields=[field1, field2, vector_field],
-                                                           check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_invalid_schema_type(self):
         """
@@ -243,23 +79,6 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "Schema type must be schema.CollectionSchema"}
         self.collection_wrap.init_collection(c_name, schema=field,
                                              check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_same_schema(self):
-        """
-        target: test collection with dup name and same schema
-        method: dup name and same schema
-        expected: two collection object is available
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        self.collection_wrap.init_collection(name=c_name, schema=default_schema,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema})
-        assert collection_w.name == self.collection_wrap.name
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_none_schema(self):
@@ -275,22 +94,6 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_field_name", ct.invalid_resource_names)
-    def test_collection_invalid_field_name(self, invalid_field_name):
-        """
-        target: test collection with invalid field name
-        method: invalid string name
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        field, _ = self.field_schema_wrap.init_field_schema(name=invalid_field_name, dtype=DataType.INT64, is_primary=True)
-        vec_field = cf.gen_float_vec_field()
-        schema = cf.gen_collection_schema(fields=[field, vec_field])
-        error = {ct.err_code: 999, ct.err_msg: f"field name invalid"}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dtype", [6, [[]], "int64", 5.1, (), "", "a", DataType.UNKNOWN])
     def test_collection_invalid_field_type(self, dtype):
         """
@@ -302,34 +105,6 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: 999, ct.err_msg: "Field dtype must be of DataType"}
         self.field_schema_wrap.init_field_schema(name="test", dtype=dtype, is_primary=True,
                                                  check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_empty_fields(self):
-        """
-        target: test collection with empty fields
-        method: create collection with fields = []
-        expected: exception
-        """
-        self._connect()
-        error = {ct.err_code: 999, ct.err_msg: "Schema must have a primary key field."}
-        self.collection_schema_wrap.init_collection_schema(fields=[], primary_field=ct.default_int64_field_name,
-                                                           check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_field(self):
-        """
-        target: test collection with dup field name
-        method: Two FieldSchema have same name
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        field_one = cf.gen_int64_field(is_primary=True)
-        field_two = cf.gen_int64_field()
-        schema = cf.gen_collection_schema(fields=[field_one, field_two, cf.gen_float_vec_field()])
-        error = {ct.err_code: 1, ct.err_msg: "duplicated field name"}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-        assert not self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("field", [cf.gen_float_vec_field(), cf.gen_binary_vec_field()])
@@ -753,34 +528,6 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_none_desc(self):
-        """
-        target: test collection with none description
-        method: create with none description
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        schema = cf.gen_default_collection_schema(description=None)
-        error = {ct.err_code: 1, ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str"}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_long_desc(self):
-        """
-        target: test collection with long desc
-        method: create with long desc
-        expected:
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        desc = "a".join("a" for _ in range(256))
-        schema = cf.gen_default_collection_schema(description=desc)
-        self.collection_wrap.init_collection(c_name, schema=schema,
-                                             check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: schema})
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_binary(self):
         """
@@ -1108,25 +855,6 @@ class TestCollectionOperation(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
             self.collection_wrap.drop()
             assert c_name not in self.utility_wrap.list_collections()[0]
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_dup_name_drop(self):
-        """
-        target: test collection with dup name, and drop
-        method: 1. two dup name collection object
-                2. one object drop collection
-        expected: collection dropped
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        self.collection_wrap.init_collection(c_name, check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: default_schema})
-        self.collection_wrap.drop()
-        assert not self.utility_wrap.has_collection(c_name)[0]
-        error = {ct.err_code: 4, ct.err_msg: 'collection not found'}
-        collection_w.has_partition("p", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_after_drop(self):
@@ -1971,22 +1699,6 @@ class TestDropCollection(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
         collection_wr.drop(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_drop_collection_not_existed(self):
-        """
-        target: test if collection not created
-        method: random a collection name, which not existed in db,
-                assert the exception raised returned by drp_collection method
-        expected: False
-        """
-        self._connect()
-        c_name = cf.gen_unique_str()
-        self.init_collection_wrap(name=c_name)
-        c_name_2 = cf.gen_unique_str()
-        # error = {ct.err_code: 0, ct.err_msg: 'DescribeCollection failed: collection not found: %s' % c_name_2}
-        # self.utility_wrap.drop_collection(c_name_2, check_task=CheckTasks.err_res, check_items=error)
-        # @longjiquan: dropping collection should be idempotent.
-        self.utility_wrap.drop_collection(c_name_2)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_drop_collection_multithread(self):
@@ -2022,31 +1734,6 @@ class TestDropCollectionInvalid(TestcaseBase):
     """
     Test drop collection with invalid params
     """
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
-    def test_drop_collection_with_invalid_collection_name(self, name):
-        """
-        target: test drop invalid collection
-        method: drop collection with invalid collection name
-        expected: raise exception
-        """
-        self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(name)}
-        self.utility_wrap.drop_collection(name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_collection_with_empty_or_None_collection_name(self):
-        """
-        target: test drop invalid collection
-        method: drop collection with empty or None collection name
-        expected: raise exception
-        """
-        self._connect()
-        error = {ct.err_code: -1, ct.err_msg: '`collection_name` value  is illegal'}
-        self.utility_wrap.drop_collection('', check_task=CheckTasks.err_res, check_items=error)
-        error_none = {ct.err_code: -1, ct.err_msg: '`collection_name` value None is illegal'}
-        self.utility_wrap.drop_collection(None, check_task=CheckTasks.err_res, check_items=error_none)
 
 
 class TestHasCollection(TestcaseBase):
