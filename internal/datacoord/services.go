@@ -630,9 +630,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	log.Info("SaveBinlogPaths sync segment with meta",
-		zap.Any("binlogs", req.GetField2BinlogPaths()),
-		zap.Any("deltalogs", req.GetDeltalogs()),
-		zap.Any("statslogs", req.GetField2StatslogPaths()),
+		zap.Any("checkpoints", req.GetCheckPoints()),
+		zap.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
+		zap.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
+		zap.Strings("statslogs", stringifyBinlogs(req.GetField2StatslogPaths())),
+		zap.Strings("bm25logs", stringifyBinlogs(req.GetField2Bm25LogPaths())),
 	)
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {

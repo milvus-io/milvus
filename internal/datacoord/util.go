@@ -410,3 +410,23 @@ func calculateStatsTaskSlot(segmentSize int64) int64 {
 func enableSortCompaction() bool {
 	return paramtable.Get().DataCoordCfg.EnableSortCompaction.GetAsBool() && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool()
 }
+
+// stringifyBinlogs is used for logging, it's not used for other purposes.
+func stringifyBinlogs(binlogs []*datapb.FieldBinlog) []string {
+	strs := make([]string, 0, len(binlogs))
+	byIDs := lo.GroupBy(binlogs, func(binlog *datapb.FieldBinlog) int64 {
+		return binlog.GetFieldID()
+	})
+	for _, binlogs := range byIDs {
+		fieldsStrs := make([]string, 0, len(binlogs))
+		for _, binlog := range binlogs {
+			for _, b := range binlog.GetBinlogs() {
+				fieldsStrs = append(fieldsStrs,
+					fmt.Sprintf("l%d(e%d,m%d,t%d-%d)", b.LogID, b.EntriesNum, b.MemorySize, b.TimestampFrom, b.TimestampTo),
+				)
+			}
+		}
+		strs = append(strs, fmt.Sprintf("f%d:%s", binlogs[0].GetFieldID(), strings.Join(fieldsStrs, "|")))
+	}
+	return strs
+}

@@ -516,7 +516,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 		},
 		CheckPoints: []*datapb.CheckPoint{
 			{
-				SegmentID: 1,
+				SegmentID: 3,
 				Position: &msgpb.MsgPosition{
 					ChannelName: "ch1",
 					MsgID:       []byte{1, 2, 3},
@@ -592,7 +592,49 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 		},
 		CheckPoints: []*datapb.CheckPoint{
 			{
-				SegmentID: 1,
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   1,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(3, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[2].GetLogPath())
+	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:           3,
+		CollectionID:        0,
+		Channel:             "ch1",
+		Field2BinlogPaths:   []*datapb.FieldBinlog{},
+		Field2StatslogPaths: []*datapb.FieldBinlog{},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
 				Position: &msgpb.MsgPosition{
 					ChannelName: "ch1",
 					MsgID:       []byte{1, 2, 3},

@@ -1043,11 +1043,22 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25l
 func UpdateBinlogsFromSaveBinlogPathsOperator(segmentID int64, binlogs, statslogs, deltalogs, bm25logs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		modPack.fromSaveBinlogPathSegmentID = segmentID
-		if !UpdateBinlogsOperator(segmentID, binlogs, statslogs, deltalogs, bm25logs)(modPack) {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Ctx(context.TODO()).Warn("meta update: update binlog failed - segment not found",
+				zap.Int64("segmentID", segmentID))
 			return false
 		}
-		if segment := modPack.Get(segmentID); segment != nil && len(deltalogs) > 0 {
+
+		segment.Binlogs = mergeFieldBinlogs(nil, binlogs)
+		segment.Statslogs = mergeFieldBinlogs(nil, statslogs)
+		segment.Deltalogs = mergeFieldBinlogs(nil, deltalogs)
+		if len(deltalogs) > 0 {
 			segment.deltaRowcount.Store(-1)
+		}
+		segment.Bm25Statslogs = mergeFieldBinlogs(nil, bm25logs)
+		modPack.increments[segmentID] = metastore.BinlogsIncrement{
+			Segment: segment.SegmentInfo,
 		}
 		return true
 	}
@@ -1111,6 +1122,8 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 				continue
 			}
 
+			// add skipDmlPositionCheck to skip this check, the check will be done at updateSegmentPack's Validate() to fail the full meta operation
+			// but not only filter the checkpoint update.
 			if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp && (len(skipDmlPositionCheck) == 0 || !skipDmlPositionCheck[0]) {
 				log.Ctx(context.TODO()).Warn("checkpoint in segment is larger than reported", zap.Any("current", segment.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
 				// segment position in etcd is larger than checkpoint, then dont change it
