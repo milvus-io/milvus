@@ -195,6 +195,8 @@ func (bw *BulkPackWriter) writeInserts(ctx context.Context, pack *SyncPack) (map
 
 func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.insertData) == 0 {
+		// TODO: we should not skip here, if the flush operation don't carry any insert data,
+		// the merge stats operation will be skipped, which is a bad case.
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
 	serializer, err := NewStorageSerializer(bw.metaCache, bw.schema)
@@ -242,6 +244,8 @@ func (bw *BulkPackWriter) writeStats(ctx context.Context, pack *SyncPack) (map[i
 
 func (bw *BulkPackWriter) writeBM25Stasts(ctx context.Context, pack *SyncPack) (map[int64]*datapb.FieldBinlog, error) {
 	if len(pack.bm25Stats) == 0 {
+		// TODO: we should not skip here, if the flush operation don't carry any insert data,
+		// the merge stats operation will be skipped, which is a bad case.
 		return make(map[int64]*datapb.FieldBinlog), nil
 	}
 
