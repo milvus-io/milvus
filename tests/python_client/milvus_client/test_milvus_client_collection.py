@@ -460,6 +460,48 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_create_collection_dup_name_same_schema(self):
+        """
+        target: test create collection with dup name and same schema
+        method: create collection with dup name and same schema
+        expected: two collection object is available and properties consistent
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        description = "test collection description"
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False, description=description)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("float_field", DataType.FLOAT)
+        schema.add_field("varchar_field", DataType.VARCHAR, max_length=100)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
+        # 1. Create collection with specific schema
+        self.create_collection(client, collection_name, schema=schema)
+        # Get first collection info
+        collection_info_1 = self.describe_collection(client, collection_name)[0]
+        description_1 = collection_info_1.get("description", "")
+        # 2. Create collection again with same name and same schema
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection still exists and properties are consistent
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        # Get second collection info and compare
+        collection_info_2 = self.describe_collection(client, collection_name)[0]
+        description_2 = collection_info_2.get("description", "")
+        # Verify collection properties are consistent
+        assert collection_info_1["collection_name"] == collection_info_2["collection_name"]
+        assert description_1 == description_2 == description
+        assert len(collection_info_1["fields"]) == len(collection_info_2["fields"])
+        # Verify field names and types are the same
+        fields_1 = {field["name"]: field["type"] for field in collection_info_1["fields"]}
+        fields_2 = {field["name"]: field["type"] for field in collection_info_2["fields"]}
+        assert fields_1 == fields_2
+        collection_count = collections.count(collection_name)
+        assert collection_count == 1, f"Expected only 1 collection named '{collection_name}', but found {collection_count}"
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_array_insert_search(self):
         """
         target: test search (high level api) normal case
@@ -888,9 +930,9 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         # Set different error messages based on collection_name value
         if collection_name == '':
-            expected_msg = '`collection_name` value  is illegal'
+            expected_msg = 'collection_name value  is illegal'
         elif collection_name is None:
-            expected_msg = '`collection_name` value None is illegal'
+            expected_msg = 'collection_name value None is illegal'
         error = {ct.err_code: 1, ct.err_msg: expected_msg}
         self.drop_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
