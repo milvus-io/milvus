@@ -573,8 +573,8 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    ASSERT_EQ(segment->GetIndex(double_id).size(), 0);
+    ASSERT_EQ(segment->GetIndex(str_id).size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
@@ -737,8 +737,8 @@ TEST(Sealed, ClearData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    ASSERT_EQ(segment->GetIndex(double_id).size(), 0);
+    ASSERT_EQ(segment->GetIndex(str_id).size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
@@ -842,8 +842,8 @@ TEST(Sealed, LoadFieldDataMmap) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(fakevec_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    ASSERT_EQ(segment->GetIndex(double_id).size(), 0);
+    ASSERT_EQ(segment->GetIndex(str_id).size(), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 =
