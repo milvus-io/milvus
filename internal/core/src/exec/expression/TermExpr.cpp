@@ -207,27 +207,16 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         InitPkCacheOffset();
     }
 
-    auto real_batch_size =
-        current_data_chunk_pos_ + batch_size_ >= active_count_
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
-
+    auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
-    auto current_chunk_view =
-        cached_bits_.view(current_data_chunk_pos_, real_batch_size);
-    res |= current_chunk_view;
-    current_data_chunk_pos_ += real_batch_size;
-
-    return res_vec;
+    TargetBitmap result;
+    result.append(cached_bits_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename ValueType>
