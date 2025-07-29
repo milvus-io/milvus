@@ -1481,7 +1481,9 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         return fill_with_empty(field_id, count);
     }
 
-    if (HasFieldData(field_id)) {
+    // hold field shared_ptr here, preventing field got destroyed
+    auto [field, exist] = GetFieldDataIfExist(field_id);
+    if (exist) {
         Assert(get_bit(field_data_ready_bitset_, field_id));
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
@@ -1564,6 +1566,24 @@ ChunkedSegmentSealedImpl::HasFieldData(FieldId field_id) const {
     } else {
         return get_bit(field_data_ready_bitset_, field_id);
     }
+}
+
+std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
+ChunkedSegmentSealedImpl::GetFieldDataIfExist(FieldId field_id) const {
+    std::shared_lock lck(mutex_);
+    bool exists;
+    if (SystemProperty::Instance().IsSystem(field_id)) {
+        exists = is_system_field_ready();
+    } else {
+        exists = get_bit(field_data_ready_bitset_, field_id);
+    }
+    if (!exists) {
+        return {nullptr, false};
+    }
+    AssertInfo(fields_.find(field_id) != fields_.end(),
+               "field {} must exist if bitset is set",
+               field_id.get());
+    return {fields_.at(field_id), exists};
 }
 
 bool
