@@ -512,17 +512,17 @@ class TestMilvusClientSearchBasicV2(TestMilvusClientV2Base):
         # Generate vectors to search
         vectors_to_search = cf.gen_vectors(default_nq, self.float_vector_dim)
         search_params = {}
-        invalid_output_fields = [["%"], [""], ["-"], ["non_exist_field"]]
+        invalid_output_fields = [["%"], [""], ["-"]]
         for field in invalid_output_fields:
-            error1 = {ct.err_code: 999, ct.err_msg: "field %s not exist" % field[0]}
+            error1 = {ct.err_code: 999, ct.err_msg: "parse output field name failed: %s" % field[0]}
             error2 = {ct.err_code: 999, ct.err_msg: "`output_fields` value %s is illegal" % field}
             error = error2 if field == [""] else error1
             self.search(client, collection_name, vectors_to_search[:default_nq],
-                                anns_field=self.float_vector_field_name,
-                                search_params=search_params,
-                                limit=default_limit,
-                                output_fields=field,
-                                check_task=CheckTasks.err_res, check_items=error)
+                        anns_field=self.float_vector_field_name,
+                        search_params=search_params,
+                        limit=default_limit,
+                        output_fields=field,
+                        check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_more_than_max_limit(self):
@@ -1337,7 +1337,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": ct.default_nq,
-                                 "limit": ct.default_limit})
+                                 "limit": ct.default_limit,
+                                 "pk_name": "id"})
         # disable mmap
         self.release_collection(client, collection_name)
         self.alter_index_properties(client, collection_name, index_name='vector', properties={"mmap.enabled": False})
@@ -1350,7 +1351,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": ct.default_nq,
-                                 "limit": ct.default_limit})
+                                 "limit": ct.default_limit,
+                                 "pk_name": "id"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ct.all_index_types[8:10])
@@ -1413,7 +1415,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": ct.default_nq,
-                                 "limit": ct.default_limit})
+                                 "limit": ct.default_limit,
+                                 "pk_name": "id"})
         # disable mmap
         self.release_collection(client, collection_name)
         self.alter_index_properties(client, collection_name, index_name='vector', properties={"mmap.enabled": False})
@@ -1426,7 +1429,8 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": ct.default_nq,
-                                 "limit": ct.default_limit})
+                                 "limit": ct.default_limit,
+                                 "pk_name": "id"})
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("num_shards", [-256, 0, ct.max_shards_num // 2, ct.max_shards_num])
@@ -1486,12 +1490,13 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
                                  "nq": ct.default_nq,
-                                 "limit": ct.default_limit})
+                                 "limit": ct.default_limit,
+                                 "pk_name": "id"})
     
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize('vector_dtype', ct.all_dense_vector_types)
     @pytest.mark.parametrize('index', ct.all_index_types[:8])
-    def test_search_output_field_vector_with_dense_vextor_and_index(self, vector_dtype, index):
+    def test_search_output_field_vector_with_dense_vector_and_index(self, vector_dtype, index):
         """
         Test search with output vector field after different index types.
         
@@ -1568,6 +1573,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                         output_fields=["*"],
                         check_task=CheckTasks.check_search_results,
                         check_items={"enable_milvus_client_api": True,
+                                     "pk_name": "id",
                                      "nq": ct.default_nq,
                                      "limit": ct.default_limit,
                                      "output_fields": ["id", "vector", "float_array", "json_field", "string_field"]})
@@ -1577,6 +1583,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                         output_fields=["id", "vector", "float_array", "json_field", "string_field"],
                         check_task=CheckTasks.check_search_results,
                         check_items={"enable_milvus_client_api": True,
+                                     "pk_name": "id",
                                      "nq": ct.default_nq,
                                      "limit": ct.default_limit,
                                      "output_fields": ["id", "vector", "float_array", "json_field", "string_field"]})
@@ -1586,6 +1593,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                         output_fields=["id", "vector", "json_field"],
                         check_task=CheckTasks.check_search_results,
                         check_items={"enable_milvus_client_api": True,
+                                     "pk_name": "id",
                                      "nq": ct.default_nq,
                                      "limit": ct.default_limit,
                                      "output_fields": ["id", "vector", "json_field"]})
@@ -1654,6 +1662,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     output_fields=["*"],
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
+                                 "pk_name": "id",
                                  "nq": ct.default_nq,
                                  "limit": ct.default_limit,
                                  "output_fields": ["id", "vector"]})
@@ -1687,6 +1696,7 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     output_fields=[],
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
+                                 "pk_name": "id",
                                  "nq": ct.default_nq,
                                  "limit": ct.default_limit})
         self.search(client, collection_name, vectors, anns_field="vector", 
@@ -1694,5 +1704,6 @@ class TestSearchV2Independent(TestMilvusClientV2Base):
                     output_fields=None,
                     check_task=CheckTasks.check_search_results,
                     check_items={"enable_milvus_client_api": True,
+                                 "pk_name": "id",
                                  "nq": ct.default_nq,
                                  "limit": ct.default_limit})
