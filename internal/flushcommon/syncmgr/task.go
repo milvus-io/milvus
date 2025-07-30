@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -78,10 +79,8 @@ type SyncTask struct {
 
 	tr *timerecord.TimeRecorder
 
-	flushedSize         int64
-	execTime            time.Duration
-	multiPartUploadSize int64
-	syncBufferSize      int64
+	flushedSize int64
+	execTime    time.Duration
 
 	// storage config used in pooled tasks, optional
 	// use singleton config for non-pooled tasks
@@ -131,8 +130,9 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	switch segmentInfo.GetStorageVersion() {
 	case storage.StorageV2:
-		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, t.syncBufferSize,
-			t.multiPartUploadSize, t.storageConfig, t.writeRetryOpts...)
+		// New sync task means needs to flush data immediately, so do not need to buffer data in writer again.
+		writer := NewBulkPackWriterV2(t.metacache, t.schema, t.chunkManager, t.allocator, 0,
+			packed.DefaultMultiPartUploadSize, t.storageConfig, t.writeRetryOpts...)
 		t.insertBinlogs, t.deltaBinlog, t.statsBinlogs, t.bm25Binlogs, t.flushedSize, err = writer.Write(ctx, t.pack)
 		if err != nil {
 			log.Warn("failed to write sync data with storage v2 format", zap.Error(err))

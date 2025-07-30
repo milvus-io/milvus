@@ -168,7 +168,7 @@ func (s *PackedBinlogRecordSuite) TestPackedBinlogRecordIntegration() {
 
 	s.Equal(len(bm25StatsLog), 0)
 
-	binlogs := lo.Values(fieldBinlogs)
+	binlogs := SortFieldBinlogs(fieldBinlogs)
 	rOption := []RwOption{
 		WithVersion(StorageV2),
 		WithStorageConfig(s.storageConfig),
