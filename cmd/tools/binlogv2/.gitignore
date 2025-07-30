@@ -1,0 +1,44 @@
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+**/.pytest_cache
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and output files
+*.log
+nohup.out
+logs/
+test_out/
+
+# Data files
+*idmap*.txt
+*.hdf5
+*.npy
+*.numpy
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
