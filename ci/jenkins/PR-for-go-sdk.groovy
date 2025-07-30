@@ -57,7 +57,7 @@ pipeline {
                                               gitBaseRef: gitBaseRef,
                                               pullRequestNumber: "$env.CHANGE_ID",
                                               suppress_suffix_of_image_tag: true,
-                                              make_cmd: "make clean && make install use_disk_index=ON",
+                                              make_cmd: "make clean && make jobs=8 install use_disk_index=ON",
                                               images: '["milvus","gotestsum","helm"]'
 
                         milvus_image_tag = tekton.query_result job_name, 'milvus-image-tag'
