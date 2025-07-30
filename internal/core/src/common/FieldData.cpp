@@ -213,6 +213,22 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(values.data(), element_count);
         }
+        case DataType::GEOMETRY: {
+            auto array_info =
+                GetDataInfoFromArray<arrow::BinaryViewArray,
+                                     arrow::Type::type::BINARY>(array);
+            auto geometry_array =
+                std::dynamic_pointer_cast<arrow::BinaryArray>(array);
+            std::vector<std::string> values(element_count);
+            for (size_t index = 0; index < element_count; ++index) {
+                values[index] = geometry_array->GetString(index);
+            }
+            if (nullable_) {
+                return FillFieldData(
+                    values.data(), array->null_bitmap_data(), element_count);
+            }
+            return FillFieldData(values.data(), array_info.second);
+        }
         case DataType::ARRAY: {
             auto array_array =
                 std::dynamic_pointer_cast<arrow::BinaryArray>(array);
@@ -278,6 +294,7 @@ template class FieldDataImpl<float, true>;
 template class FieldDataImpl<double, true>;
 template class FieldDataImpl<std::string, true>;
 template class FieldDataImpl<Json, true>;
+template class FieldDataImpl<Geometry, true>;
 template class FieldDataImpl<Array, true>;
 
 // vector data
@@ -315,6 +332,9 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
                 type, nullable, cap_rows);
         case DataType::JSON:
             return std::make_shared<FieldData<Json>>(type, nullable, cap_rows);
+        case DataType::GEOMETRY:
+            return std::make_shared<FieldData<Geometry>>(
+                type, nullable, cap_rows);
         default:
             PanicInfo(DataTypeInvalid,
                       "InitScalarFieldData not support data type " +

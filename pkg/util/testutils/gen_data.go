@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"github.com/x448/float16"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -145,6 +147,57 @@ func GenerateJSONArray(numRows int) [][]byte {
 			v, _ := json.Marshal(strconv.Itoa(i))
 			ret = append(ret, v)
 		}
+	}
+	return ret
+}
+
+// milvus core compoent view geometry as wkb bytes
+func GenerateGeometryArray(numRows int) [][]byte {
+	ret := make([][]byte, 0, numRows)
+	const (
+		point           = "POINT (30.123 -10.456)"
+		linestring      = "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)"
+		polygon         = "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))"
+		multipoint      = "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))"
+		multilinestring = "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))"
+		multipolygon    = "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))"
+	)
+	wktArray := [6]string{point, linestring, polygon, multipoint, multilinestring, multipolygon}
+	for i := 0; i < numRows; i++ {
+		// data of wkt string bytes ,consider to be process by proxy
+		if i == numRows-1 {
+			geomT, _ := wkt.Unmarshal("POINT (-84.036 39.997)") // add a special point finally for test
+			wkbdata, _ := wkb.Marshal(geomT, wkb.NDR)
+			ret = append(ret, wkbdata)
+			continue
+		}
+		geomT, _ := wkt.Unmarshal(wktArray[i%6])
+		wkbdata, _ := wkb.Marshal(geomT, wkb.NDR)
+		ret = append(ret, wkbdata)
+	}
+	return ret
+}
+
+// milvus client and proxy's insert request input view geometry data as wkt strings
+func GenerateGeometryWktArray(numRows int) [][]byte {
+	ret := make([][]byte, 0, numRows)
+	const (
+		point           = "POINT (30.123 -10.456)"
+		linestring      = "LINESTRING (30.123 -10.456, 10.789 30.123, -40.567 40.890)"
+		polygon         = "POLYGON ((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456))"
+		multipoint      = "MULTIPOINT ((10.111 40.222), (40.333 30.444), (20.555 20.666), (30.777 10.888))"
+		multilinestring = "MULTILINESTRING ((10.111 10.222, 20.333 20.444), (15.555 15.666, 25.777 25.888), (-30.999 20.000, 40.111 30.222))"
+		multipolygon    = "MULTIPOLYGON (((30.123 -10.456, 40.678 40.890, 20.345 40.567, 10.123 20.456, 30.123 -10.456)),((15.123 5.456, 25.678 5.890, 25.345 15.567, 15.123 15.456, 15.123 5.456)))"
+	)
+	wktArray := [6]string{point, linestring, polygon, multipoint, multilinestring, multipolygon}
+	for i := 0; i < numRows; i++ {
+		// data of wkt string bytes ,consider to be process by proxy
+		if i == numRows-1 {
+			ret = append(ret, []byte("POINT (-84.036 39.997)"))
+			continue
+		}
+
+		ret = append(ret, []byte(wktArray[i%6]))
 	}
 	return ret
 }
@@ -715,6 +768,54 @@ func NewArrayFieldDataWithValue(fieldName string, fieldValue interface{}) *schem
 	}
 }
 
+func NewGeometryFieldData(fieldName string, numRows int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Geometry,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{
+						Data: GenerateGeometryArray(numRows),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewGeometryFieldDataWktFormat(fieldName string, numRows int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Geometry,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{
+						Data: GenerateGeometryWktArray(numRows),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewGeometryFieldDataWithValue(fieldName string, fieldValue interface{}) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Geometry,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryData{
+					GeometryData: &schemapb.GeometryArray{
+						Data: fieldValue.([][]byte),
+					},
+				},
+			},
+		},
+	}
+}
+
 func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_BinaryVector,
@@ -882,6 +983,8 @@ func GenerateScalarFieldData(dType schemapb.DataType, fieldName string, numRows 
 		return NewArrayFieldData(fieldName, numRows)
 	case schemapb.DataType_JSON:
 		return NewJSONFieldData(fieldName, numRows)
+	case schemapb.DataType_Geometry:
+		return NewGeometryFieldData(fieldName, numRows)
 	default:
 		panic("unsupported data type")
 	}
@@ -912,6 +1015,8 @@ func GenerateScalarFieldDataWithValue(dType schemapb.DataType, fieldName string,
 		fieldData = NewArrayFieldDataWithValue(fieldName, fieldValue)
 	case schemapb.DataType_JSON:
 		fieldData = NewJSONFieldDataWithValue(fieldName, fieldValue)
+	case schemapb.DataType_Geometry:
+		fieldData = NewGeometryFieldDataWithValue(fieldName, fieldValue)
 	default:
 		panic("unsupported data type")
 	}

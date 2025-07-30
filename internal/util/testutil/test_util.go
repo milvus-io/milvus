@@ -176,6 +176,9 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int, nullPercent .
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateStringArray(rows))
 		case schemapb.DataType_JSON:
 			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateJSONArray(rows))
+		case schemapb.DataType_Geometry:
+			// wkb bytes array
+			insertData.Data[f.FieldID].AppendDataRows(testutils.GenerateGeometryArray(rows))
 		case schemapb.DataType_Array:
 			switch f.GetElementType() {
 			case schemapb.DataType_Bool:
@@ -525,6 +528,14 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data
 			validData := insertData.Data[fieldID].(*storage.JSONFieldData).ValidData
 			builder.AppendValues(lo.Map(jsonData, func(bs []byte, _ int) string {
+				return string(bs)
+			}), validData)
+			columns = append(columns, builder.NewStringArray())
+		case schemapb.DataType_Geometry:
+			builder := array.NewStringBuilder(mem)
+			wkbData := insertData.Data[fieldID].(*storage.GeometryFieldData).Data
+			validData := insertData.Data[fieldID].(*storage.GeometryFieldData).ValidData
+			builder.AppendValues(lo.Map(wkbData, func(bs []byte, _ int) string {
 				return string(bs)
 			}), validData)
 			columns = append(columns, builder.NewStringArray())

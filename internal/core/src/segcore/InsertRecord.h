@@ -437,6 +437,11 @@ struct InsertRecord {
                         field_id, size_per_chunk, scalar_mmap_descriptor);
                     break;
                 }
+                case DataType::GEOMETRY: {
+                    this->append_data<std::string>(
+                        field_id, size_per_chunk, scalar_mmap_descriptor);
+                    break;
+                }
                 case DataType::ARRAY: {
                     this->append_data<Array>(
                         field_id, size_per_chunk, scalar_mmap_descriptor);

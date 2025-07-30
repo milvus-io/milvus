@@ -27,6 +27,7 @@
 #include <roaring/roaring.hh>
 
 #include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
 #include "common/LoadInfo.h"
@@ -17071,5 +17072,409 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
         auto res =
             ExecuteQueryExpr(plan, seg.get(), json_strs.size(), MAX_TIMESTAMP);
         EXPECT_TRUE(res == expect_result);
+    }
+}
+
+TEST_P(ExprTest, TestGISFunction) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    // Create schema with geometry field
+    auto schema = std::make_shared<Schema>();
+    auto int_fid = schema->AddDebugField("int", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(int_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 1000;
+    int num_iters = 1;
+
+    // Generate test data
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // Define GIS test cases using struct like JSON tests
+    struct GISTestcase {
+        std::string wkt_string;
+        proto::plan::GISFunctionFilterExpr_GISOp op;
+    };
+
+    std::vector<GISTestcase> testcases = {
+        {"POINT(0 0)", proto::plan::GISFunctionFilterExpr_GISOp_Intersects},
+        {"POLYGON((-1 -1, 1 -1, 1 1, -1 1, -1 -1))",
+         proto::plan::GISFunctionFilterExpr_GISOp_Contains},
+        {"LINESTRING(-2 0, 2 0)",
+         proto::plan::GISFunctionFilterExpr_GISOp_Crosses},
+        {"POINT(10 10)", proto::plan::GISFunctionFilterExpr_GISOp_Equals},
+        {"POLYGON((5 5, 15 5, 15 15, 5 15, 5 5))",
+         proto::plan::GISFunctionFilterExpr_GISOp_Touches},
+        {"POLYGON((0.5 0.5, 1.5 0.5, 1.5 1.5, 0.5 1.5, 0.5 0.5))",
+         proto::plan::GISFunctionFilterExpr_GISOp_Overlaps},
+        {"POLYGON((-10 -10, 10 -10, 10 10, -10 10, -10 -10))",
+         proto::plan::GISFunctionFilterExpr_GISOp_Within}};
+
+    // Execute tests
+    for (const auto& testcase : testcases) {
+        // Create Geometry object from WKT string
+        milvus::Geometry geometry(testcase.wkt_string.c_str());
+
+        // Create GIS expression
+        auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
+            testcase.op,
+            geometry);
+
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           gis_expr);
+
+        // Verify query execution doesn't throw exceptions
+        ASSERT_NO_THROW({
+            BitsetType final = ExecuteQueryExpr(
+                plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+            EXPECT_EQ(final.size(), N * num_iters);
+
+            // Verify result is not empty (at least some geometry data satisfies conditions)
+            bool has_true_result = false;
+            for (int i = 0; i < final.size(); ++i) {
+                if (final[i]) {
+                    has_true_result = true;
+                    break;
+                }
+            }
+            // Note: Since we use random data, all results might be false, which is normal
+            // We mainly verify the function execution doesn't crash
+        });
+    }
+}
+
+TEST(ExprTest, SealedSegmentAllOperators) {
+    // 1. Build schema with geometry field and primary key
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto geo_fid = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_fid);
+
+    // 2. Generate random data and load into a sealed segment
+    const int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedSegment(schema);
+    SealedLoadFieldData(dataset, *seg);
+
+    // 3. Prepare (op, wkt) pairs to hit every GIS operator
+    std::vector<
+        std::pair<proto::plan::GISFunctionFilterExpr_GISOp, std::string>>
+        test_cases = {
+            {proto::plan::GISFunctionFilterExpr_GISOp_Equals, "POINT(0 0)"},
+            {proto::plan::GISFunctionFilterExpr_GISOp_Touches,
+             "POLYGON((-1 -1, -1 1, 1 1, 1 -1, -1 -1))"},
+            {proto::plan::GISFunctionFilterExpr_GISOp_Overlaps,
+             "POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))"},
+            {proto::plan::GISFunctionFilterExpr_GISOp_Crosses,
+             "LINESTRING(-1 0, 1 0)"},
+            {proto::plan::GISFunctionFilterExpr_GISOp_Contains,
+             "POLYGON((-2 -2, 2 -2, 2 2, -2 2, -2 -2))"},
+            {proto::plan::GISFunctionFilterExpr_GISOp_Intersects, "POINT(1 1)"},
+            {proto::plan::GISFunctionFilterExpr_GISOp_Within,
+             "POLYGON((-5 -5, 5 -5, 5 5, -5 5, -5 -5))"},
+        };
+
+    for (const auto& [op, wkt] : test_cases) {
+        // Build constant geometry used on right side of comparison
+        milvus::Geometry right_source(wkt.c_str());
+
+        // Create expression & plan node
+        auto gis_expr = std::make_shared<expr::GISFunctionFilterExpr>(
+            expr::ColumnInfo(geo_fid, DataType::GEOMETRY), op, right_source);
+        auto plan_node = std::make_shared<plan::FilterBitsNode>(
+            DEFAULT_PLANNODE_ID, gis_expr);
+
+        // Execute expression over the sealed segment
+        BitsetType result =
+            ExecuteQueryExpr(plan_node, seg.get(), N, MAX_TIMESTAMP);
+
+        // Validate basic expectations: bitset size should equal N
+        ASSERT_EQ(result.size(), N);
+    }
+}
+
+TEST_P(ExprTest, TestGISFunctionWithControlledData) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    // Create schema with geometry field
+    auto schema = std::make_shared<Schema>();
+    auto int_fid = schema->AddDebugField("int", DataType::INT64);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geom_fid = schema->AddDebugField("geometry", DataType::GEOMETRY);
+    schema->set_primary_field_id(int_fid);
+
+    auto seg = CreateGrowingSegment(schema, empty_index_meta);
+    int N = 100;
+    int num_iters = 1;
+
+    // Generate controlled test data
+    for (int iter = 0; iter < num_iters; ++iter) {
+        auto raw_data = DataGen(schema, N, iter);
+
+        // Replace geometry data with controlled test data
+        milvus::proto::schema::FieldData* geometry_field_data = nullptr;
+        for (auto& fd : *raw_data.raw_->mutable_fields_data()) {
+            if (fd.field_id() == geom_fid.get()) {
+                geometry_field_data = &fd;
+                break;
+            }
+        }
+        assert(geometry_field_data != nullptr);
+        geometry_field_data->mutable_scalars()
+            ->mutable_geometry_data()
+            ->clear_data();
+
+        // Create some controlled geometry data for testing
+        for (int i = 0; i < N; ++i) {
+            OGRGeometry* geometry = nullptr;
+
+            if (i % 4 == 0) {
+                // Create point (0, 0)
+                OGRPoint point(0.0, 0.0);
+                geometry = point.clone();
+            } else if (i % 4 == 1) {
+                // Create polygon containing (0, 0)
+                OGRPolygon polygon;
+                OGRLinearRing ring;
+                ring.addPoint(-1.0, -1.0);
+                ring.addPoint(1.0, -1.0);
+                ring.addPoint(1.0, 1.0);
+                ring.addPoint(-1.0, 1.0);
+                ring.addPoint(-1.0, -1.0);
+                polygon.addRing(&ring);
+                geometry = polygon.clone();
+            } else if (i % 4 == 2) {
+                // Create polygon not containing (0, 0)
+                OGRPolygon polygon;
+                OGRLinearRing ring;
+                ring.addPoint(10.0, 10.0);
+                ring.addPoint(20.0, 10.0);
+                ring.addPoint(20.0, 20.0);
+                ring.addPoint(10.0, 20.0);
+                ring.addPoint(10.0, 10.0);
+                polygon.addRing(&ring);
+                geometry = polygon.clone();
+            } else {
+                // Create line passing through (0, 0)
+                OGRLineString lineString;
+                lineString.addPoint(-1.0, 0.0);
+                lineString.addPoint(1.0, 0.0);
+                geometry = lineString.clone();
+            }
+
+            // Convert to WKB format
+            size_t size = geometry->WkbSize();
+            std::vector<unsigned char> wkb(size);
+            geometry->exportToWkb(wkbNDR, wkb.data());
+
+            geometry_field_data->mutable_scalars()
+                ->mutable_geometry_data()
+                ->add_data(
+                    std::string(reinterpret_cast<char*>(wkb.data()), size));
+
+            OGRGeometryFactory::destroyGeometry(geometry);
+        }
+
+        seg->PreInsert(N);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
+    }
+
+    auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
+
+    // Test specific GIS operations
+    auto test_gis_operation = [&](const std::string& wkt,
+                                  proto::plan::GISFunctionFilterExpr_GISOp op,
+                                  std::function<bool(int)> expected_func) {
+        // Create Geometry object from WKT string
+        milvus::Geometry geometry(wkt.c_str());
+
+        // Create GIS expression directly
+        auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geom_fid, DataType::GEOMETRY),
+            op,
+            geometry);
+
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           gis_expr);
+
+        BitsetType final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
+
+        EXPECT_EQ(final.size(), N * num_iters);
+
+        // Verify results
+        for (int i = 0; i < N * num_iters; ++i) {
+            auto ans = final[i];
+            auto expected = expected_func(i);
+            ASSERT_EQ(ans, expected) << "GIS operation failed at index " << i;
+        }
+    };
+
+    // Test contains operation
+    test_gis_operation("POLYGON((-2 -2, 2 -2, 2 2, -2 2, -2 -2))",
+                       proto::plan::GISFunctionFilterExpr_GISOp_Within,
+                       [](int i) -> bool {
+                           // Only geometry at index 0,1 (polygon containing (0,0))
+                           return (i % 4 == 0) || (i % 4 == 1) || (i % 4 == 3);
+                       });
+
+    // Test intersects operation
+    test_gis_operation("POINT(0 0)",
+                       proto::plan::GISFunctionFilterExpr_GISOp_Intersects,
+                       [](int i) -> bool {
+                           // Point at index 0 (0,0), polygon at index 1, line at index 3 should all intersect with point (0,0)
+                           return (i % 4 == 0) || (i % 4 == 1) || (i % 4 == 3);
+                       });
+
+    // Test equals operation
+    test_gis_operation("POINT(0 0)",
+                       proto::plan::GISFunctionFilterExpr_GISOp_Equals,
+                       [](int i) -> bool {
+                           // Only point at index 0 (0,0) should be equal
+                           return (i % 4 == 0);
+                       });
+}
+
+TEST_P(ExprTest, ParseGISFunctionFilterExprs) {
+    // Build Schema
+    auto schema = std::make_shared<Schema>();
+    auto dim = 16;
+    auto vec_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    // Generate data and load
+    int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedSegment(schema);
+    SealedLoadFieldData(dataset, *seg);
+
+    // Test plan with gisfunction_filter_expr
+    std::string raw_plan = R"PLAN(vector_anns: <
+            field_id: 100
+            predicates: <
+                gisfunction_filter_expr: <
+                    column_info: <
+                        field_id: 101
+                        data_type: Geometry
+                    >
+                    op: Within
+                    wkt_string: "POLYGON((0 0,1 0,1 1,0 1,0 0))"
+                >
+            >
+            query_info: <
+                topk: 5
+                metric_type: "L2"
+                round_decimal: 3
+                search_params: "{\"nprobe\":10}"
+            >
+            placeholder_tag: "$0"
+        >)PLAN";
+
+    // Convert and parse
+    auto bin_plan = translate_text_plan_with_metric_type(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(*schema, bin_plan.data(), bin_plan.size());
+
+    // If parsing fails, test will fail with exception
+    // If parsing succeeds, ParseGISFunctionFilterExprs is covered
+
+    // Execute search to verify execution logic
+
+    auto ph_raw = CreatePlaceholderGroup(5, dim, 123);
+    auto ph_grp = ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+    auto sr = seg->Search(plan.get(), ph_grp.get(), MAX_TIMESTAMP);
+}
+
+TEST(ExprTest, ParseGISFunctionFilterExprsMultipleOps) {
+    // Build Schema
+    auto schema = std::make_shared<Schema>();
+    auto dim = 16;
+    auto vec_id = schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_id);
+
+    // Generate data and load
+    int64_t N = 1000;
+    auto dataset = DataGen(schema, N);
+    auto seg = CreateSealedSegment(schema);
+    SealedLoadFieldData(dataset, *seg);
+
+    // Test different GIS operations
+    std::vector<std::pair<std::string, std::string>> test_cases = {
+        {"Within", "POLYGON((0 0,1 0,1 1,0 1,0 0))"},
+        {"Contains", "POINT(0.5 0.5)"},
+        {"Intersects", "LINESTRING(0 0,1 1)"},
+        {"Equals", "POINT(0 0)"},
+        {"Touches", "POLYGON((10 10,11 10,11 11,10 11,10 10))"}};
+
+    for (const auto& test_case : test_cases) {
+        const auto& op = test_case.first;
+        const auto& wkt = test_case.second;
+
+        std::string raw_plan = R"(
+            vector_anns: <
+                field_id: 100
+                predicates: <
+                    gisfunction_filter_expr: <
+                        column_info: <
+                            field_id: 101
+                            data_type: Geometry
+                        >
+                        op: )" +
+                               op + R"(
+                        wkt_string: ")" +
+                               wkt + R"("
+                    >
+                >
+                query_info: <
+                    topk: 5
+                    metric_type: "L2"
+                    round_decimal: 3
+                    search_params: "{\"nprobe\":10}"
+                >
+                placeholder_tag: "$0"
+            >
+        )";
+
+        // Convert and parse
+        auto bin_plan = translate_text_plan_to_binary_plan(raw_plan.c_str());
+        auto plan =
+            CreateSearchPlanByExpr(*schema, bin_plan.data(), bin_plan.size());
+
+        // Execute search to verify execution logic
+        auto ph_raw = CreatePlaceholderGroup(5, dim, 123);
+        auto ph_grp =
+            ParsePlaceholderGroup(plan.get(), ph_raw.SerializeAsString());
+        auto sr = seg->Search(plan.get(), ph_grp.get(), MAX_TIMESTAMP);
+        EXPECT_EQ(sr->total_nq_, 5) << "Failed for operation: " << op;
     }
 }
