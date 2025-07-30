@@ -104,6 +104,36 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         });
     }
 
+    std::shared_ptr<CellAccessor<CellT>>
+    PinCellsDirect(
+        const std::vector<uid_t>& uids,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
+        auto count = std::min(uids.size(), cells_.size());
+        ska::flat_hash_set<cid_t> involved_cids;
+        involved_cids.reserve(count);
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL: {
+                for (auto& uid : uids) {
+                    involved_cids.insert(uid);
+                }
+                break;
+            }
+            case CellIdMappingMode::ALWAYS_ZERO: {
+                if (uids.size() > 0) {
+                    involved_cids.insert(0);
+                }
+                break;
+            }
+            default: {
+                for (auto& uid : uids) {
+                    auto cid = cell_id_of(uid);
+                    involved_cids.insert(cid);
+                }
+            }
+        }
+        return PinInternal(involved_cids, timeout);
+    }
+
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
     PinCells(
         const std::vector<uid_t>& uids,

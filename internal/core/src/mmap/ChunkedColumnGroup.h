@@ -67,14 +67,15 @@ class ChunkedColumnGroup {
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(int64_t chunk_id) const {
-        auto ca = SemiInlineGet(slot_->PinCells({chunk_id}));
+        auto ca = slot_->PinCellsDirect({chunk_id});
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
     }
 
     std::shared_ptr<CellAccessor<GroupChunk>>
     GetGroupChunks(std::vector<int64_t> chunk_ids) {
-        return SemiInlineGet(slot_->PinCells(chunk_ids));
+        auto ca = slot_->PinCellsDirect(chunk_ids);
+        return ca;
     }
 
     int64_t
