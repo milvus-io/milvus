@@ -665,6 +665,20 @@ SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
+std::vector<std::pair<SegOffset, Timestamp>>
+SegmentGrowingImpl::search_batch_pks(const std::vector<PkType>& pks,
+                                     const Timestamp* timestamps) const {
+    std::vector<std::pair<SegOffset, Timestamp>> results;
+    for (size_t i = 0; i < pks.size(); ++i) {
+        auto timestamp = timestamps[i];
+        auto offsets = insert_record_.search_pk(pks[i], timestamp);
+        for (auto offset : offsets) {
+            results.emplace_back(offset, timestamp);
+        }
+    }
+    return results;
+}
+
 void
 SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,
