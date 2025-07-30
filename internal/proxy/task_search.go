@@ -790,6 +790,10 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		}
 	}
 
+	if err := validateGeometryFieldSearchResult(&t.result.Results.FieldsData); err != nil {
+		log.Warn("fail to validate geometry field search result", zap.Error(err))
+		return err
+	}
 	// reduce done, get final result
 	limit := t.SearchRequest.GetTopk() - t.SearchRequest.GetOffset()
 	resultSizeInsufficient := false

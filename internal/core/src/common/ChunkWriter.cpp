@@ -20,6 +20,7 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "simdjson/common_defs.h"
@@ -151,6 +152,73 @@ JSONChunkWriter::finish() {
         file_ ? std::make_unique<MmapFileRAII>(file_->Path()) : nullptr;
     return std::make_unique<JSONChunk>(
         row_nums_, data, size, nullable_, std::move(mmap_file_raii));
+}
+
+void
+GeometryChunkWriter::write(std::shared_ptr<arrow::RecordBatchReader> data) {
+    auto size = 0;
+    std::vector<std::string> wkb_strs;
+    std::vector<std::pair<const uint8_t*, int64_t>> null_bitmaps;
+    for (auto batch : *data) {
+        auto data = batch.ValueOrDie()->column(0);
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        for (int i = 0; i < array->length(); i++) {
+            auto str = array->GetView(i);
+            wkb_strs.emplace_back(str);
+            size += str.size();
+        }
+        if (nullable_) {
+            auto null_bitmap_n = (data->length() + 7) / 8;
+            null_bitmaps.emplace_back(data->null_bitmap_data(), null_bitmap_n);
+            size += null_bitmap_n;
+        }
+        row_nums_ += array->length();
+    }
+    // use 32-bit offsets to align with StringChunk layout
+    size += sizeof(uint32_t) * (row_nums_ + 1) + MMAP_GEOMETRY_PADDING;
+    if (file_) {
+        target_ = std::make_shared<MmapChunkTarget>(*file_, file_offset_);
+    } else {
+        target_ = std::make_shared<MemChunkTarget>(size);
+    }
+
+    // chunk layout: null bitmap, offset1, offset2, ..., offsetn, wkb1, wkb2, ..., wkbn, padding
+    // write null bitmaps
+    for (auto [data, size] : null_bitmaps) {
+        if (data == nullptr) {
+            std::vector<uint8_t> null_bitmap(size, 0xff);
+            target_->write(null_bitmap.data(), size);
+        } else {
+            target_->write(data, size);
+        }
+    }
+
+    int offset_num = row_nums_ + 1;
+    uint32_t offset_start_pos =
+        static_cast<uint32_t>(target_->tell() + sizeof(uint32_t) * offset_num);
+    std::vector<uint32_t> offsets;
+
+    for (auto str : wkb_strs) {
+        offsets.push_back(offset_start_pos);
+        offset_start_pos += str.size();
+    }
+    offsets.push_back(offset_start_pos);
+
+    target_->write(offsets.data(), offsets.size() * sizeof(uint32_t));
+
+    for (auto str : wkb_strs) {
+        target_->write(str.data(), str.size());
+    }
+}
+
+std::shared_ptr<Chunk>
+GeometryChunkWriter::finish() {
+    // write padding, maybe not needed anymore
+    // FIXME
+    char padding[MMAP_GEOMETRY_PADDING];
+    target_->write(padding, MMAP_GEOMETRY_PADDING);
+    auto [data, size] = target_->get();
+    return std::make_shared<GeometryChunk>(row_nums_, data, size, nullable_);
 }
 
 void
@@ -384,6 +452,10 @@ create_chunk(const FieldMeta& field_meta,
             w = std::make_shared<JSONChunkWriter>(nullable);
             break;
         }
+        case milvus::DataType::GEOMETRY: {
+            w = std::make_shared<GeometryChunkWriter>(nullable);
+            break;
+        }
         case milvus::DataType::ARRAY: {
             w = std::make_shared<ArrayChunkWriter>(
                 field_meta.get_element_type(), nullable);
@@ -478,6 +550,11 @@ create_chunk(const FieldMeta& field_meta,
         }
         case milvus::DataType::JSON: {
             w = std::make_shared<JSONChunkWriter>(file, file_offset, nullable);
+            break;
+        }
+        case milvus::DataType::GEOMETRY: {
+            w = std::make_shared<GeometryChunkWriter>(
+                file, file_offset, nullable);
             break;
         }
         case milvus::DataType::ARRAY: {

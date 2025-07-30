@@ -17,6 +17,9 @@
 #include <gtest/gtest.h>
 #include <string>
 
+#include "common/Geometry.h"
+#include "ogr_core.h"
+#include "ogr_geometry.h"
 #include "storage/DataCodec.h"
 #include "storage/InsertData.h"
 #include "storage/IndexData.h"
@@ -351,7 +354,54 @@ TEST(storage, InsertDataInt64Nullable) {
     ASSERT_EQ(*new_payload->ValidData(), *valid_data);
     delete[] valid_data;
 }
+TEST(storage, InsertDataGeometry) {
+    OGRPoint point1(10.25, 0.55), point2(9.75, -0.23), point3(-8.50, 1.44);
+    OGRLineString linstring;
+    linstring.addPoint(&point1);
+    linstring.addPoint(&point2);
+    linstring.addPoint(&point3);
+    OGRPolygon polygon;
+    OGRLinearRing ring;
+    ring.addPoint(&point1);
+    ring.addPoint(&point2);
+    ring.addPoint(&point3);
+    ring.closeRings();
+    polygon.addRing(&ring);
+    std::string str1, str2, str3;
+    str1 = Geometry(point1.exportToWkt().data()).to_wkb_string();
+    str2 = Geometry(linstring.exportToWkt().data()).to_wkb_string();
+    str3 = Geometry(polygon.exportToWkt().data()).to_wkb_string();
+    FixedVector<std::string> data = {str1, str2, str3};
+    auto field_data =
+        milvus::storage::CreateFieldData(storage::DataType::GEOMETRY, false);
+    field_data->FillFieldData(data.data(), data.size());
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    storage::FieldDataMeta field_data_meta{100, 101, 102, 103};
+    insert_data.SetFieldDataMeta(field_data_meta);
+    insert_data.SetTimestamps(0, 100);
 
+    auto serialized_bytes = insert_data.Serialize(storage::StorageType::Remote);
+    std::shared_ptr<uint8_t[]> serialized_data_ptr(serialized_bytes.data(),
+                                                   [&](uint8_t*) {});
+    auto new_insert_data = storage::DeserializeFileData(
+        serialized_data_ptr, serialized_bytes.size());
+    ASSERT_EQ(new_insert_data->GetCodecType(), storage::InsertDataType);
+    ASSERT_EQ(new_insert_data->GetTimeRage(),
+              std::make_pair(Timestamp(0), Timestamp(100)));
+    auto new_payload = new_insert_data->GetFieldData();
+    ASSERT_EQ(new_payload->get_data_type(), storage::DataType::GEOMETRY);
+    ASSERT_EQ(new_payload->get_num_rows(), data.size());
+    FixedVector<std::string> new_data(data.size());
+    ASSERT_EQ(new_payload->get_null_count(), 0);
+    for (int i = 0; i < data.size(); ++i) {
+        new_data[i] =
+            *static_cast<const std::string*>(new_payload->RawValue(i));
+        ASSERT_EQ(new_payload->DataSize(i), data[i].size());
+    }
+    ASSERT_EQ(data, new_data);
+}
 TEST(storage, InsertDataString) {
     FixedVector<std::string> data = {
         "test1", "test2", "test3", "test4", "test5"};

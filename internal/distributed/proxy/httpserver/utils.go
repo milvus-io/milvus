@@ -19,6 +19,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"reflect"
@@ -30,6 +31,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
 	"github.com/tidwall/gjson"
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
@@ -545,6 +548,26 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error,
 					}
 				case schemapb.DataType_JSON:
 					reallyData[fieldName] = []byte(dataString)
+				case schemapb.DataType_Geometry:
+					// treat as string(wkt) data,the string data must be valid
+					WktString, err := base64.StdEncoding.DecodeString(dataString)
+					if err != nil {
+						log.Warn("proxy can not decode datastring with base64", zap.String("WktString:", dataString))
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+					}
+					fmt.Println("before unmarshal wkt:", string(WktString))
+					geomT, err := wkt.Unmarshal(string(WktString))
+					if err != nil {
+						log.Warn("proxy change wkt to geomtyr failed!!", zap.String("WktString:", dataString))
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+					}
+					// translate the wkt bytes to wkb bytes ,store the bytes in LittleEndian which cpp core used as well
+					dataWkbBytes, err := wkb.Marshal(geomT, wkb.NDR)
+					if err != nil {
+						log.Warn("proxy change geomtry to wkb failed!!", zap.String("WktString:", dataString))
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
+					}
+					reallyData[fieldName] = dataWkbBytes
 				case schemapb.DataType_Float:
 					result, err := cast.ToFloat32E(dataString)
 					if err != nil {
@@ -752,6 +775,8 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]*schemapb.ScalarField, 0, rowsLen)
 		case schemapb.DataType_JSON:
 			data = make([][]byte, 0, rowsLen)
+		case schemapb.DataType_Geometry:
+			data = make([][]byte, 0, rowsLen)
 		case schemapb.DataType_FloatVector:
 			data = make([][]float32, 0, rowsLen)
 			dim, _ := getDim(field)
@@ -840,6 +865,8 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			case schemapb.DataType_Array:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]*schemapb.ScalarField), candi.v.Interface().(*schemapb.ScalarField))
 			case schemapb.DataType_JSON:
+				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+			case schemapb.DataType_Geometry:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
 			case schemapb.DataType_FloatVector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]float32), candi.v.Interface().([]float32))
@@ -1000,6 +1027,16 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_JsonData{
 						JsonData: &schemapb.JSONArray{
+							Data: column.([][]byte),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Geometry:
+			colData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_GeometryData{
+						GeometryData: &schemapb.GeometryArray{
 							Data: column.([][]byte),
 						},
 					},
@@ -1273,6 +1310,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetScalars().GetArrayData().Data))
 			case schemapb.DataType_JSON:
 				rowsNum = int64(len(fieldDataList[0].GetScalars().GetJsonData().Data))
+			case schemapb.DataType_Geometry:
+				rowsNum = int64(len(fieldDataList[0].GetScalars().GetGeometryData().Data))
 			case schemapb.DataType_BinaryVector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBinaryVector())*8) / fieldDataList[0].GetVectors().GetDim()
 			case schemapb.DataType_FloatVector:
@@ -1423,6 +1462,12 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 							}
 						}
 					}
+				case schemapb.DataType_Geometry:
+					if len(fieldDataList[j].ValidData) != 0 && !fieldDataList[j].ValidData[i] {
+						row[fieldDataList[j].FieldName] = nil
+						continue
+					}
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetGeometryData().Data[i]
 				default:
 					row[fieldDataList[j].FieldName] = ""
 				}

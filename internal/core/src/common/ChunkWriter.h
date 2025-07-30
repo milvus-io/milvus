@@ -21,6 +21,7 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldDataInterface.h"
+#include "common/Geometry.h"
 namespace milvus {
 
 class ChunkWriterBase {
@@ -196,6 +197,16 @@ class JSONChunkWriter : public ChunkWriterBase {
  public:
     using ChunkWriterBase::ChunkWriterBase;
 
+    void
+    write(std::shared_ptr<arrow::RecordBatchReader> data) override;
+
+    std::shared_ptr<Chunk>
+    finish() override;
+};
+
+class GeometryChunkWriter : public ChunkWriterBase {
+ public:
+    using ChunkWriterBase::ChunkWriterBase;
     void
     write(std::shared_ptr<arrow::RecordBatchReader> data) override;
 

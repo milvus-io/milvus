@@ -24,6 +24,13 @@ expr:
 	| (JSONContains | ArrayContains)'('expr',' expr')'                           # JSONContains
 	| (JSONContainsAll | ArrayContainsAll)'('expr',' expr')'                     # JSONContainsAll
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
+	| STEuqals'('Identifier','StringLiteral')'				                     # STEuqals	
+	| STTouches'('Identifier','StringLiteral')'				             		 # STTouches
+	| STOverlaps'('Identifier','StringLiteral')'						 		 # STOverlaps
+	| STCrosses'('Identifier','StringLiteral')'									 # STCrosses
+	| STContains'('Identifier','StringLiteral')'						 		 # STContains
+	| STIntersects'('Identifier','StringLiteral')'								 # STIntersects
+	| STWithin'('Identifier','StringLiteral')'									 # STWithin
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
@@ -93,6 +100,14 @@ ArrayContains: 'array_contains' | 'ARRAY_CONTAINS';
 ArrayContainsAll: 'array_contains_all' | 'ARRAY_CONTAINS_ALL';
 ArrayContainsAny: 'array_contains_any' | 'ARRAY_CONTAINS_ANY';
 ArrayLength: 'array_length' | 'ARRAY_LENGTH';
+
+STEuqals:'st_equals' | 'ST_EQUALS';
+STTouches:'st_touches' | 'ST_TOUCHES';
+STOverlaps: 'st_overlaps' | 'ST_OVERLAPS';
+STCrosses: 'st_crosses' | 'ST_CROSSES';
+STContains: 'st_contains' | 'ST_CONTAINS';
+STIntersects : 'st_intersects' | 'ST_INTERSECTS';
+STWithin :'st_within' | 'ST_WITHIN';
 
 BooleanConstant: 'true' | 'True' | 'TRUE' | 'false' | 'False' | 'FALSE';
 

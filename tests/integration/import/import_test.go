@@ -54,6 +54,8 @@ type BulkInsertSuite struct {
 	vecType    schemapb.DataType
 	indexType  indexparamcheck.IndexType
 	metricType metric.MetricType
+	expr       string
+	testType   schemapb.DataType
 }
 
 func (s *BulkInsertSuite) SetupTest() {
@@ -66,6 +68,8 @@ func (s *BulkInsertSuite) SetupTest() {
 	s.vecType = schemapb.DataType_FloatVector
 	s.indexType = "HNSW"
 	s.metricType = metric.L2
+	s.expr = ""
+	s.testType = schemapb.DataType_None
 }
 
 func (s *BulkInsertSuite) run() {
@@ -84,11 +88,22 @@ func (s *BulkInsertSuite) run() {
 	fieldSchema2 := &schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}}
 	fieldSchema3 := &schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}}
 	fieldSchema4 := &schemapb.FieldSchema{FieldID: 103, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{}}
+
+	fields := []*schemapb.FieldSchema{fieldSchema1, fieldSchema2}
 	if s.vecType != schemapb.DataType_SparseFloatVector {
-		schema = integration.ConstructSchema(collectionName, dim, false, fieldSchema1, fieldSchema2, fieldSchema3)
+		fields = append(fields, fieldSchema3)
 	} else {
-		schema = integration.ConstructSchema(collectionName, dim, false, fieldSchema1, fieldSchema2, fieldSchema4)
+		fields = append(fields, fieldSchema4)
 	}
+
+	// Append extra test field (e.g., Geometry) when specified
+	if s.testType != schemapb.DataType_None {
+		testFieldName := "testField" + schemapb.DataType_name[int32(s.testType)]
+		extraField := &schemapb.FieldSchema{FieldID: 104, Name: testFieldName, DataType: s.testType}
+		fields = append(fields, extraField)
+	}
+
+	schema = integration.ConstructSchema(collectionName, dim, false, fields...)
 
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
@@ -201,7 +216,7 @@ func (s *BulkInsertSuite) run() {
 	s.WaitForLoad(ctx, collectionName)
 
 	// search
-	expr := ""
+	expr := s.expr
 	nq := 10
 	topk := 10
 	roundDecimal := -1
@@ -215,6 +230,12 @@ func (s *BulkInsertSuite) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 	// s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+}
+
+func (s *BulkInsertSuite) TestGeometryTypes() {
+	s.testType = schemapb.DataType_Geometry
+	s.expr = "st_equals(" + "testField" + schemapb.DataType_name[int32(s.testType)] + ",'POINT (-84.036 39.997)')"
+	s.run()
 }
 
 func (s *BulkInsertSuite) TestMultiFileTypes() {

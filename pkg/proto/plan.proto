@@ -166,6 +166,22 @@ message NullExpr {
   NullOp op = 2;
 }
 
+message GISFunctionFilterExpr{
+  ColumnInfo column_info = 1;
+  string wkt_string = 2;
+  enum GISOp {
+    Invalid = 0;
+    Equals = 1;
+    Touches = 2;
+    Overlaps = 3;
+    Crosses = 4;
+    Contains = 5;
+    Intersects = 6;
+    Within = 7;
+  }
+  GISOp op = 3;
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -227,6 +243,7 @@ message Expr {
     JSONContainsExpr json_contains_expr = 13;
     CallExpr call_expr = 14;
     NullExpr null_expr = 15;
+    GISFunctionFilterExpr gisfunction_filter_expr = 16;
   };
   bool is_template = 20;
 }
