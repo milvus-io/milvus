@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -165,20 +164,9 @@ func TestFlushAllTaskExecuteSuccess(t *testing.T) {
 	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
 		Return(expectedResp, nil).Once()
 
-	// Mock SendReplicateMessagePack function
-	sendReplicateMessagePackCalled := false
-	mocker := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-		sendReplicateMessagePackCalled = true
-		assert.Equal(t, task.ctx, ctx)
-		assert.Equal(t, task.replicateMsgStream, replicateMsgStream)
-		assert.Equal(t, task.FlushAllRequest, request)
-	}).Build()
-	defer mocker.Release()
-
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResp, task.result)
-	assert.True(t, sendReplicateMessagePackCalled)
 }
 
 func TestFlushAllTaskExecuteFlushAllRPCError(t *testing.T) {
@@ -192,17 +180,9 @@ func TestFlushAllTaskExecuteFlushAllRPCError(t *testing.T) {
 	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
 		Return(nil, expectedErr).Once()
 
-	// Mock SendReplicateMessagePack function
-	sendReplicateMessagePackCalled := false
-	mocker := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-		sendReplicateMessagePackCalled = true
-	}).Build()
-	defer mocker.Release()
-
 	err := task.Execute(ctx)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to call flush all to data coordinator")
-	assert.False(t, sendReplicateMessagePackCalled)
 }
 
 func TestFlushAllTaskExecuteFlushAllResponseError(t *testing.T) {
@@ -221,17 +201,9 @@ func TestFlushAllTaskExecuteFlushAllResponseError(t *testing.T) {
 	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
 		Return(errorResp, nil).Once()
 
-	// Mock SendReplicateMessagePack function
-	sendReplicateMessagePackCalled := false
-	mocker := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-		sendReplicateMessagePackCalled = true
-	}).Build()
-	defer mocker.Release()
-
 	err := task.Execute(ctx)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to call flush all to data coordinator")
-	assert.False(t, sendReplicateMessagePackCalled)
 }
 
 func TestFlushAllTaskExecuteWithMerCheck(t *testing.T) {
@@ -247,17 +219,9 @@ func TestFlushAllTaskExecuteWithMerCheck(t *testing.T) {
 	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
 		Return(successResp, nil).Once()
 
-	// Mock SendReplicateMessagePack function
-	sendReplicateMessagePackCalled := false
-	mocker := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-		sendReplicateMessagePackCalled = true
-	}).Build()
-	defer mocker.Release()
-
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, successResp, task.result)
-	assert.True(t, sendReplicateMessagePackCalled)
 }
 
 func TestFlushAllTaskExecuteRequestContent(t *testing.T) {
@@ -268,12 +232,6 @@ func TestFlushAllTaskExecuteRequestContent(t *testing.T) {
 	// Test the content of the FlushAllRequest sent to mixCoord
 	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
 		Return(&datapb.FlushAllResponse{Status: merr.Success()}, nil).Once()
-
-	// Mock SendReplicateMessagePack function
-	mocker := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-		// Do nothing
-	}).Build()
-	defer mocker.Release()
 
 	err := task.Execute(ctx)
 	assert.NoError(t, err)
@@ -325,11 +283,6 @@ func TestFlushAllTaskLifecycle(t *testing.T) {
 	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
 		Return(expectedResp, nil).Once()
 
-	mocker2 := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-		// Do nothing
-	}).Build()
-	defer mocker2.Release()
-
 	err = task.Execute(ctx)
 	assert.NoError(t, err)
 
@@ -379,12 +332,6 @@ func TestFlushAllTaskErrorHandlingInExecute(t *testing.T) {
 			defer replicateMsgStream.AssertExpectations(t)
 
 			tc.setupMock(mixCoord)
-
-			// Mock SendReplicateMessagePack function
-			mocker := mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-				// Should not be called on error
-			}).Build()
-			defer mocker.Release()
 
 			err := task.Execute(ctx)
 			assert.Error(t, err)

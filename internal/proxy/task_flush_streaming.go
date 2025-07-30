@@ -99,8 +99,6 @@ func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
 		coll2FlushTs[collName] = flushTs
 		channelCps = resp.GetChannelCps()
 	}
-	// TODO: refactor to use streaming service
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
 	t.result = &milvuspb.FlushResponse{
 		Status:          merr.Success(),
 		DbName:          t.GetDbName(),

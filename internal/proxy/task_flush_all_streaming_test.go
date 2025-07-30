@@ -103,17 +103,10 @@ func TestFlushAllTask_WithSpecificDB(t *testing.T) {
 		// Mock sendManualFlushToWAL
 		mockey.Mock(sendManualFlushToWAL).Return(nil, nil).Build()
 
-		// Mock SendReplicateMessagePack
-		sendReplicateMessagePackCalled := false
-		mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-			sendReplicateMessagePackCalled = true
-		}).Build()
-
 		err := task.Execute(ctx)
 		assert.NoError(t, err)
 		assert.NotNil(t, task.result)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
-		assert.True(t, sendReplicateMessagePackCalled)
 	})
 }
 
@@ -171,11 +164,6 @@ func TestFlushAllTask_WithoutSpecificDB(t *testing.T) {
 
 		// Mock sendManualFlushToWAL
 		mockey.Mock(sendManualFlushToWAL).Return(nil, nil).Build()
-
-		// Mock SendReplicateMessagePack
-		mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-			// Do nothing
-		}).Build()
 
 		err := task.Execute(ctx)
 		assert.NoError(t, err)
@@ -323,11 +311,6 @@ func TestFlushAllTask_WithEmptyCollections(t *testing.T) {
 		mixCoord.EXPECT().ShowCollections(mock.Anything, mock.AnythingOfType("*milvuspb.ShowCollectionsRequest")).
 			Return(showColResp, nil).Once()
 
-		// Mock SendReplicateMessagePack
-		mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-			// Do nothing
-		}).Build()
-
 		err := task.Execute(ctx)
 		assert.NoError(t, err)
 		assert.NotNil(t, task.result)
@@ -357,11 +340,6 @@ func TestFlushAllTask_WithEmptyVChannels(t *testing.T) {
 		// Mock getVChannels with empty channels
 		mockey.Mock(mockey.GetMethod(chMgr, "getVChannels")).To(func(collID UniqueID) ([]string, error) {
 			return []string{}, nil
-		}).Build()
-
-		// Mock SendReplicateMessagePack
-		mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-			// Do nothing
 		}).Build()
 
 		err := task.Execute(ctx)
@@ -405,11 +383,6 @@ func TestFlushAllTask_MultipleVChannels(t *testing.T) {
 			return nil, nil
 		}).Build()
 
-		// Mock SendReplicateMessagePack
-		mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-			// Do nothing
-		}).Build()
-
 		err := task.Execute(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, len(vchannels), callCount) // Verify sendManualFlushToWAL was called for each vchannel
@@ -447,11 +420,6 @@ func TestFlushAllTask_VerifyFlushTs(t *testing.T) {
 		mockey.Mock(sendManualFlushToWAL).To(func(ctx context.Context, collID UniqueID, vchannel string, flushTs Timestamp) ([]int64, error) {
 			assert.Equal(t, expectedFlushTs, flushTs)
 			return nil, nil
-		}).Build()
-
-		// Mock SendReplicateMessagePack
-		mockey.Mock(SendReplicateMessagePack).To(func(ctx context.Context, replicateMsgStream msgstream.MsgStream, request interface{ GetBase() *commonpb.MsgBase }) {
-			// Do nothing
 		}).Build()
 
 		err := task.Execute(ctx)

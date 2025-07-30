@@ -98,7 +98,6 @@ func (t *flushAllTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		return fmt.Errorf("failed to call flush all to data coordinator: %s", err.Error())
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushAllRequest)
 	t.result = resp
 	return nil
 }

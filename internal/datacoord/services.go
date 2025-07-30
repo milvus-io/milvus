@@ -229,6 +229,8 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 
 	dbCollections := resp.GetDbCollections()
 	wg := errgroup.Group{}
+	// limit goroutine number to 100
+	wg.SetLimit(100)
 	for _, dbCollection := range dbCollections {
 		for _, collectionID := range dbCollection.GetCollectionIDs() {
 			cid := collectionID

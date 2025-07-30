@@ -53,6 +53,8 @@ func (t *flushAllTaskbyStreamingService) Execute(ctx context.Context) error {
 	flushTs := t.BeginTs()
 
 	wg := errgroup.Group{}
+	// limit goroutine number to 100
+	wg.SetLimit(100)
 	for _, dbName := range dbNames {
 		showColRsp, err := t.mixCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
 			Base:   commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
@@ -92,8 +94,6 @@ func (t *flushAllTaskbyStreamingService) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// TODO: refactor to use streaming service
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushAllRequest)
 	t.result = &datapb.FlushAllResponse{
 		Status:  merr.Success(),
 		FlushTs: flushTs,

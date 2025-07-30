@@ -246,7 +246,6 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 			default:
 				s.Fail(fmt.Sprintf("unsupported field type: %s", fieldData.FieldName))
 			}
-
 		}
 	}
 }
