@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -1836,4 +1838,166 @@ func (s *GcControlServiceSuite) TestTimeoutCtx() {
 
 func TestGcControlService(t *testing.T) {
 	suite.Run(t, new(GcControlServiceSuite))
+}
+
+func TestFlushAll(t *testing.T) {
+	ctx := context.Background()
+	dbName := "test_db"
+	req := &datapb.FlushAllRequest{
+		DbName: dbName,
+	}
+
+	// Test normal case
+	mockey.PatchConvey("normal case", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		// Mock GetStateCode
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		// Mock AllocTimestamp
+		expectedTs := uint64(12345)
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(expectedTs, nil).Build()
+
+		// Mock broker.ShowCollectionIDs
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1, 2, 3},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		// Mock flushCollection
+		flushResult := &datapb.FlushResult{
+			CollectionID:    1,
+			SegmentIDs:      []int64{10, 11},
+			TimeOfSeal:      123456789,
+			FlushSegmentIDs: []int64{20, 21},
+			FlushTs:         expectedTs,
+			ChannelCps:      make(map[string]*msgpb.MsgPosition),
+		}
+		mockey.Mock((*Server).flushCollection).Return(flushResult, nil).Build()
+
+		// Execute test
+		resp, err := testServer.FlushAll(ctx, req)
+
+		// Verify results
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int64(expectedTs), int64(resp.GetFlushTs()))
+	})
+
+	// Test server unhealthy case
+	mockey.PatchConvey("server unhealthy", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Abnormal).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test ShowCollectionIDs failed case
+	mockey.PatchConvey("ShowCollectionIDs failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		expectedErr := errors.New("mock ShowCollectionIDs error")
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(nil, expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test AllocTimestamp failed case
+	mockey.PatchConvey("AllocTimestamp failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		expectedErr := errors.New("mock AllocTimestamp error")
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(uint64(0), expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+	})
+
+	// Test flushCollection failed case
+	mockey.PatchConvey("flushCollection failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		expectedTs := uint64(12345)
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(expectedTs, nil).Build()
+
+		expectedErr := errors.New("mock flushCollection error")
+		mockey.Mock((*Server).flushCollection).Return(nil, expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
 }

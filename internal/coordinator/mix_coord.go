@@ -1077,3 +1077,7 @@ func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQ
 func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return s.queryCoordServer.ListLoadedSegments(ctx, req)
 }
+
+func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	return s.datacoordServer.FlushAll(ctx, req)
+}

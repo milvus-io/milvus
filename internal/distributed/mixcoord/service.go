@@ -712,6 +712,10 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	return s.mixCoord.Flush(ctx, req)
 }
 
+func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	return s.mixCoord.FlushAll(ctx, req)
+}
+
 // AssignSegmentID requests to allocate segment space for insert
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	return s.mixCoord.AssignSegmentID(ctx, req)

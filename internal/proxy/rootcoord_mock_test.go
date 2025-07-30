@@ -1623,6 +1623,10 @@ func (coord *MixCoordMock) ListLoadedSegments(ctx context.Context, in *querypb.L
 	return &querypb.ListLoadedSegmentsResponse{}, nil
 }
 
+func (coord *MixCoordMock) FlushAll(ctx context.Context, in *datapb.FlushAllRequest, opts ...grpc.CallOption) (*datapb.FlushAllResponse, error) {
+	return &datapb.FlushAllResponse{}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
