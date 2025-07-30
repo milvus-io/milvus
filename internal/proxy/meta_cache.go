@@ -1091,6 +1091,7 @@ func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
 		if err != nil {
 			log.Error("failed to load policy after RefreshPolicyInfo", zap.Error(err))
 		}
+		CleanPrivilegeCache()
 	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
