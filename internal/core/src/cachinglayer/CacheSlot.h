@@ -18,6 +18,7 @@
 #include <numeric>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <flat_hash_map/flat_hash_map.hpp>
@@ -188,8 +189,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     std::shared_ptr<CellAccessor<CellT>>
     PinInternal(const CidsT& cids, std::chrono::milliseconds timeout) {
         std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
+        std::vector<internal::ListNode::NodePin> ready_pins;
         std::unordered_set<cid_t> need_load_cids;
         futures.reserve(cids.size());
+        ready_pins.reserve(cids.size());
         need_load_cids.reserve(cids.size());
         auto resource_needed = ResourceUsage{0, 0};
         for (const auto& cid : cids) {
@@ -202,8 +205,15 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             }
         }
         for (const auto& cid : cids) {
-            auto [need_load, future] = cells_[cid].pin();
-            futures.push_back(std::move(future));
+            auto [need_load, result] = cells_[cid].pin();
+            if (std::holds_alternative<internal::ListNode::NodePin>(result)) {
+                ready_pins.push_back(
+                    std::get<internal::ListNode::NodePin>(std::move(result)));
+            } else {
+                futures.push_back(
+                    std::get<folly::SemiFuture<internal::ListNode::NodePin>>(
+                        std::move(result)));
+            }
             if (need_load) {
                 need_load_cids.insert(cid);
                 resource_needed += cells_[cid].size();
@@ -213,9 +223,22 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             RunLoad(std::move(need_load_cids), resource_needed, timeout);
         }
 
-        auto pins = SemiInlineGet(folly::collect(futures));
+        std::vector<internal::ListNode::NodePin> all_pins;
+        all_pins.reserve(cids.size());
+
+        for (auto& pin : ready_pins) {
+            all_pins.push_back(std::move(pin));
+        }
+
+        if (!futures.empty()) {
+            auto future_pins = SemiInlineGet(folly::collect(futures));
+            for (auto& pin : future_pins) {
+                all_pins.push_back(std::move(pin));
+            }
+        }
+
         return std::make_shared<CellAccessor<CellT>>(this->shared_from_this(),
-                                                     std::move(pins));
+                                                     std::move(all_pins));
     }
 
     cid_t

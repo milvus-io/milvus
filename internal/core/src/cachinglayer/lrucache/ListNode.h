@@ -13,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <variant>
 
 #include <folly/ExceptionWrapper.h>
 #include <folly/futures/Future.h>
@@ -60,15 +61,14 @@ class ListNode {
     operator=(ListNode&&) = delete;
 
     // bool in return value: whether the caller needs to load this cell.
-    // - If the cell is already loaded, return false and an immediately ready future with a NodePin, the node is pinned
-    //   upon return.
+    // - If the cell is already loaded, return false and a NodePin directly, the node is pinned upon return.
     // - If the cell is in error state, return false and an immediately ready future with an exception.
     // - If the cell is already being loaded by another thread, return false and a future that will be ready when the
     //   cell is loaded. The node will not be pinned until the future is ready.
     // - Otherwise, the cell is not loaded and not being loaded, return true and a future that will be ready when the
     //   cell is loaded. The caller needs to load this cell and call mark_loaded() to set the cell as loaded.
     //   The node will not be pinned until the future is ready.
-    std::pair<bool, folly::SemiFuture<NodePin>>
+    std::pair<bool, std::variant<NodePin, folly::SemiFuture<NodePin>>>
     pin();
 
     const ResourceUsage&
