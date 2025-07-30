@@ -100,6 +100,9 @@ class ChunkedColumnInterface {
     virtual PinWrapper<Chunk*>
     GetChunk(int64_t chunk_id) const = 0;
 
+    virtual std::vector<PinWrapper<Chunk*>>
+    GetAllChunks() const = 0;
+
     // Get number of rows before a specific chunk
     virtual int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const = 0;

@@ -311,6 +311,18 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return PinWrapper<Chunk*>(ca, chunk);
     }
 
+    std::vector<PinWrapper<Chunk*>>
+    GetAllChunks() const override {
+        auto ca = SemiInlineGet(slot_->PinAllCells());
+        std::vector<PinWrapper<Chunk*>> ret;
+        ret.reserve(num_chunks_);
+        for (size_t i = 0; i < num_chunks_; i++) {
+            auto chunk = ca->get_cell_of(i);
+            ret.emplace_back(ca, chunk);
+        }
+        return ret;
+    }
+
     int64_t
     GetNumRowsUntilChunk(int64_t chunk_id) const override {
         return GetNumRowsUntilChunk()[chunk_id];
