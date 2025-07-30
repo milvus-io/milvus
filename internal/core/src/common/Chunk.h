@@ -222,6 +222,40 @@ class StringChunk : public Chunk {
         return result;
     }
 
+    int
+    lower_bound_string(std::string_view target) {
+        int left = 0;
+        int right = row_nums_;
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            std::string_view midString = (*this)[mid];
+
+            if (midString < target) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        return left;
+    }
+
+    int
+    upper_bound_string(std::string_view target) {
+        int left = 0;
+        int right = row_nums_;
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            std::string_view midString = (*this)[mid];
+
+            if (midString <= target) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        return left;
+    }
+
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
     ViewsByOffsets(const FixedVector<int32_t>& offsets);
 
