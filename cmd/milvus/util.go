@@ -146,9 +146,7 @@ func GetMilvusRoles(args []string, flags *flag.FlagSet) *roles.MilvusRoles {
 		role.EnableProxy = true
 		role.EnableQueryNode = true
 		role.EnableDataNode = true
-		if streamingutil.IsStreamingServiceEnabled() {
-			role.EnableStreamingNode = true
-		}
+		role.EnableStreamingNode = true
 		role.Local = true
 		role.Embedded = serverType == typeutil.EmbeddedRole
 	case typeutil.MixCoordRole:

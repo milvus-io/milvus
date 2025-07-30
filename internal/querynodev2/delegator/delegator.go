@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -931,7 +930,7 @@ func (sd *shardDelegator) speedupGuranteeTS(
 	// when 1. streaming service is disable,
 	// 2. consistency level is not strong,
 	// 3. cannot speed iterator, because current client of milvus doesn't support shard level mvcc.
-	if !streamingutil.IsStreamingServiceEnabled() || isIterator || cl != commonpb.ConsistencyLevel_Strong || mvccTS != 0 {
+	if isIterator || cl != commonpb.ConsistencyLevel_Strong || mvccTS != 0 {
 		return guaranteeTS
 	}
 	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
