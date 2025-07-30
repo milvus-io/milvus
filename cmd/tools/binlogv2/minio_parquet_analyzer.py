@@ -68,6 +68,110 @@ class MinioParquetAnalyzer:
             print(f"❌ Failed to list buckets: {e}")
             return []
     
+    def filter_objects(self, objects: List[Dict[str, Any]], 
+                      prefix: str = None, suffix: str = None, contains: str = None,
+                      size_min: int = None, size_max: int = None,
+                      date_from: str = None, date_to: str = None) -> List[Dict[str, Any]]:
+        """
+        Filter objects based on various criteria
+        
+        Args:
+            objects: List of objects to filter
+            prefix: Filter by object name prefix
+            suffix: Filter by object name suffix
+            contains: Filter by object name containing string
+            size_min: Minimum size in MB
+            size_max: Maximum size in MB
+            date_from: Filter objects modified after date (YYYY-MM-DD)
+            date_to: Filter objects modified before date (YYYY-MM-DD)
+        
+        Returns:
+            Filtered list of objects
+        """
+        filtered = objects
+        
+        if prefix:
+            filtered = [obj for obj in filtered if obj['name'].startswith(prefix)]
+        
+        if suffix:
+            filtered = [obj for obj in filtered if obj['name'].endswith(suffix)]
+        
+        if contains:
+            # Support complex logic with parentheses, OR (comma) and AND (&) logic
+            filtered = self._apply_contains_filter(filtered, contains)
+        
+        if size_min is not None:
+            size_min_bytes = size_min * 1024 * 1024
+            filtered = [obj for obj in filtered if obj['size'] >= size_min_bytes]
+        
+        if size_max is not None:
+            size_max_bytes = size_max * 1024 * 1024
+            filtered = [obj for obj in filtered if obj['size'] <= size_max_bytes]
+        
+        if date_from:
+            try:
+                from_date = datetime.datetime.fromisoformat(date_from).date()
+                filtered = [obj for obj in filtered 
+                           if obj['last_modified'] and 
+                           datetime.datetime.fromisoformat(obj['last_modified']).date() >= from_date]
+            except ValueError:
+                print(f"⚠️  Invalid date format for --filter-date-from: {date_from}")
+        
+        if date_to:
+            try:
+                to_date = datetime.datetime.fromisoformat(date_to).date()
+                filtered = [obj for obj in filtered 
+                           if obj['last_modified'] and 
+                           datetime.datetime.fromisoformat(obj['last_modified']).date() <= to_date]
+            except ValueError:
+                print(f"⚠️  Invalid date format for --filter-date-to: {date_to}")
+        
+        return filtered
+
+    def _apply_contains_filter(self, objects: List[Dict[str, Any]], contains_expr: str) -> List[Dict[str, Any]]:
+        """
+        Apply complex contains filter with parentheses support
+        
+        Args:
+            objects: List of objects to filter
+            contains_expr: Complex contains expression with parentheses, OR (comma), and AND (&) logic
+        
+        Returns:
+            Filtered list of objects
+        """
+        def evaluate_expression(expr: str, obj_name: str) -> bool:
+            """Evaluate a single expression for an object name"""
+            expr = expr.strip()
+            
+            # Handle parentheses first
+            if '(' in expr and ')' in expr:
+                # Find the innermost parentheses
+                start = expr.rfind('(')
+                end = expr.find(')', start)
+                if start != -1 and end != -1:
+                    # Extract the content inside parentheses
+                    inner_expr = expr[start+1:end]
+                    # Evaluate the inner expression
+                    inner_result = evaluate_expression(inner_expr, obj_name)
+                    # Replace the parentheses expression with the result
+                    new_expr = expr[:start] + ('true' if inner_result else 'false') + expr[end+1:]
+                    return evaluate_expression(new_expr, obj_name)
+            
+            # Handle AND logic (&)
+            if '&' in expr:
+                parts = [p.strip() for p in expr.split('&')]
+                return all(evaluate_expression(part, obj_name) for part in parts)
+            
+            # Handle OR logic (,)
+            if ',' in expr:
+                parts = [p.strip() for p in expr.split(',')]
+                return any(evaluate_expression(part, obj_name) for part in parts)
+            
+            # Single keyword
+            return expr in obj_name
+        
+        return [obj for obj in objects if evaluate_expression(contains_expr, obj['name'])]
+
     def list_parquet_files(self, bucket_name: str, prefix: str = "") -> List[Dict[str, Any]]:
         """List Parquet files in a bucket"""
         try:
@@ -552,6 +656,30 @@ Examples:
   
   # List Parquet files in bucket
   python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files
+  
+  # Filter files by prefix (insert_log files only)
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-prefix "files/insert_log/"
+  
+  # Filter files by size (files larger than 1MB)
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-size-min 1
+  
+  # Filter files by date range
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-date-from "2024-01-01" --filter-date-to "2024-01-31"
+  
+  # Combine multiple filters
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-prefix "files/" --filter-size-min 0.5 --filter-contains "insert"
+  
+  # Filter with OR logic (files containing 'insert' OR 'delete')
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-contains "insert,delete"
+  
+  # Filter with AND logic (files containing 'insert' AND 'log')
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-contains "insert&log"
+  
+  # Filter with parentheses grouping ((insert OR delete) AND log)
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-contains "(insert,delete)&log"
+  
+  # Complex nested parentheses ((insert OR delete) AND (log OR bin))
+  python minio_parquet_analyzer.py --endpoint localhost --bucket mybucket --list-files --filter-contains "(insert,delete)&(log,bin)"
         """
     )
     
@@ -569,6 +697,15 @@ Examples:
     parser.add_argument("--list-files", "-l", action="store_true", help="List Parquet files in bucket")
     parser.add_argument("--object", "-o", help="Object name in bucket")
     parser.add_argument("--batch", action="store_true", help="Batch analyze all Parquet files in bucket")
+    
+    # Filter arguments
+    parser.add_argument("--filter-prefix", help="Filter objects by prefix (e.g., 'files/insert_log/')")
+    parser.add_argument("--filter-suffix", help="Filter objects by suffix (e.g., '.parquet')")
+    parser.add_argument("--filter-contains", help="Filter objects containing specific string(s). Use comma for OR logic (e.g., 'insert,delete'), use & for AND logic (e.g., 'insert&log'), use () for grouping (e.g., '(insert,delete)&log')")
+    parser.add_argument("--filter-size-min", type=int, help="Filter objects by minimum size in MB")
+    parser.add_argument("--filter-size-max", type=int, help="Filter objects by maximum size in MB")
+    parser.add_argument("--filter-date-from", help="Filter objects modified after date (YYYY-MM-DD)")
+    parser.add_argument("--filter-date-to", help="Filter objects modified before date (YYYY-MM-DD)")
     
     # Analysis arguments
     parser.add_argument("--command", "-c", choices=["analyze", "metadata", "vector", "export", "data"],
@@ -608,9 +745,31 @@ Examples:
         
         files = analyzer.list_parquet_files(args.bucket)
         if files:
-            print(f"📊 Found {len(files)} Parquet file(s) in bucket '{args.bucket}':")
-            for obj in files:
-                print(f"  - {obj['name']} ({obj['size_mb']:.2f} MB)")
+            # Apply filters if specified
+            original_count = len(files)
+            files = analyzer.filter_objects(
+                files,
+                prefix=args.filter_prefix,
+                suffix=args.filter_suffix,
+                contains=args.filter_contains,
+                size_min=args.filter_size_min,
+                size_max=args.filter_size_max,
+                date_from=args.filter_date_from,
+                date_to=args.filter_date_to
+            )
+            
+            if original_count != len(files):
+                print(f"🔍 Applied filters: {original_count} → {len(files)} files")
+            
+            if files:
+                print(f"📊 Found {len(files)} Parquet file(s) in bucket '{args.bucket}':")
+                for obj in files:
+                    modified_str = ""
+                    if obj.get('last_modified'):
+                        modified_str = f" (modified: {obj['last_modified'][:10]})"
+                    print(f"  - {obj['name']} ({obj['size_mb']:.2f} MB){modified_str}")
+            else:
+                print("❌ No files match the specified filters")
         else:
             print("❌ No Parquet files found or access denied")
     elif args.batch:
