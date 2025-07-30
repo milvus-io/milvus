@@ -626,69 +626,86 @@ def gen_digits_by_length(length=8):
     return "".join(random.choice(string.digits) for _ in range(length))
 
 
+def gen_scalar_field(field_type, name=None, description=ct.default_desc, is_primary=False, **kwargs):
+    """
+    Generate a field schema based on the field type.
+    
+    Args:
+        field_type: DataType enum value (e.g., DataType.BOOL, DataType.VARCHAR, etc.)
+        name: Field name (uses default if None)
+        description: Field description
+        is_primary: Whether this is a primary field
+        **kwargs: Additional parameters like max_length, max_capacity, etc.
+    
+    Returns:
+        Field schema object
+    """
+    # Set default names based on field type
+    if name is None:
+        name = ct.default_field_name_map.get(field_type, "default_field")
+    
+    # Set default parameters for specific field types
+    if field_type == DataType.VARCHAR and 'max_length' not in kwargs:
+        kwargs['max_length'] = ct.default_length
+    elif field_type == DataType.ARRAY:
+        if 'element_type' not in kwargs:
+            kwargs['element_type'] = DataType.INT64
+        if 'max_capacity' not in kwargs:
+            kwargs['max_capacity'] = ct.default_max_capacity
+    
+    field, _ = ApiFieldSchemaWrapper().init_field_schema(
+        name=name, 
+        dtype=field_type, 
+        description=description,
+        is_primary=is_primary, 
+        **kwargs
+    )
+    return field
+
+
+# Convenience functions for backward compatibility
 def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    bool_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.BOOL, description=description,
-                                                              is_primary=is_primary, **kwargs)
-    return bool_field
+    return gen_scalar_field(DataType.BOOL, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_string_field(name=ct.default_string_field_name, description=ct.default_desc, is_primary=False,
                      max_length=ct.default_length, **kwargs):
-    string_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.VARCHAR,
-                                                                description=description, max_length=max_length,
-                                                                is_primary=is_primary, **kwargs)
-    return string_field
+    return gen_scalar_field(DataType.VARCHAR, name=name, description=description, is_primary=is_primary, 
+                    max_length=max_length, **kwargs)
 
 
 def gen_json_field(name=ct.default_json_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    json_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.JSON, description=description,
-                                                              is_primary=is_primary, **kwargs)
-    return json_field
+    return gen_scalar_field(DataType.JSON, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_array_field(name=ct.default_array_field_name, element_type=DataType.INT64, max_capacity=ct.default_max_capacity,
                     description=ct.default_desc, is_primary=False, **kwargs):
-
-    array_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.ARRAY,
-                                                               element_type=element_type, max_capacity=max_capacity,
-                                                               description=description, is_primary=is_primary, **kwargs)
-    return array_field
+    return gen_scalar_field(DataType.ARRAY, name=name, description=description, is_primary=is_primary, 
+                    element_type=element_type, max_capacity=max_capacity, **kwargs)
 
 
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    int8_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8, description=description,
-                                                              is_primary=is_primary, **kwargs)
-    return int8_field
+    return gen_scalar_field(DataType.INT8, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_int16_field(name=ct.default_int16_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    int16_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT16, description=description,
-                                                               is_primary=is_primary, **kwargs)
-    return int16_field
+    return gen_scalar_field(DataType.INT16, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_int32_field(name=ct.default_int32_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    int32_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT32, description=description,
-                                                               is_primary=is_primary, **kwargs)
-    return int32_field
+    return gen_scalar_field(DataType.INT32, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_int64_field(name=ct.default_int64_field_name, description=ct.default_desc, is_primary=False, **kwargs):
-    int64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT64, description=description,
-                                                               is_primary=is_primary, **kwargs)
-    return int64_field
+    return gen_scalar_field(DataType.INT64, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc, **kwargs):
-    float_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT, description=description,
-                                                               is_primary=is_primary, **kwargs)
-    return float_field
+    return gen_scalar_field(DataType.FLOAT, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_double_field(name=ct.default_double_field_name, is_primary=False, description=ct.default_desc, **kwargs):
-    double_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.DOUBLE,  description=description,
-                                                                is_primary=is_primary, **kwargs)
-    return double_field
+    return gen_scalar_field(DataType.DOUBLE, name=name, description=description, is_primary=is_primary, **kwargs)
 
 
 def gen_float_vec_field(name=ct.default_float_vec_field_name, is_primary=False, dim=ct.default_dim,
@@ -1749,7 +1766,7 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
     return data
 
 
-def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=False, skip_field_names=[]):
     """
     Generates row data based on the given schema.
     
@@ -1758,6 +1775,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         schema (Schema): Collection schema or collection info. If None, uses default schema.
         start (int): Starting value for primary key fields. Defaults to 0.
         random_pk (bool, optional): Whether to generate random primary key values (default: False)
+        skip_field_names(list, optional): whether to skip some field to gen data manually (default: [])
 
     Returns:
         list[dict]: List of dictionaries where each dictionary represents a row,
@@ -1784,9 +1802,10 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
 
         fields_needs_data = []
         for field in fields:
+            field_name = field.get('name', None)
             if field.get('auto_id', False):
                 continue
-            if field.get('name', None) in func_output_fields:
+            if field_name in func_output_fields or field_name in skip_field_names:
                 continue
             fields_needs_data.append(field)
         data = []
@@ -1815,7 +1834,7 @@ def gen_row_data_by_schema(nb=ct.default_nb, schema=None, start=0, random_pk=Fal
         for field in fields:
             if field.auto_id:
                 continue
-            if field.name in func_output_fields:
+            if field.name in func_output_fields or field.name in skip_field_names:
                 continue
             fields_needs_data.append(field)
         data = []
@@ -2431,52 +2450,55 @@ def gen_invalid_search_params_type():
     return search_params
 
 
-def gen_search_param(index_type, metric_type="L2"):
-    search_params = []
-    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "GPU_IVF_FLAT", "GPU_IVF_PQ"]:
-        if index_type in ["GPU_FLAT"]:
-            ivf_search_params = {"metric_type": metric_type, "params": {}}
-            search_params.append(ivf_search_params)
-        else:
-            for nprobe in [64]:
-                ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
-                search_params.append(ivf_search_params)
-    elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
-        if metric_type not in ct.binary_metrics:
-            log.error("Metric type error: binary index only supports distance type in (%s)" % ct.binary_metrics)
-            # default metric type for binary index
-            metric_type = "JACCARD"
-        for nprobe in [64, 128]:
-            binary_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
-            search_params.append(binary_search_params)
-    elif index_type in ["HNSW"]:
-        for ef in [64, 1500, 32768]:
-            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
-            search_params.append(hnsw_search_param)
-    elif index_type == "ANNOY":
-        for search_k in [1000, 5000]:
-            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
-            search_params.append(annoy_search_param)
-    elif index_type == "SCANN":
-        for reorder_k in [1200, 3000]:
-            scann_search_param = {"metric_type": metric_type, "params": {"nprobe": 64, "reorder_k": reorder_k}}
-            search_params.append(scann_search_param)
-    elif index_type == "DISKANN":
-        for search_list in [20, 300, 1500]:
-            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
-            search_params.append(diskann_search_param)
-    elif index_type == "IVF_RABITQ":
-        for rbq_bits_query in [7]:
-            ivf_rabitq_search_param = {"metric_type": metric_type,
-                                       "params": {"rbq_bits_query": rbq_bits_query, "nprobe": 8, "refine_k": 10.0}}
-            search_params.append(ivf_rabitq_search_param)
-    else:
-        log.error("Invalid index_type.")
-        raise Exception("Invalid index_type.")
-    log.debug(search_params)
-
-    return search_params
-
+# def gen_search_param(index_type, metric_type="L2"):
+#     search_params = []
+#     if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "GPU_IVF_FLAT", "GPU_IVF_PQ"]:
+#         if index_type in ["GPU_FLAT"]:
+#             ivf_search_params = {"metric_type": metric_type, "params": {}}
+#             search_params.append(ivf_search_params)
+#         else:
+#             search_params.append({"metric_type": index_type, "params": {"nprobe": 100}})
+#             search_params.append({"metric_type": index_type, "nprobe": 100})
+#             search_params.append({"metric_type": index_type})
+#             search_params.append({"params": {"nprobe": 100}})
+#             search_params.append({"nprobe": 100})
+#             search_params.append({})
+#     elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
+#         if metric_type not in ct.binary_metrics:
+#             log.error("Metric type error: binary index only supports distance type in (%s)" % ct.binary_metrics)
+#             # default metric type for binary index
+#             metric_type = "JACCARD"
+#         for nprobe in [64, 128]:
+#             binary_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
+#             search_params.append(binary_search_params)
+#     elif index_type in ["HNSW"]:
+#         for ef in [64, 1500, 32768]:
+#             hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
+#             search_params.append(hnsw_search_param)
+#     elif index_type == "ANNOY":
+#         for search_k in [1000, 5000]:
+#             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
+#             search_params.append(annoy_search_param)
+#     elif index_type == "SCANN":
+#         for reorder_k in [1200, 3000]:
+#             scann_search_param = {"metric_type": metric_type, "params": {"nprobe": 64, "reorder_k": reorder_k}}
+#             search_params.append(scann_search_param)
+#     elif index_type == "DISKANN":
+#         for search_list in [20, 300, 1500]:
+#             diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
+#             search_params.append(diskann_search_param)
+#     elif index_type == "IVF_RABITQ":
+#         for rbq_bits_query in [7]:
+#             ivf_rabitq_search_param = {"metric_type": metric_type,
+#                                        "params": {"rbq_bits_query": rbq_bits_query, "nprobe": 8, "refine_k": 10.0}}
+#             search_params.append(ivf_rabitq_search_param)
+#     else:
+#         log.error("Invalid index_type.")
+#         raise Exception("Invalid index_type.")
+#     log.debug(search_params)
+#
+#     return search_params
+#
 
 def gen_autoindex_search_params():
     search_params = [

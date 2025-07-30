@@ -417,7 +417,8 @@ class ResponseChecker:
         """
         log.info("search_results_check: checking the searching results")
         enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
-        pk_name = check_items.get("pk_name", ct.default_primary_field_name)
+        pk_name = check_items.get("pk_name", ct.default_primary_field_name) if enable_milvus_client_api is False \
+            else check_items.get("pk_name", 'id')
 
         if func_name != 'search' and func_name != 'hybrid_search':
             log.warning("The function name is {} rather than {} or {}".format(func_name, "search", "hybrid_search"))
