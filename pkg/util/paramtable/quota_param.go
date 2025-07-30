@@ -1684,7 +1684,7 @@ specific conditions, such as memory of nodes to water marker), ` + "true" + ` me
 	p.TtProtectionEnabled = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.ttProtection.enabled",
 		Version:      "2.2.0",
-		DefaultValue: "true",
+		DefaultValue: "false",
 		Export:       true,
 	}
 	p.TtProtectionEnabled.Init(base.mgr)
