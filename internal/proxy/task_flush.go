@@ -18,17 +18,11 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -40,7 +34,7 @@ type flushTask struct {
 	mixCoord types.MixCoordClient
 	result   *milvuspb.FlushResponse
 
-	replicateMsgStream msgstream.MsgStream
+	chMgr channelsMgr
 }
 
 func (t *flushTask) TraceCtx() context.Context {
@@ -85,46 +79,6 @@ func (t *flushTask) OnEnqueue() error {
 }
 
 func (t *flushTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (t *flushTask) Execute(ctx context.Context) error {
-	coll2Segments := make(map[string]*schemapb.LongArray)
-	flushColl2Segments := make(map[string]*schemapb.LongArray)
-	coll2SealTimes := make(map[string]int64)
-	coll2FlushTs := make(map[string]Timestamp)
-	channelCps := make(map[string]*msgpb.MsgPosition)
-	for _, collName := range t.CollectionNames {
-		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
-		if err != nil {
-			return merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)
-		}
-		flushReq := &datapb.FlushRequest{
-			Base: commonpbutil.UpdateMsgBase(
-				t.Base,
-				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
-			),
-			CollectionID: collID,
-		}
-		resp, err := t.mixCoord.Flush(ctx, flushReq)
-		if err = merr.CheckRPCCall(resp, err); err != nil {
-			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
-		}
-		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
-		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
-		coll2SealTimes[collName] = resp.GetTimeOfSeal()
-		coll2FlushTs[collName] = resp.GetFlushTs()
-		channelCps = resp.GetChannelCps()
-	}
-	t.result = &milvuspb.FlushResponse{
-		Status:          merr.Success(),
-		DbName:          t.GetDbName(),
-		CollSegIDs:      coll2Segments,
-		FlushCollSegIDs: flushColl2Segments,
-		CollSealTimes:   coll2SealTimes,
-		CollFlushTs:     coll2FlushTs,
-		ChannelCps:      channelCps,
-	}
 	return nil
 }
 

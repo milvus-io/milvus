@@ -12,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
@@ -76,11 +75,8 @@ func NewClient(etcdCli *clientv3.Client) Client {
 			dialOptions...,
 		)
 	})
-	var assignmentServiceImpl *assignment.AssignmentServiceImpl
-	if streamingutil.IsStreamingServiceEnabled() {
-		assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
-		assignmentServiceImpl = assignment.NewAssignmentService(assignmentService)
-	}
+	assignmentService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordAssignmentServiceClient)
+	assignmentServiceImpl := assignment.NewAssignmentService(assignmentService)
 	broadcastService := lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingCoordBroadcastServiceClient)
 	return &clientImpl{
 		conn:              conn,

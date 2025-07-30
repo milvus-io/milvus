@@ -18,19 +18,15 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/uniquegenerator"
 )
 
@@ -50,9 +46,8 @@ func createTestFlushAllTask(t *testing.T) (*flushAllTask, *mocks.MockMixCoordCli
 				SourceID:  1,
 			},
 		},
-		ctx:                ctx,
-		mixCoord:           mixCoord,
-		replicateMsgStream: replicateMsgStream,
+		ctx:      ctx,
+		mixCoord: mixCoord,
 	}
 
 	return task, mixCoord, replicateMsgStream, ctx
@@ -151,95 +146,6 @@ func TestFlushAllTaskPreExecute(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestFlushAllTaskExecuteSuccess(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
-	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
-
-	// Setup expectations
-	expectedResp := &datapb.FlushAllResponse{
-		Status: merr.Success(),
-	}
-
-	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-		Return(expectedResp, nil).Once()
-
-	err := task.Execute(ctx)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedResp, task.result)
-}
-
-func TestFlushAllTaskExecuteFlushAllRPCError(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
-	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
-
-	// Test RPC call error
-	expectedErr := fmt.Errorf("rpc error")
-
-	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-		Return(nil, expectedErr).Once()
-
-	err := task.Execute(ctx)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to call flush all to data coordinator")
-}
-
-func TestFlushAllTaskExecuteFlushAllResponseError(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
-	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
-
-	// Test response with error status
-	errorResp := &datapb.FlushAllResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "flush all failed",
-		},
-	}
-
-	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-		Return(errorResp, nil).Once()
-
-	err := task.Execute(ctx)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to call flush all to data coordinator")
-}
-
-func TestFlushAllTaskExecuteWithMerCheck(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
-	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
-
-	// Test successful execution with merr.CheckRPCCall
-	successResp := &datapb.FlushAllResponse{
-		Status: merr.Success(),
-	}
-
-	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-		Return(successResp, nil).Once()
-
-	err := task.Execute(ctx)
-	assert.NoError(t, err)
-	assert.Equal(t, successResp, task.result)
-}
-
-func TestFlushAllTaskExecuteRequestContent(t *testing.T) {
-	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
-	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
-
-	// Test the content of the FlushAllRequest sent to mixCoord
-	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-		Return(&datapb.FlushAllResponse{Status: merr.Success()}, nil).Once()
-
-	err := task.Execute(ctx)
-	assert.NoError(t, err)
-
-	// The test verifies that Execute method creates the correct request structure internally
-	// The actual request content validation is covered by other tests
-}
-
 func TestFlushAllTaskPostExecute(t *testing.T) {
 	task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
 	defer mixCoord.AssertExpectations(t)
@@ -247,97 +153,6 @@ func TestFlushAllTaskPostExecute(t *testing.T) {
 
 	err := task.PostExecute(ctx)
 	assert.NoError(t, err)
-}
-
-func TestFlushAllTaskLifecycle(t *testing.T) {
-	ctx := context.Background()
-	mixCoord := mocks.NewMockMixCoordClient(t)
-	replicateMsgStream := msgstream.NewMockMsgStream(t)
-	defer mixCoord.AssertExpectations(t)
-	defer replicateMsgStream.AssertExpectations(t)
-
-	// Test complete task lifecycle
-
-	// 1. OnEnqueue
-	task := &flushAllTask{
-		baseTask:           baseTask{},
-		Condition:          NewTaskCondition(ctx),
-		FlushAllRequest:    &milvuspb.FlushAllRequest{},
-		ctx:                ctx,
-		mixCoord:           mixCoord,
-		replicateMsgStream: replicateMsgStream,
-	}
-
-	err := task.OnEnqueue()
-	assert.NoError(t, err)
-
-	// 2. PreExecute
-	err = task.PreExecute(ctx)
-	assert.NoError(t, err)
-
-	// 3. Execute
-	expectedResp := &datapb.FlushAllResponse{
-		Status: merr.Success(),
-	}
-
-	mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-		Return(expectedResp, nil).Once()
-
-	err = task.Execute(ctx)
-	assert.NoError(t, err)
-
-	// 4. PostExecute
-	err = task.PostExecute(ctx)
-	assert.NoError(t, err)
-
-	// Verify task state
-	assert.Equal(t, expectedResp, task.result)
-}
-
-func TestFlushAllTaskErrorHandlingInExecute(t *testing.T) {
-	// Test different error scenarios in Execute method
-
-	testCases := []struct {
-		name          string
-		setupMock     func(*mocks.MockMixCoordClient)
-		expectedError string
-	}{
-		{
-			name: "mixCoord FlushAll returns error",
-			setupMock: func(mixCoord *mocks.MockMixCoordClient) {
-				mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-					Return(nil, fmt.Errorf("network error")).Once()
-			},
-			expectedError: "failed to call flush all to data coordinator",
-		},
-		{
-			name: "mixCoord FlushAll returns error status",
-			setupMock: func(mixCoord *mocks.MockMixCoordClient) {
-				mixCoord.EXPECT().FlushAll(mock.Anything, mock.AnythingOfType("*datapb.FlushAllRequest")).
-					Return(&datapb.FlushAllResponse{
-						Status: &commonpb.Status{
-							ErrorCode: commonpb.ErrorCode_IllegalArgument,
-							Reason:    "invalid request",
-						},
-					}, nil).Once()
-			},
-			expectedError: "failed to call flush all to data coordinator",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			task, mixCoord, replicateMsgStream, ctx := createTestFlushAllTask(t)
-			defer mixCoord.AssertExpectations(t)
-			defer replicateMsgStream.AssertExpectations(t)
-
-			tc.setupMock(mixCoord)
-
-			err := task.Execute(ctx)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), tc.expectedError)
-		})
-	}
 }
 
 func TestFlushAllTaskImplementsTaskInterface(t *testing.T) {

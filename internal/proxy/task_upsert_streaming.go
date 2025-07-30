@@ -15,11 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type upsertTaskByStreamingService struct {
-	*upsertTask
-}
-
-func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
+func (ut *upsertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-Execute")
 	defer sp.End()
 	log := log.Ctx(ctx).With(zap.String("collectionName", ut.req.CollectionName))
@@ -46,7 +42,7 @@ func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) ([]message.MutableMessage, error) {
+func (ut *upsertTask) packInsertMessage(ctx context.Context) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
@@ -93,7 +89,7 @@ func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) (
 	return msgs, nil
 }
 
-func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) ([]message.MutableMessage, error) {
+func (it *upsertTask) packDeleteMessage(ctx context.Context) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", it.ID()))
 	collID := it.upsertMsg.DeleteMsg.CollectionID
 	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs

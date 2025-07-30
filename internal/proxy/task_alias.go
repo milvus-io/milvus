@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -33,10 +32,9 @@ type CreateAliasTask struct {
 	baseTask
 	Condition
 	*milvuspb.CreateAliasRequest
-	ctx                context.Context
-	mixCoord           types.MixCoordClient
-	replicateMsgStream msgstream.MsgStream
-	result             *commonpb.Status
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 }
 
 // TraceCtx returns the trace context of the task.
@@ -111,7 +109,6 @@ func (t *CreateAliasTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.CreateAliasRequest)
 	return nil
 }
 
@@ -125,10 +122,9 @@ type DropAliasTask struct {
 	baseTask
 	Condition
 	*milvuspb.DropAliasRequest
-	ctx                context.Context
-	mixCoord           types.MixCoordClient
-	replicateMsgStream msgstream.MsgStream
-	result             *commonpb.Status
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 }
 
 // TraceCtx returns the context for trace
@@ -189,7 +185,6 @@ func (t *DropAliasTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.DropAliasRequest)
 	return nil
 }
 
@@ -202,10 +197,9 @@ type AlterAliasTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterAliasRequest
-	ctx                context.Context
-	mixCoord           types.MixCoordClient
-	replicateMsgStream msgstream.MsgStream
-	result             *commonpb.Status
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 }
 
 func (t *AlterAliasTask) TraceCtx() context.Context {
@@ -270,7 +264,6 @@ func (t *AlterAliasTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterAliasRequest)
 	return nil
 }
 

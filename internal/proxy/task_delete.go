@@ -2,13 +2,11 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strconv"
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -21,7 +19,6 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -133,60 +130,6 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (dt *deleteTask) Execute(ctx context.Context) (err error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
-	defer sp.End()
-
-	if len(dt.req.GetExpr()) == 0 {
-		return merr.WrapErrParameterInvalid("valid expr", "empty expr", "invalid expression")
-	}
-
-	dt.tr = timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
-	stream, err := dt.chMgr.getOrCreateDmlStream(ctx, dt.collectionID)
-	if err != nil {
-		return err
-	}
-
-	result, numRows, err := repackDeleteMsgByHash(
-		ctx,
-		dt.primaryKeys, dt.vChannels,
-		dt.idAllocator, dt.ts,
-		dt.collectionID, dt.req.GetCollectionName(),
-		dt.partitionID, dt.req.GetPartitionName(),
-		dt.req.GetDbName(),
-	)
-	if err != nil {
-		return err
-	}
-
-	// send delete request to log broker
-	msgPack := &msgstream.MsgPack{
-		BeginTs: dt.BeginTs(),
-		EndTs:   dt.EndTs(),
-	}
-
-	for _, msgs := range result {
-		for _, msg := range msgs {
-			msgPack.Msgs = append(msgPack.Msgs, msg)
-		}
-	}
-
-	log.Ctx(ctx).Debug("send delete request to virtual channels",
-		zap.String("collectionName", dt.req.GetCollectionName()),
-		zap.Int64("collectionID", dt.collectionID),
-		zap.Strings("virtual_channels", dt.vChannels),
-		zap.Int64("taskID", dt.ID()),
-		zap.Duration("prepare duration", dt.tr.RecordSpan()))
-
-	err = stream.Produce(ctx, msgPack)
-	if err != nil {
-		return err
-	}
-	dt.sessionTS = dt.ts
-	dt.count += numRows
-	return nil
-}
-
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDeleteVectors.WithLabelValues(
 		paramtable.GetStringNodeID(),
@@ -288,7 +231,6 @@ type deleteRunner struct {
 
 	// channel
 	chMgr     channelsMgr
-	chTicker  channelsTimeTicker
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -437,20 +379,13 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 		req:          dr.req,
 		idAllocator:  dr.idAllocator,
 		chMgr:        dr.chMgr,
-		chTicker:     dr.chTicker,
 		collectionID: dr.collectionID,
 		partitionID:  partitionID,
 		vChannels:    dr.vChannels,
 		primaryKeys:  primaryKeys,
 		dbID:         dr.dbID,
 	}
-
-	var enqueuedTask task = dt
-	if streamingutil.IsStreamingServiceEnabled() {
-		enqueuedTask = &deleteTaskByStreamingService{deleteTask: dt}
-	}
-
-	if err := dr.queue.Enqueue(enqueuedTask); err != nil {
+	if err := dr.queue.Enqueue(dt); err != nil {
 		log.Ctx(ctx).Error("Failed to enqueue delete task: " + err.Error())
 		return nil, err
 	}

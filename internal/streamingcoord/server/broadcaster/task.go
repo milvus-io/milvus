@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
@@ -49,7 +50,7 @@ type pendingBroadcastTask struct {
 // Execute reexecute the task, return nil if the task is done, otherwise not done.
 // Execute can be repeated called until the task is done.
 // Same semantics as the `Poll` operation in eventloop.
-func (b *pendingBroadcastTask) Execute(ctx context.Context, operator AppendOperator) error {
+func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 	if err := b.broadcastTask.InitializeRecovery(ctx); err != nil {
 		b.Logger().Warn("broadcast task initialize recovery failed", zap.Error(err))
 		b.UpdateInstantWithNextBackOff()
@@ -58,7 +59,7 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context, operator AppendOpera
 
 	if len(b.pendingMessages) > 0 {
 		b.Logger().Debug("broadcast task is polling to make sent...", zap.Int("pendingMessages", len(b.pendingMessages)))
-		resps := operator.AppendMessages(ctx, b.pendingMessages...)
+		resps := streaming.WAL().AppendMessages(ctx, b.pendingMessages...)
 		newPendings := make([]message.MutableMessage, 0)
 		for idx, resp := range resps.Responses {
 			if resp.Error != nil {

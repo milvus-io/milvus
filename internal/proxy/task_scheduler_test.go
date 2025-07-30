@@ -492,9 +492,8 @@ func TestTaskScheduler(t *testing.T) {
 
 	ctx := context.Background()
 	tsoAllocatorIns := newMockTsoAllocator()
-	factory := newSimpleMockMsgStreamFactory()
 
-	sched, err := newTaskScheduler(ctx, tsoAllocatorIns, factory)
+	sched, err := newTaskScheduler(ctx, tsoAllocatorIns)
 	assert.NoError(t, err)
 	assert.NotNil(t, sched)
 
@@ -572,8 +571,7 @@ func TestTaskScheduler_concurrentPushAndPop(t *testing.T) {
 	).Return(collectionID, nil)
 	globalMetaCache = cache
 	tsoAllocatorIns := newMockTsoAllocator()
-	factory := newSimpleMockMsgStreamFactory()
-	scheduler, err := newTaskScheduler(context.Background(), tsoAllocatorIns, factory)
+	scheduler, err := newTaskScheduler(context.Background(), tsoAllocatorIns)
 	assert.NoError(t, err)
 
 	run := func(wg *sync.WaitGroup) {
