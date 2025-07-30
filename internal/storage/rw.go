@@ -241,6 +241,9 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		if len(binlogs) <= 0 {
 			return nil, sio.EOF
 		}
+		sort.Slice(binlogs, func(i, j int) bool {
+			return binlogs[i].GetFieldID() < binlogs[j].GetFieldID()
+		})
 		binlogLists := lo.Map(binlogs, func(fieldBinlog *datapb.FieldBinlog, _ int) []*datapb.Binlog {
 			return fieldBinlog.GetBinlogs()
 		})
