@@ -19,6 +19,7 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -46,11 +48,12 @@ type DMLGroup struct {
 }
 
 type SourceCollectionInfo struct {
-	collectionID int64
-	partitionID  int64
-	l0SegmentIDs []int64
-	SegmentIDs   []int64
-	insertedIDs  *schemapb.IDs
+	collectionID   int64
+	partitionID    int64
+	l0SegmentIDs   []int64
+	SegmentIDs     []int64
+	insertedIDs    *schemapb.IDs
+	storageVersion int
 }
 
 func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
@@ -236,6 +239,11 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
 
+	storageVersion := 0
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+		storageVersion = 2
+	}
+
 	return &SourceCollectionInfo{
 		collectionID: collectionID,
 		partitionID:  partitionID,
@@ -245,7 +253,8 @@ func (s *BulkInsertSuite) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *
 		SegmentIDs: lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) int64 {
 			return segment.GetID()
 		}),
-		insertedIDs: totalInsertedIDs,
+		insertedIDs:    totalInsertedIDs,
+		storageVersion: storageVersion,
 	}
 }
 
@@ -311,12 +320,14 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 		files = append(files, &internalpb.ImportFile{Paths: []string{fmt.Sprintf("%s/insert_log/%d/%d/%d",
 			s.Cluster.RootPath(), collectionID, partitionID, segmentID)}})
 	}
+
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 		Files:          files,
 		Options: []*commonpb.KeyValuePair{
 			{Key: "backup", Value: "true"},
+			{Key: importutilv2.StorageVersion, Value: strconv.Itoa(sourceCollectionInfo.storageVersion)},
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
@@ -358,6 +369,7 @@ func (s *BulkInsertSuite) runBinlogTest(dmlGroup *DMLGroup) {
 			Files:          files,
 			Options: []*commonpb.KeyValuePair{
 				{Key: "l0_import", Value: "true"},
+				{Key: importutilv2.StorageVersion, Value: strconv.Itoa(sourceCollectionInfo.storageVersion)},
 			},
 		})
 		s.NoError(merr.CheckRPCCall(importResp, err))
