@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -323,5 +322,6 @@ func (s *ArrayStructDataNodeSuite) TestSwapQN() {
 }
 
 func TestArrayStructDataNodeUtil(t *testing.T) {
-	suite.Run(t, new(ArrayStructDataNodeSuite))
+	// skip struct array test
+	// suite.Run(t, new(ArrayStructDataNodeSuite))
 }

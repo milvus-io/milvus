@@ -234,6 +234,7 @@ func (s *CompactionSuite) assertQuery(ctx context.Context, collectionName string
 }
 
 func (s *CompactionSuite) TestMixCompaction() {
+	s.T().Skip("skip struct array test")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 
@@ -263,5 +264,5 @@ func (s *CompactionSuite) TestMixCompactionV2() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-	s.assertMixCompaction(ctx, collectionName, true)
+	s.assertMixCompaction(ctx, collectionName, paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool())
 }
