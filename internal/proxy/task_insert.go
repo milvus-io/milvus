@@ -36,6 +36,7 @@ type insertTask struct {
 	schema          *schemapb.CollectionSchema
 	partitionKeys   *schemapb.FieldData
 	schemaTimestamp uint64
+	collectionID    int64
 }
 
 // TraceCtx returns insertTask context
@@ -137,6 +138,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("fail to get collection id", zap.Error(err))
 		return err
 	}
+	it.collectionID = collID
+
 	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, it.insertMsg.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Ctx(ctx).Warn("fail to get collection info", zap.Error(err))
