@@ -40,6 +40,8 @@ const std::string STLSORT_INDEX_FILE_NAME = "stlsort-index";
 
 constexpr size_t ALIGNMENT = 32;  // 32-byte alignment
 
+const uint64_t MMAP_INDEX_PADDING = 1;
+
 template <typename T>
 ScalarIndexSort<T>::ScalarIndexSort(
     const storage::FileManagerContext& file_manager_context)
@@ -219,12 +221,19 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                              0);
                 file_writer.Write(padding.data(), padding.size());
             }
+            // write padding in case of all null values
+            std::vector<uint8_t> padding(MMAP_INDEX_PADDING, 0);
+            file_writer.Write(padding.data(), padding.size());
             file_writer.Finish();
         }
 
         auto file = File::Open(mmap_filepath_, O_RDONLY);
-        mmap_data_ = static_cast<char*>(mmap(
-            NULL, aligned_size, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
+        mmap_data_ = static_cast<char*>(mmap(NULL,
+                                             aligned_size + MMAP_INDEX_PADDING,
+                                             PROT_READ,
+                                             MAP_PRIVATE,
+                                             file.Descriptor(),
+                                             0));
 
         if (mmap_data_ == MAP_FAILED) {
             file.Close();
@@ -234,7 +243,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                       strerror(errno));
         }
 
-        mmap_size_ = aligned_size;
+        mmap_size_ = aligned_size + MMAP_INDEX_PADDING;
         data_size_ = index_data->size;
 
         file.Close();
