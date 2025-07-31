@@ -177,7 +177,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     std::vector<std::pair<SegOffset, Timestamp>>
     search_batch_pks(const std::vector<PkType>& pks,
-                     const Timestamp* timestamps) const;
+                     const Timestamp* timestamps,
+                     bool include_same_ts) const;
 
  public:
     size_t
@@ -297,7 +298,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
               &insert_record_,
               [this](const std::vector<PkType>& pks,
                      const Timestamp* timestamps) {
-                  return this->search_batch_pks(pks, timestamps);
+                  return this->search_batch_pks(pks, timestamps, false);
               },
               segment_id) {
         this->CreateTextIndexes();

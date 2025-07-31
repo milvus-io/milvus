@@ -206,7 +206,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     std::vector<std::pair<SegOffset, Timestamp>>
     search_batch_pks(const std::vector<PkType>& pks,
-                     const Timestamp* timestamps) const;
+                     const Timestamp* timestamps,
+                     bool include_same_ts) const;
 
  public:
     int64_t
