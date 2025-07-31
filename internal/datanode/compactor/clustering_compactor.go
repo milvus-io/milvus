@@ -619,11 +619,14 @@ func (t *clusteringCompactionTask) mappingSegment(
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
 	}
-	defer rr.Close()
+	reader := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
+		return storage.ValueDeserializerWithSchema(r, v, t.plan.Schema, true)
+	})
+	defer reader.Close()
 
 	offset := int64(-1)
 	for {
-		r, err := rr.Next()
+		v, err := reader.NextValue()
 		if err != nil {
 			if err == sio.EOF {
 				break
@@ -632,54 +635,41 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
-			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
+		offset++
+
+		if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
+			continue
+		}
+
+		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+		if !ok {
+			log.Warn("convert interface to map wrong")
+			return errors.New("unexpected error")
+		}
+
+		clusteringKey := row[t.clusteringKeyField.FieldID]
+		var clusterBuffer *ClusterBuffer
+		if t.isVectorClusteringKey {
+			clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
+		} else {
+			clusterBuffer = t.keyToBufferFunc(clusteringKey)
+		}
+		if err := clusterBuffer.Write(*v); err != nil {
 			return err
 		}
+		t.writtenRowNum.Inc()
+		remained++
 
-		for _, v := range vs {
-			offset++
-
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
-				continue
-			}
-
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
-			if !ok {
-				log.Warn("convert interface to map wrong")
-				return errors.New("unexpected error")
-			}
-
-			clusteringKey := row[t.clusteringKeyField.FieldID]
-			var clusterBuffer *ClusterBuffer
-			if t.isVectorClusteringKey {
-				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
-			} else {
-				clusterBuffer = t.keyToBufferFunc(clusteringKey)
-			}
-			if err := clusterBuffer.Write(v); err != nil {
-				return err
-			}
-			t.writtenRowNum.Inc()
-			remained++
-
-			if (remained+1)%100 == 0 {
-				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
-				if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() {
-					// reach flushBinlog trigger threshold
-					log.Debug("largest buffer need to flush",
-						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
-					if err := t.flushLargestBuffers(ctx); err != nil {
-						return err
-					}
+		if (remained+1)%100 == 0 {
+			currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
+			if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() {
+				// reach flushBinlog trigger threshold
+				log.Debug("largest buffer need to flush",
+					zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
+				if err := t.flushLargestBuffers(ctx); err != nil {
+					return err
 				}
 			}
-		}
-
-		// all cluster buffers are flushed for a certain record, since the values read from the same record are references instead of copies
-		for _, buffer := range t.clusterBuffers {
-			buffer.Flush()
 		}
 	}
 
