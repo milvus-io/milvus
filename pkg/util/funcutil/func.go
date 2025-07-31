@@ -60,7 +60,7 @@ func GetIP(ip string) string {
 		return GetLocalIP()
 	}
 
-	//Support setting CIDR in the IP field to match interfaces based on CIDR. For example: 192.168.0.0/16
+	// Support setting CIDR in the IP field to match interfaces based on CIDR. For example: 192.168.0.0/16
 	_, ipnet, err := net.ParseCIDR(ip)
 	if err == nil {
 		addrs, err := net.InterfaceAddrs()
@@ -73,7 +73,6 @@ func GetIP(ip string) string {
 			}
 		}
 		panic(errors.New(`Network port does not have an IP address that falls within the given CIDR range`))
-
 	}
 
 	netIP := net.ParseIP(ip)
