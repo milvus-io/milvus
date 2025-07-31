@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
@@ -44,7 +43,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 		mu:     sync.Mutex{},
 		header: header,
 		task: &streamingpb.BroadcastTask{
-			Message:             &messagespb.Message{Payload: msg.Payload(), Properties: msg.Properties().ToRawMap()},
+			Message:             msg.IntoMessageProto(),
 			State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 			AckedVchannelBitmap: make([]byte, len(header.VChannels)),
 		},

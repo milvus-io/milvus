@@ -40,7 +40,7 @@ func newOldVersionImmutableMessage(
 	case *msgstream.DropCollectionMsg:
 		mutableMessage, err = newV1DropCollectionMsgFromV0(ctx, pchannel, underlyingMsg)
 	case *msgstream.InsertMsg:
-		mutableMessage = newV1InsertMsgFromV0(underlyingMsg, uint64(len(msg.Payload())))
+		mutableMessage = newV1InsertMsgFromV0(underlyingMsg, uint64(msg.EstimateSize()))
 	case *msgstream.DeleteMsg:
 		mutableMessage = newV1DeleteMsgFromV0(underlyingMsg, uint64(underlyingMsg.NumRows))
 	case *msgstream.TimeTickMsg:
