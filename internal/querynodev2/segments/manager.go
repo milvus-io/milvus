@@ -199,9 +199,9 @@ type SegmentManager interface {
 	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
 	Exist(segmentID typeutil.UniqueID, typ SegmentType) bool
 
-	AddReservedResource(usage ResourceUsage)
-	SubReservedResource(usage ResourceUsage)
-	GetReservedResource() ResourceUsage
+	AddLogicalResource(usage ResourceUsage)
+	SubLogicalResource(usage ResourceUsage)
+	GetLogicalResource() ResourceUsage
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -372,11 +372,11 @@ type segmentManager struct {
 	growingOnReleasingSegments *typeutil.ConcurrentSet[int64]
 	sealedOnReleasingSegments  *typeutil.ConcurrentSet[int64]
 
-	// reservedSegmentsResource is the reserved resource for all loaded segments of this querynode segment manager,
+	// logicalResource is the logical resource usage for all loaded segments of this querynode segment manager,
 	// which is to avoid memory and disk pressure when loading too many segments after eviction is enabled.
 	// only MemorySize and DiskSize are used, other fields are ignored.
-	reservedSegmentsResource ResourceUsage
-	reservedSegmentsLock     sync.RWMutex
+	logicalResource     ResourceUsage
+	logicalResourceLock sync.Mutex
 }
 
 func NewSegmentManager() *segmentManager {
@@ -385,43 +385,43 @@ func NewSegmentManager() *segmentManager {
 		secondaryIndex:             newSecondarySegmentIndex(),
 		growingOnReleasingSegments: typeutil.NewConcurrentSet[int64](),
 		sealedOnReleasingSegments:  typeutil.NewConcurrentSet[int64](),
-		reservedSegmentsLock:       sync.RWMutex{},
+		logicalResourceLock:        sync.Mutex{},
 	}
 }
 
-func (mgr *segmentManager) AddReservedResource(usage ResourceUsage) {
-	mgr.reservedSegmentsLock.Lock()
-	defer mgr.reservedSegmentsLock.Unlock()
+func (mgr *segmentManager) AddLogicalResource(usage ResourceUsage) {
+	mgr.logicalResourceLock.Lock()
+	defer mgr.logicalResourceLock.Unlock()
 
-	mgr.reservedSegmentsResource.MemorySize += usage.MemorySize
-	mgr.reservedSegmentsResource.DiskSize += usage.DiskSize
+	mgr.logicalResource.MemorySize += usage.MemorySize
+	mgr.logicalResource.DiskSize += usage.DiskSize
 }
 
-func (mgr *segmentManager) SubReservedResource(usage ResourceUsage) {
-	mgr.reservedSegmentsLock.Lock()
-	defer mgr.reservedSegmentsLock.Unlock()
+func (mgr *segmentManager) SubLogicalResource(usage ResourceUsage) {
+	mgr.logicalResourceLock.Lock()
+	defer mgr.logicalResourceLock.Unlock()
 
 	// avoid overflow of memory and disk size
-	if mgr.reservedSegmentsResource.MemorySize < usage.MemorySize {
-		mgr.reservedSegmentsResource.MemorySize = 0
-		log.Warn("Reserved memory size would be negative, setting to 0")
+	if mgr.logicalResource.MemorySize < usage.MemorySize {
+		mgr.logicalResource.MemorySize = 0
+		log.Warn("Logical memory size would be negative, setting to 0")
 	} else {
-		mgr.reservedSegmentsResource.MemorySize -= usage.MemorySize
+		mgr.logicalResource.MemorySize -= usage.MemorySize
 	}
 
-	if mgr.reservedSegmentsResource.DiskSize < usage.DiskSize {
-		mgr.reservedSegmentsResource.DiskSize = 0
-		log.Warn("Reserved disk size would be negative, setting to 0")
+	if mgr.logicalResource.DiskSize < usage.DiskSize {
+		mgr.logicalResource.DiskSize = 0
+		log.Warn("Logical disk size would be negative, setting to 0")
 	} else {
-		mgr.reservedSegmentsResource.DiskSize -= usage.DiskSize
+		mgr.logicalResource.DiskSize -= usage.DiskSize
 	}
 }
 
-func (mgr *segmentManager) GetReservedResource() ResourceUsage {
-	mgr.reservedSegmentsLock.RLock()
-	defer mgr.reservedSegmentsLock.RUnlock()
+func (mgr *segmentManager) GetLogicalResource() ResourceUsage {
+	mgr.logicalResourceLock.Lock()
+	defer mgr.logicalResourceLock.Unlock()
 
-	return mgr.reservedSegmentsResource
+	return mgr.logicalResource
 }
 
 // put is the internal put method updating both global segments and secondary index.
