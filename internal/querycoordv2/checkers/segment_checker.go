@@ -41,13 +41,16 @@ import (
 
 const initialTargetVersion = int64(0)
 
+type CheckSegmentExist func(ctx context.Context, collectionID int64, segmentID int64) bool
+
 type SegmentChecker struct {
 	*checkerActivation
-	meta            *meta.Meta
-	dist            *meta.DistributionManager
-	targetMgr       meta.TargetManagerInterface
-	nodeMgr         *session.NodeManager
-	getBalancerFunc GetBalancerFunc
+	meta              *meta.Meta
+	dist              *meta.DistributionManager
+	targetMgr         meta.TargetManagerInterface
+	nodeMgr           *session.NodeManager
+	getBalancerFunc   GetBalancerFunc
+	checkSegmentExist CheckSegmentExist
 }
 
 func NewSegmentChecker(
@@ -56,6 +59,7 @@ func NewSegmentChecker(
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	getBalancerFunc GetBalancerFunc,
+	checkSegmentExist CheckSegmentExist,
 ) *SegmentChecker {
 	return &SegmentChecker{
 		checkerActivation: newCheckerActivation(),
@@ -64,6 +68,7 @@ func NewSegmentChecker(
 		targetMgr:         targetMgr,
 		nodeMgr:           nodeMgr,
 		getBalancerFunc:   getBalancerFunc,
+		checkSegmentExist: checkSegmentExist,
 	}
 }
 
@@ -314,7 +319,10 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	}
 
 	level0Segments := lo.Filter(toLoad, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetLevel() == datapb.SegmentLevel_L0
+		// Patch for 2.5 branch only, l0 segments need to be loaded before other segments
+		// then if l0 segment has been garbage collected, load l0 will never succeed,
+		// other segment will never be loaded, so we need to check if l0 segment exists
+		return segment.GetLevel() == datapb.SegmentLevel_L0 && c.checkSegmentExist(ctx, collectionID, segment.GetID())
 	})
 	// L0 segment found,
 	// QueryCoord loads the L0 segments first,
