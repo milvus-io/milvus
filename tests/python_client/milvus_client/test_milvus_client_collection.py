@@ -229,6 +229,47 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_collection_without_vectors(self):
+        """
+        target: test create collection without vectors
+        method: create collection only with int field
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with only non-vector fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("int_field", DataType.INT64, is_primary=True, auto_id=False)
+        error = {ct.err_code: 1100, ct.err_msg: "schema does not contain vector field: invalid parameter"}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR])
+    def test_milvus_client_collection_without_primary_field(self, vector_type):
+        """
+        target: test create collection without primary field
+        method: no primary field specified in collection schema and fields
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with fields but no primary key
+        schema1 = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema1.add_field("int_field", DataType.INT64)  # Not primary
+        schema1.add_field("vector_field", vector_type, dim=default_dim)
+        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        self.create_collection(client, collection_name, schema=schema1,
+                               check_task=CheckTasks.err_res, check_items=error)
+        # Create schema with only vector field
+        schema2 = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema2.add_field("vector_field", vector_type, dim=default_dim)
+        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        self.create_collection(client, collection_name, schema=schema2,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_dup_field(self):
         """
@@ -305,6 +346,24 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Try to create collection with multiple primary keys
         error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
         self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("shards_num,error_type", [(ct.max_shards_num + 1, "range"), (257, "range"), (1.0, "type"), ("2", "type")])
+    def test_milvus_client_collection_invalid_shards(self, shards_num, error_type):
+        """
+        target: test collection with invalid shards_num values
+        method: create collection with shards_num that are out of valid range or wrong type
+        expected: raise exception with appropriate error message
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        if error_type == "range":
+            error = {ct.err_code: 1, ct.err_msg: f"maximum shards's number should be limited to {ct.max_shards_num}"}
+        else:  # error_type == "type"
+            error = {ct.err_code: 999, ct.err_msg: "invalid num_shards type"}
+        # Try to create collection with invalid shards_num (should fail)
+        self.create_collection(client, collection_name, default_dim, shards_num=shards_num,
                                check_task=CheckTasks.err_res, check_items=error)
 
 class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
@@ -920,6 +979,83 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("shards_num", [ct.default_shards_num, -256, 0, ct.max_shards_num // 2, ct.max_shards_num])
+    def test_milvus_client_collection_shards_num(self, shards_num):
+        """
+        target: test collection with different shards_num values
+        method: create collection with various shards_num including default and boundary values
+        expected: collection created successfully with correct shards_num
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim, shards_num=shards_num)        # Verify collection exists in the list
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_collection_binary(self):
+        """
+        target: test collection with binary-vec
+        method: create collection with binary vector field
+        expected: collection created successfully with binary vector field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with binary vector field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        collection_info = self.describe_collection(client, collection_name)[0]
+        field_names = [field["name"] for field in collection_info["fields"]]
+        assert ct.default_int64_field_name in field_names
+        assert ct.default_binary_vec_field_name in field_names
+
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_multi_create_drop(self):
+        """
+        target: test cycle creation and deletion of multiple collections
+        method: in a loop, collections are created and deleted sequentially
+        expected: no exception, each collection is created and dropped successfully
+        """
+        client = self._client()
+        c_num = 20
+
+        for i in range(c_num):
+            collection_name = cf.gen_collection_name_by_testcase_name() + f"_{i}"
+            self.create_collection(client, collection_name, default_dim)
+            collections = self.list_collections(client)[0]
+            assert collection_name in collections
+            # Drop the collection
+            self.drop_collection(client, collection_name)
+            collections_after_drop = self.list_collections(client)[0]
+            assert collection_name not in collections_after_drop
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_after_drop(self):
+        """
+        target: test create collection after create and drop
+        method: 1. create a collection 2. drop the collection 3. re-create with same name
+        expected: no exception, collection can be recreated with the same name after dropping
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)        
+        self.drop_collection(client, collection_name)
+        assert not self.has_collection(client, collection_name)[0]
+        
+        self.create_collection(client, collection_name, default_dim)
+        assert self.has_collection(client, collection_name)[0]
+
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of drop collection interface """
@@ -1044,9 +1180,9 @@ class TestMilvusClientReleaseCollectionValid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_unloaded_collection(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: Test releasing a collection that has not been loaded
+        method: Create a collection and call release_collection multiple times without loading
+        expected: No raising errors, and the collection can still be dropped
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -1058,16 +1194,18 @@ class TestMilvusClientReleaseCollectionValid(TestMilvusClientV2Base):
             self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_load_partially_loaded_collection(self):
+    def test_milvus_client_release_partition_after_load_collection(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test releasing specific partitions after loading entire collection
+        method: 1. create collection and partition
+                2. load entire collection 
+                3. attempt to release specific partition while collection is loaded
+        expected: partition release operations work correctly with loaded collection
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         partition_name = cf.gen_unique_str("partition")
-        # 1. create collection
+        # 1. create collection and partition
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name)
         self.release_partitions(client, collection_name, ["_default", partition_name])
@@ -1117,6 +1255,40 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_drop(self):
+        """
+        target: test load collection after it has been dropped
+        method: 1. create collection
+                2. drop the collection
+                3. try to load the dropped collection
+        expected: raise exception indicating collection not found
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        self.drop_collection(client, collection_name)
+        error = {ct.err_code: 999, ct.err_msg: "collection not found"}
+        self.load_collection(client, collection_name,
+                             check_task=CheckTasks.err_res, check_items=error)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_collection_after_drop(self):
+        """
+        target: test release collection after it has been dropped
+        method: 1. create collection
+                2. drop the collection
+                3. try to release the dropped collection
+        expected: raise exception indicating collection not found
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        self.drop_collection(client, collection_name)
+        error = {ct.err_code: 999, ct.err_msg: "collection not found"}
+        self.release_collection(client, collection_name,
+                             check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_collection_over_max_length(self):
         """
         target: test fast create collection normal case
@@ -1149,6 +1321,41 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_disconnect(self):
+        """
+        target: test load/release collection operations after connection is closed
+        method: 1. create collection with client
+                2. close the client connection
+                3. try to load collection with disconnected client
+        expected: operations should raise appropriate connection errors
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        self.close(client)
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        self.load_collection(client, collection_name, 
+                            check_task=CheckTasks.err_res, check_items=error)
+        
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_release_collection_after_disconnect(self):
+        """
+        target: test load/release collection operations after connection is closed
+        method: 1. create collection with client
+                2. close the client connection
+                3. try to release collection with disconnected client
+        expected: operations should raise appropriate connection errors
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        self.close(client)
+        error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
+        self.release_collection(client, collection_name, 
+                            check_task=CheckTasks.err_res, check_items=error)
+
 
 
 class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
@@ -1188,16 +1395,19 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
             self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_load_partially_loaded_collection(self):
+    def test_milvus_client_load_partition_after_release_collection(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test mixed loading scenarios with partial partitions and full collection
+        method: 1. create collection and partition
+                2. load specific partition first
+                3. then load entire collection  
+                4. release and load again
+        expected: all loading operations work correctly without conflicts
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         partition_name = cf.gen_unique_str("partition")
-        # 1. create collection
+        # 1. create collection and partition
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name)
         self.release_collection(client, collection_name)
@@ -1208,6 +1418,402 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.load_collection(client, collection_name)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_load_partitions_after_load_collection(self):
+        """
+        target: test load partitions after load collection
+        method: 1. load collection
+                2. load partitions
+                3. search on one partition
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        # Search on one partition
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, 
+                   limit=default_limit, partition_names=[partition_name_1])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partitions_after_load_release_collection(self):
+        """
+        target: test load partitions after load release collection
+        method: 1. load collection
+                2. release collection
+                3. load partitions
+                4. search on one partition
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        # Search on one partition
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, 
+                   limit=default_limit, partition_names=[partition_name_1])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_release_collection_partition(self):
+        """
+        target: test load collection after release collection and partition
+        method: 1. load collection
+                2. release collection
+                3. release one partition
+                4. load collection
+                5. search on the partition
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.load_collection(client, collection_name)
+        # Search on the partition
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, 
+                   limit=default_limit, partition_names=[partition_name_1])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partitions_after_release_collection_partition(self):
+        """
+        target: test load partitions after release collection and partition
+        method: 1. load collection
+                2. release collection
+                3. release partition
+                4. search on partition and expect error
+                5. load partitions
+                6. search on one partition successfully
+        expected: Error on step 4, success on step 6
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        # Search on released partition should fail
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        error = {ct.err_code: 101, ct.err_msg: f"failed to search: collection not loaded"}
+        self.search(client, collection_name, vectors_to_search, 
+                   limit=default_limit, partition_names=[partition_name_1],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # Load partitions
+        self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        # Search should now work
+        self.search(client, collection_name, vectors_to_search, 
+                   limit=default_limit, partition_names=[partition_name_1])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_release_partition(self):
+        """
+        target: test load collection after load collection and release partition
+        method: 1. load collection
+                2. release one partition
+                3. search on the released partition and report error
+                4. search on the non-released partition and raise no exception
+                5. load collection
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        # Search on released partition should fail
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
+        self.search(client, collection_name, vectors_to_search,
+                   limit=default_limit, partition_names=[partition_name_1],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # Search on non-released partition should work
+        self.search(client, collection_name, vectors_to_search,
+                   limit=default_limit, partition_names=[partition_name_2])
+        # Load collection again
+        self.load_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partitions_after_release_partition(self):
+        """
+        target: test load partitions after release partition
+        method: 1. load collection
+                2. release one partition  
+                3. search on the released partition and report error
+                4. load partitions
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        # Search on released partition should fail
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
+        self.search(client, collection_name, vectors_to_search,
+                   limit=default_limit, partition_names=[partition_name_1],
+                   check_task=CheckTasks.err_res, check_items=error)
+        # Load partitions
+        self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_release_partition_collection(self):
+        """
+        target: test load collection after release partition and collection
+        method: 1. load collection
+                2. release partition
+                3. query on the released partition and report error
+                4. release collection
+                5. load collection
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        # Query on released partition should fail
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp, 
+                   partition_names=[partition_name_1],
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partitions_after_release_partition_collection(self):
+        """
+        target: test load partitions after release partition and collection
+        method: 1. load partition
+                2. release partition
+                3. release collection  
+                4. load partitions
+                5. query on the partitions
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.load_collection(client, collection_name)
+        
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.release_collection(client, collection_name)
+        self.load_partitions(client, collection_name, partition_name_1)
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp, 
+                   partition_names=[partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.load_partitions(client, collection_name, partition_name_2)
+        self.query(client, collection_name, filter=default_search_exp, 
+                   partition_names=[partition_name_2])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_release_partitions(self):
+        """
+        target: test load collection after release partitions
+        method: 1. load collection
+                2. release partitions
+                3. load collection
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_2])
+        self.load_collection(client, collection_name)
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partitions_after_release_partitions(self):
+        """
+        target: test load partitions after release partitions
+        method: 1. load collection
+                2. release partitions
+                3. load partitions
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.release_partitions(client, collection_name, [partition_name_2])
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.load_partitions(client, collection_name, [partition_name_2])
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_drop_partition_and_release_another(self):
+        """
+        target: test load collection after drop a partition and release another
+        method: 1. load collection
+                2. drop a partition
+                3. release left partition
+                4. query on the left partition
+                5. load collection
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        self.release_partitions(client, collection_name, [partition_name_2])
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
+        
+        self.load_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_partition_after_drop_partition_and_release_another(self):
+        """
+        target: test load partition after drop a partition and release another
+        method: 1. load collection
+                2. drop a partition
+                3. release left partition
+                4. load partition
+                5. query on the partition
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        self.release_partitions(client, collection_name, [partition_name_2])
+        self.load_partitions(client, collection_name, [partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_another_partition_after_drop_one_partition(self):
+        """
+        target: test load another partition after drop a partition
+        method: 1. load collection
+                2. drop a partition
+                3. load another partition
+                4. query on the partition
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        self.load_partitions(client, collection_name, [partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2])
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_after_drop_one_partition(self):
+        """
+        target: test load collection after drop a partition
+        method: 1. load collection
+                2. drop a partition
+                3. load collection
+                4. query on the partition
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        
+        self.load_collection(client, collection_name)
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        self.load_collection(client, collection_name)
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2])
+        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):
