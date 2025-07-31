@@ -67,7 +67,7 @@ class ChunkedColumnGroup {
 
     PinWrapper<GroupChunk*>
     GetGroupChunk(int64_t chunk_id) const {
-        auto ca = slot_->PinCellsDirect({chunk_id});
+        auto ca = slot_->PinOneCellDirect(chunk_id);
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<GroupChunk*>(ca, chunk);
     }

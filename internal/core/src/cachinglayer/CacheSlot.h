@@ -105,6 +105,42 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     }
 
     std::shared_ptr<CellAccessor<CellT>>
+    PinOneCellDirect(
+        const uid_t& uid,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
+        auto cid = 0;
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL: {
+                cid = uid;
+                break;
+            }
+            case CellIdMappingMode::ALWAYS_ZERO: {
+                cid = 0;
+                break;
+            }
+            default: {
+                cid = cell_id_of(uid);
+            }
+        }
+        auto [need_load, result] = cells_[cid].pin();
+        if (std::holds_alternative<internal::ListNode::NodePin>(result)) {
+            std::vector<internal::ListNode::NodePin> pins;
+            pins.push_back(
+                std::get<internal::ListNode::NodePin>(std::move(result)));
+            return std::make_shared<CellAccessor<CellT>>(
+                this->shared_from_this(), std::move(pins));
+        } else {
+            auto future =
+                std::get<folly::SemiFuture<internal::ListNode::NodePin>>(
+                    std::move(result));
+            std::vector<internal::ListNode::NodePin> pins;
+            pins.push_back(SemiInlineGet(std::move(future)));
+            return std::make_shared<CellAccessor<CellT>>(
+                this->shared_from_this(), std::move(pins));
+        }
+    }
+
+    std::shared_ptr<CellAccessor<CellT>>
     PinCellsDirect(
         const std::vector<uid_t>& uids,
         std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
