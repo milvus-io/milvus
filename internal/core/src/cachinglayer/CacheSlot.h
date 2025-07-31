@@ -387,7 +387,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     std::vector<CacheCell> cells_;
     CellIdMappingMode cell_id_mapping_mode_;
     internal::DList* dlist_;
-    bool evictable_;
+    const bool evictable_;
 };
 
 // - A thin wrapper for accessing cells in a CacheSlot.
