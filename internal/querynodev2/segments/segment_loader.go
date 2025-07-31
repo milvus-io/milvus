@@ -1803,12 +1803,12 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		// deltalog is not evictable, skip evictable size calculation
 	}
 
-	evictableMemoryCacheSize := uint64(float64(segmentEvictableMemorySize) * (1.0 - multiplyFactor.TieredEvictableMemoryCacheRatio))
-	evictableDiskCacheSize := uint64(float64(segmentEvictableDiskSize) * (1.0 - multiplyFactor.TieredEvictableDiskCacheRatio))
+	evictableMemoryUncacheSize := uint64(float64(segmentEvictableMemorySize) * (1.0 - multiplyFactor.TieredEvictableMemoryCacheRatio))
+	evictableDiskUncacheSize := uint64(float64(segmentEvictableDiskSize) * (1.0 - multiplyFactor.TieredEvictableDiskCacheRatio))
 
 	return &ResourceUsage{
-		MemorySize:         segmentMemorySize + indexMemorySize - evictableMemoryCacheSize,
-		DiskSize:           segmentDiskSize - evictableDiskCacheSize,
+		MemorySize:         segmentMemorySize + indexMemorySize - evictableMemoryUncacheSize,
+		DiskSize:           segmentDiskSize - evictableDiskUncacheSize,
 		MmapFieldCount:     mmapFieldCount,
 		FieldGpuMemorySize: fieldGpuMemorySize,
 	}, nil
