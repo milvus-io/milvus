@@ -240,14 +240,14 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	}
 
 	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
-		memoryUsageFactor:          1.0,
-		memoryIndexUsageFactor:     1.0,
-		EnableInterminSegmentIndex: false,
-		tempSegmentIndexFactor:     0.0,
-		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:      paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredMemoryEvictionFactor: paramtable.Get().QueryNodeCfg.TieredMemoryEvictionFactor.GetAsFloat(),
-		TieredDiskEvictionFactor:   paramtable.Get().QueryNodeCfg.TieredDiskEvictionFactor.GetAsFloat(),
+		memoryUsageFactor:               1.0,
+		memoryIndexUsageFactor:          1.0,
+		EnableInterminSegmentIndex:      false,
+		tempSegmentIndexFactor:          0.0,
+		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
 	})
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.

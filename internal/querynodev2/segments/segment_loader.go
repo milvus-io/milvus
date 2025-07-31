@@ -146,14 +146,14 @@ func (r *LoadResource) IsZero() bool {
 }
 
 type resourceEstimateFactor struct {
-	memoryUsageFactor          float64
-	memoryIndexUsageFactor     float64
-	EnableInterminSegmentIndex bool
-	tempSegmentIndexFactor     float64
-	deltaDataExpansionFactor   float64
-	TieredEvictionEnabled      bool
-	TieredMemoryEvictionFactor float64
-	TieredDiskEvictionFactor   float64
+	memoryUsageFactor               float64
+	memoryIndexUsageFactor          float64
+	EnableInterminSegmentIndex      bool
+	tempSegmentIndexFactor          float64
+	deltaDataExpansionFactor        float64
+	TieredEvictionEnabled           bool
+	TieredEvictableMemoryCacheRatio float64
+	TieredEvictableDiskCacheRatio   float64
 }
 
 func NewLoader(
@@ -1471,14 +1471,14 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	diskUsage := uint64(localDiskUsage) + loader.committedResource.DiskSize
 
 	factor := resourceEstimateFactor{
-		memoryUsageFactor:          paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
-		memoryIndexUsageFactor:     paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
-		EnableInterminSegmentIndex: paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
-		tempSegmentIndexFactor:     paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
-		deltaDataExpansionFactor:   paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-		TieredEvictionEnabled:      paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
-		TieredMemoryEvictionFactor: paramtable.Get().QueryNodeCfg.TieredMemoryEvictionFactor.GetAsFloat(),
-		TieredDiskEvictionFactor:   paramtable.Get().QueryNodeCfg.TieredDiskEvictionFactor.GetAsFloat(),
+		memoryUsageFactor:               paramtable.Get().QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat(),
+		memoryIndexUsageFactor:          paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(),
+		EnableInterminSegmentIndex:      paramtable.Get().QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool(),
+		tempSegmentIndexFactor:          paramtable.Get().QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat(),
+		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
+		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
+		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
 	}
 	maxSegmentSize := uint64(0)
 	predictMemUsage := memUsage
@@ -1714,8 +1714,8 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 	}
 
 	return &ResourceUsage{
-		MemorySize:         segmentMemorySize + indexMemorySize - uint64(float64(segmentEvictableMemorySize)*multiplyFactor.TieredMemoryEvictionFactor),
-		DiskSize:           segmentDiskSize - uint64(float64(segmentEvictableDiskSize)*multiplyFactor.TieredDiskEvictionFactor),
+		MemorySize:         segmentMemorySize + indexMemorySize - uint64(float64(segmentEvictableMemorySize)*(1.0-multiplyFactor.TieredEvictableMemoryCacheRatio)),
+		DiskSize:           segmentDiskSize - uint64(float64(segmentEvictableDiskSize)*(1.0-multiplyFactor.TieredEvictableDiskCacheRatio)),
 		MmapFieldCount:     mmapFieldCount,
 		FieldGpuMemorySize: fieldGpuMemorySize,
 	}, nil
