@@ -1,6 +1,7 @@
 package message
 
 import (
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
 

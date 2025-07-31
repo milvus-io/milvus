@@ -5,9 +5,11 @@ import (
 	"reflect"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -273,6 +275,7 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 
 		cipher := mustGetCipher()
 		encryptor, safeKey, err := cipher.GetEncryptor(b.cipherConfig.EzID, b.cipherConfig.CollectionID)
+		log.Info("YX: safeKey", zap.Any("safeKey", safeKey))
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get encryptor")
 		}
