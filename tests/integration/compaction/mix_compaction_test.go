@@ -238,7 +238,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-	s.assertMixCompaction(ctx, collectionName, false)
+	s.assertMixCompaction(ctx, collectionName, paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool())
 	s.assertQuery(ctx, collectionName)
 
 	// drop collection
@@ -252,6 +252,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 }
 
 func (s *CompactionSuite) TestMixCompactionV2() {
+	s.T().Skip("skip v2 compaction test")
 	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
 		paramtable.Get().CommonCfg.EnableStorageV2.Key:         "true",
 		paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key: "false",
