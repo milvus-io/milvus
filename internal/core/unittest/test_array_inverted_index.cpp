@@ -169,7 +169,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
         std::unordered_set<TypeParam> row(this->vec_of_array_[offset].begin(),
                                           this->vec_of_array_[offset].end());
         if (elems.empty()) {
-            return true;
+            return false;
         }
 
         for (const auto& elem : elems) {
