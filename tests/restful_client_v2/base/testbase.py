@@ -120,7 +120,7 @@ class TestBase(Base):
         for attempt in range(max_retries):
             try:
                 logger.info(f"Connection attempt {attempt + 1}/{max_retries}")
-                connections.connect(uri=endpoint, token=token)
+                self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
                 logger.info("Successfully connected to Milvus")
                 break
             except Exception as e:
