@@ -1360,11 +1360,6 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
 
 class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
     """ Test case of search interface """
-    """
-    ******************************************************************
-    #  The following are valid base cases
-    ******************************************************************
-    """
 
     @pytest.fixture(scope="function", params=[False, True])
     def auto_id(self, request):
@@ -1377,6 +1372,12 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
     @pytest.fixture(scope="function", params=["int", "string"])
     def id_type(self, request):
         yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_loaded_collection(self):
