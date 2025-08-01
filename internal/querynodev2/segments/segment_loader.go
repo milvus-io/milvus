@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -708,6 +709,8 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	map[int64]struct{}, // unindexed text fields
 	map[int64]*datapb.JsonKeyStats, // json key stats info
 ) {
+	storageVersion := loadInfo.GetStorageVersion()
+
 	fieldID2IndexInfo := make(map[int64][]*querypb.FieldIndexInfo)
 	for _, indexInfo := range loadInfo.IndexInfos {
 		if len(indexInfo.GetIndexFilePaths()) > 0 {
@@ -719,19 +722,53 @@ func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.Coll
 	indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
 	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
 
-	for _, fieldBinlog := range loadInfo.BinlogPaths {
-		fieldID := fieldBinlog.FieldID
-		// check num rows of data meta and index meta are consistent
-		if infos, ok := fieldID2IndexInfo[fieldID]; ok {
-			for _, indexInfo := range infos {
-				fieldInfo := &IndexedFieldInfo{
-					FieldBinlog: fieldBinlog,
-					IndexInfo:   indexInfo,
+	if storageVersion == storage.StorageV2 {
+		for _, fieldBinlog := range loadInfo.BinlogPaths {
+			fieldID := fieldBinlog.FieldID
+
+			if fieldID == storagecommon.DefaultShortColumnGroupID {
+				// for short column group, we need to load all fields in the group
+				for _, field := range schema.GetFields() {
+					if infos, ok := fieldID2IndexInfo[field.GetFieldID()]; ok {
+						for _, indexInfo := range infos {
+							fieldInfo := &IndexedFieldInfo{
+								FieldBinlog: fieldBinlog,
+								IndexInfo:   indexInfo,
+							}
+							indexedFieldInfos[indexInfo.IndexID] = fieldInfo
+						}
+					}
 				}
-				indexedFieldInfos[indexInfo.IndexID] = fieldInfo
+				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+			} else {
+				// for single file field, such as vector field, text field
+				if infos, ok := fieldID2IndexInfo[fieldID]; ok {
+					for _, indexInfo := range infos {
+						fieldInfo := &IndexedFieldInfo{
+							FieldBinlog: fieldBinlog,
+							IndexInfo:   indexInfo,
+						}
+						indexedFieldInfos[indexInfo.IndexID] = fieldInfo
+					}
+				} else {
+					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+				}
 			}
-		} else {
-			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+		}
+	} else {
+		for _, fieldBinlog := range loadInfo.BinlogPaths {
+			fieldID := fieldBinlog.FieldID
+			if infos, ok := fieldID2IndexInfo[fieldID]; ok {
+				for _, indexInfo := range infos {
+					fieldInfo := &IndexedFieldInfo{
+						FieldBinlog: fieldBinlog,
+						IndexInfo:   indexInfo,
+					}
+					indexedFieldInfos[indexInfo.IndexID] = fieldInfo
+				}
+			} else {
+				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+			}
 		}
 	}
 
