@@ -2805,7 +2805,7 @@ func TestValidateFunctionInputField(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("Invalid BM25 function input - tokenizer not enabled", func(t *testing.T) {
+	t.Run("Invalid BM25 function input - analyzer not enabled", func(t *testing.T) {
 		function := &schemapb.FunctionSchema{
 			Type: schemapb.FunctionType_BM25,
 		}

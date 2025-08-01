@@ -1,4 +1,4 @@
-package ctokenizer
+package canalyzer
 
 import (
 	"fmt"
@@ -10,31 +10,65 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
-func TestTokenizer(t *testing.T) {
-	paramtable.Init()
+func TestAnalyzer(t *testing.T) {
+	// use default analyzer.
+	{
+		m := "{}"
+		analyzer, err := NewAnalyzer(m)
+		assert.NoError(t, err)
+		defer analyzer.Destroy()
 
-	// default tokenizer.
+		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
+		defer tokenStream.Destroy()
+
+		tokens := []string{}
+		for tokenStream.Advance() {
+			tokens = append(tokens, tokenStream.Token())
+		}
+		assert.Equal(t, len(tokens), 3)
+	}
+
+	{
+		m := ""
+		analyzer, err := NewAnalyzer(m)
+		assert.NoError(t, err)
+		defer analyzer.Destroy()
+
+		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
+		defer tokenStream.Destroy()
+
+		tokens := []string{}
+		for tokenStream.Advance() {
+			tokens = append(tokens, tokenStream.Token())
+		}
+		assert.Equal(t, len(tokens), 3)
+	}
+
+	// use default tokenizer.
 	{
 		m := "{\"tokenizer\": \"standard\"}"
-		tokenizer, err := NewTokenizer(m)
-		require.NoError(t, err)
-		defer tokenizer.Destroy()
+		analyzer, err := NewAnalyzer(m)
+		assert.NoError(t, err)
+		defer analyzer.Destroy()
 
-		tokenStream := tokenizer.NewTokenStream("football, basketball, pingpang")
+		tokenStream := analyzer.NewTokenStream("football, basketball, pingpang")
 		defer tokenStream.Destroy()
+
+		tokens := []string{}
 		for tokenStream.Advance() {
-			fmt.Println(tokenStream.Token())
+			tokens = append(tokens, tokenStream.Token())
 		}
+		assert.Equal(t, len(tokens), 3)
 	}
 
 	// jieba tokenizer.
 	{
 		m := "{\"tokenizer\": \"jieba\"}"
-		tokenizer, err := NewTokenizer(m)
-		require.NoError(t, err)
-		defer tokenizer.Destroy()
+		analyzer, err := NewAnalyzer(m)
+		assert.NoError(t, err)
+		defer analyzer.Destroy()
 
-		tokenStream := tokenizer.NewTokenStream("张华考上了北京大学；李萍进了中等技术学校；我在百货公司当售货员：我们都有光明的前途")
+		tokenStream := analyzer.NewTokenStream("张华考上了北京大学；李萍进了中等技术学校；我在百货公司当售货员：我们都有光明的前途")
 		defer tokenStream.Destroy()
 		for tokenStream.Advance() {
 			fmt.Println(tokenStream.Token())
@@ -44,7 +78,7 @@ func TestTokenizer(t *testing.T) {
 	// lindera tokenizer.
 	{
 		m := "{\"tokenizer\": {\"type\":\"lindera\", \"dict_kind\": \"ipadic\"}}"
-		tokenizer, err := NewTokenizer(m)
+		tokenizer, err := NewAnalyzer(m)
 		require.NoError(t, err)
 		defer tokenizer.Destroy()
 
@@ -56,24 +90,24 @@ func TestTokenizer(t *testing.T) {
 	}
 }
 
-func TestValidateTokenizer(t *testing.T) {
-	// valid tokenizer
+func TestValidateAnalyzer(t *testing.T) {
+	// valid analyzer
 	{
 		m := "{\"tokenizer\": \"standard\"}"
-		err := ValidateTokenizer(m)
+		err := ValidateAnalyzer(m)
 		assert.NoError(t, err)
 	}
 
 	{
 		m := ""
-		err := ValidateTokenizer(m)
+		err := ValidateAnalyzer(m)
 		assert.NoError(t, err)
 	}
 
 	// invalid tokenizer
 	{
 		m := "{\"tokenizer\": \"invalid\"}"
-		err := ValidateTokenizer(m)
+		err := ValidateAnalyzer(m)
 		assert.Error(t, err)
 	}
 }
