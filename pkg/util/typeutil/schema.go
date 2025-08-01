@@ -112,7 +112,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 			res += 2
 		case schemapb.DataType_Int32, schemapb.DataType_Float:
 			res += 4
-		case schemapb.DataType_Int64, schemapb.DataType_Double:
+		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_Timestamptz:
 			res += 8
 		case schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_Array, schemapb.DataType_JSON:
 			maxLengthPerRow, err := getVarFieldLength(fs, policy)
@@ -192,6 +192,8 @@ func CalcScalarSize(column *schemapb.FieldData) int {
 		res += len(column.GetScalars().GetFloatData().GetData()) * 4
 	case schemapb.DataType_Double:
 		res += len(column.GetScalars().GetDoubleData().GetData()) * 8
+	case schemapb.DataType_Timestamptz:
+		res += len(column.GetScalars().GetTimestamptzData().GetData()) * 8
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		for _, str := range column.GetScalars().GetStringData().GetData() {
 			res += len(str)
@@ -1806,6 +1808,8 @@ func getData(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetFloatData().GetData()[idx]
 	case schemapb.DataType_Double:
 		return field.GetScalars().GetDoubleData().GetData()[idx]
+	case schemapb.DataType_Timestamptz:
+		return field.GetScalars().GetTimestamptzData().GetData()[idx]
 	case schemapb.DataType_VarChar, schemapb.DataType_Text:
 		return field.GetScalars().GetStringData().GetData()[idx]
 	case schemapb.DataType_FloatVector:

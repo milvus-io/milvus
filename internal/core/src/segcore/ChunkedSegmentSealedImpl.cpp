@@ -1705,6 +1705,16 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
                                                     ->mutable_data());
             break;
         }
+        case DataType::TIMESTAMPTZ: {
+            bulk_subscript_impl<int64_t>(column.get(),
+                                         seg_offsets,
+                                         count,
+                                         ret->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
+            break;
+        }
         case DataType::VECTOR_FLOAT: {
             bulk_subscript_impl(field_meta.get_sizeof(),
                                 column.get(),

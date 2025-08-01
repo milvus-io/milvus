@@ -27,6 +27,7 @@ var (
 	NewNullableColumnString    NullableColumnCreateFunc[string, *ColumnString]    = NewNullableColumnCreator(NewColumnString).New
 	NewNullableColumnFloat     NullableColumnCreateFunc[float32, *ColumnFloat]    = NewNullableColumnCreator(NewColumnFloat).New
 	NewNullableColumnDouble    NullableColumnCreateFunc[float64, *ColumnDouble]   = NewNullableColumnCreator(NewColumnDouble).New
+	NewNullableColumnTimestamptz    NullableColumnCreateFunc[int64, *ColumnTimestamptz]   = NewNullableColumnCreator(NewColumnTimestamptz).New
 	NewNullableColumnJSONBytes NullableColumnCreateFunc[[]byte, *ColumnJSONBytes] = NewNullableColumnCreator(NewColumnJSONBytes).New
 	// array
 	NewNullableColumnBoolArray    NullableColumnCreateFunc[[]bool, *ColumnBoolArray]      = NewNullableColumnCreator(NewColumnBoolArray).New

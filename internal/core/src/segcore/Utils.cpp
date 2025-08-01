@@ -188,6 +188,14 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         }
                         break;
                     }
+                    case DataType::TIMESTAMPTZ: {
+                        for (auto& array_bytes : array_data) {
+                            result +=
+                                array_bytes.timestamptz_data().data_size() *
+                                sizeof(int64_t);
+                        }
+                        break;
+                    }
                     case DataType::VARCHAR:
                     case DataType::STRING:
                     case DataType::TEXT: {
@@ -292,6 +300,11 @@ CreateEmptyScalarDataArray(int64_t count, const FieldMeta& field_meta) {
         }
         case DataType::DOUBLE: {
             auto obj = scalar_array->mutable_double_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            auto obj = scalar_array->mutable_timestamptz_data();
             obj->mutable_data()->Resize(count, 0);
             break;
         }
@@ -458,6 +471,12 @@ CreateScalarDataArrayFrom(const void* data_raw,
         case DataType::DOUBLE: {
             auto data = reinterpret_cast<const double*>(data_raw);
             auto obj = scalar_array->mutable_double_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            auto data = reinterpret_cast<const int64_t*>(data_raw);
+            auto obj = scalar_array->mutable_timestamptz_data();
             obj->mutable_data()->Add(data, data + count);
             break;
         }
@@ -720,6 +739,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
             }
+            case DataType::TIMESTAMPTZ: {
+                auto data = FIELD_DATA(src_field_data, timestamptz).data(); //Here is a marco
+                auto obj = scalar_array->mutable_timestamptz_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                break;
+            }
             case DataType::VARCHAR:
             case DataType::TEXT: {
                 auto& data = FIELD_DATA(src_field_data, string);
@@ -908,6 +933,26 @@ ReverseDataFromIndex(const index::IndexBase* index,
             auto obj = scalar_array->mutable_double_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
+        }
+        case DataType::TIMESTAMPTZ: {
+            using IndexType = index::ScalarIndex<int64_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int64_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
+                // if has no value, means nullable must be true, no need to check nullable again
+                if (!raw.has_value()) {
+                    valid_data[i] = false;
+                    continue;
+                }
+                if (nullable) {
+                    valid_data[i] = true;
+                }
+                raw_data[i] = raw.value();
+                auto obj = scalar_array->mutable_timestamptz_data();
+                *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+                break;
+            }
         }
         case DataType::VARCHAR: {
             using IndexType = index::ScalarIndex<std::string>;

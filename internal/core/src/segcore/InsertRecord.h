@@ -25,6 +25,7 @@
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "log/Log.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
@@ -598,6 +599,9 @@ struct InsertRecord<false> : public InsertRecord<true> {
                     }
                 }
             }
+            LOG_DEBUG("Appending field: {} with type {}",
+                     field_meta.get_name().get(),
+                     GetDataTypeName(field_meta.get_data_type()));
             append_field_meta(
                 field_id, field_meta, size_per_chunk, mmap_descriptor);
         }
@@ -754,6 +758,11 @@ struct InsertRecord<false> : public InsertRecord<true> {
             }
             case DataType::DOUBLE: {
                 this->append_data<double>(
+                    field_id, size_per_chunk, scalar_mmap_descriptor);
+                return;
+            }
+            case DataType::TIMESTAMPTZ: {
+                this->append_data<int64_t>(
                     field_id, size_per_chunk, scalar_mmap_descriptor);
                 return;
             }

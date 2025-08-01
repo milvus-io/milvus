@@ -50,6 +50,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
     auto int64_field = schema->AddDebugField("int64", DataType::INT64);
     auto float_field = schema->AddDebugField("float", DataType::FLOAT);
     auto double_field = schema->AddDebugField("double", DataType::DOUBLE);
+    auto timestamptz_field = schema->AddDebugField("timestamptz", DataType::TIMESTAMPTZ);
     auto varchar_field = schema->AddDebugField("varchar", DataType::VARCHAR);
     auto json_field = schema->AddDebugField("json", DataType::JSON);
     auto int_array_field =
@@ -115,6 +116,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
             float_field, ids_ds->GetIds(), num_inserted);
         auto double_result = segment->bulk_subscript(
             double_field, ids_ds->GetIds(), num_inserted);
+        auto timestamptz_result = segment->bulk_subscript(
+            timestamptz_field, ids_ds->GetIds(), num_inserted);
         auto varchar_result = segment->bulk_subscript(
             varchar_field, ids_ds->GetIds(), num_inserted);
         auto json_result =
@@ -151,6 +154,8 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         EXPECT_EQ(float_result->scalars().float_data().data_size(),
                   num_inserted);
         EXPECT_EQ(double_result->scalars().double_data().data_size(),
+                  num_inserted);
+        EXPECT_EQ(timestamptz_result->scalars().timestamptz_data().data_size(),
                   num_inserted);
         EXPECT_EQ(varchar_result->scalars().string_data().data_size(),
                   num_inserted);
