@@ -25,35 +25,35 @@ func (_m *MockSegmentManager) EXPECT() *MockSegmentManager_Expecter {
 	return &MockSegmentManager_Expecter{mock: &_m.Mock}
 }
 
-// AddReservedResource provides a mock function with given fields: usage
-func (_m *MockSegmentManager) AddReservedResource(usage ResourceUsage) {
+// AddLogicalResource provides a mock function with given fields: usage
+func (_m *MockSegmentManager) AddLogicalResource(usage ResourceUsage) {
 	_m.Called(usage)
 }
 
-// MockSegmentManager_AddReservedResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddReservedResource'
-type MockSegmentManager_AddReservedResource_Call struct {
+// MockSegmentManager_AddLogicalResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddLogicalResource'
+type MockSegmentManager_AddLogicalResource_Call struct {
 	*mock.Call
 }
 
-// AddReservedResource is a helper method to define mock.On call
+// AddLogicalResource is a helper method to define mock.On call
 //   - usage ResourceUsage
-func (_e *MockSegmentManager_Expecter) AddReservedResource(usage interface{}) *MockSegmentManager_AddReservedResource_Call {
-	return &MockSegmentManager_AddReservedResource_Call{Call: _e.mock.On("AddReservedResource", usage)}
+func (_e *MockSegmentManager_Expecter) AddLogicalResource(usage interface{}) *MockSegmentManager_AddLogicalResource_Call {
+	return &MockSegmentManager_AddLogicalResource_Call{Call: _e.mock.On("AddLogicalResource", usage)}
 }
 
-func (_c *MockSegmentManager_AddReservedResource_Call) Run(run func(usage ResourceUsage)) *MockSegmentManager_AddReservedResource_Call {
+func (_c *MockSegmentManager_AddLogicalResource_Call) Run(run func(usage ResourceUsage)) *MockSegmentManager_AddLogicalResource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(ResourceUsage))
 	})
 	return _c
 }
 
-func (_c *MockSegmentManager_AddReservedResource_Call) Return() *MockSegmentManager_AddReservedResource_Call {
+func (_c *MockSegmentManager_AddLogicalResource_Call) Return() *MockSegmentManager_AddLogicalResource_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockSegmentManager_AddReservedResource_Call) RunAndReturn(run func(ResourceUsage)) *MockSegmentManager_AddReservedResource_Call {
+func (_c *MockSegmentManager_AddLogicalResource_Call) RunAndReturn(run func(ResourceUsage)) *MockSegmentManager_AddLogicalResource_Call {
 	_c.Run(run)
 	return _c
 }
@@ -484,12 +484,12 @@ func (_c *MockSegmentManager_GetGrowing_Call) RunAndReturn(run func(int64) Segme
 	return _c
 }
 
-// GetReservedResource provides a mock function with no fields
-func (_m *MockSegmentManager) GetReservedResource() ResourceUsage {
+// GetLogicalResource provides a mock function with no fields
+func (_m *MockSegmentManager) GetLogicalResource() ResourceUsage {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetReservedResource")
+		panic("no return value specified for GetLogicalResource")
 	}
 
 	var r0 ResourceUsage
@@ -502,29 +502,29 @@ func (_m *MockSegmentManager) GetReservedResource() ResourceUsage {
 	return r0
 }
 
-// MockSegmentManager_GetReservedResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReservedResource'
-type MockSegmentManager_GetReservedResource_Call struct {
+// MockSegmentManager_GetLogicalResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLogicalResource'
+type MockSegmentManager_GetLogicalResource_Call struct {
 	*mock.Call
 }
 
-// GetReservedResource is a helper method to define mock.On call
-func (_e *MockSegmentManager_Expecter) GetReservedResource() *MockSegmentManager_GetReservedResource_Call {
-	return &MockSegmentManager_GetReservedResource_Call{Call: _e.mock.On("GetReservedResource")}
+// GetLogicalResource is a helper method to define mock.On call
+func (_e *MockSegmentManager_Expecter) GetLogicalResource() *MockSegmentManager_GetLogicalResource_Call {
+	return &MockSegmentManager_GetLogicalResource_Call{Call: _e.mock.On("GetLogicalResource")}
 }
 
-func (_c *MockSegmentManager_GetReservedResource_Call) Run(run func()) *MockSegmentManager_GetReservedResource_Call {
+func (_c *MockSegmentManager_GetLogicalResource_Call) Run(run func()) *MockSegmentManager_GetLogicalResource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockSegmentManager_GetReservedResource_Call) Return(_a0 ResourceUsage) *MockSegmentManager_GetReservedResource_Call {
+func (_c *MockSegmentManager_GetLogicalResource_Call) Return(_a0 ResourceUsage) *MockSegmentManager_GetLogicalResource_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegmentManager_GetReservedResource_Call) RunAndReturn(run func() ResourceUsage) *MockSegmentManager_GetReservedResource_Call {
+func (_c *MockSegmentManager_GetLogicalResource_Call) RunAndReturn(run func() ResourceUsage) *MockSegmentManager_GetLogicalResource_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -804,35 +804,35 @@ func (_c *MockSegmentManager_RemoveBy_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// SubReservedResource provides a mock function with given fields: usage
-func (_m *MockSegmentManager) SubReservedResource(usage ResourceUsage) {
+// SubLogicalResource provides a mock function with given fields: usage
+func (_m *MockSegmentManager) SubLogicalResource(usage ResourceUsage) {
 	_m.Called(usage)
 }
 
-// MockSegmentManager_SubReservedResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SubReservedResource'
-type MockSegmentManager_SubReservedResource_Call struct {
+// MockSegmentManager_SubLogicalResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SubLogicalResource'
+type MockSegmentManager_SubLogicalResource_Call struct {
 	*mock.Call
 }
 
-// SubReservedResource is a helper method to define mock.On call
+// SubLogicalResource is a helper method to define mock.On call
 //   - usage ResourceUsage
-func (_e *MockSegmentManager_Expecter) SubReservedResource(usage interface{}) *MockSegmentManager_SubReservedResource_Call {
-	return &MockSegmentManager_SubReservedResource_Call{Call: _e.mock.On("SubReservedResource", usage)}
+func (_e *MockSegmentManager_Expecter) SubLogicalResource(usage interface{}) *MockSegmentManager_SubLogicalResource_Call {
+	return &MockSegmentManager_SubLogicalResource_Call{Call: _e.mock.On("SubLogicalResource", usage)}
 }
 
-func (_c *MockSegmentManager_SubReservedResource_Call) Run(run func(usage ResourceUsage)) *MockSegmentManager_SubReservedResource_Call {
+func (_c *MockSegmentManager_SubLogicalResource_Call) Run(run func(usage ResourceUsage)) *MockSegmentManager_SubLogicalResource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(ResourceUsage))
 	})
 	return _c
 }
 
-func (_c *MockSegmentManager_SubReservedResource_Call) Return() *MockSegmentManager_SubReservedResource_Call {
+func (_c *MockSegmentManager_SubLogicalResource_Call) Return() *MockSegmentManager_SubLogicalResource_Call {
 	_c.Call.Return()
 	return _c
 }
 
-func (_c *MockSegmentManager_SubReservedResource_Call) RunAndReturn(run func(ResourceUsage)) *MockSegmentManager_SubReservedResource_Call {
+func (_c *MockSegmentManager_SubLogicalResource_Call) RunAndReturn(run func(ResourceUsage)) *MockSegmentManager_SubLogicalResource_Call {
 	_c.Run(run)
 	return _c
 }
