@@ -414,6 +414,7 @@ JsonKeyStatsInvertedIndex::BuildWithFieldData(
             auto n = data->get_num_rows();
             for (int i = 0; i < n; i++) {
                 if (!data->is_valid(i)) {
+                    offset++;
                     continue;
                 }
                 AddJson(static_cast<const milvus::Json*>(data->RawValue(i))
