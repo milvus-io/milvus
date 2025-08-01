@@ -256,6 +256,7 @@ struct EvictionConfig {
     std::string disk_path;
     // Loading memory factor for estimating memory during loading
     float loading_memory_factor;
+    bool use_physical_memory_to_check_watermark = true;
 
     EvictionConfig()
         : cache_touch_window(std::chrono::milliseconds(0)),

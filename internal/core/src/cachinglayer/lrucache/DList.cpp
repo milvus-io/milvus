@@ -180,6 +180,24 @@ DList::evictionLoop() {
             break;
         }
         auto used = used_resources_.load();
+        auto physical_used = getCurrentProcessMemoryUsage();
+        if (eviction_config_.use_physical_memory_to_check_watermark &&
+            physical_used > used.memory_bytes) {
+            LOG_TRACE(
+                "[MCL] physical_used {} is greater than logically used {}, "
+                "updating to use physical memory usage",
+                physical_used,
+                used.memory_bytes);
+            used.memory_bytes = physical_used;
+        }
+        if (!(used - high_watermark_).AnyGTZero()) {
+            LOG_TRACE(
+                "[MCL] used {} is less than high watermark {}, no need to "
+                "evict",
+                used.ToString(),
+                high_watermark_.ToString());
+            continue;
+        }
         // if usage is above high watermark, evict until low watermark is reached.
         tryEvict(
             {
