@@ -92,12 +92,52 @@ getContainerMemLimit() {
         try {
             int64_t env_limit = std::stoll(mem_limit_env);
             limits.push_back(env_limit);
-            LOG_DEBUG("[MCL] Found MEM_LIMIT environment variable: {}",
+            LOG_TRACE("[MCL] Found MEM_LIMIT environment variable: {}",
                       FormatBytes(env_limit));
         } catch (...) {
             LOG_WARN("[MCL] Invalid MEM_LIMIT environment variable: {}",
                      mem_limit_env);
         }
+    }
+
+    // Check direct cgroup v1 path
+    std::ifstream cgroup_v1("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+    if (cgroup_v1.is_open()) {
+        std::string limit_str;
+        if (std::getline(cgroup_v1, limit_str)) {
+            try {
+                int64_t limit = std::stoll(limit_str);
+                if (limit < (1LL << 62)) {  // Filter out unrealistic values
+                    limits.push_back(limit);
+                    LOG_TRACE(
+                        "[MCL] Found direct cgroups v1 limit "
+                        "(/sys/fs/cgroup/memory/memory.limit_in_bytes): {}",
+                        FormatBytes(limit));
+                }
+            } catch (...) {
+                // Ignore parse errors
+            }
+        }
+        cgroup_v1.close();
+    }
+
+    // Check direct cgroup v2 path
+    std::ifstream cgroup_v2("/sys/fs/cgroup/memory.max");
+    if (cgroup_v2.is_open()) {
+        std::string limit_str;
+        if (std::getline(cgroup_v2, limit_str) && limit_str != "max") {
+            try {
+                int64_t limit = std::stoll(limit_str);
+                limits.push_back(limit);
+                LOG_TRACE(
+                    "[MCL] Found direct cgroups v2 limit "
+                    "(/sys/fs/cgroup/memory.max): {}",
+                    FormatBytes(limit));
+            } catch (...) {
+                // Ignore parse errors
+            }
+        }
+        cgroup_v2.close();
     }
 
     // Check process-specific cgroup limits from /proc/self/cgroup
@@ -123,7 +163,7 @@ getContainerMemLimit() {
                             try {
                                 int64_t proc_limit = std::stoll(proc_line);
                                 limits.push_back(proc_limit);
-                                LOG_DEBUG(
+                                LOG_TRACE(
                                     "[MCL] Found process-specific cgroups v2 "
                                     "limit: {}",
                                     FormatBytes(proc_limit));
@@ -147,7 +187,7 @@ getContainerMemLimit() {
                                 // when unlimited)
                                 if (proc_limit < (1LL << 62)) {
                                     limits.push_back(proc_limit);
-                                    LOG_DEBUG(
+                                    LOG_TRACE(
                                         "[MCL] Found process-specific cgroups "
                                         "v1 limit: {}",
                                         FormatBytes(proc_limit));
@@ -166,7 +206,7 @@ getContainerMemLimit() {
     // Return the minimum of all found limits
     if (!limits.empty()) {
         int64_t min_limit = *std::min_element(limits.begin(), limits.end());
-        LOG_DEBUG("[MCL] Using minimum memory limit: {} from {} sources",
+        LOG_TRACE("[MCL] Using minimum memory limit: {} from {} sources",
                   FormatBytes(min_limit),
                   limits.size());
         return min_limit;
