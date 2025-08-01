@@ -148,9 +148,7 @@ JsonInvertedIndex<T>::LoadIndexMetas(
     //
     // Use null_offset_ as the source for non_exist_offsets_ to maintain
     // backward compatibility. This ensures Exists() behaves like v2.5.x IsNotNull().
-    for (auto& n : this->null_offset_) {
-        non_exist_offsets_.push_back(n);
-    }
+    non_exist_offsets_ = this->null_offset_;
 }
 
 template <typename T>
