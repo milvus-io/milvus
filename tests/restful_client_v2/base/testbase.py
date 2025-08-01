@@ -107,32 +107,7 @@ class TestBase(Base):
             self.vector_client.api_key = None
             self.collection_client.api_key = None
             self.partition_client.api_key = None
-
-        # Print connection info for debugging
-        logger.info(f"Attempting to connect to Milvus:")
-        logger.info(f"  Endpoint: {endpoint}")
-        logger.info(f"  Token: {token if token else 'None'}")
-        
-        # Retry connection with backoff
-        max_retries = 5
-        retry_delay = 2  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Connection attempt {attempt + 1}/{max_retries}")
-                connections.connect(uri=endpoint, token=token)
-                logger.info("Successfully connected to Milvus")
-                break
-            except Exception as e:
-                logger.error(f"Connection attempt {attempt + 1} failed: {e}")
-                if attempt < max_retries - 1:
-                    logger.info(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    logger.error(f"Failed to connect after {max_retries} attempts")
-                    raise e
-
+        connections.connect(uri=endpoint, token=token)
 
     def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000, return_insert_id=False):
         # create collection
