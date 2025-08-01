@@ -284,7 +284,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}, map[string][]bool) {
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) (error, []map[string]interface{}, map[string][]bool) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
@@ -321,7 +321,14 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error,
 					}
 				}
 
-				dataString := gjson.Get(data.Raw, fieldName).String()
+				// For partial update, check if field exists in the data
+				fieldValue := gjson.Get(data.Raw, fieldName)
+				if partialUpdate && !fieldValue.Exists() {
+					// Skip fields that are not provided in partial update
+					continue
+				}
+
+				dataString := fieldValue.String()
 				// if has pass pk than just to try to set it
 				if field.IsPrimaryKey && field.AutoID && len(dataString) == 0 {
 					continue
@@ -732,7 +739,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 	return res
 }
 
-func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool) ([]*schemapb.FieldData, error) {
+func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, errors.New("no row need to be convert to columns")
@@ -844,6 +851,11 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				continue
 			}
 			if !ok {
+				// For partial update, skip missing fields instead of returning error
+				if partialUpdate {
+					delete(nameColumns, field.Name)
+					continue
+				}
 				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
 			}
 			switch field.DataType {
