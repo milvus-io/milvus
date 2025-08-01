@@ -52,8 +52,8 @@ class PhyExistsFilterExpr : public SegmentExpr {
                       DataType::NONE,
                       active_count,
                       batch_size,
-                      true,
-                      consistency_level),
+                      consistency_level,
+                      true),
           expr_(expr) {
     }
 
