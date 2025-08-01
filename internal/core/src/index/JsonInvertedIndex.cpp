@@ -97,6 +97,7 @@ template <typename T>
 void
 JsonInvertedIndex<T>::LoadIndexMetas(
     const std::vector<std::string>& index_files, const Config& config) {
+    InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
     auto fill_non_exist_offset = [&](const uint8_t* data, int64_t size) {
         non_exist_offsets_.resize((size_t)size / sizeof(size_t));
         memcpy(non_exist_offsets_.data(), data, (size_t)size);
@@ -138,8 +139,21 @@ JsonInvertedIndex<T>::LoadIndexMetas(
             fill_non_exist_offset(non_exist_offset_codec->PayloadData(),
                                   non_exist_offset_codec->PayloadSize());
         }
+        return;
     }
-    InvertedIndexTantivy<T>::LoadIndexMetas(index_files, config);
+
+    LOG_INFO(
+        "No non_exist_offset_file found, use null_offset_ to fill "
+        "non_exist_offsets_");
+    // Fallback: no non_exist_offset_file found. This occurs in two scenarios:
+    // 1. Legacy v2.5.x data where non_exist_offset_file doesn't exist
+    // 2. All records are valid (no invalid offsets to track)
+    //
+    // Use null_offset_ as the source for non_exist_offsets_ to maintain
+    // backward compatibility. This ensures Exists() behaves like v2.5.x IsNotNull().
+    for (auto& n : this->null_offset_) {
+        non_exist_offsets_.push_back(n);
+    }
 }
 
 template <typename T>
