@@ -107,7 +107,8 @@ class TestBase(Base):
             self.vector_client.api_key = None
             self.collection_client.api_key = None
             self.partition_client.api_key = None
-        
+        connections.connect(uri=endpoint, token=token)
+
         # Print connection info for debugging
         logger.info(f"Attempting to connect to Milvus:")
         logger.info(f"  Endpoint: {endpoint}")
@@ -120,7 +121,7 @@ class TestBase(Base):
         for attempt in range(max_retries):
             try:
                 logger.info(f"Connection attempt {attempt + 1}/{max_retries}")
-                self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
+                connections.connect(uri=endpoint, token=token)
                 logger.info("Successfully connected to Milvus")
                 break
             except Exception as e:
