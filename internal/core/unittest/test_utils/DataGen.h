@@ -19,6 +19,7 @@
 #include <cmath>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <ogr_geometry.h>
 #include <cstdlib>
 
 #include "Constants.h"
@@ -207,6 +208,14 @@ struct GeneratedData {
                         std::copy(src_data.begin(), src_data.end(), ret_data);
                         break;
                     }
+                    case DataType::GEOMETRY: {
+                        auto ret_data =
+                            reinterpret_cast<std::string*>(ret.data());
+                        auto src_data =
+                            target_field_data.scalars().geometry_data().data();
+                        std::copy(src_data.begin(), src_data.end(), ret_data);
+                        break;
+                    }
                     default: {
                         PanicInfo(Unsupported, "unsupported");
                     }
@@ -335,16 +344,96 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline GeneratedData DataGen(SchemaPtr schema,
-                             int64_t N,
-                             uint64_t seed = 42,
-                             uint64_t ts_offset = 0,
-                             int repeat_count = 1,
-                             int array_len = 10,
-                             bool random_pk = false,
-                             bool random_val = true,
-                             bool random_valid = false,
-                             bool sparse_with_empty_row = false) {
+inline void generateRandomPoint(OGRPoint& point) {
+    point.setX(static_cast<double>(rand()) / RAND_MAX * 360.0 - 180.0);
+    point.setY(static_cast<double>(rand()) / RAND_MAX * 180.0 - 90.0);
+}
+
+inline void
+generateRandomLineString(OGRLineString& lineString, int numPoints) {
+    for (int i = 0; i < numPoints; ++i) {
+        OGRPoint point;
+        generateRandomPoint(point);
+        lineString.addPoint(&point);
+    }
+}
+
+inline void
+generateRandomPolygon(OGRPolygon& polygon, int numperRing) {
+    OGRLinearRing ring;
+    generateRandomLineString(ring, numperRing);
+    ring.closeRings();
+    polygon.addRing(&ring);
+}
+
+inline OGRGeometry*
+GenRandomGeometry() {
+    OGRGeometry* geometry = nullptr;
+    int geomType = rand() % 6;  // Randomly select a geometry type (0 to 6)
+    switch (geomType) {
+        case 0: {
+            OGRPoint point;
+            generateRandomPoint(point);
+            geometry = point.clone();
+            break;
+        }
+        case 1: {
+            OGRLineString lineString;
+            generateRandomLineString(lineString, 5);
+            geometry = lineString.clone();
+            break;
+        }
+        case 2: {
+            OGRPolygon polygon;
+            generateRandomPolygon(polygon, 5);
+            geometry = polygon.clone();
+            break;
+        }
+        case 3: {
+            OGRMultiPoint multiPoint;
+            for (int i = 0; i < 3; ++i) {
+                OGRPoint point;
+                generateRandomPoint(point);
+                multiPoint.addGeometry(&point);
+            }
+            geometry = multiPoint.clone();
+            break;
+        }
+        case 4: {
+            OGRMultiLineString multiLineString;
+            for (int i = 0; i < 3; ++i) {
+                OGRLineString lineString;
+                generateRandomLineString(lineString, 5);
+                multiLineString.addGeometry(&lineString);
+            }
+            geometry = multiLineString.clone();
+            break;
+        }
+        case 5: {
+            OGRMultiPolygon multiPolygon;
+            for (int i = 0; i < 3; ++i) {
+                OGRPolygon polygon;
+                generateRandomPolygon(polygon, 5);
+                multiPolygon.addGeometry(&polygon);
+            }
+            geometry = multiPolygon.clone();
+            break;
+        }
+    }
+    return geometry;
+}
+
+inline GeneratedData
+DataGen(SchemaPtr schema,
+        int64_t N,
+        uint64_t seed = 42,
+        uint64_t ts_offset = 0,
+        int repeat_count = 1,
+        int array_len = 10,
+        bool random_pk = false,
+        bool random_val = true,
+        bool random_valid = false,
+        bool sparse_with_empty_row = false) {
     using std::vector;
     std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
@@ -540,6 +629,21 @@ inline GeneratedData DataGen(SchemaPtr schema,
                                R"(","bool": true)" + R"(, "array": [1,2,3])" +
                                "}";
                     data[i] = str;
+                }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::GEOMETRY: {
+                vector<std::string> data(N);
+                for (int i = 0; i < N / repeat_count; i++) {
+                    OGRGeometry* geo = GenRandomGeometry();
+                    size_t size = geo->WkbSize();
+                    auto wkb_data = new unsigned char[size];
+                    geo->exportToWkb(wkbNDR, wkb_data);
+                    data[i] = std::string(
+                        reinterpret_cast<const char*>(wkb_data), size);
+                    OGRGeometryFactory::destroyGeometry(geo);
+                    delete[] wkb_data;
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
@@ -1183,6 +1287,16 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 } else {
                     createFieldData(data_raw.data(), DataType::JSON, dim);
                 }
+                break;
+            }
+            case DataType::GEOMETRY: {
+                auto src_data = data->scalars().geometry_data().data();
+                std::vector<std::string> data_raw(src_data.size());
+                for (int i = 0; i < src_data.size(); i++) {
+                    auto str = src_data.Get(i);
+                    data_raw[i] = std::move(std::string(str));
+                }
+                createFieldData(data_raw.data(), DataType::GEOMETRY, dim);
                 break;
             }
             case DataType::ARRAY: {

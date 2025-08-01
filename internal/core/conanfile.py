@@ -8,8 +8,8 @@ class MilvusConan(ConanFile):
         "rocksdb/6.29.5@milvus/dev#b1842a53ddff60240c5282a3da498ba1",
         "boost/1.82.0#744a17160ebb5838e9115eab4d6d0c06",
         "onetbb/2021.9.0#4a223ff1b4025d02f31b65aedf5e7f4a",
-        "nlohmann_json/3.11.2#ffb9e9236619f1c883e36662f944345d",
-        "zstd/1.5.4#308b8b048f9a3823ce248f9c150cc889",
+        "nlohmann_json/3.11.3#ffb9e9236619f1c883e36662f944345d",
+        "zstd/1.5.5#34e9debe03bf0964834a09dfbc31a5dd",
         "lz4/1.9.4#c5afb86edd69ac0df30e3a9e192e43db",
         "snappy/1.1.9#0519333fef284acd04806243de7d3070",
         "lzo/2.10#9517fc1bcc4d4cc229a79806003a1baa",
@@ -47,7 +47,14 @@ class MilvusConan(ConanFile):
         "rapidjson/cci.20230929#624c0094d741e6a3749d2e44d834b96c",
         "simde/0.8.2#5e1edfd5cba92f25d79bf6ef4616b972",
         "unordered_dense/4.4.0#6a855c992618cc4c63019109a2e47298",
-        "xxhash/0.8.3#199e63ab9800302c232d030b27accec0"
+        "xxhash/0.8.3#199e63ab9800302c232d030b27accec0",
+        "json-c/0.17#aaea4a8164c63860731ea7ce4fa206f2",
+        "sqlite3/3.44.2#497f5b5414e48e35a717dd3035947819",
+        "proj/9.3.1#38e8bacd0f98467d38e20f46a085b4b3",
+        "libtiff/4.6.0#32ca1d04c9f024637d49c0c2882cfdbe",
+        "libgeotiff/1.7.1#0375633ef1116fc067b3773be7fd902f",
+        "geos/3.12.0#b76c27884c1fa4ee8c9e486337b7dc4e",
+        "gdal/3.5.3#61a42c933d3440a449cac89fd0866621"
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -81,6 +88,8 @@ class MilvusConan(ConanFile):
         "fmt:header_only": True,
         "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
+        "gdal:shared": True,
+        "gdal:fPIC": True,
     }
 
     def configure(self):
