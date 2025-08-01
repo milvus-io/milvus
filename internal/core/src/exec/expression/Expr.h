@@ -558,8 +558,7 @@ class SegmentExpr : public Expr {
                 return input->size();
             } else {
                 if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>||
-                              std::is_same_v<T, ArrayView>) {
+                              std::is_same_v<T, Json>) {
                     return ProcessDataByOffsetsForSealedSeg<T>(
                         func, skip_func, input, res, valid_res, values...);
                 }
@@ -621,10 +620,9 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         ValTypes... values) {
         int64_t processed_size = 0;
-
+        LOG_INFO("hc====ProcessDataChunksForSingleChunk");
         if constexpr (std::is_same_v<T, std::string_view> ||
-                      std::is_same_v<T, Json>||
-                      std::is_same_v<T, ArrayView>) {
+                      std::is_same_v<T, Json>) {
             if (segment_->type() == SegmentType::Sealed) {
                 return ProcessChunkForSealedSeg<T>(
                     func, skip_func, res, valid_res, values...);
@@ -711,9 +709,13 @@ class SegmentExpr : public Expr {
                 if constexpr (std::is_same_v<T, std::string_view> ||
                               std::is_same_v<T, Json> ||
                               std::is_same_v<T, ArrayView>) {
+                    LOG_INFO("hc====ProcessDataChunksForMultipleChunk for field sealed, segment_id: {}, segment_type: {}", 
+                        segment_->get_segment_id(), segment_->type());
                     if (segment_->type() == SegmentType::Sealed) {
                         // first is the raw data, second is valid_data
                         // use valid_data to see if raw data is null
+                        LOG_INFO("hc====get batch views, segment_id: {}, segment_type: {}", 
+                            segment_->get_segment_id(), segment_->type());
                         auto [data_vec, valid_data] =
                             segment_->get_batch_views<T>(
                                 field_id_, i, data_pos, size);
@@ -789,9 +791,13 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         ValTypes... values) {
         if (segment_->is_chunked()) {
+            LOG_INFO("ProcessDataChunksForMultipleChunk, segment_id: {}, is_chunked: {}", 
+                segment_->get_segment_id(), segment_->is_chunked());
             return ProcessDataChunksForMultipleChunk<T>(
                 func, skip_func, res, valid_res, values...);
         } else {
+            LOG_INFO("ProcessDataChunksForSingleChunk, segment_id: {}, is_chunked: {}", 
+                segment_->get_segment_id(), segment_->is_chunked());
             return ProcessDataChunksForSingleChunk<T>(
                 func, skip_func, res, valid_res, values...);
         }

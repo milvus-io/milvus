@@ -268,6 +268,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
                                                     valid_res,
                                                     arg_set_);
     } else {
+        LOG_INFO("hc====JsonContainsExpr ProcessDataChunks<milvus::ArrayView>");
         processed_size = ProcessDataChunks<milvus::ArrayView>(
             execute_sub_batch, std::nullptr_t{}, res, valid_res, arg_set_);
     }

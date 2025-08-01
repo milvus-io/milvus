@@ -234,6 +234,20 @@ class ArrayChunk : public Chunk {
     }
 
     std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ViewsByOffsets(const FixedVector<int32_t>& offsets) {
+        std::vector<ArrayView> views;
+        FixedVector<bool> valid_res;
+        size_t size = offsets.size();
+        views.reserve(size);
+        valid_res.reserve(size);
+        for (auto i = 0; i < size; ++i) {
+            views.emplace_back(View(offsets[i]));
+            valid_res.emplace_back(isValid(offsets[i]));
+        }
+        return {std::move(views), std::move(valid_res)};
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
     Views(std::optional<std::pair<int64_t, int64_t>> offset_len =
               std::nullopt) const {
         auto start_offset = 0;

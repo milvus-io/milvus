@@ -168,10 +168,17 @@ class ChunkedColumnBase : public ColumnBase {
     }
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    ViewsByOffsets(int64_t chunk_id,
+    StringViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const {
         PanicInfo(ErrorCode::Unsupported,
                   "viewsbyoffsets only supported for VariableColumn");
+    }
+
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViewsByOffsets(int64_t chunk_id,
+                   const FixedVector<int32_t>& offsets) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "viewsbyoffsets only supported for ArrayColumn");
     }
 
     std::pair<size_t, size_t>
@@ -355,7 +362,7 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    ViewsByOffsets(int64_t chunk_id,
+    StringViewsByOffsets(int64_t chunk_id,
                    const FixedVector<int32_t>& offsets) const override {
         return std::static_pointer_cast<StringChunk>(chunks_[chunk_id])
             ->ViewsByOffsets(offsets);
@@ -443,6 +450,13 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                    std::nullopt) const override {
         return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])
             ->Views(offset_len);
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViewsByOffsets(int64_t chunk_id,
+                   const FixedVector<int32_t>& offsets) const override {
+        return std::dynamic_pointer_cast<ArrayChunk>(chunks_[chunk_id])
+            ->ViewsByOffsets(offsets);
     }
 };
 }  // namespace milvus

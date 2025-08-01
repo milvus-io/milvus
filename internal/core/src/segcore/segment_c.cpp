@@ -48,6 +48,7 @@ NewSegment(CCollection collection,
         std::unique_ptr<milvus::segcore::SegmentInterface> segment;
         switch (seg_type) {
             case Growing: {
+                LOG_INFO("hc====NewSegment Growing, segment_id: {}, is_sorted_by_pk: {}", segment_id, is_sorted_by_pk);
                 auto seg = milvus::segcore::CreateGrowingSegment(
                     col->get_schema(), col->get_index_meta(), segment_id);
                 segment = std::move(seg);
@@ -55,6 +56,7 @@ NewSegment(CCollection collection,
             }
             case Sealed:
             case Indexing:
+                LOG_INFO("hc====NewSegment Sealed, segment_id: {}, is_sorted_by_pk: {}", segment_id, is_sorted_by_pk);
                 segment = milvus::segcore::CreateSealedSegment(
                     col->get_schema(),
                     col->get_index_meta(),
@@ -65,6 +67,7 @@ NewSegment(CCollection collection,
                     false);
                 break;
             case ChunkedSealed:
+                LOG_INFO("hc====NewSegment ChunkedSealed, segment_id: {}, is_sorted_by_pk: {}", segment_id, is_sorted_by_pk);
                 segment = milvus::segcore::CreateSealedSegment(
                     col->get_schema(),
                     col->get_index_meta(),
