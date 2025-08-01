@@ -48,12 +48,13 @@ ListNode::NodePin::operator=(NodePin&& other) {
     return *this;
 }
 
-ListNode::ListNode(DList* dlist, ResourceUsage size)
+ListNode::ListNode(DList* dlist, ResourceUsage size, bool evictable)
     : last_touch_(dlist ? (std::chrono::high_resolution_clock::now() -
                            2 * dlist->eviction_config().cache_touch_window)
                         : std::chrono::high_resolution_clock::now()),
       dlist_(dlist),
-      size_(size) {
+      size_(size),
+      evictable_(evictable) {
 }
 
 ListNode::~ListNode() {
@@ -103,7 +104,8 @@ ListNode::pin() {
                    "Programming error: read_op called on a {} cell",
                    state_to_string(state_));
         // pin the cell now so that we can avoid taking the lock again in deferValue.
-        if (pin_count_.fetch_add(1) == 0 && state_ == State::LOADED && dlist_) {
+        if (pin_count_.fetch_add(1) == 0 && state_ == State::LOADED && dlist_ &&
+            evictable_) {
             // node became inevictable, decrease evictable size
             dlist_->decreaseEvictableSize(size_);
         }
@@ -187,9 +189,11 @@ void
 ListNode::unpin() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
     if (pin_count_.fetch_sub(1) == 1) {
-        touch(false);
+        if (evictable_) {
+            touch(false);
+        }
         // Notify DList that this node became evictable
-        if (dlist_ && state_ == State::LOADED) {
+        if (dlist_ && evictable_ && state_ == State::LOADED) {
             dlist_->increaseEvictableSize(size_);
         }
     }
