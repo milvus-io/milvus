@@ -2839,6 +2839,8 @@ type queryNodeConfig struct {
 	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
 	TieredDiskHighWatermarkRatio    ParamItem `refreshable:"false"`
 	TieredEvictionEnabled           ParamItem `refreshable:"false"`
+	TieredEvictableMemoryCacheRatio ParamItem `refreshable:"false"`
+	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
 	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
 	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
 	TieredLoadingMemoryFactor       ParamItem `refreshable:"false"`
@@ -3047,6 +3049,48 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 		Export: true,
 	}
 	p.TieredEvictionEnabled.Init(base.mgr)
+
+	p.TieredEvictableMemoryCacheRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictableMemoryCacheRatio",
+		Version:      "2.6.0",
+		DefaultValue: "1.0",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "1.0"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc: `This ratio estimates how much evictable memory can be cached.
+The higher the ratio, the more physical memory is reserved for evictable memory,
+resulting in fewer evictions but fewer segments can be loaded.
+Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
+This parameter is only valid when eviction is enabled.
+It defaults to 1.0 (meaning all evictable memory is cached), with a valid range of [0.0, 1.0].`,
+		Export: true,
+	}
+	p.TieredEvictableMemoryCacheRatio.Init(base.mgr)
+
+	p.TieredEvictableDiskCacheRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictableDiskCacheRatio",
+		Version:      "2.6.0",
+		DefaultValue: "1.0",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "1.0"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc: `This ratio estimates how much evictable disk space can be cached.
+The higher the ratio, the more physical disk space is reserved for evictable disk usage,
+resulting in fewer evictions but fewer segments can be loaded.
+Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
+This parameter is only valid when eviction is enabled.
+It defaults to 1.0 (meaning all evictable disk is cached), with a valid range of [0.0, 1.0].`,
+		Export: true,
+	}
+	p.TieredEvictableDiskCacheRatio.Init(base.mgr)
 
 	p.TieredMemoryLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",

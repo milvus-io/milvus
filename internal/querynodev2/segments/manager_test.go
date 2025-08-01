@@ -59,6 +59,7 @@ func (s *ManagerSuite) SetupTest() {
 		segment, err := NewSegment(
 			context.Background(),
 			collection,
+			s.mgr,
 			s.types[i],
 			0,
 			&querypb.SegmentLoadInfo{
