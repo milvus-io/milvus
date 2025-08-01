@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from base.client_v2_base import TestMilvusClientV2Base
