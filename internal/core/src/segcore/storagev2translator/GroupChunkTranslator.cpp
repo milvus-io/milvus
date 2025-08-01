@@ -55,16 +55,22 @@ GroupChunkTranslator::GroupChunkTranslator(
       insert_files_(insert_files),
       use_mmap_(use_mmap),
       load_priority_(load_priority),
-      meta_(
-          num_fields,
-          use_mmap ? milvus::cachinglayer::StorageType::DISK
-                   : milvus::cachinglayer::StorageType::MEMORY,
-          milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
-          // TODO(tiered storage 2): vector may be of small size and mixed with scalar, do we force it
-          // to use the warm up policy of scalar field?
-          milvus::segcore::getCacheWarmupPolicy(/* is_vector */ false,
-                                                /* is_index */ false),
-          /* support_eviction */ true) {
+      meta_(num_fields,
+            use_mmap ? milvus::cachinglayer::StorageType::DISK
+                     : milvus::cachinglayer::StorageType::MEMORY,
+            milvus::cachinglayer::CellIdMappingMode::IDENTICAL,
+            milvus::segcore::getCacheWarmupPolicy(
+                /* is_vector */
+                [&]() {
+                    for (const auto& [fid, field_meta] : field_metas_) {
+                        if (IsVectorDataType(field_meta.get_data_type())) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }(),
+                /* is_index */ false),
+            /* support_eviction */ true) {
     auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
                   .GetArrowFileSystem();
 

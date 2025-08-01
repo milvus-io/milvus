@@ -166,6 +166,12 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
     // Reserve resources (both checks passed)
     used_resources_ += size;
     loading_ += size * eviction_config_.loading_memory_factor;
+    LOG_TRACE(
+        "[MCL] reserveMemoryInternal success, size={}, used_resources_={}, "
+        "loading_={}",
+        size.ToString(),
+        used_resources_.load().ToString(),
+        loading_.load().ToString());
     return true;
 }
 
@@ -336,12 +342,15 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
         }
     }
     if (!size_to_evict.AnyGTZero()) {
-        LOG_DEBUG(
-            "[MCL] No items can be evicted, expected_eviction {}, min_eviction "
-            "{}, giving up eviction. Current usage: {}",
-            expected_eviction.ToString(),
-            min_eviction.ToString(),
-            usageInfo());
+        // Do not spam log during eviction loop.
+        if (!evict_expired_items) {
+            LOG_DEBUG(
+                "[MCL] No items can be evicted, expected_eviction {}, "
+                "min_eviction {}, giving up eviction. Current usage: {}",
+                expected_eviction.ToString(),
+                min_eviction.ToString(),
+                usageInfo());
+        }
         return ResourceUsage{0, 0};
     }
     if (!size_to_evict.CanHold(expected_eviction)) {

@@ -44,6 +44,11 @@ SemiInlineGet(folly::SemiFuture<T>&& future) {
 
 inline std::string
 FormatBytes(int64_t bytes) {
+    constexpr int64_t kUnlimitedThreshold =
+        std::numeric_limits<int64_t>::max() / 100;
+    if (bytes >= kUnlimitedThreshold) {
+        return "UNSET";
+    }
     if (bytes < 1024) {
         return fmt::format("{} B", bytes);
     } else if (bytes < 1024 * 1024) {
@@ -208,6 +213,27 @@ struct CacheWarmupPolicies {
           vectorFieldCacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
           scalarIndexCacheWarmupPolicy(scalarIndexCacheWarmupPolicy),
           vectorIndexCacheWarmupPolicy(vectorIndexCacheWarmupPolicy) {
+    }
+
+    std::string
+    ToString() const {
+        auto policyToString = [](CacheWarmupPolicy policy) -> std::string {
+            switch (policy) {
+                case CacheWarmupPolicy::CacheWarmupPolicy_Sync:
+                    return "Sync";
+                case CacheWarmupPolicy::CacheWarmupPolicy_Disable:
+                    return "Disable";
+                default:
+                    return "Unknown";
+            }
+        };
+        return fmt::format(
+            "warmup policies: scalarField: {}, vectorField: {}, "
+            "scalarIndex: {}, vectorIndex: {}",
+            policyToString(scalarFieldCacheWarmupPolicy),
+            policyToString(vectorFieldCacheWarmupPolicy),
+            policyToString(scalarIndexCacheWarmupPolicy),
+            policyToString(vectorIndexCacheWarmupPolicy));
     }
 };
 
