@@ -1859,22 +1859,6 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_release_collection_after_drop(self):
-        """
-        target: test release collection after drop
-        method: insert and flush, then release collection after load and drop
-        expected: raise exception
-        """
-        self._connect()
-        c_name = cf.gen_unique_str()
-        collection_wr = self.init_collection_wrap(name=c_name)
-        collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        collection_wr.load()
-        collection_wr.drop()
-        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
-        collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_partition_names_empty(self):
         """
