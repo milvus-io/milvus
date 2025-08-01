@@ -53,9 +53,11 @@ template <bool is_sealed = false>
 class DeletedRecord {
  public:
     DeletedRecord(InsertRecord<is_sealed>* insert_record,
-                  std::function<std::vector<std::pair<SegOffset, Timestamp>>(
+                  std::function<void(
                       const std::vector<PkType>& pks,
-                      const Timestamp* timestamps)> search_pk_func,
+                      const Timestamp* timestamps,
+                      std::function<void(SegOffset offset, Timestamp ts)> cb)>
+                      search_pk_func,
                   int64_t segment_id)
         : insert_record_(insert_record),
           search_pk_func_(std::move(search_pk_func)),
@@ -115,30 +117,30 @@ class DeletedRecord {
                 max_timestamp = deleted_ts;
             }
         }
-        auto offsets = search_pk_func_(pks, timestamps);
-        for (auto& [offset, deleted_ts] : offsets) {
-            auto row_id = offset.get();
-            // if already deleted, no need to add new record
-            if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
-                continue;
-            }
-            // if insert record and delete record is same timestamp,
-            // delete not take effect on this record.
-            if (deleted_ts == insert_record_->timestamps_[row_id]) {
-                continue;
-            }
-            accessor.insert(std::make_pair(deleted_ts, row_id));
-            if constexpr (is_sealed) {
-                Assert(deleted_mask_.size() > 0);
-                deleted_mask_.set(row_id);
-            } else {
-                // need to add mask size firstly for growing segment
-                deleted_mask_.resize(insert_record_->size());
-                deleted_mask_.set(row_id);
-            }
-            removed_num++;
-            mem_add += DELETE_PAIR_SIZE;
-        }
+        search_pk_func_(
+            pks, timestamps, [&](SegOffset offset, Timestamp delete_ts) {
+                auto row_id = offset.get();
+                // if already deleted, no need to add new record
+                if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
+                    return;
+                }
+                // if insert record and delete record is same timestamp,
+                // delete not take effect on this record.
+                if (delete_ts == insert_record_->timestamps_[row_id]) {
+                    return;
+                }
+                accessor.insert(std::make_pair(delete_ts, row_id));
+                if constexpr (is_sealed) {
+                    Assert(deleted_mask_.size() > 0);
+                    deleted_mask_.set(row_id);
+                } else {
+                    // need to add mask size firstly for growing segment
+                    deleted_mask_.resize(insert_record_->size());
+                    deleted_mask_.set(row_id);
+                }
+                removed_num++;
+                mem_add += DELETE_PAIR_SIZE;
+            });
 
         n_.fetch_add(removed_num);
         mem_size_.fetch_add(mem_add);
@@ -322,8 +324,9 @@ class DeletedRecord {
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
     InsertRecord<is_sealed>* insert_record_;
-    std::function<std::vector<std::pair<SegOffset, Timestamp>>(
-        const std::vector<PkType>& pks, const Timestamp* timestamps)>
+    std::function<void(const std::vector<PkType>& pks,
+                       const Timestamp* timestamps,
+                       std::function<void(SegOffset offset, Timestamp ts)>)>
         search_pk_func_;
     int64_t segment_id_{0};
     std::shared_ptr<SortedDeleteList> deleted_lists_;
