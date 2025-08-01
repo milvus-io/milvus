@@ -326,6 +326,14 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 			} else if nullable {
 				err = appender.AppendNull(fieldData, rowNum)
 			}
+		case schemapb.DataType_Timestamptz:
+			appender := &nullDefaultAppender[int64]{}
+			if defaultVal != nil {
+				v := defaultVal.GetTimestamptzData()
+				err = appender.AppendDefault(fieldData, v, rowNum)
+			} else if nullable {
+				err = appender.AppendNull(fieldData, rowNum)
+			}
 		case schemapb.DataType_VarChar:
 			appender := &nullDefaultAppender[string]{}
 			if defaultVal != nil {

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <random>
@@ -225,6 +226,15 @@ struct GeneratedData {
                             std::copy_n(src_data, raw_->num_rows(), ret.data());
                             break;
                         }
+                        case DataType::TIMESTAMPTZ: {
+                            auto src_data = reinterpret_cast<const T*>(
+                                target_field_data.scalars()
+                                    .timestamptz_data()
+                                    .data()
+                                    .data());
+                            std::copy_n(src_data, raw_->num_rows(), ret.data());
+                            break;
+                        }
                         case DataType::VARCHAR: {
                             auto ret_data =
                                 reinterpret_cast<std::string*>(ret.data());
@@ -366,7 +376,10 @@ inline SchemaPtr CreateTestSchema() {
         schema->AddDebugField("int16", milvus::DataType::INT16, true);
     auto int32_field =
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
-    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto int64_field = 
+        schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto timestamptz_field = 
+        schema->AddDebugArrayField("timestamptz", DataType::TIMESTAMPTZ, true);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
@@ -634,6 +647,19 @@ DataGen(SchemaPtr schema,
                 FixedVector<bool> data(N);
                 for (int i = 0; i < N; ++i) {
                     data[i] = i % 2 == 0 ? true : false;
+                }
+                insert_cols(data, N, field_meta, random_valid);
+                break;
+            }
+            case DataType::TIMESTAMPTZ: {
+                vector<int64_t> data(N);
+                for (int i = 0; i < N; ++i) {
+                    int64_t x= 0;
+                    if (random_val)
+                        x = random() % (2 * N);
+                    else
+                        x = i / repeat_count;
+                    data[i] = x;
                 }
                 insert_cols(data, N, field_meta, random_valid);
                 break;
@@ -1286,6 +1312,17 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 }
                 break;
             }
+            case DataType::TIMESTAMPTZ: {
+                auto raw_data = data->scalars().timestamptz_data().data().data();
+                if (field_meta.is_nullable()) {
+                    auto raw_valid_data = data->valid_data().data();
+                    createNullableFieldData(
+                        raw_data, raw_valid_data, DataType::TIMESTAMPTZ, dim);
+                } else {
+                    createFieldData(raw_data, DataType::TIMESTAMPTZ, dim);
+                }
+                break;
+            }
             case DataType::VARCHAR: {
                 auto begin = data->scalars().string_data().data().begin();
                 auto end = data->scalars().string_data().data().end();
@@ -1581,11 +1618,14 @@ gen_all_data_types_schema() {
         schema->AddDebugField("int16", milvus::DataType::INT16, true);
     auto int32_field =
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
-    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto int64_field = 
+        schema->AddDebugField("int64", milvus::DataType::INT64);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
         schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
+    auto timestamptz_field =
+        schema->AddDebugField("timestamptz", milvus::DataType::TIMESTAMPTZ, true);
     auto varchar_field =
         schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
     auto json_field =

@@ -438,6 +438,13 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error,
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
+				case schemapb.DataType_Timestamptz:
+					result, err := json.Number(dataString).Int64()
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)],
+							dataString, err.Error()), reallyDataArray, validDataMap
+					}
+					reallyData[fieldName] = result
 				case schemapb.DataType_Array:
 					switch field.ElementType {
 					case schemapb.DataType_Bool:
@@ -768,6 +775,8 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			data = make([]float32, 0, rowsLen)
 		case schemapb.DataType_Double:
 			data = make([]float64, 0, rowsLen)
+		case schemapb.DataType_Timestamptz:
+			data = make([]int64, 0, rowsLen)
 		case schemapb.DataType_String:
 			data = make([]string, 0, rowsLen)
 		case schemapb.DataType_VarChar:
@@ -859,6 +868,8 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]int64), candi.v.Interface().(int64))
 			case schemapb.DataType_Float:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float32), candi.v.Interface().(float32))
+			case schemapb.DataType_Timestamptz:
+				nameColumns[field.Name] = append(nameColumns[field.Name].([]int64), candi.v.Interface().(int64))
 			case schemapb.DataType_Double:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]float64), candi.v.Interface().(float64))
 			case schemapb.DataType_String:
@@ -991,6 +1002,16 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 					Data: &schemapb.ScalarField_DoubleData{
 						DoubleData: &schemapb.DoubleArray{
 							Data: column.([]float64),
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Timestamptz:
+			colData.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_TimestamptzData{
+						TimestamptzData: &schemapb.TimestamptzArray{
+							Data: column.([]int64),
 						},
 					},
 				},
@@ -1330,6 +1351,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetScalars().GetFloatData().GetData()))
 			case schemapb.DataType_Double:
 				rowsNum = int64(len(fieldDataList[0].GetScalars().GetDoubleData().GetData()))
+			case schemapb.DataType_Timestamptz:
+				rowsNum = int64(len(fieldDataList[0].GetScalars().GetTimestamptzData().GetData()))
 			case schemapb.DataType_String:
 				rowsNum = int64(len(fieldDataList[0].GetScalars().GetStringData().GetData()))
 			case schemapb.DataType_VarChar:
@@ -1433,6 +1456,12 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 						continue
 					}
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetScalars().GetDoubleData().GetData()[i]
+				case schemapb.DataType_Timestamptz:
+					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
+						row[fieldDataList[j].GetFieldName()] = nil
+						continue
+					}
+					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetTimestamptzData().GetData()[i]
 				case schemapb.DataType_String:
 					if len(fieldDataList[j].GetValidData()) != 0 && !fieldDataList[j].GetValidData()[i] {
 						row[fieldDataList[j].GetFieldName()] = nil
@@ -1635,6 +1664,18 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_DoubleData{
 				DoubleData: v,
+			},
+		}
+		return data, nil
+
+	case schemapb.DataType_Timestamptz:
+		v, ok := value.(float64)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalid("string", value, "Wrong defaultValue type")
+		}
+		data := &schemapb.ValueField{
+			Data: &schemapb.ValueField_TimestamptzData{
+				TimestamptzData: int64(v),
 			},
 		}
 		return data, nil
