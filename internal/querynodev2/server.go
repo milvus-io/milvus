@@ -386,7 +386,7 @@ func (node *QueryNode) InitSegcore() error {
 	loadingMemoryFactor := C.float(paramtable.Get().QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
-	diskPath := C.CString(localDataRootPath)
+	diskPath := C.CString(paramtable.Get().LocalStorageCfg.Path.GetValue())
 	defer C.free(unsafe.Pointer(diskPath))
 
 	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
