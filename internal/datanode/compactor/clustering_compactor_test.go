@@ -247,6 +247,7 @@ func (s *ClusteringCompactionTaskSuite) preparScalarCompactionNormalTask() {
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormal() {
+	s.T().Skip("no chunking for storage v2, skip legacy test")
 	s.preparScalarCompactionNormalTask()
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
@@ -343,6 +344,7 @@ func (s *ClusteringCompactionTaskSuite) prepareScalarCompactionNormalByMemoryLim
 }
 
 func (s *ClusteringCompactionTaskSuite) TestScalarCompactionNormalByMemoryLimit() {
+	s.T().Skip("no chunking for storage v2, skip legacy test")
 	s.prepareScalarCompactionNormalByMemoryLimit()
 	// 8+8+8+4+7+4*4=51
 	// 51*1024 = 52224
@@ -432,6 +434,7 @@ func (s *ClusteringCompactionTaskSuite) prepareCompactionWithBM25FunctionTask() 
 }
 
 func (s *ClusteringCompactionTaskSuite) TestCompactionWithBM25Function() {
+	s.T().Skip("no chunking for storage v2, skip legacy test")
 	// 8 + 8 + 8 + 7 + 8 = 39
 	// 39*1024 = 39936
 	// plus buffer on null bitsets etc., let's make it 50000
