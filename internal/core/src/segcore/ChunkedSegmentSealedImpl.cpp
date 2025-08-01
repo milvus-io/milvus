@@ -903,7 +903,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     bool include_same_ts,
     const std::function<void(const SegOffset offset, const Timestamp ts)>&
         callback) const {
-    // std::vector<std::pair<SegOffset, Timestamp>> pk_offsets;
     // handle unsorted case
     if (!is_sorted_by_pk_) {
         for (size_t i = 0; i < pks.size(); i++) {
@@ -981,7 +980,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                         if (timestamp_hit(
                                 insert_record_.timestamps_[segment_offset],
                                 timestamp)) {
-                            // pk_offsets.emplace_back(segment_offset, timestamp);
                             callback(SegOffset(segment_offset), timestamp);
                         }
                     }
