@@ -241,32 +241,34 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             auto start = std::chrono::high_resolution_clock::now();
             std::vector<cid_t> cids_vec(cids.begin(), cids.end());
 
-            bool reservation_success = false;
+            if (dlist_) {
+                bool reservation_success = false;
 
-            auto now = std::chrono::steady_clock::now();
-            reservation_success = SemiInlineGet(
-                dlist_->reserveMemoryWithTimeout(resource_needed, timeout));
-            LOG_TRACE(
-                "[MCL] CacheSlot reserveMemoryWithTimeout {} sec "
-                "result: {} time: {} sec",
-                timeout.count() / 1000.0,
-                reservation_success ? "success" : "failed",
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - now)
-                        .count() *
-                    1.0 / 1000);
+                auto now = std::chrono::steady_clock::now();
+                reservation_success = SemiInlineGet(
+                    dlist_->reserveMemoryWithTimeout(resource_needed, timeout));
+                LOG_TRACE(
+                    "[MCL] CacheSlot reserveMemoryWithTimeout {} sec "
+                    "result: {} time: {} sec",
+                    timeout.count() / 1000.0,
+                    reservation_success ? "success" : "failed",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - now)
+                            .count() *
+                        1.0 / 1000);
 
-            if (!reservation_success) {
-                auto error_msg = fmt::format(
-                    "[MCL] CacheSlot failed to reserve memory for "
-                    "cells: key={}, cell_ids=[{}], total "
-                    "resource_needed={}",
-                    translator_->key(),
-                    fmt::join(cids_vec, ","),
-                    resource_needed.ToString());
-                LOG_ERROR(error_msg);
-                reserve_resource_failure = true;
-                ThrowInfo(ErrorCode::InsufficientResource, error_msg);
+                if (!reservation_success) {
+                    auto error_msg = fmt::format(
+                        "[MCL] CacheSlot failed to reserve memory for "
+                        "cells: key={}, cell_ids=[{}], total "
+                        "resource_needed={}",
+                        translator_->key(),
+                        fmt::join(cids_vec, ","),
+                        resource_needed.ToString());
+                    LOG_ERROR(error_msg);
+                    reserve_resource_failure = true;
+                    ThrowInfo(ErrorCode::InsufficientResource, error_msg);
+                }
             }
 
             auto results = translator_->get_cells(cids_vec);
@@ -294,7 +296,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                 cells_[cid].set_error(ew);
             }
             // If the resource reservation failed, we don't need to release the memory.
-            if (!reserve_resource_failure) {
+            if (dlist_ && !reserve_resource_failure) {
                 dlist_->releaseMemory(resource_needed);
             }
         }
