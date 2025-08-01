@@ -27,6 +27,32 @@ use crate::error::TantivyBindingError;
 
 const MAX_ROUND: usize = 3;
 
+pub struct FileMutexGuard {
+    file: Option<fs::File>,
+    path: PathBuf,
+}
+
+impl FileMutexGuard {
+    fn build(path: PathBuf) -> io::Result<FileMutexGuard> {
+        let flock = fs::File::create(&path)?;
+        flock.lock_exclusive()?;
+        Ok(FileMutexGuard {
+            file: Some(flock),
+            path: path,
+        })
+    }
+}
+
+impl Drop for FileMutexGuard {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            let _ = file.unlock();
+            drop(file); // drop file before remove file
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 pub struct FetchParams {
     pub lindera_dir: String,
 
@@ -278,10 +304,9 @@ pub async fn fetch(
         return Ok(());
     }
 
-    let flock = fs::File::create(&lock_path)?;
-    flock.lock_exclusive()?;
+    let _flock_guard = FileMutexGuard::build(lock_path)?;
 
-    // Fast path where the data is already
+    // Fast path where the data is already in cache
     if output_dir.is_dir() {
         return Ok(());
     }
@@ -300,11 +325,6 @@ pub async fn fetch(
     .await;
     let _ = std::fs::remove_dir_all(&tmp_dir);
     let _ = std::fs::remove_dir_all(&input_dir);
-
-    // unlock file lock and remove lock file.
-    flock.unlock()?;
-    drop(flock);
-    let _ = fs::remove_file(&lock_path);
 
     build_result
 }
