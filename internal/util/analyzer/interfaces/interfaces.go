@@ -1,4 +1,4 @@
-package tokenizerapi
+package interfaces
 
 import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
@@ -7,5 +7,11 @@ type TokenStream interface {
 	Advance() bool
 	Token() string
 	DetailedToken() *milvuspb.AnalyzerToken
+	Destroy()
+}
+
+type Analyzer interface {
+	NewTokenStream(text string) TokenStream
+	Clone() (Analyzer, error)
 	Destroy()
 }
