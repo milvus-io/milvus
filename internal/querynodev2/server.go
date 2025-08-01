@@ -206,15 +206,34 @@ func ResizeChunkCachePool(evt *config.Event) {
 	}
 }
 
+func (node *QueryNode) ReconfigFileWriterParams(evt *config.Event) {
+	if evt.HasUpdated {
+		if err := initcore.InitFileWriterConfig(paramtable.Get()); err != nil {
+			log.Ctx(node.ctx).Warn("QueryNode failed to reconfigure file writer params", zap.Error(err))
+			return
+		}
+		log.Ctx(node.ctx).Info("QueryNode reconfig file writer params successfully",
+			zap.String("mode", paramtable.Get().CommonCfg.DiskWriteMode.GetValue()),
+			zap.Uint64("bufferSize", paramtable.Get().CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()),
+			zap.Int("nrThreads", paramtable.Get().CommonCfg.DiskWriteNumThreads.GetAsInt()))
+	}
+}
+
 func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 	pt := paramtable.Get()
 	pt.Watch(pt.CommonCfg.HighPriorityThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.highPriority", ResizeHighPriorityPool))
 	pt.Watch(pt.CommonCfg.ChunkCacheThreadCoreCoefficient.Key,
 		config.NewHandler("common.threadCoreCoefficient.chunkCache", ResizeChunkCachePool))
+	pt.Watch(pt.CommonCfg.DiskWriteMode.Key,
+		config.NewHandler("common.diskWriteMode", node.ReconfigFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteBufferSizeKb.Key,
+		config.NewHandler("common.diskWriteBufferSizeKb", node.ReconfigFileWriterParams))
+	pt.Watch(pt.CommonCfg.DiskWriteNumThreads.Key,
+		config.NewHandler("common.diskWriteNumThreads", node.ReconfigFileWriterParams))
 }
 
-// InitSegcore set init params of segCore, such as chunckRows, SIMD type...
+// InitSegcore set init params of segCore, such as chunkRows, SIMD type...
 func (node *QueryNode) InitSegcore() error {
 	cGlogConf := C.CString(path.Join(paramtable.GetBaseTable().GetConfigDir(), paramtable.DefaultGlogConf))
 	C.SegcoreInit(cGlogConf)
@@ -250,6 +269,7 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
 	cChunkCacheThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.ChunkCacheThreadCoreCoefficient.GetAsFloat())
 	C.InitChunkCacheThreadCoreCoefficient(cChunkCacheThreadCoreCoefficient)
+
 	node.RegisterSegcoreConfigWatcher()
 
 	cCPUNum := C.int(hardware.GetCPUNum())
@@ -285,6 +305,11 @@ func (node *QueryNode) InitSegcore() error {
 	initcore.InitLocalChunkManager(localDataRootPath)
 
 	err := initcore.InitRemoteChunkManager(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
+	err = initcore.InitFileWriterConfig(paramtable.Get())
 	if err != nil {
 		return err
 	}

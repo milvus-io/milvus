@@ -41,7 +41,7 @@ class File {
                    "failed to create mmap file {}: {}",
                    filepath,
                    strerror(errno));
-        return File(fd, std::string(filepath));
+        return File(fd, std::string(filepath), flags);
     }
 
     int
@@ -94,14 +94,33 @@ class File {
     }
 
  private:
-    explicit File(int fd, const std::string& filepath)
+    explicit File(int fd, const std::string& filepath, int flags)
         : fd_(fd), filepath_(filepath) {
-        fs_ = fdopen(fd_, "wb+");
+        fs_ = fdopen(fd_, get_mode_from_flags(flags));
         AssertInfo(fs_ != nullptr,
                    "failed to open file {}: {}",
                    filepath,
                    strerror(errno));
     }
+
+    static inline const char*
+    get_mode_from_flags(int flags) {
+        switch (flags) {
+            case O_RDONLY: {
+                return "rb";
+            }
+            case O_WRONLY: {
+                return flags & O_APPEND ? "ab" : "wb";
+            }
+            case O_RDWR: {
+                return flags & O_APPEND ? "ab+" : "wb+";
+            }
+            default: {
+                AssertInfo(false, "invalid file flags: {}", flags);
+            }
+        }
+    }
+
     int fd_{-1};
     FILE* fs_;
     std::string filepath_;
