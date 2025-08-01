@@ -4319,7 +4319,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
 		Version:      "2.5.8",
-		DefaultValue: "100",
+		DefaultValue: "10000",
 		Doc:          `The expansion factor for pre-allocating IDs during compaction.`,
 	}
 	p.CompactionPreAllocateIDExpansionFactor.Init(base.mgr)
