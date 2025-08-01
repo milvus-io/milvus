@@ -20,14 +20,11 @@
 #include <utility>
 #include <variant>
 #include "common/Consts.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus {
 
 extern int64_t FILE_SLICE_SIZE;
-extern float HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
-extern float MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
-extern float LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
-extern int CPU_NUM;
 extern int64_t EXEC_EVAL_EXPR_BATCH_SIZE;
 extern int64_t JSON_KEY_STATS_COMMIT_INTERVAL;
 extern bool OPTIMIZE_EXPR_ENABLED;
@@ -36,18 +33,6 @@ extern bool CONFIG_PARAM_TYPE_CHECK_ENABLED;
 
 void
 SetIndexSliceSize(const int64_t size);
-
-void
-SetHighPriorityThreadCoreCoefficient(const float coefficient);
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
-
-void
-SetLowPriorityThreadCoreCoefficient(const float coefficient);
-
-void
-SetCpuNum(const int core);
 
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);

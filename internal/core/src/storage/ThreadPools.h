@@ -17,9 +17,8 @@
 #ifndef MILVUS_THREADPOOLS_H
 #define MILVUS_THREADPOOLS_H
 
-#include "ThreadPool.h"
 #include "common/Common.h"
-
+#include "ThreadPool.h"
 namespace milvus {
 
 constexpr const char* LOAD_PRIORITY = "load_priority";

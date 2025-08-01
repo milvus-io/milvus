@@ -46,3 +46,4 @@ if (LINUX)
 endif()
 
 add_subdirectory(milvus-storage)
+add_subdirectory(milvus-common)

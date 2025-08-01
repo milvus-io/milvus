@@ -16,7 +16,7 @@
 #include "segcore/segment_c.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentSealed.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 

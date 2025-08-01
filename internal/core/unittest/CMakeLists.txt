@@ -16,6 +16,7 @@ include_directories(
     ${SIMDJSON_INCLUDE_DIR}
     ${TANTIVY_INCLUDE_DIR}
     ${CONAN_INCLUDE_DIRS}
+    ${MILVUS_COMMON_INCLUDE_DIR}
     ${MILVUS_STORAGE_INCLUDE_DIR}
 )
 
@@ -177,6 +178,7 @@ if (LINUX)
             milvus_core
             knowhere
             milvus-storage
+            milvus-common
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -191,12 +193,12 @@ target_link_libraries(all_tests
         milvus_core
         knowhere
         milvus-storage
+        milvus-common
         )
 
 install(TARGETS all_tests DESTINATION unittest)
 
 add_subdirectory(bench)
-add_subdirectory(test_cachinglayer)
 
 # if (USE_DYNAMIC_SIMD)
 # add_executable(dynamic_simd_test

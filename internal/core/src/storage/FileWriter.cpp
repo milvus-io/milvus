@@ -16,7 +16,7 @@
 
 #include <utility>
 #include "folly/futures/Future.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "storage/FileWriter.h"
 
 namespace milvus::storage {
