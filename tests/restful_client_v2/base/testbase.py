@@ -107,7 +107,17 @@ class TestBase(Base):
             self.vector_client.api_key = None
             self.collection_client.api_key = None
             self.partition_client.api_key = None
-        connections.connect(uri=endpoint, token=token)
+        
+        retry = 0
+        while retry < 10:
+            try:
+                logger.info("try to connect to milvus with endpoint: {endpoint}, token: {token}")
+                connections.connect(uri=endpoint, token=token)
+                break
+            except Exception as e:
+                logger.error(e)
+                time.sleep(5)
+                retry += 1
 
     def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000, return_insert_id=False):
         # create collection
