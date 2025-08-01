@@ -142,9 +142,6 @@ JsonInvertedIndex<T>::LoadIndexMetas(
         return;
     }
 
-    LOG_INFO(
-        "No non_exist_offset_file found, use null_offset_ to fill "
-        "non_exist_offsets_");
     // Fallback: no non_exist_offset_file found. This occurs in two scenarios:
     // 1. Legacy v2.5.x data where non_exist_offset_file doesn't exist
     // 2. All records are valid (no invalid offsets to track)
