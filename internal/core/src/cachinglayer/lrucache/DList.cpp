@@ -200,29 +200,35 @@ std::string
 DList::usageInfo() const {
     auto used = used_resources_.load();
     static double precision = 100.0;
-    return fmt::format(
-        "low_watermark_: {}; "
-        "high_watermark_: {}; "
-        "max_memory_: {}; "
-        "used_resources_: {} {:.2}% of max, {:.2}% of "
-        "high_watermark memory, {:.2}% of max, {:.2}% of "
-        "high_watermark disk; "
-        "evictable_size_: {}; "
-        "loading: {}; ",
+    std::string info = fmt::format(
+        "low_watermark_: {}; high_watermark_: {}; "
+        "max_memory_: {}; used_resources_: {} (",
         low_watermark_.ToString(),
         high_watermark_.ToString(),
         max_memory_.ToString(),
-        used.ToString(),
-        static_cast<double>(used.memory_bytes) / max_memory_.memory_bytes *
-            precision,
-        static_cast<double>(used.memory_bytes) / high_watermark_.memory_bytes *
-            precision,
-        static_cast<double>(used.file_bytes) / max_memory_.file_bytes *
-            precision,
-        static_cast<double>(used.file_bytes) / high_watermark_.file_bytes *
-            precision,
-        evictable_size_.load().ToString(),
-        loading_.load().ToString());
+        used.ToString());
+
+    if (used.memory_bytes > 0) {
+        info += fmt::format(", {:.2}% of max, {:.2}% of high_watermark memory",
+                            static_cast<double>(used.memory_bytes) /
+                                max_memory_.memory_bytes * precision,
+                            static_cast<double>(used.memory_bytes) /
+                                high_watermark_.memory_bytes * precision);
+    }
+
+    if (used.file_bytes > 0) {
+        info += fmt::format(", {:.2}% of max, {:.2}% of high_watermark disk",
+                            static_cast<double>(used.file_bytes) /
+                                max_memory_.file_bytes * precision,
+                            static_cast<double>(used.file_bytes) /
+                                high_watermark_.file_bytes * precision);
+    }
+
+    info += fmt::format("); evictable_size_: {}; loading: {}; ",
+                        evictable_size_.load().ToString(),
+                        loading_.load().ToString());
+
+    return info;
 }
 
 // this method is not thread safe, it does not attempt to lock each node, use for debug only.
