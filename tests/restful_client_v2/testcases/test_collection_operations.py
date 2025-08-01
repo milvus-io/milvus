@@ -24,6 +24,9 @@ class TestCreateCollection(TestBase):
         method: create a collection with a simple schema
         expected: create collection success
         """
+        import os
+        os.putenv("GRPC_VERBOSE", 1)
+        os.putenv("GRPC_TRACE", "connectivity_state")
         name = gen_collection_name()
         dim = 128
         client = self.collection_client
