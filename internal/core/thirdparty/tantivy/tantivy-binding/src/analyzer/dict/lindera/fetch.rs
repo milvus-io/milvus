@@ -19,6 +19,7 @@ use log::{error, info, warn};
 use md5::Context;
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
 use reqwest::Client;
+use tokio::runtime::Runtime;
 use tokio::time::sleep;
 use tokio::time::Duration;
 
@@ -168,7 +169,7 @@ async fn download_with_retry(
     Err("Failed to download a valid file from all sources".into())
 }
 
-pub async fn build(
+pub fn build(
     params: &FetchParams,
     builder: impl DictionaryBuilder,
     build_dir: &PathBuf,
@@ -195,13 +196,14 @@ pub async fn build(
         .build()?;
 
     let mut dest = fs::File::create(tmp_path.as_path())?;
-    let content = download_with_retry(
+
+    let rt = Runtime::new().unwrap();
+    let content = rt.block_on(download_with_retry(
         &client,
         params.download_urls.iter().map(|s| s.as_str()).collect(),
         MAX_ROUND,
         params.md5_hash.as_str(),
-    )
-    .await?;
+    ))?;
 
     io::copy(&mut Cursor::new(content.as_slice()), &mut dest)?;
     dest.flush()?;
@@ -288,10 +290,7 @@ pub async fn build(
 }
 
 /// Fetch the necessary assets and then build the dictionary using `builder`
-pub async fn fetch(
-    params: &FetchParams,
-    builder: impl DictionaryBuilder,
-) -> Result<(), Box<dyn Error>> {
+pub fn fetch(params: &FetchParams, builder: impl DictionaryBuilder) -> Result<(), Box<dyn Error>> {
     let build_dir = PathBuf::from(params.lindera_dir.as_str());
     std::fs::create_dir_all(&build_dir)?;
 
@@ -321,8 +320,7 @@ pub async fn fetch(
         &input_dir,
         &output_dir,
         &tmp_dir,
-    )
-    .await;
+    );
     let _ = std::fs::remove_dir_all(&tmp_dir);
     let _ = std::fs::remove_dir_all(&input_dir);
 
