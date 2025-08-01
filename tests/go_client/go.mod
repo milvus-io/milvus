@@ -13,7 +13,7 @@ require (
 	google.golang.org/grpc v1.65.0
 )
 
-replace github.com/milvus-io/milvus/client/v2 => ../../../milvus/client
+replace github.com/milvus-io/milvus/client/v2 => ../../../master/client
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -116,3 +116,5 @@ require (
 	k8s.io/apimachinery v0.28.6 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
+
+replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/weiliu1031/milvus-proto/go-api/v2 v2.0.0-20250806064303-19421828cd2f

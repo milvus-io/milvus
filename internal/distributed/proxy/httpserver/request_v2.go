@@ -272,6 +272,7 @@ type CollectionDataReq struct {
 	CollectionName string                   `json:"collectionName" binding:"required"`
 	PartitionName  string                   `json:"partitionName"`
 	Data           []map[string]interface{} `json:"data" binding:"required"`
+	PartialUpdate  bool                     `json:"partialUpdate"`
 }
 
 func (req *CollectionDataReq) GetDbName() string { return req.DbName }
