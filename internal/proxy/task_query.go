@@ -635,6 +635,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			t.allQueryCnt += res.GetAllRetrieveCount()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
+			log.Debug("result detail: ", zap.Any("FieldsData", res.FieldsData),)
 			return true
 		})
 	}
@@ -645,6 +646,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema.CollectionSchema, t.plan, t.collectionName)
 
 	t.result, err = reducer.Reduce(toReduceResults)
+	log.Debug("reduced result: ", zap.Any("FieldsData", t.result.FieldsData),)
 	if err != nil {
 		log.Warn("fail to reduce query result", zap.Error(err))
 		return err
