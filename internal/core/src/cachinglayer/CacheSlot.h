@@ -306,8 +306,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
      public:
         CacheCell() = default;
         CacheCell(CacheSlot<CellT>* slot, cid_t cid, ResourceUsage size)
-            : internal::ListNode(slot->evictable_ ? slot->dlist_ : nullptr,
-                                 size),
+            : internal::ListNode(slot->dlist_, size, slot->evictable_),
               slot_(slot),
               cid_(cid) {
         }
