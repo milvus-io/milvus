@@ -106,4 +106,18 @@ class File {
     FILE* fs_;
     std::string filepath_;
 };
+
+class MmapFileRAII {
+ public:
+    MmapFileRAII(const std::string& filepath) : file_path_(filepath) {
+    }
+    ~MmapFileRAII() {
+        if (!file_path_.empty()) {
+            unlink(file_path_.c_str());
+        }
+    }
+
+ private:
+    const std::string file_path_;
+};
 }  // namespace milvus
