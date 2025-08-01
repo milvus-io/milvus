@@ -230,6 +230,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
 
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_collection_without_vectors(self):
         """

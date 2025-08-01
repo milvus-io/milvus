@@ -51,7 +51,6 @@ class TestBase(Base):
         if token is None:
             self.vector_client.api_key = None
             self.collection_client.api_key = None
-        connections.connect(uri=endpoint, token=token)
         # Print connection info for debugging
         logger.info(f"Attempting to connect to Milvus:")
         logger.info(f"  Endpoint: {endpoint}")
