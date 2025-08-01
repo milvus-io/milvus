@@ -52,6 +52,7 @@ type columnBasedDataOption struct {
 	collName      string
 	partitionName string
 	columns       []column.Column
+	partialUpdate bool
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -253,6 +254,11 @@ func (opt *columnBasedDataOption) WithPartition(partitionName string) *columnBas
 	return opt
 }
 
+func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnBasedDataOption {
+	opt.partialUpdate = partialUpdate
+	return opt
+}
+
 func (opt *columnBasedDataOption) CollectionName() string {
 	return opt.collName
 }
@@ -282,6 +288,7 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 		FieldsData:      fieldsData,
 		NumRows:         uint32(rowNum),
 		SchemaTimestamp: coll.UpdateTimestamp,
+		PartialUpdate:   opt.partialUpdate,
 	}, nil
 }
 
@@ -340,6 +347,7 @@ func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb
 		PartitionName:  opt.partitionName,
 		FieldsData:     fieldsData,
 		NumRows:        uint32(rowNum),
+		PartialUpdate:  opt.partialUpdate,
 	}, nil
 }
 

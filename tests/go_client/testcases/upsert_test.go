@@ -1,6 +1,7 @@
 package testcases
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -652,4 +653,92 @@ func TestUpsertWithoutLoading(t *testing.T) {
 
 func TestUpsertPartitionKeyCollection(t *testing.T) {
 	t.Skip("waiting gen partition key field")
+}
+
+func TestUpsertNullableFieldBehavior(t *testing.T) {
+	/*
+		Test nullable field behavior for Upsert operation:
+		1. Insert data with nullable field having a value
+		2. Upsert the same entity without providing the nullable field
+		3. Verify that the nullable field is set to null (upsert replaces all fields)
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// Create collection with nullable field using custom schema
+	collName := common.GenRandomString("upsert_nullable", 6)
+
+	// Create fields including nullable field
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	nullableField := entity.NewField().WithName("nullable_varchar").WithDataType(entity.FieldTypeVarChar).WithMaxLength(100).WithNullable(true)
+
+	fields := []*entity.Field{pkField, vecField, nullableField}
+	schema := hp.GenSchema(hp.TNewSchemaOption().TWithName(collName).TWithDescription("test nullable field behavior for upsert").TWithFields(fields))
+
+	// Create collection using schema
+	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
+	common.CheckErr(t, err, true)
+
+	// Cleanup
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second*10)
+		defer cancel()
+		err := mc.DropCollection(ctx, client.NewDropCollectionOption(collName))
+		common.CheckErr(t, err, true)
+	})
+
+	// Insert initial data with nullable field having a value
+	pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2, 3})
+	vecColumn := hp.GenColumnData(3, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	nullableColumn := column.NewColumnVarChar("nullable_varchar", []string{"original_1", "original_2", "original_3"})
+
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(pkColumn, vecColumn, nullableColumn))
+	common.CheckErr(t, err, true)
+
+	// Use prepare pattern for remaining operations
+	prepare := &hp.CollectionPrepare{}
+
+	// Flush data
+	prepare.FlushData(ctx, t, mc, collName)
+
+	// Create index for vector field
+	indexParams := hp.TNewIndexParams(schema)
+	prepare.CreateIndex(ctx, t, mc, indexParams)
+
+	// Load collection
+	loadParams := hp.NewLoadParams(collName)
+	prepare.Load(ctx, t, mc, loadParams)
+
+	// Wait for loading to complete
+	time.Sleep(time.Second * 5)
+
+	// Upsert entities without providing nullable field (should set to null)
+	upsertPkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, []int64{1, 2})
+	upsertVecColumn := hp.GenColumnData(2, entity.FieldTypeFloatVector, *hp.TNewDataOption().TWithStart(100))
+
+	upsertRes, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).WithColumns(upsertPkColumn, upsertVecColumn))
+	common.CheckErr(t, err, true)
+	require.EqualValues(t, 2, upsertRes.UpsertCount)
+
+	// Wait for consistency
+	time.Sleep(time.Second * 3)
+
+	// Query to verify nullable field is set to null
+	resSet, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("%s in [1, 2]", common.DefaultInt64FieldName)).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	// Verify results - nullable field should be null
+	require.Equal(t, 2, resSet.GetColumn("nullable_varchar").Len())
+	nullableResults := resSet.GetColumn("nullable_varchar").(*column.ColumnVarChar).Data()
+	require.Equal(t, "", nullableResults[0]) // null value is represented as empty string
+	require.Equal(t, "", nullableResults[1]) // null value is represented as empty string
+
+	// Query entity that was not upserted to verify original value is preserved
+	resSet3, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter(fmt.Sprintf("%s == 3", common.DefaultInt64FieldName)).WithOutputFields("*").WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, err, true)
+
+	require.Equal(t, 1, resSet3.GetColumn("nullable_varchar").Len())
+	nullableResult3 := resSet3.GetColumn("nullable_varchar").(*column.ColumnVarChar).Data()
+	require.Equal(t, "original_3", nullableResult3[0])
 }

@@ -71,12 +71,14 @@ type UpsertReq struct {
 	DbName         string                   `json:"dbName"`
 	CollectionName string                   `json:"collectionName" validate:"required"`
 	Data           []map[string]interface{} `json:"data" validate:"required"`
+	PartialUpdate  bool                     `json:"partialUpdate"`
 }
 
 type SingleUpsertReq struct {
 	DbName         string                 `json:"dbName"`
 	CollectionName string                 `json:"collectionName" validate:"required"`
 	Data           map[string]interface{} `json:"data" validate:"required"`
+	PartialUpdate  bool                   `json:"partialUpdate"`
 }
 
 type SearchReq struct {
