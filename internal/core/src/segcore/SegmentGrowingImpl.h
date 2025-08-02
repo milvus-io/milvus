@@ -175,10 +175,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     try_remove_chunks(FieldId fieldId);
 
-    std::vector<std::pair<SegOffset, Timestamp>>
-    search_batch_pks(const std::vector<PkType>& pks,
-                     const Timestamp* timestamps,
-                     bool include_same_ts) const;
+    void
+    search_batch_pks(
+        const std::vector<PkType>& pks,
+        const Timestamp* timestamps,
+        bool include_same_ts,
+        const std::function<void(const SegOffset offset, const Timestamp ts)>&
+            callback) const;
 
  public:
     size_t
@@ -297,8 +300,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
           deleted_record_(
               &insert_record_,
               [this](const std::vector<PkType>& pks,
-                     const Timestamp* timestamps) {
-                  return this->search_batch_pks(pks, timestamps, false);
+                     const Timestamp* timestamps,
+                     std::function<void(const SegOffset offset,
+                                        const Timestamp ts)> callback) {
+                  this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {
         this->CreateTextIndexes();

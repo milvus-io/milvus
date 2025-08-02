@@ -896,21 +896,23 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
     });
 }
 
-std::vector<std::pair<SegOffset, Timestamp>>
-ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
-                                           const Timestamp* timestamps,
-                                           bool include_same_ts) const {
-    std::vector<std::pair<SegOffset, Timestamp>> pk_offsets;
+void
+ChunkedSegmentSealedImpl::search_batch_pks(
+    const std::vector<PkType>& pks,
+    const Timestamp* timestamps,
+    bool include_same_ts,
+    const std::function<void(const SegOffset offset, const Timestamp ts)>&
+        callback) const {
     // handle unsorted case
     if (!is_sorted_by_pk_) {
         for (size_t i = 0; i < pks.size(); i++) {
             auto offsets = insert_record_.search_pk(
                 pks[i], timestamps[i], include_same_ts);
             for (auto offset : offsets) {
-                pk_offsets.emplace_back(offset, timestamps[i]);
+                callback(offset, timestamps[i]);
             }
         }
-        return pk_offsets;
+        return;
     }
 
     auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
@@ -951,7 +953,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
                         auto offset = it - src + num_rows_until_chunk;
                         if (timestamp_hit(insert_record_.timestamps_[offset],
                                           timestamp)) {
-                            pk_offsets.emplace_back(offset, timestamp);
+                            callback(SegOffset(offset), timestamp);
                         }
                     }
                 }
@@ -978,7 +980,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
                         if (timestamp_hit(
                                 insert_record_.timestamps_[segment_offset],
                                 timestamp)) {
-                            pk_offsets.emplace_back(segment_offset, timestamp);
+                            callback(SegOffset(segment_offset), timestamp);
                         }
                     }
                 }
@@ -993,8 +995,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(const std::vector<PkType>& pks,
                     schema_->get_fields().at(pk_field_id).get_data_type()));
         }
     }
-
-    return pk_offsets;
 }
 
 template <typename Condition>
@@ -1121,8 +1121,11 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           &insert_record_,
-          [this](const std::vector<PkType>& pks, const Timestamp* timestamps) {
-              return this->search_batch_pks(pks, timestamps, false);
+          [this](const std::vector<PkType>& pks,
+                 const Timestamp* timestamps,
+                 std::function<void(const SegOffset offset, const Timestamp ts)>
+                     callback) {
+              this->search_batch_pks(pks, timestamps, false, callback);
           },
           segment_id) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();

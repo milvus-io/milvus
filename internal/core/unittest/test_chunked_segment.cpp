@@ -276,8 +276,10 @@ TEST_P(TestChunkSegment, TestSkipNextTermExpr) {
     proto::plan::GenericValue v1;
     v1.set_int64_val(10000);
     auto first_expr = std::make_shared<expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(fields.at("int64"), DataType::INT64), proto::plan::OpType::GreaterEqual, v1);
-    
+        expr::ColumnInfo(fields.at("int64"), DataType::INT64),
+        proto::plan::OpType::GreaterEqual,
+        v1);
+
     std::vector<proto::plan::GenericValue> v2;
     for (int i = 1; i <= 5; ++i) {
         proto::plan::GenericValue v;
@@ -286,9 +288,12 @@ TEST_P(TestChunkSegment, TestSkipNextTermExpr) {
     }
     auto second_expr = std::make_shared<expr::TermFilterExpr>(
         expr::ColumnInfo(fields.at("pk"), DataType::INT64), v2);
-    auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(expr::LogicalBinaryExpr::OpType::And, first_expr, second_expr);
-    auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, and_expr);
-    auto final = query::ExecuteQueryExpr(plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
+    auto and_expr = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, first_expr, second_expr);
+    auto plan =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, and_expr);
+    auto final = query::ExecuteQueryExpr(
+        plan, segment.get(), chunk_num * test_data_count, MAX_TIMESTAMP);
     ASSERT_EQ(5, final.count());
     for (int i = 10001; i <= 10005; ++i) {
         ASSERT_EQ(true, final[i]) << "i: " << i;
