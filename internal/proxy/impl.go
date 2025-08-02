@@ -2832,10 +2832,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.Uint32("NumRows", request.NumRows),
+		zap.String("db", request.GetDbName()),
+		zap.String("collection", request.GetCollectionName()),
+		zap.String("partition", request.GetPartitionName()),
+		zap.Uint32("NumRows", request.GetNumRows()),
+		zap.Bool("partialUpdate", request.GetPartialUpdate()),
 	)
 	log.Debug("Start processing upsert request in Proxy")
 
@@ -2878,6 +2879,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		chMgr:           node.chMgr,
 		chTicker:        node.chTicker,
 		schemaTimestamp: request.SchemaTimestamp,
+		node:            node,
 	}
 	var enqueuedTask task = it
 	if streamingutil.IsStreamingServiceEnabled() {
