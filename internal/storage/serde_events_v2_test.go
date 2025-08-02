@@ -49,8 +49,12 @@ func TestPackedSerde(t *testing.T) {
 			}
 			multiPartUploadSize := int64(0)
 			batchSize := 7
-			writer, err := NewPackedSerializeWriter(bucketName, chunkPaths, generateTestSchema(), bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, batchSize)
+
+			packedRecordWriter, err := NewPackedRecordWriter(bucketName, chunkPaths, schema, bufferSize, multiPartUploadSize, []storagecommon.ColumnGroup{group}, nil)
 			assert.NoError(t, err)
+			writer := NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
+				return ValueSerializer(v, schema)
+			}, batchSize)
 
 			for i := 1; i <= size; i++ {
 				value, err := reader.NextValue()
