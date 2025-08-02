@@ -18,6 +18,7 @@
 #include <numeric>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <flat_hash_map/flat_hash_map.hpp>
@@ -101,6 +102,72 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             std::iota(cids.begin(), cids.end(), 0);
             return PinInternal(cids, timeout);
         });
+    }
+
+    std::shared_ptr<CellAccessor<CellT>>
+    PinOneCellDirect(
+        const uid_t& uid,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
+        auto cid = 0;
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL: {
+                cid = uid;
+                break;
+            }
+            case CellIdMappingMode::ALWAYS_ZERO: {
+                cid = 0;
+                break;
+            }
+            default: {
+                cid = cell_id_of(uid);
+            }
+        }
+        auto [need_load, result] = cells_[cid].pin();
+        if (std::holds_alternative<internal::ListNode::NodePin>(result)) {
+            std::vector<internal::ListNode::NodePin> pins;
+            pins.push_back(
+                std::get<internal::ListNode::NodePin>(std::move(result)));
+            return std::make_shared<CellAccessor<CellT>>(
+                this->shared_from_this(), std::move(pins));
+        } else {
+            auto future =
+                std::get<folly::SemiFuture<internal::ListNode::NodePin>>(
+                    std::move(result));
+            std::vector<internal::ListNode::NodePin> pins;
+            pins.push_back(SemiInlineGet(std::move(future)));
+            return std::make_shared<CellAccessor<CellT>>(
+                this->shared_from_this(), std::move(pins));
+        }
+    }
+
+    std::shared_ptr<CellAccessor<CellT>>
+    PinCellsDirect(
+        const std::vector<uid_t>& uids,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(100000)) {
+        auto count = std::min(uids.size(), cells_.size());
+        ska::flat_hash_set<cid_t> involved_cids;
+        involved_cids.reserve(count);
+        switch (cell_id_mapping_mode_) {
+            case CellIdMappingMode::IDENTICAL: {
+                for (auto& uid : uids) {
+                    involved_cids.insert(uid);
+                }
+                break;
+            }
+            case CellIdMappingMode::ALWAYS_ZERO: {
+                if (uids.size() > 0) {
+                    involved_cids.insert(0);
+                }
+                break;
+            }
+            default: {
+                for (auto& uid : uids) {
+                    auto cid = cell_id_of(uid);
+                    involved_cids.insert(cid);
+                }
+            }
+        }
+        return PinInternal(involved_cids, timeout);
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
@@ -188,8 +255,10 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     std::shared_ptr<CellAccessor<CellT>>
     PinInternal(const CidsT& cids, std::chrono::milliseconds timeout) {
         std::vector<folly::SemiFuture<internal::ListNode::NodePin>> futures;
+        std::vector<internal::ListNode::NodePin> ready_pins;
         std::unordered_set<cid_t> need_load_cids;
         futures.reserve(cids.size());
+        ready_pins.reserve(cids.size());
         need_load_cids.reserve(cids.size());
         auto resource_needed = ResourceUsage{0, 0};
         for (const auto& cid : cids) {
@@ -202,8 +271,15 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             }
         }
         for (const auto& cid : cids) {
-            auto [need_load, future] = cells_[cid].pin();
-            futures.push_back(std::move(future));
+            auto [need_load, result] = cells_[cid].pin();
+            if (std::holds_alternative<internal::ListNode::NodePin>(result)) {
+                ready_pins.push_back(
+                    std::get<internal::ListNode::NodePin>(std::move(result)));
+            } else {
+                futures.push_back(
+                    std::get<folly::SemiFuture<internal::ListNode::NodePin>>(
+                        std::move(result)));
+            }
             if (need_load) {
                 need_load_cids.insert(cid);
                 resource_needed += cells_[cid].size();
@@ -213,9 +289,22 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
             RunLoad(std::move(need_load_cids), resource_needed, timeout);
         }
 
-        auto pins = SemiInlineGet(folly::collect(futures));
+        std::vector<internal::ListNode::NodePin> all_pins;
+        all_pins.reserve(cids.size());
+
+        for (auto& pin : ready_pins) {
+            all_pins.push_back(std::move(pin));
+        }
+
+        if (!futures.empty()) {
+            auto future_pins = SemiInlineGet(folly::collect(futures));
+            for (auto& pin : future_pins) {
+                all_pins.push_back(std::move(pin));
+            }
+        }
+
         return std::make_shared<CellAccessor<CellT>>(this->shared_from_this(),
-                                                     std::move(pins));
+                                                     std::move(all_pins));
     }
 
     cid_t
