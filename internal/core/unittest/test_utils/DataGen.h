@@ -376,9 +376,8 @@ inline SchemaPtr CreateTestSchema() {
         schema->AddDebugField("int16", milvus::DataType::INT16, true);
     auto int32_field =
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
-    auto int64_field = 
-        schema->AddDebugField("int64", milvus::DataType::INT64);
-    auto timestamptz_field = 
+    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto timestamptz_field =
         schema->AddDebugArrayField("timestamptz", DataType::TIMESTAMPTZ, true);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
@@ -654,7 +653,7 @@ DataGen(SchemaPtr schema,
             case DataType::TIMESTAMPTZ: {
                 vector<int64_t> data(N);
                 for (int i = 0; i < N; ++i) {
-                    int64_t x= 0;
+                    int64_t x = 0;
                     if (random_val)
                         x = random() % (2 * N);
                     else
@@ -1331,7 +1330,8 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
                 break;
             }
             case DataType::TIMESTAMPTZ: {
-                auto raw_data = data->scalars().timestamptz_data().data().data();
+                auto raw_data =
+                    data->scalars().timestamptz_data().data().data();
                 if (field_meta.is_nullable()) {
                     auto raw_valid_data = data->valid_data().data();
                     createNullableFieldData(
@@ -1637,14 +1637,13 @@ gen_all_data_types_schema() {
         schema->AddDebugField("int16", milvus::DataType::INT16, true);
     auto int32_field =
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
-    auto int64_field = 
-        schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
         schema->AddDebugField("double", milvus::DataType::DOUBLE, true);
-    auto timestamptz_field =
-        schema->AddDebugField("timestamptz", milvus::DataType::TIMESTAMPTZ, true);
+    auto timestamptz_field = schema->AddDebugField(
+        "timestamptz", milvus::DataType::TIMESTAMPTZ, true);
     auto varchar_field =
         schema->AddDebugField("varchar", milvus::DataType::VARCHAR, true);
     auto json_field =
