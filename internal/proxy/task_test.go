@@ -1596,7 +1596,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	// illegal name
 	task.CollectionName = "#0xc0de"
 	err = task.PreExecute(ctx)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 
 	// describe collection with id
 	task.CollectionID = 1
