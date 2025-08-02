@@ -181,6 +181,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	version = current.version
 	sealedRowCount = d.queryView.sealedSegmentRowCount
 	if d.queryView.GetLoadedRatio() == 1.0 {
+		log.Debug("query view is fully loaded")
 		// if query view is fully loaded, we can use current target version to filter segments
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
@@ -318,6 +319,7 @@ func (d *distribution) updateServiceable(triggerAction string) {
 func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
+	log.Debug("add sealed segments to distribution")
 
 	for _, entry := range entries {
 		oldEntry, ok := d.sealedSegments[entry.SegmentID]
@@ -349,6 +351,7 @@ func (d *distribution) AddDistributions(entries ...SegmentEntry) {
 func (d *distribution) AddGrowing(entries ...SegmentEntry) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
+	log.Debug("add growing segments to distribution")
 
 	for _, entry := range entries {
 		d.growingSegments[entry.SegmentID] = entry

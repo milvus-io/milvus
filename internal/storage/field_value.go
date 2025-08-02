@@ -1064,9 +1064,9 @@ func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.G
 	case schemapb.DataType_Double:
 		floatVal := gVal.Val.(*planpb.GenericValue_FloatVal)
 		return NewDoubleFieldValue(floatVal.FloatVal), nil
-	// case schemapb.DataType_Timestamptz:
-	// 	i64VAl := gVal.Val.(*planpb.GenericValue_Int64Val)
-	// 	return NewTimestamptzFieldValue(i64VAl.Int64Val), nil
+	case schemapb.DataType_Timestamptz:
+		i64VAl := gVal.Val.(*planpb.GenericValue_Int64Val)
+		return NewInt64FieldValue(i64VAl.Int64Val), nil
 	case schemapb.DataType_String:
 		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
 		return NewStringFieldValue(strVal.StringVal), nil
@@ -1093,6 +1093,8 @@ func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldV
 		return NewFloatFieldValue(data.(float32))
 	case schemapb.DataType_Double:
 		return NewDoubleFieldValue(data.(float64))
+	case schemapb.DataType_Timestamptz:
+		return NewInt64FieldValue(data.(int64))
 	case schemapb.DataType_String:
 		return NewStringFieldValue(data.(string))
 	case schemapb.DataType_VarChar:

@@ -517,7 +517,7 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 			idata.Data[field.FieldID] = &DoubleFieldData{
 				Data: readDoubleArray(blobReaders),
 			}
-		
+
 		case schemapb.DataType_Timestamptz:
 			idata.Data[field.FieldID] = &TimestamptzFieldData{
 				Data: readTimestamptzArray(blobReaders),
@@ -721,7 +721,6 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 				ValidData: validData,
 				Nullable:  field.GetNullable(),
 			}
-			
 
 		case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
 			srcData := srcField.GetScalars().GetStringData().GetData()
