@@ -115,4 +115,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/XTxxxx/milvus-proto/go-api/v2 v2.0.0-20250702144202-008daf6ef235
+replace github.com/milvus-io/milvus-proto/go-api/v2 => github.com/XTxxxx/milvus-proto/go-api/v2 v2.0.0-20250801171945-168b28714354
