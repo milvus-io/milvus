@@ -79,7 +79,7 @@ func TestShardManager(t *testing.T) {
 					StorageVersion: 2,
 					Stat: &streamingpb.SegmentAssignmentStat{
 						MaxBinarySize:         100,
-						InsertedBinarySize:    50,
+						ModifiedBinarySize:    50,
 						CreateSegmentTimeTick: 101,
 					},
 				},
@@ -91,7 +91,7 @@ func TestShardManager(t *testing.T) {
 					StorageVersion: 2,
 					Stat: &streamingpb.SegmentAssignmentStat{
 						MaxBinarySize:         100,
-						InsertedBinarySize:    0,
+						ModifiedBinarySize:    0,
 						CreateSegmentTimeTick: 100,
 					},
 				},
@@ -103,7 +103,7 @@ func TestShardManager(t *testing.T) {
 					StorageVersion: 2,
 					Stat: &streamingpb.SegmentAssignmentStat{
 						MaxBinarySize:         100,
-						InsertedBinarySize:    0,
+						ModifiedBinarySize:    0,
 						CreateSegmentTimeTick: 100,
 					},
 				},
@@ -273,7 +273,7 @@ func TestShardManager(t *testing.T) {
 		CollectionID: 4,
 		PartitionID:  5,
 		TimeTick:     800,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       1,
 			BinarySize: 20,
 		},
