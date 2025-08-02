@@ -740,7 +740,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                 break;
             }
             case DataType::TIMESTAMPTZ: {
-                auto data = FIELD_DATA(src_field_data, timestamptz).data(); //Here is a marco
+                auto data = FIELD_DATA(src_field_data, timestamptz)
+                                .data();  //Here is a marco
                 auto obj = scalar_array->mutable_timestamptz_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 break;
