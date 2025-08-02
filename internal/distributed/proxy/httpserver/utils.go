@@ -439,17 +439,10 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
-				case schemapb.DataType_Int64:
+				case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 					result, err := json.Number(dataString).Int64()
 					if err != nil {
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
-					}
-					reallyData[fieldName] = result
-				case schemapb.DataType_Timestamptz:
-					result, err := json.Number(dataString).Int64()
-					if err != nil {
-						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)],
-							dataString, err.Error()), reallyDataArray, validDataMap
 					}
 					reallyData[fieldName] = result
 				case schemapb.DataType_Array:

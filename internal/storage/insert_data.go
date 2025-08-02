@@ -429,7 +429,7 @@ type JSONFieldData struct {
 	Nullable  bool
 }
 type TimestamptzFieldData struct {
-	Data 	  []int64
+	Data      []int64
 	ValidData []bool
 	Nullable  bool
 }
@@ -483,7 +483,7 @@ func (data *Int32FieldData) RowNum() int         { return len(data.Data) }
 func (data *Int64FieldData) RowNum() int         { return len(data.Data) }
 func (data *FloatFieldData) RowNum() int         { return len(data.Data) }
 func (data *DoubleFieldData) RowNum() int        { return len(data.Data) }
-func (data *TimestamptzFieldData) RowNum() int         { return len(data.Data) }
+func (data *TimestamptzFieldData) RowNum() int   { return len(data.Data) }
 func (data *StringFieldData) RowNum() int        { return len(data.Data) }
 func (data *ArrayFieldData) RowNum() int         { return len(data.Data) }
 func (data *JSONFieldData) RowNum() int          { return len(data.Data) }
@@ -612,7 +612,7 @@ func (data *Int32FieldData) GetDataRows() any             { return data.Data }
 func (data *Int64FieldData) GetDataRows() any             { return data.Data }
 func (data *FloatFieldData) GetDataRows() any             { return data.Data }
 func (data *DoubleFieldData) GetDataRows() any            { return data.Data }
-func (data *TimestamptzFieldData) GetDataRows() any 		  { return data.Data }
+func (data *TimestamptzFieldData) GetDataRows() any       { return data.Data }
 func (data *StringFieldData) GetDataRows() any            { return data.Data }
 func (data *ArrayFieldData) GetDataRows() any             { return data.Data }
 func (data *JSONFieldData) GetDataRows() any              { return data.Data }
@@ -1521,7 +1521,9 @@ func (data *Int32FieldData) GetDataType() schemapb.DataType  { return schemapb.D
 func (data *Int64FieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Int64 }
 func (data *FloatFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Float }
 func (data *DoubleFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_Double }
-func (data *TimestamptzFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Timestamptz }
+func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
+	return schemapb.DataType_Timestamptz
+}
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
 func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
@@ -1605,7 +1607,7 @@ func (data *Int32FieldData) GetRowSize(i int) int          { return 4 }
 func (data *Int64FieldData) GetRowSize(i int) int          { return 8 }
 func (data *FloatFieldData) GetRowSize(i int) int          { return 4 }
 func (data *DoubleFieldData) GetRowSize(i int) int         { return 8 }
-func (data *TimestamptzFieldData) GetRowSize(i int) int          { return 8 }
+func (data *TimestamptzFieldData) GetRowSize(i int) int    { return 8 }
 func (data *BinaryVectorFieldData) GetRowSize(i int) int   { return data.Dim / 8 }
 func (data *FloatVectorFieldData) GetRowSize(i int) int    { return data.Dim * 4 }
 func (data *Float16VectorFieldData) GetRowSize(i int) int  { return data.Dim * 2 }

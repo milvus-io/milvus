@@ -3390,7 +3390,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		r, _ := protojson.Marshal(res)
 		log.Ctx(ctx).Debug("Count result", zap.String("result", string(r)))
 	}
-	log.Debug("Query done", zap.Any("Results field data", res.GetFieldsData()),)
+	log.Debug("Query done", zap.Any("Results field data", res.GetFieldsData()))
 	return res, nil
 }
 

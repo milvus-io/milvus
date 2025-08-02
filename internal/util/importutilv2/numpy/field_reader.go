@@ -178,6 +178,11 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 			return nil, nil, err
 		}
 		c.readPosition += int(readCount)
+	case schemapb.DataType_Timestamptz:
+		data, err = ReadN[int64](c.reader, c.order, readCount)
+		if err != nil {
+			return nil, nil, err
+		}
 	case schemapb.DataType_VarChar:
 		data, err = c.ReadString(readCount)
 		c.readPosition += int(readCount)
