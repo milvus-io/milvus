@@ -1,21 +1,18 @@
 use super::fetch;
 use crate::error::{Result, TantivyBindingError};
 use lindera_dictionary::dictionary_builder::unidic::UnidicBuilder;
-use tokio::runtime::Runtime;
 
 #[cfg(feature = "lindera-unidic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
 #[cfg(not(feature = "lindera-unidic"))]
-async fn download(params: &fetch::FetchParams) -> Result<()> {
-    fetch::fetch(params, UnidicBuilder::new())
-        .await
-        .map_err(|e| {
-            TantivyBindingError::InternalError(format!(
-                "fetch unidic failed with error: {}",
-                e.to_string()
-            ))
-        })
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::fetch(params, UnidicBuilder::new()).map_err(|e| {
+        TantivyBindingError::InternalError(format!(
+            "fetch unidic failed with error: {}",
+            e.to_string()
+        ))
+    })
 }
 
 #[cfg(not(feature = "lindera-unidic"))]
@@ -39,8 +36,7 @@ pub fn load_unidic(
         params.download_urls = download_url
     }
 
-    let rt = Runtime::new().unwrap();
-    rt.block_on(download(&params))?;
+    download(&params)?;
     fetch::load(&params)
 }
 

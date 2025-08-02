@@ -1,21 +1,18 @@
 use super::fetch;
 use crate::error::{Result, TantivyBindingError};
 use lindera_dictionary::dictionary_builder::cc_cedict::CcCedictBuilder;
-use tokio::runtime::Runtime;
 
 #[cfg(feature = "lindera-cc-cedict")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
 #[cfg(not(feature = "lindera-cc-cedict"))]
-async fn download(params: &fetch::FetchParams) -> Result<()> {
-    fetch::fetch(params, CcCedictBuilder::new())
-        .await
-        .map_err(|e| {
-            TantivyBindingError::InternalError(format!(
-                "fetch cc_cedict failed with error: {}",
-                e.to_string()
-            ))
-        })
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::fetch(params, CcCedictBuilder::new()).map_err(|e| {
+        TantivyBindingError::InternalError(format!(
+            "fetch cc_cedict failed with error: {}",
+            e.to_string()
+        ))
+    })
 }
 
 #[cfg(not(feature = "lindera-cc-cedict"))]
@@ -39,8 +36,7 @@ pub fn load_cc_cedict(
         params.download_urls = download_url
     }
 
-    let rt = Runtime::new().unwrap();
-    rt.block_on(download(&params))?;
+    download(&params)?;
     fetch::load(&params)
 }
 

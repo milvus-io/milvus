@@ -78,9 +78,9 @@ impl AnalyzerBuilder<'_> {
         for filter in filters {
             if filter.is_string() {
                 let filter_name = filter.as_str().unwrap();
-                let costum = self.filters.remove(filter_name);
-                if !costum.is_none() {
-                    builder = costum.unwrap().transform(builder);
+                let customize = self.filters.remove(filter_name);
+                if !customize.is_none() {
+                    builder = customize.unwrap().transform(builder);
                     continue;
                 }
 

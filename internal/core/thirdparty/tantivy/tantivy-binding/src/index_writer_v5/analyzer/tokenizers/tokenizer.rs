@@ -51,7 +51,7 @@ pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBu
             }
             _ => {
                 return Err(TantivyBindingError::InvalidArgument(
-                    "costum tokenizer must set type".to_string(),
+                    "customized tokenizer must set type".to_string(),
                 ))
             }
         }
