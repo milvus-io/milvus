@@ -1,4 +1,4 @@
-package ctokenizer
+package canalyzer
 
 /*
 #cgo pkg-config: milvus_core
@@ -10,29 +10,27 @@ import "C"
 
 import (
 	"unsafe"
-
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
 )
 
-func NewTokenizer(param string) (tokenizerapi.Tokenizer, error) {
+func NewAnalyzer(param string) (*CAnalyzer, error) {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
 	var ptr C.CTokenizer
 	status := C.create_tokenizer(paramPtr, &ptr)
-	if err := HandleCStatus(&status, "failed to create tokenizer"); err != nil {
+	if err := HandleCStatus(&status, "failed to create analyzer"); err != nil {
 		return nil, err
 	}
 
-	return NewCTokenizer(ptr), nil
+	return NewCAnalyzer(ptr), nil
 }
 
-func ValidateTokenizer(param string) error {
+func ValidateAnalyzer(param string) error {
 	paramPtr := C.CString(param)
 	defer C.free(unsafe.Pointer(paramPtr))
 
 	status := C.validate_tokenizer(paramPtr)
-	if err := HandleCStatus(&status, "failed to create tokenizer"); err != nil {
+	if err := HandleCStatus(&status, "failed to create analyzer"); err != nil {
 		return err
 	}
 	return nil
