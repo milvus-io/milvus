@@ -449,7 +449,6 @@ func (s *Server) init() error {
 		return err
 	}
 	s.etcdCli = etcdCli
-	s.proxy.SetEtcdClient(s.etcdCli)
 	s.proxy.SetAddress(s.listenerManager.internalGrpcListener.Address())
 
 	errChan := make(chan error, 1)

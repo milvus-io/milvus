@@ -35,12 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
-type flushTaskByStreamingService struct {
-	*flushTask
-	chMgr channelsMgr
-}
-
-func (t *flushTaskByStreamingService) Execute(ctx context.Context) error {
+func (t *flushTask) Execute(ctx context.Context) error {
 	coll2Segments := make(map[string]*schemapb.LongArray)
 	flushColl2Segments := make(map[string]*schemapb.LongArray)
 	coll2SealTimes := make(map[string]int64)

@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
@@ -437,22 +436,18 @@ type taskScheduler struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	msFactory msgstream.Factory
 }
 
 type schedOpt func(*taskScheduler)
 
 func newTaskScheduler(ctx context.Context,
 	tsoAllocatorIns tsoAllocator,
-	factory msgstream.Factory,
 	opts ...schedOpt,
 ) (*taskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &taskScheduler{
-		ctx:       ctx1,
-		cancel:    cancel,
-		msFactory: factory,
+		ctx:    ctx1,
+		cancel: cancel,
 	}
 	s.ddQueue = newDdTaskQueue(tsoAllocatorIns)
 	s.dmQueue = newDmTaskQueue(tsoAllocatorIns)

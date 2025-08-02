@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -46,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/ctokenizer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
@@ -255,7 +253,6 @@ func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateD
 		Condition:             NewTaskCondition(ctx),
 		CreateDatabaseRequest: request,
 		mixCoord:              node.mixCoord,
-		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -323,7 +320,6 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		Condition:           NewTaskCondition(ctx),
 		DropDatabaseRequest: request,
 		mixCoord:            node.mixCoord,
-		replicateMsgStream:  node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -452,7 +448,6 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		Condition:            NewTaskCondition(ctx),
 		AlterDatabaseRequest: request,
 		mixCoord:             node.mixCoord,
-		replicateMsgStream:   node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -667,7 +662,6 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		DropCollectionRequest: request,
 		mixCoord:              node.mixCoord,
 		chMgr:                 node.chMgr,
-		chTicker:              node.chTicker,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -833,7 +827,6 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
 		mixCoord:              node.mixCoord,
-		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -908,7 +901,6 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		Condition:                NewTaskCondition(ctx),
 		ReleaseCollectionRequest: request,
 		mixCoord:                 node.mixCoord,
-		replicateMsgStream:       node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1278,7 +1270,6 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		Condition:              NewTaskCondition(ctx),
 		AlterCollectionRequest: request,
 		mixCoord:               node.mixCoord,
-		replicateMsgStream:     node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1343,7 +1334,6 @@ func (node *Proxy) AlterCollectionField(ctx context.Context, request *milvuspb.A
 		Condition:                   NewTaskCondition(ctx),
 		AlterCollectionFieldRequest: request,
 		mixCoord:                    node.mixCoord,
-		replicateMsgStream:          node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1616,7 +1606,6 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
 		mixCoord:              node.mixCoord,
-		replicateMsgStream:    node.replicateMsgStream,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1682,7 +1671,6 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		Condition:                NewTaskCondition(ctx),
 		ReleasePartitionsRequest: request,
 		mixCoord:                 node.mixCoord,
-		replicateMsgStream:       node.replicateMsgStream,
 	}
 
 	method := "ReleasePartitions"
@@ -2082,11 +2070,10 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	defer sp.End()
 
 	cit := &createIndexTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		req:                request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       request,
+		mixCoord:  node.mixCoord,
 	}
 
 	method := "CreateIndex"
@@ -2152,11 +2139,10 @@ func (node *Proxy) AlterIndex(ctx context.Context, request *milvuspb.AlterIndexR
 	defer sp.End()
 
 	task := &alterIndexTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		req:                request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       request,
+		mixCoord:  node.mixCoord,
 	}
 
 	method := "AlterIndex"
@@ -2370,11 +2356,10 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	defer sp.End()
 
 	dit := &dropIndexTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		DropIndexRequest:   request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:              ctx,
+		Condition:        NewTaskCondition(ctx),
+		DropIndexRequest: request,
+		mixCoord:         node.mixCoord,
 	}
 
 	method := "DropIndex"
@@ -2630,16 +2615,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 			},
 		},
 		idAllocator:     node.rowIDAllocator,
-		segIDAssigner:   node.segAssigner,
 		chMgr:           node.chMgr,
-		chTicker:        node.chTicker,
 		schemaTimestamp: request.SchemaTimestamp,
-	}
-	var enqueuedTask task = it
-	if streamingutil.IsStreamingServiceEnabled() {
-		enqueuedTask = &insertTaskByStreamingService{
-			insertTask: it,
-		}
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2657,7 +2634,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	log.Debug("Enqueue insert request in Proxy")
 
-	if err := node.sched.dmQueue.Enqueue(enqueuedTask); err != nil {
+	if err := node.sched.dmQueue.Enqueue(it); err != nil {
 		log.Warn("Failed to enqueue insert task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
@@ -2765,7 +2742,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		idAllocator:     node.rowIDAllocator,
 		tsoAllocatorIns: node.tsoAllocator,
 		chMgr:           node.chMgr,
-		chTicker:        node.chTicker,
 		queue:           node.sched.dmQueue,
 		lb:              node.lbPolicy,
 		limiter:         limiter,
@@ -2874,23 +2850,15 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		},
 
 		idAllocator:     node.rowIDAllocator,
-		segIDAssigner:   node.segAssigner,
 		chMgr:           node.chMgr,
-		chTicker:        node.chTicker,
 		schemaTimestamp: request.SchemaTimestamp,
-	}
-	var enqueuedTask task = it
-	if streamingutil.IsStreamingServiceEnabled() {
-		enqueuedTask = &upsertTaskByStreamingService{
-			upsertTask: it,
-		}
 	}
 
 	log.Debug("Enqueue upsert request in Proxy",
 		zap.Int("len(FieldsData)", len(request.FieldsData)),
 		zap.Int("len(HashKeys)", len(request.HashKeys)))
 
-	if err := node.sched.dmQueue.Enqueue(enqueuedTask); err != nil {
+	if err := node.sched.dmQueue.Enqueue(it); err != nil {
 		log.Info("Failed to enqueue upsert task",
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -3561,11 +3529,11 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	defer sp.End()
 
 	ft := &flushTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		FlushRequest:       request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:          ctx,
+		Condition:    NewTaskCondition(ctx),
+		FlushRequest: request,
+		mixCoord:     node.mixCoord,
+		chMgr:        node.chMgr,
 	}
 
 	method := "Flush"
@@ -3578,16 +3546,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		zap.Any("collections", request.CollectionNames))
 
 	log.Debug(rpcReceived(method))
-
-	var enqueuedTask task = ft
-	if streamingutil.IsStreamingServiceEnabled() {
-		enqueuedTask = &flushTaskByStreamingService{
-			flushTask: ft,
-			chMgr:     node.chMgr,
-		}
-	}
-
-	if err := node.sched.dcQueue.Enqueue(enqueuedTask); err != nil {
+	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
 		log.Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err))
@@ -3846,7 +3805,6 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		Condition:          NewTaskCondition(ctx),
 		CreateAliasRequest: request,
 		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
 	}
 
 	method := "CreateAlias"
@@ -4034,11 +3992,10 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 	defer sp.End()
 
 	dat := &DropAliasTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		DropAliasRequest:   request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:              ctx,
+		Condition:        NewTaskCondition(ctx),
+		DropAliasRequest: request,
+		mixCoord:         node.mixCoord,
 	}
 
 	method := "DropAlias"
@@ -4098,11 +4055,10 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	defer sp.End()
 
 	aat := &AlterAliasTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		AlterAliasRequest:  request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:               ctx,
+		Condition:         NewTaskCondition(ctx),
+		AlterAliasRequest: request,
+		mixCoord:          node.mixCoord,
 	}
 
 	method := "AlterAlias"
@@ -4174,11 +4130,11 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 	defer sp.End()
 
 	ft := &flushAllTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		FlushAllRequest:    request,
-		mixCoord:           node.mixCoord,
-		replicateMsgStream: node.replicateMsgStream,
+		ctx:             ctx,
+		Condition:       NewTaskCondition(ctx),
+		FlushAllRequest: request,
+		mixCoord:        node.mixCoord,
+		chMgr:           node.chMgr,
 	}
 
 	method := "FlushAll"
@@ -4191,15 +4147,7 @@ func (node *Proxy) FlushAll(ctx context.Context, request *milvuspb.FlushAllReque
 
 	log.Debug(rpcReceived(method))
 
-	var enqueuedTask task = ft
-	if streamingutil.IsStreamingServiceEnabled() {
-		enqueuedTask = &flushAllTaskbyStreamingService{
-			flushAllTask: ft,
-			chMgr:        node.chMgr,
-		}
-	}
-
-	if err := node.sched.dcQueue.Enqueue(enqueuedTask); err != nil {
+	if err := node.sched.dcQueue.Enqueue(ft); err != nil {
 		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), "").Inc()
 		resp.Status = merr.Status(err)
@@ -5198,9 +5146,6 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
 	return result, err
 }
 
@@ -5273,9 +5218,6 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
 	return result, err
 }
 
@@ -5305,9 +5247,6 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 		log.Error("delete credential fail",
 			zap.Error(err))
 		return merr.Status(err), nil
-	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, err
 }
@@ -5372,9 +5311,6 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 		log.Warn("fail to create role", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
 	return result, nil
 }
 
@@ -5407,9 +5343,6 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 			zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
 	return result, nil
 }
 
@@ -5438,9 +5371,6 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 	if err != nil {
 		log.Warn("fail to operate user role", zap.Error(err))
 		return merr.Status(err), nil
-	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5624,9 +5554,6 @@ func (node *Proxy) OperatePrivilegeV2(ctx context.Context, req *milvuspb.Operate
 			}
 		}
 	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
 	return result, nil
 }
 
@@ -5674,9 +5601,6 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 				return result, nil
 			}
 		}
-	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -5914,11 +5838,6 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 		log.Warn("failed to rename collection", zap.Error(err))
 		return merr.Status(err), err
 	}
-
-	if merr.Ok(resp) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
-
 	return resp, nil
 }
 
@@ -6432,136 +6351,9 @@ func (node *Proxy) Connect(ctx context.Context, request *milvuspb.ConnectRequest
 }
 
 func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.ReplicateMessageRequest) (*milvuspb.ReplicateMessageResponse, error) {
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
-	}
-
-	var err error
-	if req.GetChannelName() == "" {
-		log.Ctx(ctx).Warn("channel name is empty")
-		return &milvuspb.ReplicateMessageResponse{
-			Status: merr.Status(merr.WrapErrParameterInvalidMsg("invalid channel name for the replicate message request")),
-		}, nil
-	}
-
-	// get the latest position of the replicate msg channel
-	replicateMsgChannel := Params.CommonCfg.ReplicateMsgChannel.GetValue()
-	if req.GetChannelName() == replicateMsgChannel {
-		msgID, err := msgstream.GetChannelLatestMsgID(ctx, node.factory, replicateMsgChannel)
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to get the latest message id of the replicate msg channel", zap.Error(err))
-			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
-		}
-		position := &msgpb.MsgPosition{
-			ChannelName: replicateMsgChannel,
-			MsgID:       msgID,
-		}
-		positionBytes, err := proto.Marshal(position)
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to marshal position", zap.Error(err))
-			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
-		}
-		return &milvuspb.ReplicateMessageResponse{
-			Status:   merr.Status(nil),
-			Position: base64.StdEncoding.EncodeToString(positionBytes),
-		}, nil
-	}
-
-	collectionReplicateEnable := paramtable.Get().CommonCfg.CollectionReplicateEnable.GetAsBool()
-	ttMsgEnabled := paramtable.Get().CommonCfg.TTMsgEnabled.GetAsBool()
-
-	// replicate message can be use in two ways, otherwise return error
-	// 1. collectionReplicateEnable is false and ttMsgEnabled is false, active/standby mode
-	// 2. collectionReplicateEnable is true and ttMsgEnabled is true, data migration mode
-	if (!collectionReplicateEnable && ttMsgEnabled) || (collectionReplicateEnable && !ttMsgEnabled) {
-		return &milvuspb.ReplicateMessageResponse{
-			Status: merr.Status(merr.ErrDenyReplicateMessage),
-		}, nil
-	}
-
-	msgPack := &msgstream.MsgPack{
-		BeginTs:        req.BeginTs,
-		EndTs:          req.EndTs,
-		Msgs:           make([]msgstream.TsMsg, 0),
-		StartPositions: req.StartPositions,
-		EndPositions:   req.EndPositions,
-	}
-	checkCollectionReplicateProperty := func(dbName, collectionName string) bool {
-		if !collectionReplicateEnable {
-			return true
-		}
-		replicateID, err := GetReplicateID(ctx, dbName, collectionName)
-		if err != nil {
-			log.Warn("get replicate id failed", zap.String("collectionName", collectionName), zap.Error(err))
-			return false
-		}
-		return replicateID != ""
-	}
-
-	// getTsMsgFromConsumerMsg
-	for i, msgBytes := range req.Msgs {
-		header := commonpb.MsgHeader{}
-		err = proto.Unmarshal(msgBytes, &header)
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to unmarshal msg header", zap.Int("index", i), zap.Error(err))
-			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
-		}
-		if header.GetBase() == nil {
-			log.Ctx(ctx).Warn("msg header base is nil", zap.Int("index", i))
-			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrInvalidMsgBytes)}, nil
-		}
-		tsMsg, err := node.replicateStreamManager.GetMsgDispatcher().Unmarshal(msgBytes, header.GetBase().GetMsgType())
-		if err != nil {
-			log.Ctx(ctx).Warn("failed to unmarshal msg", zap.Int("index", i), zap.Error(err))
-			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrInvalidMsgBytes)}, nil
-		}
-		switch realMsg := tsMsg.(type) {
-		case *msgstream.InsertMsg:
-			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
-				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
-			}
-			assignedSegmentInfos, err := node.segAssigner.GetSegmentID(realMsg.GetCollectionID(), realMsg.GetPartitionID(),
-				realMsg.GetShardName(), uint32(realMsg.NumRows), req.EndTs)
-			if err != nil {
-				log.Ctx(ctx).Warn("failed to get segment id", zap.Error(err))
-				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
-			}
-			if len(assignedSegmentInfos) == 0 {
-				log.Ctx(ctx).Warn("no segment id assigned")
-				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.ErrNoAssignSegmentID)}, nil
-			}
-			for assignSegmentID := range assignedSegmentInfos {
-				realMsg.SegmentID = assignSegmentID
-				break
-			}
-		case *msgstream.DeleteMsg:
-			if !checkCollectionReplicateProperty(realMsg.GetDbName(), realMsg.GetCollectionName()) {
-				return &milvuspb.ReplicateMessageResponse{Status: merr.Status(merr.WrapErrCollectionReplicateMode("replicate"))}, nil
-			}
-		}
-		msgPack.Msgs = append(msgPack.Msgs, tsMsg)
-	}
-
-	msgStream, err := node.replicateStreamManager.GetReplicateMsgStream(ctx, req.ChannelName)
-	if err != nil {
-		log.Ctx(ctx).Warn("failed to get msg stream from the replicate stream manager", zap.Error(err))
-		return &milvuspb.ReplicateMessageResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	messageIDsMap, err := msgStream.Broadcast(ctx, msgPack)
-	if err != nil {
-		log.Ctx(ctx).Warn("failed to produce msg", zap.Error(err))
-		return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil
-	}
-	var position string
-	if len(messageIDsMap[req.GetChannelName()]) == 0 {
-		log.Ctx(ctx).Warn("no message id returned")
-	} else {
-		messageIDs := messageIDsMap[req.GetChannelName()]
-		position = base64.StdEncoding.EncodeToString(messageIDs[len(messageIDs)-1].Serialize())
-	}
-	return &milvuspb.ReplicateMessageResponse{Status: merr.Status(nil), Position: position}, nil
+	return &milvuspb.ReplicateMessageResponse{
+		Status: merr.Status(merr.WrapErrServiceUnavailable("not supported in streaming mode")),
+	}, nil
 }
 
 func (node *Proxy) ListClientInfos(ctx context.Context, req *proxypb.ListClientInfosRequest) (*proxypb.ListClientInfosResponse, error) {
@@ -6821,9 +6613,6 @@ func (node *Proxy) CreatePrivilegeGroup(ctx context.Context, req *milvuspb.Creat
 		log.Warn("fail to create privilege group", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
-	}
 	return result, nil
 }
 
@@ -6852,9 +6641,6 @@ func (node *Proxy) DropPrivilegeGroup(ctx context.Context, req *milvuspb.DropPri
 	if err != nil {
 		log.Warn("fail to drop privilege group", zap.Error(err))
 		return merr.Status(err), nil
-	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }
@@ -6918,9 +6704,6 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	if err != nil {
 		log.Warn("fail to operate privilege group", zap.Error(err))
 		return merr.Status(err), nil
-	}
-	if merr.Ok(result) {
-		SendReplicateMessagePack(ctx, node.replicateMsgStream, req)
 	}
 	return result, nil
 }

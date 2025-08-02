@@ -22,7 +22,6 @@ import (
 
 func RecoverBroadcaster(
 	ctx context.Context,
-	appendOperator *syncutil.Future[AppendOperator],
 ) (Broadcaster, error) {
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
 	if err != nil {
@@ -38,7 +37,6 @@ func RecoverBroadcaster(
 		backoffChan:            make(chan *pendingBroadcastTask),
 		pendingChan:            make(chan *pendingBroadcastTask),
 		workerChan:             make(chan *pendingBroadcastTask),
-		appendOperator:         appendOperator,
 	}
 	go b.execute()
 	return b, nil
@@ -54,7 +52,6 @@ type broadcasterImpl struct {
 	pendingChan            chan *pendingBroadcastTask
 	backoffChan            chan *pendingBroadcastTask
 	workerChan             chan *pendingBroadcastTask
-	appendOperator         *syncutil.Future[AppendOperator] // TODO: we can remove those lazy future in 2.6.0, by remove the msgstream broadcaster.
 }
 
 // Broadcast broadcasts the message to all channels.
@@ -140,14 +137,6 @@ func (b *broadcasterImpl) execute() {
 		b.Logger().Info("broadcaster execute exit")
 	}()
 
-	// Wait for appendOperator ready
-	appendOperator, err := b.appendOperator.GetWithContext(b.backgroundTaskNotifier.Context())
-	if err != nil {
-		b.Logger().Info("broadcaster is closed before appendOperator ready")
-		return
-	}
-	b.Logger().Info("broadcaster appendOperator ready, begin to start workers and dispatch")
-
 	// Start n workers to handle the broadcast task.
 	wg := sync.WaitGroup{}
 	for i := 0; i < workers; i++ {
@@ -156,7 +145,7 @@ func (b *broadcasterImpl) execute() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b.worker(i, appendOperator)
+			b.worker(i)
 		}()
 	}
 	defer wg.Wait()
@@ -205,7 +194,7 @@ func (b *broadcasterImpl) dispatch() {
 	}
 }
 
-func (b *broadcasterImpl) worker(no int, appendOperator AppendOperator) {
+func (b *broadcasterImpl) worker(no int) {
 	logger := b.Logger().With(zap.Int("workerNo", no))
 	defer func() {
 		logger.Info("broadcaster worker exit")
@@ -216,7 +205,7 @@ func (b *broadcasterImpl) worker(no int, appendOperator AppendOperator) {
 		case <-b.backgroundTaskNotifier.Context().Done():
 			return
 		case task := <-b.workerChan:
-			if err := task.Execute(b.backgroundTaskNotifier.Context(), appendOperator); err != nil {
+			if err := task.Execute(b.backgroundTaskNotifier.Context()); err != nil {
 				// If the task is not done, repush it into pendings and retry infinitely.
 				select {
 				case <-b.backgroundTaskNotifier.Context().Done():

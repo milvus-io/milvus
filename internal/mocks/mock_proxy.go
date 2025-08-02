@@ -6,7 +6,6 @@ import (
 	context "context"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	federpb "github.com/milvus-io/milvus-proto/go-api/v2/federpb"
 
@@ -6686,39 +6685,6 @@ func (_c *MockProxy_SetAddress_Call) Return() *MockProxy_SetAddress_Call {
 }
 
 func (_c *MockProxy_SetAddress_Call) RunAndReturn(run func(string)) *MockProxy_SetAddress_Call {
-	_c.Run(run)
-	return _c
-}
-
-// SetEtcdClient provides a mock function with given fields: etcdClient
-func (_m *MockProxy) SetEtcdClient(etcdClient *clientv3.Client) {
-	_m.Called(etcdClient)
-}
-
-// MockProxy_SetEtcdClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetEtcdClient'
-type MockProxy_SetEtcdClient_Call struct {
-	*mock.Call
-}
-
-// SetEtcdClient is a helper method to define mock.On call
-//   - etcdClient *clientv3.Client
-func (_e *MockProxy_Expecter) SetEtcdClient(etcdClient interface{}) *MockProxy_SetEtcdClient_Call {
-	return &MockProxy_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
-}
-
-func (_c *MockProxy_SetEtcdClient_Call) Run(run func(etcdClient *clientv3.Client)) *MockProxy_SetEtcdClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*clientv3.Client))
-	})
-	return _c
-}
-
-func (_c *MockProxy_SetEtcdClient_Call) Return() *MockProxy_SetEtcdClient_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockProxy_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Client)) *MockProxy_SetEtcdClient_Call {
 	_c.Run(run)
 	return _c
 }

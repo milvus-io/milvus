@@ -16,8 +16,6 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	types "github.com/milvus-io/milvus/internal/types"
-
 	workerpb "github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 )
 
@@ -1915,52 +1913,6 @@ func (_c *MockDataNode_SetEtcdClient_Call) Return() *MockDataNode_SetEtcdClient_
 
 func (_c *MockDataNode_SetEtcdClient_Call) RunAndReturn(run func(*clientv3.Client)) *MockDataNode_SetEtcdClient_Call {
 	_c.Run(run)
-	return _c
-}
-
-// SetMixCoordClient provides a mock function with given fields: mixCoord
-func (_m *MockDataNode) SetMixCoordClient(mixCoord types.MixCoordClient) error {
-	ret := _m.Called(mixCoord)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SetMixCoordClient")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(types.MixCoordClient) error); ok {
-		r0 = rf(mixCoord)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockDataNode_SetMixCoordClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetMixCoordClient'
-type MockDataNode_SetMixCoordClient_Call struct {
-	*mock.Call
-}
-
-// SetMixCoordClient is a helper method to define mock.On call
-//   - mixCoord types.MixCoordClient
-func (_e *MockDataNode_Expecter) SetMixCoordClient(mixCoord interface{}) *MockDataNode_SetMixCoordClient_Call {
-	return &MockDataNode_SetMixCoordClient_Call{Call: _e.mock.On("SetMixCoordClient", mixCoord)}
-}
-
-func (_c *MockDataNode_SetMixCoordClient_Call) Run(run func(mixCoord types.MixCoordClient)) *MockDataNode_SetMixCoordClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(types.MixCoordClient))
-	})
-	return _c
-}
-
-func (_c *MockDataNode_SetMixCoordClient_Call) Return(_a0 error) *MockDataNode_SetMixCoordClient_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockDataNode_SetMixCoordClient_Call) RunAndReturn(run func(types.MixCoordClient) error) *MockDataNode_SetMixCoordClient_Call {
-	_c.Call.Return(run)
 	return _c
 }
 

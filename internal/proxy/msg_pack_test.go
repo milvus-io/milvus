@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -49,12 +48,6 @@ func TestRepackInsertData(t *testing.T) {
 	defer mix.Close()
 
 	cache := NewMockCache(t)
-	cache.On("GetPartitionID",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(int64(1), nil)
 	globalMetaCache = cache
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mix, paramtable.GetNodeID())
@@ -113,33 +106,6 @@ func TestRepackInsertData(t *testing.T) {
 	for index := range insertMsg.RowIDs {
 		insertMsg.RowIDs[index] = int64(index)
 	}
-
-	ids, err := parsePrimaryFieldData2IDs(fieldData)
-	assert.NoError(t, err)
-	result := &milvuspb.MutationResult{
-		IDs: ids,
-	}
-
-	t.Run("assign segmentID failed", func(t *testing.T) {
-		fakeSegAllocator, err := newSegIDAssigner(ctx, &mockDataCoord2{expireTime: Timestamp(2500)}, getLastTick1)
-		assert.NoError(t, err)
-		_ = fakeSegAllocator.Start()
-		defer fakeSegAllocator.Close()
-
-		_, err = repackInsertData(ctx, []string{"test_dml_channel"}, insertMsg,
-			result, idAllocator, fakeSegAllocator)
-		assert.Error(t, err)
-	})
-
-	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
-	assert.NoError(t, err)
-	_ = segAllocator.Start()
-	defer segAllocator.Close()
-
-	t.Run("repack insert data success", func(t *testing.T) {
-		_, err = repackInsertData(ctx, []string{"test_dml_channel"}, insertMsg, result, idAllocator, segAllocator)
-		assert.NoError(t, err)
-	})
 }
 
 func TestRepackInsertDataWithPartitionKey(t *testing.T) {
@@ -160,11 +126,6 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
-
-	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
-	assert.NoError(t, err)
-	_ = segAllocator.Start()
-	defer segAllocator.Close()
 
 	fieldName2Types := map[string]schemapb.DataType{
 		testInt64Field:    schemapb.DataType_Int64,
@@ -221,17 +182,4 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	for index := range insertMsg.RowIDs {
 		insertMsg.RowIDs[index] = int64(index)
 	}
-
-	ids, err := parsePrimaryFieldData2IDs(fieldNameToDatas[testInt64Field])
-	assert.NoError(t, err)
-	result := &milvuspb.MutationResult{
-		IDs: ids,
-	}
-
-	t.Run("repack insert data success", func(t *testing.T) {
-		partitionKeys := generateFieldData(schemapb.DataType_VarChar, testVarCharField, nb)
-		_, err = repackInsertDataWithPartitionKey(ctx, []string{"test_dml_channel"}, partitionKeys,
-			insertMsg, result, idAllocator, segAllocator)
-		assert.NoError(t, err)
-	})
 }
