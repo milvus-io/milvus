@@ -214,7 +214,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
-		
+
 	case schemapb.DataType_Timestamptz:
 		data := []int64{}
 		err := json.Unmarshal(raw, &data)
