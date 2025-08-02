@@ -56,6 +56,14 @@ func (m *messageImpl) IsPersisted() bool {
 	return !m.properties.Exist(messageNotPersisteted)
 }
 
+// IntoMessageProto converts the message to a protobuf message.
+func (m *messageImpl) IntoMessageProto() *messagespb.Message {
+	return &messagespb.Message{
+		Payload:    m.payload,
+		Properties: m.properties.ToRawMap(),
+	}
+}
+
 // EstimateSize returns the estimated size of current message.
 func (m *messageImpl) EstimateSize() int {
 	if ch := m.cipherHeader(); ch != nil {

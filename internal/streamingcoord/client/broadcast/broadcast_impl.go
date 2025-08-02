@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -31,10 +30,7 @@ func (c *GRPCBroadcastServiceImpl) Broadcast(ctx context.Context, msg message.Br
 		return nil, err
 	}
 	resp, err := client.Broadcast(ctx, &streamingpb.BroadcastRequest{
-		Message: &messagespb.Message{
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
-		},
+		Message: msg.IntoMessageProto(),
 	})
 	if err != nil {
 		return nil, err

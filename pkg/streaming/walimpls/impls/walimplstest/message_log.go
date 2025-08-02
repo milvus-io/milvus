@@ -45,10 +45,11 @@ func (l *messageLog) Append(_ context.Context, msg message.MutableMessage) (mess
 	l.cond.LockAndBroadcast()
 	defer l.cond.L.Unlock()
 	id := l.id
+	pb := msg.IntoMessageProto()
 	newEntry := entry{
 		ID:         id,
-		Payload:    msg.Payload(),
-		Properties: msg.Properties().ToRawMap(),
+		Payload:    pb.Payload,
+		Properties: pb.Properties,
 	}
 	data, err := json.Marshal(newEntry)
 	if err != nil {

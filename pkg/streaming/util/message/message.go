@@ -3,6 +3,8 @@ package message
 import (
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 )
 
 var (
@@ -24,7 +26,10 @@ type BasicMessage interface {
 	// from 1: new version after streamingnode.
 	Version() Version
 
-	// Message payload.
+	// Payload returns the message payload.
+	// If the underlying message is encrypted, the payload will be decrypted.
+	// !!! So if the message is encrypted, additional overhead will be paid for decryption.
+	// If the underlying message is not encrypted, the payload will be returned directly.
 	Payload() []byte
 
 	// EstimateSize returns the estimated size of message.
@@ -53,6 +58,9 @@ type BasicMessage interface {
 
 	// IsPersisted returns true if the message is persisted into underlying log storage.
 	IsPersisted() bool
+
+	// IntoMessageProto converts the message to a protobuf message.
+	IntoMessageProto() *messagespb.Message
 }
 
 // MutableMessage is the mutable message interface.

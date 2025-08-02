@@ -30,7 +30,8 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 		panic("write on a wal that is not in read-write mode")
 	}
 
-	properties := msg.Properties().ToRawMap()
+	pb := msg.IntoMessageProto()
+	properties := pb.Properties
 	headers := make([]kafka.Header, 0, len(properties))
 	for key, value := range properties {
 		header := kafka.Header{Key: key, Value: []byte(value)}
@@ -41,7 +42,7 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 
 	if err := w.p.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: 0},
-		Value:          msg.Payload(),
+		Value:          pb.Payload,
 		Headers:        headers,
 	}, ch); err != nil {
 		return nil, err

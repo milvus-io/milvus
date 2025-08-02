@@ -82,14 +82,15 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	if err != nil {
 		return nil, errors.Wrap(err, "get producer from future")
 	}
+	pb := msg.IntoMessageProto()
 	id, err := p.Send(ctx, &pulsar.ProducerMessage{
-		Payload:    msg.Payload(),
-		Properties: msg.Properties().ToRawMap(),
+		Payload:    pb.Payload,
+		Properties: pb.Properties,
 	})
 	if w.backlogClearHelper != nil {
 		// Observe the append traffic even if the message is not sent successfully.
 		// Because if the write is failed, the message may be already written to the pulsar topic.
-		w.backlogClearHelper.ObserveAppend(len(msg.Payload()))
+		w.backlogClearHelper.ObserveAppend(msg.EstimateSize())
 	}
 	if err != nil {
 		w.Log().RatedWarn(1, "send message to pulsar failed", zap.Error(err))

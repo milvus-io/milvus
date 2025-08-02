@@ -143,7 +143,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
 			// use payload size instead.
-			partition.BinarySize = uint64(len(msg.Payload()))
+			partition.BinarySize = uint64(msg.EstimateSize())
 		}
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),

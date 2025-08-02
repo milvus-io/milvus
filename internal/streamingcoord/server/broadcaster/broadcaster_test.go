@@ -193,10 +193,11 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
 	msg := createNewBroadcastMsg(vchannels, rks...).WithBroadcastID(broadcastID)
+	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
+			Payload:    pb.Payload,
+			Properties: pb.Properties,
 		},
 		State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 		AckedVchannelBitmap: make([]byte, len(vchannels)),
@@ -208,10 +209,11 @@ func createNewWaitAckBroadcastTaskFromMessage(
 	state streamingpb.BroadcastTaskState,
 	bitmap []byte,
 ) *streamingpb.BroadcastTask {
+	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
+			Payload:    pb.Payload,
+			Properties: pb.Properties,
 		},
 		State:               state,
 		AckedVchannelBitmap: bitmap,
