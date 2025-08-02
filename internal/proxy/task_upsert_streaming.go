@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -24,12 +25,17 @@ func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
 	defer sp.End()
 	log := log.Ctx(ctx).With(zap.String("collectionName", ut.req.CollectionName))
 
-	insertMsgs, err := ut.packInsertMessage(ctx)
+	var ez *message.CipherConfig
+	if hookutil.IsClusterEncyptionEnabled() {
+		ez = hookutil.GetEzByCollProperties(ut.schema.GetProperties(), ut.collectionID).AsMessageConfig()
+	}
+
+	insertMsgs, err := ut.packInsertMessage(ctx, ez)
 	if err != nil {
 		log.Warn("pack insert message failed", zap.Error(err))
 		return err
 	}
-	deleteMsgs, err := ut.packDeleteMessage(ctx)
+	deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
 	if err != nil {
 		log.Warn("pack delete message failed", zap.Error(err))
 		return err
@@ -46,7 +52,7 @@ func (ut *upsertTaskByStreamingService) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) ([]message.MutableMessage, error) {
+func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
@@ -81,9 +87,9 @@ func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) (
 	// start to repack insert data
 	var msgs []message.MutableMessage
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez)
 	}
 	if err != nil {
 		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
@@ -93,7 +99,7 @@ func (ut *upsertTaskByStreamingService) packInsertMessage(ctx context.Context) (
 	return msgs, nil
 }
 
-func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context) ([]message.MutableMessage, error) {
+func (it *upsertTaskByStreamingService) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", it.ID()))
 	collID := it.upsertMsg.DeleteMsg.CollectionID
 	it.upsertMsg.DeleteMsg.PrimaryKeys = it.oldIDs
