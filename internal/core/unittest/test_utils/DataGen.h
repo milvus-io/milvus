@@ -1685,8 +1685,7 @@ gen_all_data_types_schema() {
         schema->AddDebugField("int16", milvus::DataType::INT16, true);
     auto int32_field =
         schema->AddDebugField("int32", milvus::DataType::INT32, true);
-    auto int64_field = 
-        schema->AddDebugField("int64", milvus::DataType::INT64);
+    auto int64_field = schema->AddDebugField("int64", milvus::DataType::INT64);
     auto float_field =
         schema->AddDebugField("float", milvus::DataType::FLOAT, true);
     auto double_field =
