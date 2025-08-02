@@ -295,10 +295,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 	}
 	m[schemapb.DataType_Timestamptz] = serdeEntry{
-		func(i int) arrow.DataType {
+		arrowType: func(i int) arrow.DataType {
 			return arrow.PrimitiveTypes.Int64
 		},
-		func(a arrow.Array, i int) (any, bool) {
+		deserialize: func(a arrow.Array, i int, shouldCopy bool) (any, bool) {
 			if a.IsNull(i) {
 				return nil, true
 			}
@@ -307,7 +307,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			return nil, false
 		},
-		func(b array.Builder, v any) bool {
+		serialize: func(b array.Builder, v any) bool {
 			if v == nil {
 				b.AppendNull()
 				return true
