@@ -285,6 +285,13 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 			bd.AppendValues(
 				lo.RepeatBy(numRows, func(_ int) float64 { return schema.GetDefaultValue().GetDoubleData() }),
 				nil)
+
+		case schemapb.DataType_Timestamptz:
+			bd := builder.(*array.Int64Builder)
+			bd.AppendValues(
+				lo.RepeatBy(numRows, func(_ int) int64 { return schema.GetDefaultValue().GetTimestamptzData() }),
+				nil)
+
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			bd := builder.(*array.StringBuilder)
 			bd.AppendValues(

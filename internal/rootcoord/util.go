@@ -446,6 +446,10 @@ func checkFieldSchema(fieldSchemas []*schemapb.FieldSchema) error {
 				if dtype != schemapb.DataType_Double {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Double")
 				}
+			case *schemapb.ValueField_TimestamptzData:
+				if dtype != schemapb.DataType_Timestamptz {
+					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_Timestamptz")
+				}
 			case *schemapb.ValueField_StringData:
 				if dtype != schemapb.DataType_VarChar {
 					return errTypeMismatch(fieldSchema.GetName(), dtype.String(), "DataType_VarChar")

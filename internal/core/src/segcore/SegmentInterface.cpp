@@ -501,6 +501,18 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
+            case DataType::TIMESTAMPTZ: {
+                auto data_ptr = result->mutable_scalars()
+                                    ->mutable_timestamptz_data()
+                                    ->mutable_data()
+                                    ->mutable_data();
+
+                for (int64_t i = 0; i < count; ++i) {
+                    data_ptr[i] =
+                        field_meta.default_value()->timestamptz_data();
+                }
+                break;
+            }
             case DataType::VARCHAR: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()

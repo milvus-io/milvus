@@ -173,6 +173,17 @@ TEST_F(StorageUtilTest, CreateArrowScalarFromDefaultValue) {
     }
     {
         DefaultValueType default_value;
+        default_value.set_timestamptz_data(123456789);
+        FieldMeta timestamptz_field(FieldName("f"),
+                                    FieldId(100),
+                                    DataType::TIMESTAMPTZ,
+                                    false,
+                                    default_value);
+        auto scalar = CreateArrowScalarFromDefaultValue(timestamptz_field);
+        ASSERT_TRUE(scalar->Equals(*arrow::MakeScalar(int64_t(123456789))));
+    }
+    {
+        DefaultValueType default_value;
         default_value.set_bool_data(true);
         FieldMeta bool_field(
             FieldName("f"), FieldId(100), DataType::BOOL, false, default_value);

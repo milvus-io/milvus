@@ -69,7 +69,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		switch inputType {
 		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 			return newFunction[int64, int32](base, funcSchema)
-		case schemapb.DataType_Int64:
+		case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 			return newFunction[int64, int64](base, funcSchema)
 		case schemapb.DataType_Float:
 			return newFunction[int64, float32](base, funcSchema)
@@ -82,7 +82,7 @@ func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemap
 		switch inputType {
 		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 			return newFunction[string, int32](base, funcSchema)
-		case schemapb.DataType_Int64:
+		case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 			return newFunction[string, int64](base, funcSchema)
 		case schemapb.DataType_Float:
 			return newFunction[string, float32](base, funcSchema)

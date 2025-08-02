@@ -55,6 +55,11 @@ TEST(GetArrowDataTypeTest, DOUBLE) {
     ASSERT_TRUE(result->Equals(arrow::float64()));
 }
 
+TEST(GetArrowDataTypeTest, TIMESTAMPTZ) {
+    auto result = GetArrowDataType(DataType::TIMESTAMPTZ);
+    ASSERT_TRUE(result->Equals(arrow::int64()));
+}
+
 TEST(GetArrowDataTypeTest, STRING_TYPES) {
     auto result1 = GetArrowDataType(DataType::STRING);
     auto result2 = GetArrowDataType(DataType::VARCHAR);
