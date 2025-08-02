@@ -410,14 +410,6 @@ func FillWithNullValue(field *schemapb.FieldData, fieldSchema *schemapb.FieldSch
 				return err
 			}
 
-		case *schemapb.ScalarField_TimestamptzData:
-			if fieldSchema.GetNullable() {
-				sd.TimestamptzData.Data, err = fillWithNullValueImpl(sd.TimestamptzData.Data, field.GetValidData())
-				if err != nil {
-					return err
-				}
-			}
-
 		case *schemapb.ScalarField_StringData:
 			sd.StringData.Data, err = fillWithNullValueImpl(sd.StringData.Data, field.GetValidData())
 			if err != nil {
