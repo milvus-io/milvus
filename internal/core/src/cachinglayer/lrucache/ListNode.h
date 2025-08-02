@@ -41,12 +41,12 @@ class ListNode {
         ~NodePin();
 
      private:
-        NodePin(ListNode* node);
+        explicit NodePin(ListNode* node);
         friend class ListNode;
         ListNode* node_;
     };
     ListNode() = default;
-    ListNode(DList* dlist, ResourceUsage size);
+    ListNode(DList* dlist, ResourceUsage size, bool evictable);
     virtual ~ListNode();
 
     // ListNode is not movable/copyable because it contains a shared_mutex.
@@ -123,7 +123,9 @@ class ListNode {
                     state_ = State::LOADED;
                     cb();
                     // memory of this cell is not reserved, touch() to track it.
-                    touch(true);
+                    if (evictable_) {
+                        touch(true);
+                    }
                 } else if (state_ == State::LOADING) {
                     // another thread has explicitly requested loading this cell, we did it first
                     // thus we set up the state first.
@@ -131,7 +133,9 @@ class ListNode {
                     state_ = State::LOADED;
                     promise = std::move(load_promise_);
                     // the node that marked LOADING has already reserved memory, do not double count.
-                    touch(false);
+                    if (evictable_) {
+                        touch(false);
+                    }
                     remove_self_from_loading_resource();
                 } else {
                     // LOADED: cell has been loaded by another thread, do nothing.
@@ -190,6 +194,7 @@ class ListNode {
     std::atomic<int> pin_count_{0};
 
     std::unique_ptr<folly::SharedPromise<folly::Unit>> load_promise_{nullptr};
+    bool evictable_{false};
 };
 
 }  // namespace milvus::cachinglayer::internal

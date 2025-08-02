@@ -45,13 +45,11 @@ class Manager {
     template <typename CellT>
     std::shared_ptr<CacheSlot<CellT>>
     CreateCacheSlot(std::unique_ptr<Translator<CellT>> translator) {
-        // if eviction is disabled, pass nullptr dlist to CacheSlot, so pinned cells
-        // in this CacheSlot will not be evicted.
-        auto dlist = (translator->meta()->support_eviction && evictionEnabled_)
-                         ? dlist_.get()
-                         : nullptr;
-        auto cache_slot =
-            std::make_shared<CacheSlot<CellT>>(std::move(translator), dlist);
+        auto evictable =
+            translator->meta()->support_eviction && evictionEnabled_;
+        // NOTE: when evictionEnabled_ is false, dlist_ is nullptr.
+        auto cache_slot = std::make_shared<CacheSlot<CellT>>(
+            std::move(translator), dlist_.get(), evictable);
         cache_slot->Warmup();
         return cache_slot;
     }
