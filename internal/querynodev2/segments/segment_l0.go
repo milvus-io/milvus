@@ -121,6 +121,10 @@ func (s *L0Segment) HasRawData(fieldID int64) bool {
 	return false
 }
 
+func (s *L0Segment) DropIndex(ctx context.Context, indexID int64) error {
+	return nil
+}
+
 func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 	return nil
 }
