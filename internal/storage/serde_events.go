@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"sort"
 	"strconv"
 
@@ -560,8 +559,7 @@ type CompositeBinlogRecordWriter struct {
 	// writers and stats generated at runtime
 	fieldWriters map[FieldID]*BinlogStreamWriter
 	rw           RecordWriter
-	tsFrom       typeutil.Timestamp
-	tsTo         typeutil.Timestamp
+	tsRange      *TimestampRange
 	rowNum       int64
 
 	// results
@@ -579,47 +577,15 @@ func (c *CompositeBinlogRecordWriter) Write(r Record) error {
 		return err
 	}
 
-	tsArray := r.Column(common.TimeStampField).(*array.Int64)
-	rows := r.Len()
-	for i := 0; i < rows; i++ {
-		ts := typeutil.Timestamp(tsArray.Value(i))
-		if ts < c.tsFrom {
-			c.tsFrom = ts
-		}
-		if ts > c.tsTo {
-			c.tsTo = ts
-		}
-
-		switch schemapb.DataType(c.pkstats.PkType) {
-		case schemapb.DataType_Int64:
-			pkArray := r.Column(c.pkstats.FieldID).(*array.Int64)
-			pk := &Int64PrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			c.pkstats.Update(pk)
-		case schemapb.DataType_VarChar:
-			pkArray := r.Column(c.pkstats.FieldID).(*array.String)
-			pk := &VarCharPrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			c.pkstats.Update(pk)
-		default:
-			panic("invalid data type")
-		}
-
-		for fieldID, stats := range c.bm25Stats {
-			field, ok := r.Column(fieldID).(*array.Binary)
-			if !ok {
-				return errors.New("bm25 field value not found")
-			}
-			stats.AppendBytes(field.Value(i))
-		}
+	rows, err := updateStats(r, c.pkstats, c.bm25Stats, c.tsRange)
+	if err != nil {
+		return err
 	}
+	c.rowNum += rows
 
 	if err := c.rw.Write(r); err != nil {
 		return err
 	}
-	c.rowNum += int64(rows)
 
 	// flush if size exceeds chunk size
 	if c.rw.GetWrittenUncompressed() >= c.chunkSize {
@@ -648,8 +614,7 @@ func (c *CompositeBinlogRecordWriter) initWriters() error {
 func (c *CompositeBinlogRecordWriter) resetWriters() {
 	c.fieldWriters = nil
 	c.rw = nil
-	c.tsFrom = math.MaxUint64
-	c.tsTo = 0
+	c.tsRange = &TimestampRange{tsFrom: typeutil.MaxTimestamp, tsTo: 0}
 }
 
 func (c *CompositeBinlogRecordWriter) Close() error {
@@ -719,8 +684,8 @@ func (c *CompositeBinlogRecordWriter) FlushChunk() error {
 			MemorySize:    b.MemorySize,
 			LogPath:       b.Key,
 			EntriesNum:    b.RowNum,
-			TimestampFrom: c.tsFrom,
-			TimestampTo:   c.tsTo,
+			TimestampFrom: c.tsRange.tsFrom,
+			TimestampTo:   c.tsRange.tsTo,
 		})
 	}
 

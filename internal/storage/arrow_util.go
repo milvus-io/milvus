@@ -29,6 +29,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+func GetValueAt(a arrow.Array, idx int, defaultValue *schemapb.ValueField, dataType schemapb.DataType) any {
+	serdeEntry, ok := serdeMap[dataType]
+	if !ok {
+		return nil
+	}
+	value, ok := serdeEntry.deserialize(a, idx, true)
+	if !ok {
+		// FIXME: should throw error.
+		return defaultValue
+	}
+	if value == nil {
+		return defaultValue
+	}
+	return value
+}
+
 func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {
 	switch b := builder.(type) {
 	case *array.BooleanBuilder:

@@ -22,6 +22,7 @@ import (
 	"maps"
 	"math"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
@@ -505,4 +506,49 @@ func DeserializeStatsList(blob *Blob) ([]*PrimaryKeyStats, error) {
 		return nil, err
 	}
 	return stats, nil
+}
+
+type TimestampRange struct {
+	tsFrom typeutil.Timestamp
+	tsTo   typeutil.Timestamp
+}
+
+func updateStats(r Record, pkstats *PrimaryKeyStats, bm25Stats map[int64]*BM25Stats, tsRange *TimestampRange) (int64, error) {
+	tsArray := r.Column(common.TimeStampField).(*array.Int64)
+	rows := r.Len()
+	for i := 0; i < rows; i++ {
+		ts := typeutil.Timestamp(tsArray.Value(i))
+		if ts < tsRange.tsFrom {
+			tsRange.tsFrom = ts
+		}
+		if ts > tsRange.tsTo {
+			tsRange.tsTo = ts
+		}
+
+		switch schemapb.DataType(pkstats.PkType) {
+		case schemapb.DataType_Int64:
+			pkArray := r.Column(pkstats.FieldID).(*array.Int64)
+			pk := &Int64PrimaryKey{
+				Value: pkArray.Value(i),
+			}
+			pkstats.Update(pk)
+		case schemapb.DataType_VarChar:
+			pkArray := r.Column(pkstats.FieldID).(*array.String)
+			pk := &VarCharPrimaryKey{
+				Value: pkArray.Value(i),
+			}
+			pkstats.Update(pk)
+		default:
+			panic("invalid data type")
+		}
+
+		for fieldID, stats := range bm25Stats {
+			field, ok := r.Column(fieldID).(*array.Binary)
+			if !ok {
+				return 0, errors.New("bm25 field value not found")
+			}
+			stats.AppendBytes(field.Value(i))
+		}
+	}
+	return int64(rows), nil
 }
