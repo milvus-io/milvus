@@ -320,8 +320,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    ViewsByOffsets(int64_t chunk_id,
-                   const FixedVector<int32_t>& offsets) const override {
+    StringViewsByOffsets(int64_t chunk_id,
+                         const FixedVector<int32_t>& offsets) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] ViewsByOffsets only supported for "
@@ -333,6 +333,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
             chunk_wrapper,
             static_cast<StringChunk*>(chunk.get())->ViewsByOffsets(offsets));
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    ArrayViewsByOffsets(int64_t chunk_id,
+                        const FixedVector<int32_t>& offsets) const override {
+        auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+            chunk_wrapper,
+            static_cast<ArrayChunk*>(chunk.get())->ViewsByOffsets(offsets));
     }
 
     std::pair<size_t, size_t>
