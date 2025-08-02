@@ -175,7 +175,9 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
-            LOG_DEBUG("Set data for field: {} with type {}", field_meta.get_name().get(), GetDataTypeName(field_meta.get_data_type()));
+            LOG_DEBUG("Set data for field: {} with type {}",
+                      field_meta.get_name().get(),
+                      GetDataTypeName(field_meta.get_data_type()));
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -881,12 +883,12 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
         }
         case DataType::TIMESTAMPTZ: {
             bulk_subscript_impl<int64_t>(vec_ptr,
-                                        seg_offsets,
-                                        count,
-                                        result->mutable_scalars()
-                                            ->mutable_timestamptz_data()
-                                            ->mutable_data()
-                                            ->mutable_data());
+                                         seg_offsets,
+                                         count,
+                                         result->mutable_scalars()
+                                             ->mutable_timestamptz_data()
+                                             ->mutable_data()
+                                             ->mutable_data());
             break;
         }
         case DataType::VARCHAR:

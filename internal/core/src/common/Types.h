@@ -75,7 +75,6 @@ enum class DataType {
     FLOAT = 10,
     DOUBLE = 11,
 
-
     STRING = 20,
     VARCHAR = 21,
     ARRAY = 22,
