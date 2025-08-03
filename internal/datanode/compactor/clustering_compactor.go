@@ -642,9 +642,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 		for i := 0; i < rec.Len(); i++ {
 			offset++
 			pk := storage.GetValueAt(pkArr, i, nil, t.primaryKeyField.DataType)
-			ts := storage.GetValueAt(tsArr, i, nil, schemapb.DataType_Int64).(typeutil.Timestamp)
+			ts := storage.GetValueAt(tsArr, i, nil, schemapb.DataType_Int64).(int64)
 
-			if entityFilter.Filtered(pk, ts) {
+			if entityFilter.Filtered(pk, typeutil.Timestamp(ts)) {
 				continue
 			}
 
@@ -850,7 +850,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
-) (map[interface{}]int64, error) {
+) (map[any]int64, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.Int64("segmentID", segment.GetSegmentID()))
@@ -920,8 +920,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.RecordReader, expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		remained      int64                 = 0
-		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
+		remained      int64         = 0
+		analyzeResult map[any]int64 = make(map[any]int64, 0)
 	)
 
 	for {
@@ -937,8 +937,8 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.Reco
 		for i := 0; i < rec.Len(); i++ {
 			// apply filter
 			pk := storage.GetValueAt(rec.Column(t.primaryKeyField.GetFieldID()), i, nil, t.primaryKeyField.DataType)
-			ts := storage.GetValueAt(rec.Column(common.TimeStampField), i, nil, schemapb.DataType_Int64).(typeutil.Timestamp)
-			if expiredFilter.Filtered(pk, ts) {
+			ts := storage.GetValueAt(rec.Column(common.TimeStampField), i, nil, schemapb.DataType_Int64).(int64)
+			if expiredFilter.Filtered(pk, typeutil.Timestamp(ts)) {
 				continue
 			}
 			// update result
