@@ -113,6 +113,15 @@ type ClusterBuffer struct {
 	lock    sync.RWMutex
 }
 
+func (b *ClusterBuffer) flush() error {
+	if b.builder.GetRowNum() > 0 {
+		rec := b.builder.Build()
+		defer rec.Release()
+		return b.writer.Write(rec)
+	}
+	return nil
+}
+
 func (b *ClusterBuffer) Write(a storage.Record, pos int) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
@@ -121,9 +130,7 @@ func (b *ClusterBuffer) Write(a storage.Record, pos int) error {
 		return err
 	}
 	if b.builder.GetRowNum() >= b.writer.batchSize {
-		rec := b.builder.Build()
-		defer rec.Release()
-		return b.writer.Write(rec)
+		return b.flush()
 	}
 	return nil
 }
@@ -131,12 +138,18 @@ func (b *ClusterBuffer) Write(a storage.Record, pos int) error {
 func (b *ClusterBuffer) FlushChunk() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if err := b.flush(); err != nil {
+		return err
+	}
 	return b.writer.FlushChunk()
 }
 
 func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if err := b.flush(); err != nil {
+		return err
+	}
 	return b.writer.Close()
 }
 
@@ -156,6 +169,7 @@ func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStat
 	return &ClusterBuffer{
 		id:                      id,
 		writer:                  writer,
+		builder:                 storage.NewRecordBuilder(writer.schema),
 		clusteringKeyFieldStats: clusteringKeyFieldStats,
 		lock:                    sync.RWMutex{},
 	}
