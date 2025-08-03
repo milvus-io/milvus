@@ -834,6 +834,7 @@ func newCompositeBinlogRecordWriter(collectionID, partitionID, segmentID UniqueI
 		maxRowNum:    maxRowNum,
 		pkstats:      stats,
 		bm25Stats:    bm25Stats,
+		tsRange:      &TimestampRange{tsFrom: typeutil.MaxTimestamp, tsTo: 0},
 	}, nil
 }
 
