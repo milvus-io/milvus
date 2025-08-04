@@ -37,7 +37,6 @@ ArrowArrayDeepCopyToRecordBatch(const struct ArrowArray* src,
     AssertInfo(src != nullptr, "[StorageV2] Source ArrowArray is null");
     AssertInfo(schema != nullptr, "[StorageV2] Source ArrowSchema is null");
 
-    // Import the record batch from the original array using the copied schema
     auto record_batch =
         arrow::ImportRecordBatch(const_cast<struct ArrowArray*>(src),
                                  const_cast<struct ArrowSchema*>(schema))
@@ -51,7 +50,6 @@ ArrowArrayDeepCopyToRecordBatch(const struct ArrowArray* src,
     for (int i = 0; i < record_batch->num_columns(); i++) {
         auto original_array = record_batch->column(i);
 
-        // Use Arrow's CopyTo() function for true deep copy
         auto copied_data_result =
             original_array->data()->CopyTo(memory_manager);
         AssertInfo(copied_data_result.ok(),
@@ -63,7 +61,7 @@ ArrowArrayDeepCopyToRecordBatch(const struct ArrowArray* src,
         copied_arrays.push_back(copied_array);
     }
 
-    // Create and return a new RecordBatch with the truly copied arrays
+    // Create and return a new RecordBatch with the copied arrays
     return arrow::RecordBatch::Make(
         record_batch->schema(), record_batch->num_rows(), copied_arrays);
 }
