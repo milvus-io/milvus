@@ -1820,6 +1820,34 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_load_collection_after_index(self):
+        """
+        target: test load collection, after index created
+        method: insert and create index, load collection with correct params
+        expected: no error raised
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # Prepare and create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="IVF_SQ8", 
+                              metric_type="L2", params={"nlist": 64})
+        self.create_index(client, collection_name, index_params)
+        # Load and release collection
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
