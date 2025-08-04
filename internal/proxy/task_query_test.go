@@ -1293,6 +1293,8 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 	})
 }
 
+<<<<<<< HEAD
+=======
 func Test_reconstructStructFieldData(t *testing.T) {
 	t.Run("count(*) query - should return early", func(t *testing.T) {
 		results := &milvuspb.QueryResults{
@@ -1759,3 +1761,4 @@ func Test_reconstructStructFieldData(t *testing.T) {
 		assert.Equal(t, "regular_field", results.OutputFields[0])
 	})
 }
+>>>>>>> master

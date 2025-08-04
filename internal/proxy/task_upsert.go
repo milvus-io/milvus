@@ -210,11 +210,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	allFields := make([]*schemapb.FieldSchema, 0, len(it.schema.Fields)+5)
-	allFields = append(allFields, it.schema.Fields...)
-	for _, structField := range it.schema.GetStructArrayFields() {
-		allFields = append(allFields, structField.GetFields()...)
-	}
+	allFields := typeutil.GetAllFieldSchemas(it.schema.CollectionSchema)
 
 	// use the passed pk as new pk when autoID == false
 	// automatic generate pk as new pk wehen autoID == true

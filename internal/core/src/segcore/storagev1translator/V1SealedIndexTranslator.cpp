@@ -13,6 +13,7 @@ V1SealedIndexTranslator::V1SealedIndexTranslator(
           load_index_info->enable_mmap,
           load_index_info->mmap_dir_path,
           load_index_info->field_type,
+          load_index_info->element_type,
           load_index_info->index_params,
           load_index_info->index_files,
           load_index_info->index_size,

@@ -59,12 +59,14 @@ namespace milvus::index {
 
 template <typename T>
 VectorMemIndex<T>::VectorMemIndex(
+    DataType elem_type,
     const IndexType& index_type,
     const MetricType& metric_type,
     const IndexVersion& version,
     bool use_knowhere_build_pool,
     const storage::FileManagerContext& file_manager_context)
     : VectorIndex(index_type, metric_type),
+      elem_type_(elem_type),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
@@ -89,12 +91,14 @@ VectorMemIndex<T>::VectorMemIndex(
 }
 
 template <typename T>
-VectorMemIndex<T>::VectorMemIndex(const IndexType& index_type,
+VectorMemIndex<T>::VectorMemIndex(DataType elem_type,
+                                  const IndexType& index_type,
                                   const MetricType& metric_type,
                                   const IndexVersion& version,
                                   const knowhere::ViewDataOp view_data,
                                   bool use_knowhere_build_pool)
     : VectorIndex(index_type, metric_type),
+      elem_type_(elem_type),
       use_knowhere_build_pool_(use_knowhere_build_pool) {
     CheckMetricTypeSupport<T>(metric_type);
     AssertInfo(!is_unsupported(index_type, metric_type),
@@ -304,6 +308,11 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     SetDim(index_.Dim());
 }
 
+bool
+is_embedding_list_index(const IndexType& index_type) {
+    return index_type == knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+}
+
 template <typename T>
 void
 VectorMemIndex<T>::Build(const Config& config) {
@@ -331,22 +340,73 @@ VectorMemIndex<T>::Build(const Config& config) {
             total_num_rows += data->get_num_rows();
             AssertInfo(dim == 0 || dim == data->get_dim(),
                        "inconsistent dim value between field datas!");
-            dim = data->get_dim();
+
+            // todo(SapdeA): now, vector arrays (embedding list) are serialized
+            // to parquet by using binary format which does not provide dim
+            // information so we use this temporary solution.
+            if (is_embedding_list_index(index_type_)) {
+                AssertInfo(elem_type_ != DataType::NONE,
+                           "embedding list index must have elem_type");
+                dim = config[DIM_KEY].get<int64_t>();
+            } else {
+                dim = data->get_dim();
+            }
         }
 
         auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[total_size]);
+
+        size_t lim_offset = 0;
+        std::vector<size_t> lims;
+        lims.reserve(total_num_rows + 1);
+        lims.push_back(lim_offset);
+
         int64_t offset = 0;
-        // TODO: avoid copying
-        for (auto data : field_datas) {
-            std::memcpy(buf.get() + offset, data->Data(), data->Size());
-            offset += data->Size();
-            data.reset();
+        if (!is_embedding_list_index(index_type_)) {
+            // TODO: avoid copying
+            for (auto data : field_datas) {
+                std::memcpy(buf.get() + offset, data->Data(), data->Size());
+                offset += data->Size();
+                data.reset();
+            }
+        } else {
+            auto elem_size = vector_element_size(elem_type_);
+            for (auto data : field_datas) {
+                auto vec_array_data =
+                    dynamic_cast<FieldData<VectorArray>*>(data.get());
+                AssertInfo(vec_array_data != nullptr,
+                           "failed to cast field data to vector array");
+
+                auto rows = vec_array_data->get_num_rows();
+                for (auto i = 0; i < rows; ++i) {
+                    auto size = vec_array_data->DataSize(i);
+                    assert(size % (dim * elem_size) == 0);
+                    assert(dim * elem_size != 0);
+
+                    auto vec_array = vec_array_data->value_at(i);
+
+                    std::memcpy(buf.get() + offset, vec_array->data(), size);
+                    offset += size;
+
+                    lim_offset += size / (dim * elem_size);
+                    lims.push_back(lim_offset);
+                }
+
+                assert(data->Size() == offset);
+
+                data.reset();
+            }
+
+            total_num_rows = lim_offset;
         }
+
         field_datas.clear();
 
         auto dataset = GenDataset(total_num_rows, dim, buf.get());
         if (!scalar_info.empty()) {
             dataset->Set(knowhere::meta::SCALAR_INFO, std::move(scalar_info));
+        }
+        if (!lims.empty()) {
+            dataset->SetLims(lims.data());
         }
         BuildWithDataset(dataset, build_config);
     } else {
@@ -409,7 +469,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
 
-    auto num_queries = dataset->GetRows();
+    auto num_vectors = dataset->GetRows();
     knowhere::Json search_conf = PrepareSearchParams(search_info);
     auto topk = search_info.topk_;
     // TODO :: check dim of search data
@@ -427,7 +487,7 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
                           res.what());
             }
             auto result = ReGenRangeSearchResult(
-                res.value(), topk, num_queries, GetMetricType());
+                res.value(), topk, num_vectors, GetMetricType());
             milvus::tracer::AddEvent("finish_ReGenRangeSearchResult");
             return result;
         } else {
@@ -448,6 +508,8 @@ VectorMemIndex<T>::Query(const DatasetPtr dataset,
     }();
 
     auto ids = final->GetIds();
+    // In embedding list query, final->GetRows() can be different from dataset->GetRows().
+    auto num_queries = final->GetRows();
     float* distances = const_cast<float*>(final->GetDistance());
     final->SetIsOwner(true);
     auto round_decimal = search_info.round_decimal_;
@@ -518,7 +580,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),

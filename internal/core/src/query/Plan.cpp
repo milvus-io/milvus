@@ -30,6 +30,17 @@ ParsePlaceholderGroup(const Plan* plan,
         placeholder_group_blob.size());
 }
 
+bool
+check_data_type(const FieldMeta& field_meta,
+                const milvus::proto::common::PlaceholderType type) {
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        return type ==
+               milvus::proto::common::PlaceholderType::EmbListFloatVector;
+    }
+    return static_cast<int>(field_meta.get_data_type()) ==
+           static_cast<int>(type);
+}
+
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan,
                       const uint8_t* blob,
@@ -44,8 +55,7 @@ ParsePlaceholderGroup(const Plan* plan,
         Assert(plan->tag2field_.count(element.tag_));
         auto field_id = plan->tag2field_.at(element.tag_);
         auto& field_meta = plan->schema_->operator[](field_id);
-        AssertInfo(static_cast<int>(field_meta.get_data_type()) ==
-                       static_cast<int>(info.type()),
+        AssertInfo(check_data_type(field_meta, info.type()),
                    "vector type must be the same, field {} - type {}, search "
                    "info type {}",
                    field_meta.get_name().get(),
@@ -59,19 +69,43 @@ ParsePlaceholderGroup(const Plan* plan,
                 SparseBytesToRows(info.values(), /*validate=*/true);
         } else {
             auto line_size = info.values().Get(0).size();
-            if (field_meta.get_sizeof() != line_size) {
-                ThrowInfo(
-                    DimNotMatch,
-                    fmt::format("vector dimension mismatch, expected vector "
-                                "size(byte) {}, actual {}.",
-                                field_meta.get_sizeof(),
-                                line_size));
-            }
             auto& target = element.blob_;
-            target.reserve(line_size * element.num_of_queries_);
-            for (auto& line : info.values()) {
-                Assert(line_size == line.size());
-                target.insert(target.end(), line.begin(), line.end());
+
+            if (field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
+                if (field_meta.get_sizeof() != line_size) {
+                    PanicInfo(DimNotMatch,
+                              fmt::format(
+                                  "vector dimension mismatch, expected vector "
+                                  "size(byte) {}, actual {}.",
+                                  field_meta.get_sizeof(),
+                                  line_size));
+                }
+                target.reserve(line_size * element.num_of_queries_);
+                for (auto& line : info.values()) {
+                    Assert(line_size == line.size());
+                    target.insert(target.end(), line.begin(), line.end());
+                }
+            } else {
+                target.reserve(line_size * element.num_of_queries_);
+                auto dim = field_meta.get_dim();
+
+                // If the vector is embedding list, line contains multiple vectors.
+                // And we should record the offsets so that we can identify each
+                // embedding list in a flattened vectors.
+                auto& lims = element.lims_;
+                lims.reserve(element.num_of_queries_ + 1);
+                size_t offset = 0;
+                lims.push_back(offset);
+
+                auto elem_size = milvus::index::vector_element_size(
+                    field_meta.get_element_type());
+                for (auto& line : info.values()) {
+                    target.insert(target.end(), line.begin(), line.end());
+
+                    Assert(line.size() % (dim * elem_size) == 0);
+                    offset += line.size() / (dim * elem_size);
+                    lims.push_back(offset);
+                }
             }
         }
         result->emplace_back(std::move(element));

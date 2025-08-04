@@ -241,7 +241,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                              SearchResult& search_result) const {
     AssertInfo(GetMetricType() == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
-    auto num_queries = dataset->GetRows();
+    auto num_rows = dataset->GetRows();
     auto topk = search_info.topk_;
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
@@ -273,7 +273,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
                                       res.what()));
             }
             return ReGenRangeSearchResult(
-                res.value(), topk, num_queries, GetMetricType());
+                res.value(), topk, num_rows, GetMetricType());
         } else {
             auto res = index_.Search(dataset, search_config, bitset);
             if (!res.has_value()) {
@@ -287,6 +287,8 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
     }();
 
     auto ids = final->GetIds();
+    // In embedding list query, final->GetRows() can be different from dataset->GetRows().
+    auto num_queries = final->GetRows();
     float* distances = const_cast<float*>(final->GetDistance());
     final->SetIsOwner(true);
 

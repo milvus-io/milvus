@@ -396,6 +396,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
+                  const size_t* query_lims,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,

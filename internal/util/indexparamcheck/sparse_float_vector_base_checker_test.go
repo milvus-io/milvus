@@ -23,12 +23,12 @@ func Test_sparseFloatVectorBaseChecker_StaticCheck(t *testing.T) {
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("SPARSE_INVERTED_INDEX")
 
 	t.Run("valid metric", func(t *testing.T) {
-		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, validParams)
+		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, validParams)
 		assert.NoError(t, err)
 	})
 
 	t.Run("invalid metric", func(t *testing.T) {
-		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, invalidParams)
+		err := c.StaticCheck(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, invalidParams)
 		assert.Error(t, err)
 	})
 }
@@ -63,22 +63,22 @@ func Test_sparseFloatVectorBaseChecker_CheckTrain(t *testing.T) {
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("SPARSE_INVERTED_INDEX")
 
 	t.Run("valid params", func(t *testing.T) {
-		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, validParams)
+		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, validParams)
 		assert.NoError(t, err)
 	})
 
 	t.Run("invalid drop ratio", func(t *testing.T) {
-		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, invalidDropRatio)
+		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, invalidDropRatio)
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid BM25K1", func(t *testing.T) {
-		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, invalidBM25K1)
+		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, invalidBM25K1)
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid BM25B", func(t *testing.T) {
-		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, invalidBM25B)
+		err := c.CheckTrain(schemapb.DataType_SparseFloatVector, schemapb.DataType_None, invalidBM25B)
 		assert.Error(t, err)
 	})
 }

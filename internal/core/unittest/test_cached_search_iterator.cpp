@@ -124,7 +124,8 @@ class CachedSearchIteratorTest
                     search_info,
                     std::map<std::string, std::string>{},
                     bitset,
-                    data_type_);
+                    data_type_,
+                    DataType::NONE);
 
             case ConstructorType::ChunkedColumn:
                 return std::make_unique<CachedSearchIterator>(
@@ -133,7 +134,8 @@ class CachedSearchIteratorTest
                     search_info,
                     std::map<std::string, std::string>{},
                     bitset,
-                    data_type_);
+                    data_type_,
+                    DataType::NONE);
             default:
                 return nullptr;
         }
@@ -699,7 +701,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          std::map<std::string, std::string>{},
                          nullptr,
-                         data_type_),
+                         data_type_,
+                         DataType::NONE),
                      SegcoreError);
 
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
@@ -709,7 +712,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          std::map<std::string, std::string>{},
                          nullptr,
-                         data_type_),
+                         data_type_,
+                         DataType::NONE),
                      SegcoreError);
 
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
@@ -719,7 +723,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          std::map<std::string, std::string>{},
                          nullptr,
-                         data_type_),
+                         data_type_,
+                         DataType::NONE),
                      SegcoreError);
     } else if (std::get<0>(GetParam()) == ConstructorType::ChunkedColumn) {
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
@@ -728,7 +733,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          std::map<std::string, std::string>{},
                          nullptr,
-                         data_type_),
+                         data_type_,
+                         DataType::NONE),
                      SegcoreError);
         EXPECT_THROW(auto iterator = std::make_unique<CachedSearchIterator>(
                          column_.get(),
@@ -736,7 +742,8 @@ TEST_P(CachedSearchIteratorTest, ConstructorWithInvalidParams) {
                          search_info,
                          std::map<std::string, std::string>{},
                          nullptr,
-                         data_type_),
+                         data_type_,
+                         DataType::NONE),
                      SegcoreError);
     }
 }

@@ -11,6 +11,11 @@
 
 #include <string>
 #include <vector>
+#include <execinfo.h>
+#include <cxxabi.h>
+#include <dlfcn.h>
+#include <sstream>
+#include <iostream>
 
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
@@ -89,8 +94,23 @@ PrepareBFDataSet(const dataset::SearchDataset& query_ds,
                  DataType data_type) {
     auto base_dataset =
         knowhere::GenDataSet(raw_ds.num_raw_data, raw_ds.dim, raw_ds.raw_data);
+    if (raw_ds.raw_data_lims != nullptr) {
+        // knowhere::DataSet count vectors in a flattened manner where as the num_raw_data here is the number
+        // of embedding lists where each embedding list contains multiple vectors. So we should use the last element
+        // in lims which equals to the total number of vectors.
+        base_dataset->SetLims(raw_ds.raw_data_lims);
+        // the length of lims equals to the number of embedding lists + 1
+        base_dataset->SetRows(raw_ds.raw_data_lims[raw_ds.num_raw_data]);
+    }
+
     auto query_dataset = knowhere::GenDataSet(
         query_ds.num_queries, query_ds.dim, query_ds.query_data);
+    if (query_ds.query_lims != nullptr) {
+        // ditto
+        query_dataset->SetLims(query_ds.query_lims);
+        query_dataset->SetRows(query_ds.query_lims[query_ds.num_queries]);
+    }
+
     if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
         base_dataset->SetIsSparse(true);
         query_dataset->SetIsSparse(true);
@@ -105,7 +125,8 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const SearchInfo& search_info,
                  const std::map<std::string, std::string>& index_info,
                  const BitsetView& bitset,
-                 DataType data_type) {
+                 DataType data_type,
+                 DataType element_type) {
     SubSearchResult sub_result(query_ds.num_queries,
                                query_ds.topk,
                                query_ds.metric_type,
@@ -122,7 +143,18 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
     sub_result.mutable_seg_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
 
+    // For vector array (embedding list), element type is used to determine how to operate search.
+    if (data_type == DataType::VECTOR_ARRAY) {
+        AssertInfo(element_type != DataType::NONE,
+                   "Element type is not specified for vector array");
+        data_type = element_type;
+    }
+
     if (search_cfg.contains(RADIUS)) {
+        AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                   "Vector array(embedding list) is not supported for range "
+                   "search");
+
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],
                                   search_cfg[RANGE_FILTER],
@@ -238,7 +270,10 @@ DispatchBruteForceIteratorByDataType(const knowhere::DataSetPtr& base_dataset,
                                      const knowhere::DataSetPtr& query_dataset,
                                      const knowhere::Json& config,
                                      const BitsetView& bitset,
-                                     const milvus::DataType& data_type) {
+                                     milvus::DataType data_type) {
+    AssertInfo(data_type != DataType::VECTOR_ARRAY,
+               "VECTOR_ARRAY is not supported for brute force iterator");
+
     switch (data_type) {
         case DataType::VECTOR_FLOAT:
             return knowhere::BruteForce::AnnIterator<float>(

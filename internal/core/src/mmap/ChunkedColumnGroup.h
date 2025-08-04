@@ -319,6 +319,20 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             static_cast<VectorArrayChunk*>(chunk.get())->Views());
     }
 
+    PinWrapper<std::vector<size_t>>
+    VectorArrayLims(int64_t chunk_id) const override {
+        if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
+            PanicInfo(ErrorCode::Unsupported,
+                      "VectorArrayLims only supported for "
+                      "ChunkedVectorArrayColumn");
+        }
+        auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<std::vector<size_t>>(
+            chunk_wrapper,
+            static_cast<VectorArrayChunk*>(chunk.get())->Lims());
+    }
+
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViewsByOffsets(int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const override {

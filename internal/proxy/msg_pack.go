@@ -178,6 +178,7 @@ func setMsgID(ctx context.Context,
 	return nil
 }
 
+// note: the struct field data is flattened before this function
 func repackInsertData(ctx context.Context,
 	channelNames []string,
 	insertMsg *msgstream.InsertMsg,

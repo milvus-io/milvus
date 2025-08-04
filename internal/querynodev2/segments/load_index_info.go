@@ -33,7 +33,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -113,25 +112,6 @@ func (li *LoadIndexInfo) appendIndexFile(ctx context.Context, filePath string) e
 		return nil, nil
 	}).Await()
 	return HandleCStatus(ctx, &status, "AppendIndexIFile failed")
-}
-
-// appendFieldInfo appends fieldID & fieldType to index
-func (li *LoadIndexInfo) appendFieldInfo(ctx context.Context, collectionID int64, partitionID int64, segmentID int64, fieldID int64, fieldType schemapb.DataType, enableMmap bool, mmapDirPath string) error {
-	var status C.CStatus
-	GetDynamicPool().Submit(func() (any, error) {
-		cColID := C.int64_t(collectionID)
-		cParID := C.int64_t(partitionID)
-		cSegID := C.int64_t(segmentID)
-		cFieldID := C.int64_t(fieldID)
-		cintDType := uint32(fieldType)
-		cEnableMmap := C.bool(enableMmap)
-		cMmapDirPath := C.CString(mmapDirPath)
-		defer C.free(unsafe.Pointer(cMmapDirPath))
-		status = C.AppendFieldInfo(li.cLoadIndexInfo, cColID, cParID, cSegID, cFieldID, cintDType, cEnableMmap, cMmapDirPath)
-		return nil, nil
-	}).Await()
-
-	return HandleCStatus(ctx, &status, "AppendFieldInfo failed")
 }
 
 func (li *LoadIndexInfo) appendStorageInfo(uri string, version int64) {

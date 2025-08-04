@@ -68,6 +68,8 @@ const (
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
+	// offsets for embedding list search
+	LimsKey = "lims"
 
 	SearchIterV2Key        = "search_iter_v2"
 	SearchIterBatchSizeKey = "search_iter_batch_size"

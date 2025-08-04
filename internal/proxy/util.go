@@ -619,9 +619,6 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if field.GetNullable() {
 		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
 	}
-
-	// todo(SpadeA): add more check when index is enabled
-
 	return nil
 }
 
@@ -2684,4 +2681,89 @@ func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {
 	}
 
 	return 0
+}
+
+// reconstructStructFieldDataCommon reconstructs struct fields from flattened sub-fields
+// It works with both QueryResults and SearchResults by operating on the common data structures
+func reconstructStructFieldDataCommon(
+	fieldsData []*schemapb.FieldData,
+	outputFields []string,
+	schema *schemapb.CollectionSchema,
+) ([]*schemapb.FieldData, []string) {
+	if len(outputFields) == 1 && outputFields[0] == "count(*)" {
+		return fieldsData, outputFields
+	}
+
+	if len(schema.StructArrayFields) == 0 {
+		return fieldsData, outputFields
+	}
+
+	regularFieldIDs := make(map[int64]interface{})
+	subFieldToStructMap := make(map[int64]int64)
+	groupedStructFields := make(map[int64][]*schemapb.FieldData)
+	structFieldNames := make(map[int64]string)
+	reconstructedOutputFields := make([]string, 0, len(fieldsData))
+
+	// record all regular field IDs
+	for _, field := range schema.Fields {
+		regularFieldIDs[field.GetFieldID()] = nil
+	}
+
+	// build the mapping from sub-field ID to struct field ID
+	for _, structField := range schema.StructArrayFields {
+		for _, subField := range structField.GetFields() {
+			subFieldToStructMap[subField.GetFieldID()] = structField.GetFieldID()
+		}
+		structFieldNames[structField.GetFieldID()] = structField.GetName()
+	}
+
+	newFieldsData := make([]*schemapb.FieldData, 0, len(fieldsData))
+	for _, field := range fieldsData {
+		fieldID := field.GetFieldId()
+		if _, ok := regularFieldIDs[fieldID]; ok {
+			newFieldsData = append(newFieldsData, field)
+			reconstructedOutputFields = append(reconstructedOutputFields, field.GetFieldName())
+		} else {
+			structFieldID := subFieldToStructMap[fieldID]
+			groupedStructFields[structFieldID] = append(groupedStructFields[structFieldID], field)
+		}
+	}
+
+	for structFieldID, fields := range groupedStructFields {
+		fieldData := &schemapb.FieldData{
+			FieldName: structFieldNames[structFieldID],
+			FieldId:   structFieldID,
+			Type:      schemapb.DataType_ArrayOfStruct,
+			Field:     &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: fields}},
+		}
+		newFieldsData = append(newFieldsData, fieldData)
+		reconstructedOutputFields = append(reconstructedOutputFields, structFieldNames[structFieldID])
+	}
+
+	return newFieldsData, reconstructedOutputFields
+}
+
+// Wrapper for QueryResults
+func reconstructStructFieldDataForQuery(results *milvuspb.QueryResults, schema *schemapb.CollectionSchema) {
+	fieldsData, outputFields := reconstructStructFieldDataCommon(
+		results.FieldsData,
+		results.OutputFields,
+		schema,
+	)
+	results.FieldsData = fieldsData
+	results.OutputFields = outputFields
+}
+
+// New wrapper for SearchResults
+func reconstructStructFieldDataForSearch(results *milvuspb.SearchResults, schema *schemapb.CollectionSchema) {
+	if results.Results == nil {
+		return
+	}
+	fieldsData, outputFields := reconstructStructFieldDataCommon(
+		results.Results.FieldsData,
+		results.Results.OutputFields,
+		schema,
+	)
+	results.Results.FieldsData = fieldsData
+	results.Results.OutputFields = outputFields
 }

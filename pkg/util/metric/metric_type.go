@@ -43,4 +43,6 @@ const (
 	BM25 MetricType = "BM25"
 
 	EMPTY MetricType = ""
+
+	MAX_SIM MetricType = "MAX_SIM"
 )

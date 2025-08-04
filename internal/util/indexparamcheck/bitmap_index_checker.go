@@ -11,8 +11,8 @@ type BITMAPChecker struct {
 	scalarIndexChecker
 }
 
-func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
-	return c.scalarIndexChecker.CheckTrain(dataType, params)
+func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
+	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
 }
 
 func (c *BITMAPChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {

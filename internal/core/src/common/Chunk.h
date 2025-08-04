@@ -424,6 +424,26 @@ class VectorArrayChunk : public Chunk {
                   "VectorArrayChunk::ValueAt is not supported");
     }
 
+    const char*
+    Data() const override {
+        return data_ + offsets_lens_[0];
+    }
+
+    // The name 'Lims' is consistent with knowhere::DataSet::SetLims which describes the number of vectors
+    // in each vector array (embedding list). This is needed as vectors are flattened in the chunk.
+    const std::vector<size_t>
+    Lims() const {
+        auto offset = 0;
+        std::vector<size_t> offsets;
+        offsets.reserve(row_nums_ + 1);
+        offsets.push_back(offset);
+        for (int64_t i = 0; i < row_nums_; i++) {
+            offset += offsets_lens_[i * 2 + 1];
+            offsets.push_back(offset);
+        }
+        return offsets;
+    }
+
  private:
     int64_t dim_;
     uint32_t* offsets_lens_;

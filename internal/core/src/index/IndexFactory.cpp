@@ -98,13 +98,18 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
 LoadResourceRequest
 IndexFactory::IndexLoadResource(
     DataType field_type,
+    DataType element_type,
     IndexVersion index_version,
     float index_size,
     const std::map<std::string, std::string>& index_params,
     bool mmap_enable) {
     if (milvus::IsVectorDataType(field_type)) {
-        return VecIndexLoadResource(
-            field_type, index_version, index_size, index_params, mmap_enable);
+        return VecIndexLoadResource(field_type,
+                                    element_type,
+                                    index_version,
+                                    index_size,
+                                    index_params,
+                                    mmap_enable);
     } else {
         return ScalarIndexLoadResource(
             field_type, index_version, index_size, index_params, mmap_enable);
@@ -114,6 +119,7 @@ IndexFactory::IndexLoadResource(
 LoadResourceRequest
 IndexFactory::VecIndexLoadResource(
     DataType field_type,
+    DataType element_type,
     IndexVersion index_version,
     float index_size,
     const std::map<std::string, std::string>& index_params,
@@ -198,6 +204,29 @@ IndexFactory::VecIndexLoadResource(
                 knowhere::IndexStaticFaced<knowhere::int8>::HasRawData(
                     index_type, index_version, config);
             break;
+        case milvus::DataType::VECTOR_ARRAY: {
+            switch (element_type) {
+                case milvus::DataType::VECTOR_FLOAT:
+                    resource = knowhere::IndexStaticFaced<
+                        knowhere::fp32>::EstimateLoadResource(index_type,
+                                                              index_version,
+                                                              index_size_gb,
+                                                              config);
+                    has_raw_data =
+                        knowhere::IndexStaticFaced<knowhere::fp32>::HasRawData(
+                            index_type, index_version, config);
+                    break;
+
+                default:
+                    LOG_ERROR(
+                        "invalid data type to estimate index load resource: "
+                        "field_type {}, element_type {}",
+                        field_type,
+                        element_type);
+                    return LoadResourceRequest{0, 0, 0, 0, true};
+            }
+            break;
+        }
         default:
             LOG_ERROR("invalid data type to estimate index load resource: {}",
                       field_type);
@@ -491,8 +520,12 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<float>>(
                     index_type, metric_type, version, file_manager_context);
             }
+            case DataType::VECTOR_ARRAY: {
+                PanicInfo(Unsupported, "VECTOR_ARRAY is not supported");
+            }
             case DataType::VECTOR_INT8: {
                 // TODO caiyd, not support yet
+                PanicInfo(Unsupported, "VECTOR_INT8 is not supported");
             }
             default:
                 ThrowInfo(
@@ -505,6 +538,7 @@ IndexFactory::CreateVectorIndex(
             case DataType::VECTOR_FLOAT:
             case DataType::VECTOR_SPARSE_FLOAT: {
                 return std::make_unique<VectorMemIndex<float>>(
+                    DataType::NONE,
                     index_type,
                     metric_type,
                     version,
@@ -513,6 +547,7 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorMemIndex<bin1>>(
+                    DataType::NONE,
                     index_type,
                     metric_type,
                     version,
@@ -521,6 +556,7 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_FLOAT16: {
                 return std::make_unique<VectorMemIndex<float16>>(
+                    DataType::NONE,
                     index_type,
                     metric_type,
                     version,
@@ -529,6 +565,7 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_BFLOAT16: {
                 return std::make_unique<VectorMemIndex<bfloat16>>(
+                    DataType::NONE,
                     index_type,
                     metric_type,
                     version,
@@ -537,11 +574,32 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_INT8: {
                 return std::make_unique<VectorMemIndex<int8>>(
+                    DataType::NONE,
                     index_type,
                     metric_type,
                     version,
                     use_knowhere_build_pool,
                     file_manager_context);
+            }
+            case DataType::VECTOR_ARRAY: {
+                auto element_type =
+                    static_cast<DataType>(file_manager_context.fieldDataMeta
+                                              .field_schema.element_type());
+                switch (element_type) {
+                    case DataType::VECTOR_FLOAT:
+                        return std::make_unique<VectorMemIndex<float>>(
+                            element_type,
+                            index_type,
+                            metric_type,
+                            version,
+                            use_knowhere_build_pool,
+                            file_manager_context);
+                    default:
+                        PanicInfo(NotImplemented,
+                                  fmt::format("not implemented data type to "
+                                              "build mem index: {}",
+                                              data_type));
+                }
             }
             default:
                 ThrowInfo(
