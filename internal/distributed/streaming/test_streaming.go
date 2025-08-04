@@ -21,6 +21,7 @@ package streaming
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -53,7 +54,7 @@ func SetupNoopWALForTest() {
 type noopLocal struct{}
 
 func (n *noopLocal) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
-	return 0, nil
+	return 0, errors.New("not implemented")
 }
 
 func (n *noopLocal) GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
@@ -141,7 +142,7 @@ func (n *noopWALAccesser) Broadcast() Broadcast {
 }
 
 func (n *noopWALAccesser) Read(ctx context.Context, opts ReadOption) Scanner {
-	return nil
+	return &noopScanner{}
 }
 
 func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
@@ -160,6 +161,19 @@ func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.Mu
 
 func (n *noopWALAccesser) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
 	return AppendResponses{}
+}
+
+type noopScanner struct{}
+
+func (n *noopScanner) Done() <-chan struct{} {
+	return make(chan struct{})
+}
+
+func (n *noopScanner) Error() error {
+	return nil
+}
+
+func (n *noopScanner) Close() {
 }
 
 // getExpectErr is a helper function to get the error from the expectErr channel.

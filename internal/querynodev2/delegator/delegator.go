@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -135,8 +134,6 @@ type shardDelegator struct {
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
-	// dispatcherClient msgdispatcher.Client
-	factory msgstream.Factory
 
 	sf          conc.Singleflight[struct{}]
 	loader      segments.Loader
@@ -1144,8 +1141,7 @@ func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersi
 
 // NewShardDelegator creates a new ShardDelegator instance with all fields initialized.
 func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID UniqueID, channel string, version int64,
-	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader,
-	factory msgstream.Factory, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
+	workerManager cluster.Manager, manager *segments.Manager, loader segments.Loader, startTs uint64, queryHook optimizers.QueryHook, chunkManager storage.ChunkManager,
 	queryView *channelQueryView,
 ) (ShardDelegator, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID),
@@ -1183,7 +1179,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		pkOracle:         pkoracle.NewPkOracle(),
 		latestTsafe:      atomic.NewUint64(startTs),
 		loader:           loader,
-		factory:          factory,
 		queryHook:        queryHook,
 		chunkManager:     chunkManager,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),

@@ -312,6 +312,8 @@ func TestProxy(t *testing.T) {
 	params.DataNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
 	params.Save(params.MQCfg.Type.Key, "pulsar")
+	params.CommonCfg.EnableStorageV2.SwapTempValue("false")
+	defer params.CommonCfg.EnableStorageV2.SwapTempValue("")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")
@@ -1126,6 +1128,10 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		segmentIDs = resp.CollSegIDs[collectionName].Data
+		// TODO: Here's a Bug, because a growing segment may cannot be seen right away by mixcoord,
+		// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
+		// use timetick for GetFlushState in-future but not segment list.
+		time.Sleep(5 * time.Second)
 		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
 
 		f := func() bool {

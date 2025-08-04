@@ -49,12 +49,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -68,7 +68,6 @@ import (
 type ServiceSuite struct {
 	suite.Suite
 	// Data
-	msgChan        chan *msgstream.ConsumeMsgPack
 	collectionID   int64
 	collectionName string
 	schema         *schemapb.CollectionSchema
@@ -92,8 +91,7 @@ type ServiceSuite struct {
 	chunkManagerFactory *storage.ChunkManagerFactory
 
 	// Mock
-	factory   *dependency.MockFactory
-	msgStream *msgstream.MockMsgStream
+	factory *dependency.MockFactory
 }
 
 func (suite *ServiceSuite) SetupSuite() {
@@ -129,7 +127,6 @@ func (suite *ServiceSuite) SetupTest() {
 	ctx := context.Background()
 	// init mock
 	suite.factory = dependency.NewMockFactory(suite.T())
-	suite.msgStream = msgstream.NewMockMsgStream(suite.T())
 	// TODO:: cpp chunk manager not support local chunk manager
 	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, suite.T().TempDir())
 	// suite.chunkManagerFactory = storage.NewChunkManagerFactory("local", storage.RootPath("/tmp/milvus-test"))
@@ -315,13 +312,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsInt64() {
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(suite.collectionID, schema),
 	}
 
-	// mocks
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil).Maybe()
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil).Maybe()
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	suite.msgStream.EXPECT().Chan().Return(suite.msgChan).Maybe()
-	suite.msgStream.EXPECT().Close().Maybe()
-
 	// watchDmChannels
 	status, err := suite.node.WatchDmChannels(ctx, req)
 	suite.NoError(err)
@@ -366,13 +356,6 @@ func (suite *ServiceSuite) TestWatchDmChannelsVarchar() {
 		},
 		IndexInfoList: mock_segcore.GenTestIndexInfoList(suite.collectionID, schema),
 	}
-
-	// mocks
-	suite.factory.EXPECT().NewTtMsgStream(mock.Anything).Return(suite.msgStream, nil).Maybe()
-	suite.msgStream.EXPECT().AsConsumer(mock.Anything, []string{suite.pchannel}, mock.Anything, mock.Anything).Return(nil).Maybe()
-	suite.msgStream.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-	suite.msgStream.EXPECT().Chan().Return(suite.msgChan).Maybe()
-	suite.msgStream.EXPECT().Close().Maybe()
 
 	// watchDmChannels
 	status, err := suite.node.WatchDmChannels(ctx, req)
@@ -2437,6 +2420,13 @@ func TestQueryNodeService(t *testing.T) {
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
+	wal.EXPECT().WALName().Return(rmq.WALName).Maybe()
+	scanner := mock_streaming.NewMockScanner(t)
+	scanner.EXPECT().Done().Return(make(chan struct{})).Maybe()
+	scanner.EXPECT().Error().Return(nil).Maybe()
+	scanner.EXPECT().Close().Return().Maybe()
+	wal.EXPECT().Read(mock.Anything, mock.Anything).Return(scanner).Maybe()
+
 	streaming.SetWALForTest(wal)
 	defer streaming.RecoverWALForTest()
 

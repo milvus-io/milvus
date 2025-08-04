@@ -19,6 +19,7 @@ package delegator
 import (
 	"context"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -50,6 +52,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	streaming.SetupNoopWALForTest()
+
+	os.Exit(m.Run())
+}
 
 type DelegatorSuite struct {
 	suite.Suite
@@ -164,11 +172,7 @@ func (s *DelegatorSuite) SetupTest() {
 
 	var err error
 	//	s.delegator, err = NewShardDelegator(s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader)
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
-		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-			return s.mq, nil
-		},
-	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 }
 
@@ -203,11 +207,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
-			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-				return s.mq, nil
-			},
-		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.Error(err)
 	})
 
@@ -246,11 +246,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 			}},
 		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, &msgstream.MockMqFactory{
-			NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-				return s.mq, nil
-			},
-		}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		_, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 	})
 }
@@ -1410,11 +1406,7 @@ func (s *DelegatorSuite) TestUpdateSchema() {
 func (s *DelegatorSuite) ResetDelegator() {
 	var err error
 	s.delegator.Close()
-	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
-		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-			return s.mq, nil
-		},
-	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.delegator, err = NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 }
 
