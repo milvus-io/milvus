@@ -936,17 +936,6 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	if segment == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
-	// set segment to SegmentState_Flushed
-	var operators []UpdateOperator
-	if enableSortCompaction() {
-		operators = append(operators, SetSegmentIsInvisible(segmentID, true))
-	}
-	operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
-	err := s.meta.UpdateSegmentsInfo(ctx, operators...)
-	if err != nil {
-		log.Warn("flush segment complete failed", zap.Error(err))
-		return err
-	}
 
 	if enableSortCompaction() {
 		select {
@@ -986,12 +975,40 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 func (s *Server) handleFlushingSegments(ctx context.Context) {
 	segments := s.meta.GetFlushingSegments()
 	for _, segment := range segments {
+		// The old flushing segment may not be flushed, so we need to flush it again.
+		// It should be retry until success
+		if err := s.flushFlushingSegment(ctx, segment.ID); err != nil {
+			log.Warn("flush flushing segment failed", zap.Int64("segmentID", segment.ID), zap.Error(err))
+			return
+		}
+		log.Info("flush flushing segment success", zap.Int64("segmentID", segment.ID))
 		select {
 		case <-ctx.Done():
 			return
 		case s.flushCh <- segment.ID:
 		}
 	}
+}
+
+// flushFlushingSegment flushes a segment to `Flushed` state
+func (s *Server) flushFlushingSegment(ctx context.Context, segmentID UniqueID) error {
+	return retry.Do(ctx, func() error {
+		// set segment to SegmentState_Flushed
+		var operators []UpdateOperator
+		if enableSortCompaction() {
+			operators = append(operators, SetSegmentIsInvisible(segmentID, true))
+		}
+		operators = append(operators, UpdateStatusOperator(segmentID, commonpb.SegmentState_Flushed))
+		if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
+			log.Warn("flush segment complete failed", zap.Int64("segmentID", segmentID), zap.Error(err))
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// underlying etcd may return context canceled, so we need to return a error to retry.
+			return errors.New("flush segment complete failed")
+		}
+		return nil
+	}, retry.AttemptAlways())
 }
 
 func (s *Server) initMixCoord() error {

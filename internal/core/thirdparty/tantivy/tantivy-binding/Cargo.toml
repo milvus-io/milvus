@@ -26,6 +26,7 @@ overflow-checks = false
 tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
 tantivy-5 = { package = "tantivy", git = "https://github.com/zilliztech/tantivy", tag = "0.21.1-fix4" }
 lindera = "0.42.4"
+fs2 = "0.4"
 lindera-dictionary = "0.42.4"
 futures = "0.3.21"
 libc = "0.2"
@@ -42,6 +43,7 @@ icu_segmenter = "2.0.0-beta2"
 whatlang = "0.16.4"
 lingua = "1.7.1"
 fancy-regex = "0.14.0"
+unicode-general-category = "1.0.0"
 
 # lindera dependencies for fetch and prepare dictionary online.
 tokio = { version = "1.45.0", features = [

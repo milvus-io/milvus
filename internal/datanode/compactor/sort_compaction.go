@@ -225,7 +225,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	binlogs, stats, bm25stats := srw.GetLogs()
-	insertLogs := lo.Values(binlogs)
+	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}

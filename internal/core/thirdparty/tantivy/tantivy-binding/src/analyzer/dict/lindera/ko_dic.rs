@@ -1,21 +1,18 @@
 use super::fetch;
 use crate::error::{Result, TantivyBindingError};
 use lindera_dictionary::dictionary_builder::ko_dic::KoDicBuilder;
-use tokio::runtime::Runtime;
 
 #[cfg(feature = "lindera-ko-dic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
 #[cfg(not(feature = "lindera-ko-dic"))]
-async fn download(params: &fetch::FetchParams) -> Result<()> {
-    fetch::fetch(params, KoDicBuilder::new())
-        .await
-        .map_err(|e| {
-            TantivyBindingError::InternalError(format!(
-                "fetch ko-dic failed with error: {}",
-                e.to_string()
-            ))
-        })
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::fetch(params, KoDicBuilder::new()).map_err(|e| {
+        TantivyBindingError::InternalError(format!(
+            "fetch ko-dic failed with error: {}",
+            e.to_string()
+        ))
+    })
 }
 
 #[cfg(not(feature = "lindera-ko-dic"))]
@@ -40,8 +37,7 @@ pub fn load_ko_dic(
         params.download_urls = download_url
     }
 
-    let rt = Runtime::new().unwrap();
-    rt.block_on(download(&params))?;
+    download(&params)?;
     fetch::load(&params)
 }
 

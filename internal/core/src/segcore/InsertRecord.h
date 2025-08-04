@@ -321,12 +321,20 @@ struct InsertRecord {
     }
 
     std::vector<SegOffset>
-    search_pk(const PkType& pk, Timestamp timestamp) const {
+    search_pk(const PkType& pk,
+              Timestamp timestamp,
+              bool include_same_ts = true) const {
         std::shared_lock lck(shared_mutex_);
         std::vector<SegOffset> res_offsets;
         auto offset_iter = pk2offset_->find(pk);
+        auto timestamp_hit =
+            include_same_ts ? [](const Timestamp& ts1,
+                                 const Timestamp& ts2) { return ts1 <= ts2; }
+                            : [](const Timestamp& ts1, const Timestamp& ts2) {
+                                  return ts1 < ts2;
+                              };
         for (auto offset : offset_iter) {
-            if (timestamps_[offset] <= timestamp) {
+            if (timestamp_hit(timestamps_[offset], timestamp)) {
                 res_offsets.emplace_back(offset);
             }
         }

@@ -65,6 +65,10 @@ class GroupChunkTranslator
     std::pair<size_t, size_t>
     get_file_and_row_group_index(milvus::cachinglayer::cid_t cid) const;
 
+    milvus::cachinglayer::cid_t
+    get_cid_from_file_and_row_group_index(size_t file_idx,
+                                          size_t row_group_idx) const;
+
     milvus::cachinglayer::Meta*
     meta() override {
         return &meta_;
@@ -81,6 +85,7 @@ class GroupChunkTranslator
     FieldDataInfo column_group_info_;
     std::vector<std::string> insert_files_;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
+    std::vector<size_t> file_row_group_prefix_sum_;
     SchemaPtr schema_;
     bool is_sorted_by_pk_;
     ChunkedSegmentSealedImpl* chunked_segment_;

@@ -439,14 +439,31 @@ func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
 	return fmt.Errorf(`index param "metric_type" is not specified for index float vector %s`, field.GetName())
 }
 
-func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
+func validateDuplicatedFieldName(schema *schemapb.CollectionSchema) error {
 	names := make(map[string]bool)
-	for _, field := range fields {
-		_, ok := names[field.Name]
+	validateFieldNames := func(name string) error {
+		_, ok := names[name]
 		if ok {
-			return errors.Newf("duplicated field name %s found", field.GetName())
+			return errors.Newf("duplicated field name %s found", name)
 		}
-		names[field.Name] = true
+		names[name] = true
+		return nil
+	}
+	for _, field := range schema.Fields {
+		if err := validateFieldNames(field.Name); err != nil {
+			return err
+		}
+	}
+	for _, structArrayField := range schema.StructArrayFields {
+		if err := validateFieldNames(structArrayField.Name); err != nil {
+			return err
+		}
+
+		for _, field := range structArrayField.Fields {
+			if err := validateFieldNames(field.Name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -477,6 +494,14 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 			}
 		}
 	}
+	for _, structArrayField := range schema.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+				return errors.Newf("fields in StructArrayField must be Array or ArrayOfVector, field name = %s, field type = %s",
+					field.GetName(), field.GetDataType().String())
+			}
+		}
+	}
 	return nil
 }
 
@@ -491,6 +516,13 @@ func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 			idx = i
 			if !field.IsPrimaryKey {
 				return fmt.Errorf("only primary field can speficy AutoID with true, field name = %s", field.Name)
+			}
+		}
+	}
+	for _, structArrayField := range coll.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.AutoID {
+				return errors.Newf("autoID is not supported for struct field, field name = %s", field.Name)
 			}
 		}
 	}
@@ -527,6 +559,11 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 			return err
 		}
 	}
+
+	if field.DataType == schemapb.DataType_ArrayOfVector {
+		return fmt.Errorf("array of vector can only be in the struct array field, field name: %s", field.Name)
+	}
+
 	// TODO should remove the index params in the field schema
 	indexParams := funcutil.KeyValuePair2Map(field.GetIndexParams())
 	if err = ValidateAutoIndexMmapConfig(isVectorType, indexParams); err != nil {
@@ -535,6 +572,68 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 
 	if err := validateAnalyzer(schema, field); err != nil {
 		return err
+	}
+	return nil
+}
+
+func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.CollectionSchema) error {
+	// validate field name
+	var err error
+	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+
+	if field.DataType != schemapb.DataType_Array && field.DataType != schemapb.DataType_ArrayOfVector {
+		return fmt.Errorf("Fields in StructArrayField can only be array or array of struct, but field %s is %s", field.Name, field.DataType.String())
+	}
+
+	if field.ElementType == schemapb.DataType_ArrayOfStruct || field.ElementType == schemapb.DataType_ArrayOfVector ||
+		field.ElementType == schemapb.DataType_Array {
+		return fmt.Errorf("Nested array is not supported %s", field.Name)
+	}
+
+	if field.DataType == schemapb.DataType_Array {
+		if typeutil.IsVectorType(field.GetElementType()) {
+			return fmt.Errorf("Inconsistent schema: element type of array field %s is a vector type", field.Name)
+		}
+	} else {
+		if !typeutil.IsVectorType(field.GetElementType()) {
+			return fmt.Errorf("Inconsistent schema: element type of array field %s is not a vector type", field.Name)
+		}
+		err = validateDimension(field)
+		if err != nil {
+			return err
+		}
+	}
+
+	// valid max length per row parameters
+	// if max_length not specified, return error
+	if field.ElementType == schemapb.DataType_VarChar {
+		err = validateMaxLengthPerRow(schema.Name, field)
+		if err != nil {
+			return err
+		}
+	}
+
+	// todo(SpadeA): make nullable field in struct array supported
+	if field.GetNullable() {
+		return fmt.Errorf("nullable is not supported for fields in struct array now, fieldName = %s", field.Name)
+	}
+
+	// todo(SpadeA): add more check when index is enabled
+
+	return nil
+}
+
+func ValidateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema, schema *schemapb.CollectionSchema) error {
+	if len(structArrayField.Fields) == 0 {
+		return fmt.Errorf("struct array field %s has no sub-fields", structArrayField.Name)
+	}
+
+	for _, subField := range structArrayField.Fields {
+		if err := ValidateFieldsInStruct(subField, schema); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -667,6 +766,15 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	if idx == -1 {
 		return errors.New("primary key is not specified")
 	}
+
+	for _, structArrayField := range coll.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			if field.IsPrimaryKey {
+				return errors.Newf("primary key is not supported for struct field, field name = %s", field.Name)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -721,93 +829,6 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 		}
 	}
 	return fmt.Errorf("data_type %s mismatch with metric_type %s", dataType.String(), metricTypeStrRaw)
-}
-
-func validateSchema(coll *schemapb.CollectionSchema) error {
-	autoID := coll.AutoID
-	primaryIdx := -1
-	idMap := make(map[int64]int)    // fieldId -> idx
-	nameMap := make(map[string]int) // name -> idx
-	for idx, field := range coll.Fields {
-		// check system field
-		if field.FieldID < 100 {
-			// System Fields, not injected yet
-			return fmt.Errorf("fieldID(%d) that is less than 100 is reserved for system fields: %s", field.FieldID, field.Name)
-		}
-
-		// primary key detector
-		if field.IsPrimaryKey {
-			if autoID {
-				return errors.New("autoId forbids primary key")
-			} else if primaryIdx != -1 {
-				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[primaryIdx].Name, field.Name)
-			}
-			if field.DataType != schemapb.DataType_Int64 {
-				return errors.New("type of primary key should be int64")
-			}
-			primaryIdx = idx
-		}
-		// check unique
-		elemIdx, ok := idMap[field.FieldID]
-		if ok {
-			return fmt.Errorf("duplicate field ids: %d", coll.Fields[elemIdx].FieldID)
-		}
-		idMap[field.FieldID] = idx
-		elemIdx, ok = nameMap[field.Name]
-		if ok {
-			return fmt.Errorf("duplicate field names: %s", coll.Fields[elemIdx].Name)
-		}
-		nameMap[field.Name] = idx
-
-		isVec, err3 := isVector(field.DataType)
-		if err3 != nil {
-			return err3
-		}
-
-		if isVec {
-			indexKv, err1 := RepeatedKeyValToMap(field.IndexParams)
-			if err1 != nil {
-				return err1
-			}
-			typeKv, err2 := RepeatedKeyValToMap(field.TypeParams)
-			if err2 != nil {
-				return err2
-			}
-			if !typeutil.IsSparseFloatVectorType(field.DataType) {
-				dimStr, ok := typeKv[common.DimKey]
-				if !ok {
-					return fmt.Errorf("dim not found in type_params for vector field %s(%d)", field.Name, field.FieldID)
-				}
-				dim, err := strconv.Atoi(dimStr)
-				if err != nil || dim < 0 {
-					return fmt.Errorf("invalid dim; %s", dimStr)
-				}
-			}
-
-			metricTypeStr, ok := indexKv[common.MetricTypeKey]
-			if ok {
-				err4 := validateMetricType(field.DataType, metricTypeStr)
-				if err4 != nil {
-					return err4
-				}
-			}
-			// in C++, default type will be specified
-			// do nothing
-		} else {
-			if len(field.IndexParams) != 0 {
-				return fmt.Errorf("index params is not empty for scalar field: %s(%d)", field.Name, field.FieldID)
-			}
-			if len(field.TypeParams) != 0 {
-				return fmt.Errorf("type params is not empty for scalar field: %s(%d)", field.Name, field.FieldID)
-			}
-		}
-	}
-
-	if !autoID && primaryIdx == -1 {
-		return errors.New("primary key is required for non autoid mode")
-	}
-
-	return nil
 }
 
 func validateFunction(coll *schemapb.CollectionSchema) error {
@@ -988,6 +1009,8 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 		}
 	}
 
+	// todo(Spadea): should be there any check between vectors in struct fields?
+
 	return nil
 }
 
@@ -1016,6 +1039,21 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 
 		if field.IsClusteringKey {
 			return merr.WrapErrParameterInvalidMsg("Clustering Key field %s cannot skip loading", field.GetName())
+		}
+	}
+
+	for _, structArrayField := range schema.StructArrayFields {
+		for _, field := range structArrayField.Fields {
+			shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
+			if err != nil {
+				return err
+			}
+			if shouldLoad {
+				if typeutil.IsVectorType(field.ElementType) {
+					vectorCnt++
+				}
+				continue
+			}
 		}
 	}
 
@@ -1122,6 +1160,13 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 		}
 	}
 
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			fieldName2Schema[field.Name] = field
+			expectColumnNum++
+		}
+	}
+
 	if len(columns) != expectColumnNum {
 		return fmt.Errorf("len(columns) mismatch the expectColumnNum, expectColumnNum: %d, len(columns): %d",
 			expectColumnNum, len(columns))
@@ -1140,6 +1185,13 @@ func fillFieldPropertiesBySchema(columns []*schemapb.FieldData, schema *schemapb
 						" collectionName:%s", fieldData.FieldName, schema.Name)
 				}
 				fd.Scalars.GetArrayData().ElementType = fieldSchema.ElementType
+			} else if fieldData.Type == schemapb.DataType_ArrayOfVector {
+				fd, ok := fieldData.Field.(*schemapb.FieldData_Vectors)
+				if !ok {
+					return fmt.Errorf("field convert FieldData_Vectors fail in fieldData, fieldName: %s,"+
+						" collectionName:%s", fieldData.FieldName, schema.Name)
+				}
+				fd.Vectors.GetVectorArray().ElementType = fieldSchema.ElementType
 			}
 		} else {
 			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
@@ -1168,8 +1220,8 @@ func ValidateUsername(username string) error {
 	usernameSize := len(username)
 	for i := 1; i < usernameSize; i++ {
 		c := username[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("invalid user name %s, username must contain only numbers, letters and underscores, but got %s", username, c)
+		if c != '_' && c != '-' && c != '.' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrParameterInvalidMsg("invalid user name %s, username must contain only numbers, letters, underscores, dots, and hyphens, but got %s", username, c)
 		}
 	}
 	return nil
@@ -1503,6 +1555,18 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 		allFieldNameMap[field.Name] = field
 	}
 
+	// User may specify a struct array field or some specific fields in the struct array field
+	for _, subStruct := range schema.StructArrayFields {
+		for _, field := range subStruct.Fields {
+			allFieldNameMap[field.Name] = field
+		}
+	}
+
+	structArrayNameToFields := make(map[string][]*schemapb.FieldSchema)
+	for _, subStruct := range schema.StructArrayFields {
+		structArrayNameToFields[subStruct.Name] = subStruct.Fields
+	}
+
 	userRequestedPkFieldExplicitly := false
 
 	for _, outputFieldName := range outputFields {
@@ -1520,6 +1584,15 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			}
 			useAllDyncamicFields = true
 		} else {
+			if structArrayField, ok := structArrayNameToFields[outputFieldName]; ok {
+				for _, field := range structArrayField {
+					if schema.CanRetrieveRawFieldData(field) {
+						resultFieldNameMap[field.Name] = true
+						userOutputFieldsMap[field.Name] = true
+					}
+				}
+				continue
+			}
 			if field, ok := allFieldNameMap[outputFieldName]; ok {
 				if !schema.CanRetrieveRawFieldData(field) {
 					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
@@ -1651,7 +1724,7 @@ func isPartitionLoaded(ctx context.Context, mc types.MixCoordClient, collID int6
 	return true, nil
 }
 
-func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
+func checkFieldsDataBySchema(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
 	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
 	autoGenFieldNum := 0
@@ -1665,7 +1738,7 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 		dataNameSet.Insert(fieldName)
 	}
 
-	for _, fieldSchema := range schema.Fields {
+	for _, fieldSchema := range allFields {
 		if fieldSchema.AutoID && !fieldSchema.IsPrimaryKey {
 			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
@@ -1707,7 +1780,7 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
-	expectedNum := len(schema.Fields)
+	expectedNum := len(allFields)
 	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
 
 	if expectedNum != actualNum {
@@ -1718,7 +1791,91 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 	return nil
 }
 
-func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
+// checkAndFlattenStructFieldData verifies the array length of the struct array field data in the insert message
+// and then flattens the data so that data node and query node have not to handle the struct array field data.
+func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	structSchemaMap := make(map[string]*schemapb.StructArrayFieldSchema, len(schema.GetStructArrayFields()))
+	for _, structField := range schema.GetStructArrayFields() {
+		structSchemaMap[structField.Name] = structField
+	}
+
+	fieldSchemaMap := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, fieldSchema := range schema.GetFields() {
+		fieldSchemaMap[fieldSchema.Name] = fieldSchema
+	}
+
+	structFieldCount := 0
+	flattenedFields := make([]*schemapb.FieldData, 0, len(insertMsg.GetFieldsData())+5)
+
+	for _, fieldData := range insertMsg.GetFieldsData() {
+		if _, ok := fieldSchemaMap[fieldData.FieldName]; ok {
+			flattenedFields = append(flattenedFields, fieldData)
+			continue
+		}
+
+		structSchema, ok := structSchemaMap[fieldData.FieldName]
+		if !ok {
+			return fmt.Errorf("fieldName %v not exist in collection schema, fieldType %v, fieldId %v", fieldData.FieldName, fieldData.Type, fieldData.FieldId)
+		}
+
+		structFieldCount++
+		structArrays, ok := fieldData.Field.(*schemapb.FieldData_StructArrays)
+		if !ok {
+			return fmt.Errorf("field convert FieldData_StructArrays fail in fieldData, fieldName: %s,"+
+				" collectionName:%s", fieldData.FieldName, schema.Name)
+		}
+
+		if len(structArrays.StructArrays.Fields) != len(structSchema.GetFields()) {
+			return fmt.Errorf("length of fields of struct field mismatch length of the fields in schema, fieldName: %s,"+
+				" collectionName:%s, fieldData fields length:%d, schema fields length:%d",
+				fieldData.FieldName, schema.Name, len(structArrays.StructArrays.Fields), len(structSchema.GetFields()))
+		}
+
+		// Check the array length of the struct array field data
+		expectedArrayLen := -1
+		for _, subField := range structArrays.StructArrays.Fields {
+			var currentArrayLen int
+
+			switch subFieldData := subField.Field.(type) {
+			case *schemapb.FieldData_Scalars:
+				if scalarArray := subFieldData.Scalars.GetArrayData(); scalarArray != nil {
+					currentArrayLen = len(scalarArray.Data)
+				} else {
+					return fmt.Errorf("scalar array data is nil in struct field '%s', sub-field '%s'",
+						fieldData.FieldName, subField.FieldName)
+				}
+			case *schemapb.FieldData_Vectors:
+				if vectorArray := subFieldData.Vectors.GetVectorArray(); vectorArray != nil {
+					currentArrayLen = len(vectorArray.Data)
+				} else {
+					return fmt.Errorf("vector array data is nil in struct field '%s', sub-field '%s'",
+						fieldData.FieldName, subField.FieldName)
+				}
+			default:
+				return fmt.Errorf("unexpected field data type in struct array field, fieldName: %s", fieldData.FieldName)
+			}
+
+			if expectedArrayLen == -1 {
+				expectedArrayLen = currentArrayLen
+			} else if currentArrayLen != expectedArrayLen {
+				return fmt.Errorf("inconsistent array length in struct field '%s': expected %d, got %d for sub-field '%s'",
+					fieldData.FieldName, expectedArrayLen, currentArrayLen, subField.FieldName)
+			}
+
+			flattenedFields = append(flattenedFields, subField)
+		}
+	}
+
+	if len(schema.GetStructArrayFields()) != structFieldCount {
+		return fmt.Errorf("the number of struct array fields is not the same as needed, expected: %d, actual: %d",
+			len(schema.GetStructArrayFields()), structFieldCount)
+	}
+
+	insertMsg.FieldsData = flattenedFields
+	return nil
+}
+
+func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
 	log := log.With(zap.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -1726,7 +1883,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(schema, insertMsg, true); err != nil {
+	if err := checkFieldsDataBySchema(allFields, schema, insertMsg, true); err != nil {
 		return nil, err
 	}
 
@@ -1780,8 +1937,8 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 // for some varchar with analzyer
 // we need check char format before insert it to message queue
 // now only support utf-8
-func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	checkeFields := lo.FilterMap(schema.GetFields(), func(field *schemapb.FieldSchema, _ int) (int64, bool) {
+func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) error {
+	checkeFields := lo.FilterMap(allFields, func(field *schemapb.FieldSchema, _ int) (int64, bool) {
 		if field.DataType == schemapb.DataType_VarChar {
 			return field.GetFieldID(), true
 		}
@@ -1819,7 +1976,7 @@ func checkInputUtf8Compatiable(schema *schemapb.CollectionSchema, insertMsg *msg
 	return nil
 }
 
-func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
+func checkUpsertPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, *schemapb.IDs, error) {
 	log := log.With(zap.String("collectionName", insertMsg.CollectionName))
 	rowNums := uint32(insertMsg.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
@@ -1827,7 +1984,7 @@ func checkUpsertPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *m
 		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(schema, insertMsg, false); err != nil {
+	if err := checkFieldsDataBySchema(allFields, schema, insertMsg, false); err != nil {
 		return nil, nil, err
 	}
 

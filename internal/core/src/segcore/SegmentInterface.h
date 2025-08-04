@@ -155,6 +155,17 @@ class SegmentInterface {
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const = 0;
 
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const = 0;
+
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
     virtual void
     LazyCheckSchema(SchemaPtr sch) = 0;
 
@@ -228,12 +239,11 @@ class SegmentInternalInterface : public SegmentInterface {
             ThrowInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
-        auto pw = chunk_view_by_offsets(field_id, chunk_id, offsets);
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return pw;
-        } else {
-            static_assert(std::is_same_v<ViewType, milvus::Json>,
-                          "only Json is supported for get_views_by_offsets");
+            return chunk_string_views_by_offsets(field_id, chunk_id, offsets);
+        } else if constexpr (std::is_same_v<ViewType, Json>) {
+            auto pw =
+                chunk_string_views_by_offsets(field_id, chunk_id, offsets);
             std::vector<ViewType> res;
             res.reserve(pw.get().first.size());
             for (const auto& view : pw.get().first) {
@@ -242,6 +252,8 @@ class SegmentInternalInterface : public SegmentInterface {
             return PinWrapper<
                 std::pair<std::vector<ViewType>, FixedVector<bool>>>(
                 {std::move(res), pw.get().second});
+        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+            return chunk_array_views_by_offsets(field_id, chunk_id, offsets);
         }
     }
 
@@ -368,6 +380,17 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
+
+    virtual bool
+    HasNgramIndex(FieldId field_id) const override;
+
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override;
 
  public:
     virtual void
@@ -500,9 +523,15 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_view_by_offsets(FieldId field_id,
-                          int64_t chunk_id,
-                          const FixedVector<int32_t>& offsets) const = 0;
+    chunk_string_views_by_offsets(
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    chunk_array_views_by_offsets(FieldId field_id,
+                                 int64_t chunk_id,
+                                 const FixedVector<int32_t>& offsets) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
     virtual PinWrapper<const index::IndexBase*>

@@ -297,6 +297,30 @@ func TestPayloadWriter_Failed(t *testing.T) {
 		err = w.AddFloatToPayload(data, nil)
 		require.Error(t, err)
 	})
+
+	t.Run("Test ArrayOfFloatVector", func(t *testing.T) {
+		// The dim is not used for ArrayOfVector type for payload writer as each row contains this info
+		w, err := NewPayloadWriter(schemapb.DataType_ArrayOfVector, WithDim(1))
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.FinishPayloadWriter()
+		require.NoError(t, err)
+
+		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
+			Dim: 8,
+		})
+		require.Error(t, err)
+
+		w, err = NewPayloadWriter(schemapb.DataType_Int64)
+		require.Nil(t, err)
+		require.NotNil(t, w)
+
+		err = w.AddOneVectorArrayToPayload(&schemapb.VectorField{
+			Dim: 8,
+		})
+		require.Error(t, err)
+	})
 }
 
 func TestParquetEncoding(t *testing.T) {

@@ -449,10 +449,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
             FieldDataInfo(column_group_id.get(), num_rows, infos.mmap_dir_path);
         column_group_info.arrow_reader_channel->set_capacity(parallel_degree);
 
-        LOG_INFO("segment {} loads column group {} with num_rows {}",
-                 this->get_segment_id(),
-                 column_group_id.get(),
-                 num_rows);
+        LOG_INFO(
+            "[StorageV2] segment {} loads column group {} with num_rows {}",
+            this->get_segment_id(),
+            column_group_id.get(),
+            num_rows);
 
         auto& pool =
             ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
@@ -469,10 +470,12 @@ SegmentGrowingImpl::load_column_group_data_internal(
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
             auto status = reader->Close();
-            AssertInfo(status.ok(),
-                       "failed to close file reader when get row group "
-                       "metadata from file: " +
-                           file + " with error: " + status.ToString());
+            AssertInfo(
+                status.ok(),
+                "[StorageV2] failed to close file reader when get row group "
+                "metadata from file {} with error {}",
+                file,
+                status.ToString());
         }
 
         // create parallel degree split strategy
@@ -489,23 +492,30 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     infos.load_priority);
         });
 
-        LOG_INFO("segment {} submits load column group {} task to thread pool",
-                 this->get_segment_id(),
-                 info.field_id);
+        LOG_INFO(
+            "[StorageV2] segment {} submits load column group {} task to "
+            "thread pool",
+            this->get_segment_id(),
+            column_group_id.get());
 
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
         std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
         while (column_group_info.arrow_reader_channel->pop(r)) {
-            for (const auto& [row_group_id, table] : r->arrow_tables) {
-                size_t batch_num_rows = table->num_rows();
-                for (int i = 0; i < table->schema()->num_fields(); ++i) {
-                    AssertInfo(table->schema()->field(i)->metadata()->Contains(
-                                   milvus_storage::ARROW_FIELD_ID_KEY),
-                               "field id not found in metadata for field {}",
-                               table->schema()->field(i)->name());
+            for (const auto& table_info : r->arrow_tables) {
+                size_t batch_num_rows = table_info.table->num_rows();
+                for (int i = 0; i < table_info.table->schema()->num_fields();
+                     ++i) {
+                    AssertInfo(
+                        table_info.table->schema()
+                            ->field(i)
+                            ->metadata()
+                            ->Contains(milvus_storage::ARROW_FIELD_ID_KEY),
+                        "[StorageV2] field id not found in metadata for field "
+                        "{}",
+                        table_info.table->schema()->field(i)->name());
                     auto field_id =
-                        std::stoll(table->schema()
+                        std::stoll(table_info.table->schema()
                                        ->field(i)
                                        ->metadata()
                                        ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
@@ -523,7 +533,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                 ? field.second.get_dim()
                                 : 1,
                             batch_num_rows);
-                        field_data->FillFieldData(table->column(i));
+                        field_data->FillFieldData(table_info.table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
                     }
                 }
@@ -635,12 +645,22 @@ SegmentGrowingImpl::chunk_array_view_impl(
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_view_by_offsets(
+SegmentGrowingImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk view by offsets not implemented for growing segment");
+}
+
+PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_array_views_by_offsets(
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    ThrowInfo(
+        ErrorCode::NotImplemented,
+        "chunk array views by offsets not implemented for growing segment");
 }
 
 int64_t
@@ -653,6 +673,23 @@ DataType
 SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
     return field_meta.get_data_type();
+}
+
+void
+SegmentGrowingImpl::search_batch_pks(
+    const std::vector<PkType>& pks,
+    const Timestamp* timestamps,
+    bool include_same_ts,
+    const std::function<void(const SegOffset offset, const Timestamp ts)>&
+        callback) const {
+    for (size_t i = 0; i < pks.size(); ++i) {
+        auto timestamp = timestamps[i];
+        auto offsets =
+            insert_record_.search_pk(pks[i], timestamp, include_same_ts);
+        for (auto offset : offsets) {
+            callback(offset, timestamp);
+        }
+    }
 }
 
 void

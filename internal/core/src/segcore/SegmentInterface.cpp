@@ -542,4 +542,21 @@ SegmentInternalInterface::GetNgramIndex(FieldId field_id) const {
     return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
+PinWrapper<index::NgramInvertedIndex*>
+SegmentInternalInterface::GetNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+}
+
+bool
+SegmentInternalInterface::HasNgramIndex(FieldId field_id) const {
+    return false;
+}
+
+bool
+SegmentInternalInterface::HasNgramIndexForJson(
+    FieldId field_id, const std::string& nested_path) const {
+    return false;
+}
+
 }  // namespace milvus::segcore

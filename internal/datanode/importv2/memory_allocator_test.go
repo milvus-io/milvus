@@ -17,7 +17,10 @@
 package importv2
 
 import (
+	"math/rand"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -30,14 +33,12 @@ func TestMemoryAllocatorBasicOperations(t *testing.T) {
 	// Test initial state
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
-	// Test memory allocation for task 1
-	success := ma.TryAllocate(1, 50*1024*1024) // 50MB for task 1
-	assert.True(t, success)
+	// Test memory allocation for task 1 using BlockingAllocate
+	ma.BlockingAllocate(1, 50*1024*1024) // 50MB for task 1
 	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 2
-	success = ma.TryAllocate(2, 50*1024*1024) // 50MB for task 2
-	assert.True(t, success)
+	ma.BlockingAllocate(2, 50*1024*1024) // 50MB for task 2
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory release for task 1
@@ -60,17 +61,25 @@ func TestMemoryAllocatorMemoryLimit(t *testing.T) {
 	testSize := memoryLimit / 10 // Use 10% of available memory
 
 	// Allocate memory up to the limit
-	success := ma.TryAllocate(1, testSize)
-	assert.True(t, success)
+	ma.BlockingAllocate(1, testSize)
 	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory)
 
-	// Try to allocate more memory than available (should fail)
-	success = ma.TryAllocate(2, memoryLimit)
-	assert.False(t, success)
-	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory) // Should remain unchanged
+	// Try to allocate more memory than available (this will block, so we test in a goroutine)
+	done := make(chan bool)
+	go func() {
+		ma.BlockingAllocate(2, testSize)
+		done <- true
+	}()
 
-	// Release the allocated memory
+	// Release the allocated memory to unblock the waiting allocation
 	ma.Release(1, testSize)
+	<-done
+
+	// Verify that the second allocation succeeded after release
+	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory)
+
+	// Release the second allocation
+	ma.Release(2, testSize)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 }
 
@@ -84,10 +93,8 @@ func TestMemoryAllocatorConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		taskID := int64(i + 1)
 		go func() {
-			success := ma.TryAllocate(taskID, 50*1024*1024) // 50MB each
-			if success {
-				ma.Release(taskID, 50*1024*1024)
-			}
+			ma.BlockingAllocate(taskID, 50*1024*1024) // 50MB each
+			ma.Release(taskID, 50*1024*1024)
 			done <- true
 		}()
 	}
@@ -97,10 +104,9 @@ func TestMemoryAllocatorConcurrentAccess(t *testing.T) {
 		<-done
 	}
 
-	// Verify final state - should be 0 or the sum of remaining allocations
-	// depending on memory limit and concurrent execution
+	// Verify final state - should be 0 since all allocations were released
 	finalMemory := ma.(*memoryAllocator).usedMemory
-	assert.GreaterOrEqual(t, finalMemory, int64(0))
+	assert.Equal(t, int64(0), finalMemory)
 }
 
 // TestMemoryAllocatorNegativeRelease tests handling of negative memory release
@@ -109,8 +115,7 @@ func TestMemoryAllocatorNegativeRelease(t *testing.T) {
 	ma := NewMemoryAllocator(1024 * 1024 * 1024)
 
 	// Allocate some memory
-	success := ma.TryAllocate(1, 100*1024*1024) // 100MB
-	assert.True(t, success)
+	ma.BlockingAllocate(1, 100*1024*1024) // 100MB
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Release more than allocated (should not go negative)
@@ -121,15 +126,14 @@ func TestMemoryAllocatorNegativeRelease(t *testing.T) {
 // TestMemoryAllocatorMultipleTasks tests memory management for multiple tasks
 func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 	// Create memory allocator with 1GB system memory
-	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	ma := NewMemoryAllocator(1024 * 1024 * 1024 * 2)
 
 	// Allocate memory for multiple tasks with smaller sizes
 	taskIDs := []int64{1, 2, 3, 4, 5}
 	sizes := []int64{20, 30, 25, 15, 35} // Total: 125MB
 
 	for i, taskID := range taskIDs {
-		success := ma.TryAllocate(taskID, sizes[i]*1024*1024)
-		assert.True(t, success)
+		ma.BlockingAllocate(taskID, sizes[i]*1024*1024)
 	}
 
 	// Verify total used memory
@@ -154,4 +158,71 @@ func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 
 	// Verify final state
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorZeroSize tests handling of zero size allocations
+func TestMemoryAllocatorZeroSize(t *testing.T) {
+	// Create memory allocator
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+
+	// Test zero size allocation
+	ma.BlockingAllocate(1, 0)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+
+	// Test zero size release
+	ma.Release(1, 0)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorSimple tests basic functionality without external dependencies
+func TestMemoryAllocatorSimple(t *testing.T) {
+	// Create memory allocator with 1GB system memory
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+
+	// Test initial state
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+
+	// Test memory allocation
+	ma.BlockingAllocate(1, 50*1024*1024) // 50MB
+	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
+
+	// Test memory release
+	ma.Release(1, 50*1024*1024)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorMassiveConcurrency tests massive concurrent memory allocation and release
+func TestMemoryAllocatorMassiveConcurrency(t *testing.T) {
+	// Create memory allocator with 1.6GB system memory
+	totalMemory := int64(16 * 1024 * 1024 * 1024) // 16GB * 10%
+	ma := NewMemoryAllocator(totalMemory)
+
+	const numTasks = 200
+
+	var wg sync.WaitGroup
+	wg.Add(numTasks)
+	// Start concurrent allocation and release
+	for i := 0; i < numTasks; i++ {
+		taskID := int64(i + 1)
+		var memorySize int64
+		// 10% chance to allocate 1.6GB, 90% chance to allocate 128MB-1536MB
+		if rand.Float64() < 0.1 {
+			memorySize = int64(1600 * 1024 * 1024)
+		} else {
+			multiple := rand.Intn(12) + 1
+			memorySize = int64(multiple * 128 * 1024 * 1024) // 128MB to 1536MB
+		}
+
+		go func(id int64, size int64) {
+			defer wg.Done()
+			ma.BlockingAllocate(id, size)
+			time.Sleep(1 * time.Millisecond)
+			ma.Release(id, size)
+		}(taskID, memorySize)
+	}
+	wg.Wait()
+
+	// Assert that all memory is released
+	finalMemory := ma.(*memoryAllocator).usedMemory
+	assert.Equal(t, int64(0), finalMemory, "All memory should be released")
 }

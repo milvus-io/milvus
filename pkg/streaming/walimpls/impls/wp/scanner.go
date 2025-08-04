@@ -54,8 +54,13 @@ func (s *scannerImpl) executeConsumer() {
 	for {
 		msg, err := s.reader.ReadNext(s.Context())
 		if err != nil {
-			if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+			// underlying mq may report ctx error, so we need to check the ctx error here to avoid return nil Error() without close.
+			if s.Context().Err() != nil {
 				s.Finish(nil)
+				return
+			}
+			if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
+				s.Finish(errors.Wrap(err, "wp readNext Timeout"))
 				return
 			}
 			log.Ctx(s.Context()).Error("wp readNext msg exception", zap.Error(err))

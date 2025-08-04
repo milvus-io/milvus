@@ -41,10 +41,10 @@
 
 using namespace milvus;
 CStatus
-CreateIndexV0(enum CDataType dtype,
-              const char* serialized_type_params,
-              const char* serialized_index_params,
-              CIndex* res_index) {
+CreateIndexForUT(enum CDataType dtype,
+                 const char* serialized_type_params,
+                 const char* serialized_index_params,
+                 CIndex* res_index) {
     SCOPE_CGO_CALL_METRIC();
 
     auto status = CStatus();

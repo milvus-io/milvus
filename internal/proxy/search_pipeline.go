@@ -561,12 +561,16 @@ func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs 
 
 func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	multipleMilvusResults := inputs[0].([]*milvuspb.SearchResults)
+	idInt64Type := false
 	idsList := lo.FilterMap(multipleMilvusResults, func(m *milvuspb.SearchResults, _ int) (*schemapb.IDs, bool) {
+		if m.GetResults().GetIds().GetIntId() != nil {
+			idInt64Type = true
+		}
 		return m.Results.Ids, true
 	})
+
 	uniqueIDs := &schemapb.IDs{}
-	switch idsList[0].GetIdField().(type) {
-	case *schemapb.IDs_IntId:
+	if idInt64Type {
 		idsSet := typeutil.NewSet[int64]()
 		for _, ids := range idsList {
 			if data := ids.GetIntId().GetData(); data != nil {
@@ -578,7 +582,7 @@ func mergeIDsFunc(ctx context.Context, span trace.Span, inputs ...any) ([]any, e
 				Data: idsSet.Collect(),
 			},
 		}
-	case *schemapb.IDs_StrId:
+	} else {
 		idsSet := typeutil.NewSet[string]()
 		for _, ids := range idsList {
 			if data := ids.GetStrId().GetData(); data != nil {

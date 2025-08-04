@@ -30,6 +30,8 @@ enum SegmentLevel {
 
 service DataCoord {
   rpc Flush(FlushRequest) returns (FlushResponse) {}
+  rpc FlushAll(FlushAllRequest) returns(FlushAllResponse) {}
+
 
   // AllocSegment alloc a new growing segment, add it into segment meta.
   rpc AllocSegment(AllocSegmentRequest) returns (AllocSegmentResponse) {}
@@ -153,6 +155,25 @@ message FlushResponse {
   int64 timeOfSeal = 6;
   uint64 flush_ts = 7;
   map<string, msg.MsgPosition> channel_cps = 8;
+}
+
+message FlushResult {
+  int64 collectionID = 1;
+  repeated int64 segmentIDs =2; // newly sealed segments
+  repeated int64 flushSegmentIDs = 3; // old flushed segment
+  int64 timeOfSeal = 4;
+  uint64 flush_ts = 5;
+  map<string, msg.MsgPosition> channel_cps = 6;
+}
+
+message FlushAllRequest {
+  common.MsgBase base = 1;
+  string dbName = 2;
+}
+
+message FlushAllResponse {
+  common.Status status = 1;
+  uint64 flushTs = 2;
 }
 
 message FlushChannelsRequest {
@@ -397,6 +418,7 @@ message SaveBinlogPathsRequest {
   int64 partitionID =14; // report partitionID for create L0 segment
   int64 storageVersion = 15;
   repeated FieldBinlog field2Bm25logPaths = 16;
+  bool with_full_binlogs = 17; // report with full data for verification.
 }
 
 message CheckPoint {

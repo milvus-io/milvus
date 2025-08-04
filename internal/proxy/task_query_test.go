@@ -1292,3 +1292,470 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.True(t, skip)
 	})
 }
+
+func Test_reconstructStructFieldData(t *testing.T) {
+	t.Run("count(*) query - should return early", func(t *testing.T) {
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{"count(*)"},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "count(*)",
+					FieldId:   0,
+					Type:      schemapb.DataType_Int64,
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "sub_field",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		originalFieldsData := make([]*schemapb.FieldData, len(results.FieldsData))
+		copy(originalFieldsData, results.FieldsData)
+		originalOutputFields := make([]string, len(results.OutputFields))
+		copy(originalOutputFields, results.OutputFields)
+
+		reconstructStructFieldData(results, schema)
+
+		// Should not modify anything for count(*) query
+		assert.Equal(t, originalFieldsData, results.FieldsData)
+		assert.Equal(t, originalOutputFields, results.OutputFields)
+	})
+
+	t.Run("no struct array fields - should return early", func(t *testing.T) {
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{"field1", "field2"},
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldName: "field1",
+					FieldId:   100,
+					Type:      schemapb.DataType_Int64,
+				},
+				{
+					FieldName: "field2",
+					FieldId:   101,
+					Type:      schemapb.DataType_VarChar,
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{},
+		}
+
+		originalFieldsData := make([]*schemapb.FieldData, len(results.FieldsData))
+		copy(originalFieldsData, results.FieldsData)
+		originalOutputFields := make([]string, len(results.OutputFields))
+		copy(originalOutputFields, results.OutputFields)
+
+		reconstructStructFieldData(results, schema)
+
+		// Should not modify anything when no struct array fields
+		assert.Equal(t, originalFieldsData, results.FieldsData)
+		assert.Equal(t, originalOutputFields, results.OutputFields)
+	})
+
+	t.Run("reconstruct single struct field", func(t *testing.T) {
+		// Create mock data
+		subField1Data := &schemapb.FieldData{
+			FieldName: "sub_int_array",
+			FieldId:   1021,
+			Type:      schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Int32,
+							Data: []*schemapb.ScalarField{
+								{
+									Data: &schemapb.ScalarField_IntData{
+										IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		subField2Data := &schemapb.FieldData{
+			FieldName: "sub_text_array",
+			FieldId:   1022,
+			Type:      schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_VarChar,
+							Data: []*schemapb.ScalarField{
+								{
+									Data: &schemapb.ScalarField_StringData{
+										StringData: &schemapb.StringArray{Data: []string{"hello", "world"}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{"sub_int_array", "sub_text_array"},
+			FieldsData:   []*schemapb.FieldData{subField1Data, subField2Data},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "pk",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "sub_int_array",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+						{
+							FieldID:     1022,
+							Name:        "sub_text_array",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_VarChar,
+						},
+					},
+				},
+			},
+		}
+
+		reconstructStructFieldData(results, schema)
+
+		// Check result
+		assert.Len(t, results.FieldsData, 1, "Should only have one reconstructed struct field")
+		assert.Len(t, results.OutputFields, 1, "Output fields should only have one")
+
+		structField := results.FieldsData[0]
+		assert.Equal(t, "test_struct", structField.FieldName)
+		assert.Equal(t, int64(102), structField.FieldId)
+		assert.Equal(t, schemapb.DataType_ArrayOfStruct, structField.Type)
+		assert.Equal(t, "test_struct", results.OutputFields[0])
+
+		// Check fields inside struct
+		structArrays := structField.GetStructArrays()
+		assert.NotNil(t, structArrays)
+		assert.Len(t, structArrays.Fields, 2, "Struct should contain 2 sub fields")
+
+		// Check sub fields
+		var foundIntField, foundTextField bool
+		for _, field := range structArrays.Fields {
+			switch field.FieldId {
+			case 1021:
+				assert.Equal(t, "sub_int_array", field.FieldName)
+				assert.Equal(t, schemapb.DataType_Array, field.Type)
+				foundIntField = true
+			case 1022:
+				assert.Equal(t, "sub_text_array", field.FieldName)
+				assert.Equal(t, schemapb.DataType_Array, field.Type)
+				foundTextField = true
+			}
+		}
+		assert.True(t, foundIntField, "Should find int array field")
+		assert.True(t, foundTextField, "Should find text array field")
+	})
+
+	t.Run("mixed regular and struct fields", func(t *testing.T) {
+		// Create regular field data
+		regularField := &schemapb.FieldData{
+			FieldName: "regular_field",
+			FieldId:   100,
+			Type:      schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}},
+					},
+				},
+			},
+		}
+
+		// Create struct sub field data
+		subFieldData := &schemapb.FieldData{
+			FieldName: "sub_field",
+			FieldId:   1021,
+			Type:      schemapb.DataType_Array,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{
+						ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_Int32,
+							Data: []*schemapb.ScalarField{
+								{
+									Data: &schemapb.ScalarField_IntData{
+										IntData: &schemapb.IntArray{Data: []int32{10, 20}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{"regular_field", "sub_field"},
+			FieldsData:   []*schemapb.FieldData{regularField, subFieldData},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  100,
+					Name:     "regular_field",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "sub_field",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		reconstructStructFieldData(results, schema)
+
+		// Check result: should have 2 fields (1 regular + 1 reconstructed struct)
+		assert.Len(t, results.FieldsData, 2)
+		assert.Len(t, results.OutputFields, 2)
+
+		// Check regular and struct fields both exist
+		var foundRegularField, foundStructField bool
+		for i, field := range results.FieldsData {
+			switch field.FieldId {
+			case 100:
+				assert.Equal(t, "regular_field", field.FieldName)
+				assert.Equal(t, schemapb.DataType_Int64, field.Type)
+				assert.Equal(t, "regular_field", results.OutputFields[i])
+				foundRegularField = true
+			case 102:
+				assert.Equal(t, "test_struct", field.FieldName)
+				assert.Equal(t, schemapb.DataType_ArrayOfStruct, field.Type)
+				assert.Equal(t, "test_struct", results.OutputFields[i])
+				foundStructField = true
+			}
+		}
+		assert.True(t, foundRegularField, "Should find regular field")
+		assert.True(t, foundStructField, "Should find reconstructed struct field")
+	})
+
+	t.Run("multiple struct fields", func(t *testing.T) {
+		// Create sub field for first struct
+		struct1SubField := &schemapb.FieldData{
+			FieldName: "struct1_sub",
+			FieldId:   1021,
+			Type:      schemapb.DataType_Array,
+		}
+
+		// Create sub fields for second struct
+		struct2SubField1 := &schemapb.FieldData{
+			FieldName: "struct2_sub1",
+			FieldId:   1031,
+			Type:      schemapb.DataType_Array,
+		}
+
+		struct2SubField2 := &schemapb.FieldData{
+			FieldName: "struct2_sub2",
+			FieldId:   1032,
+			Type:      schemapb.DataType_Array,
+		}
+
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{"struct1_sub", "struct2_sub1", "struct2_sub2"},
+			FieldsData:   []*schemapb.FieldData{struct1SubField, struct2SubField1, struct2SubField2},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "struct1",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "struct1_sub",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+				{
+					FieldID: 103,
+					Name:    "struct2",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1031,
+							Name:        "struct2_sub1",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_VarChar,
+						},
+						{
+							FieldID:     1032,
+							Name:        "struct2_sub2",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Float,
+						},
+					},
+				},
+			},
+		}
+
+		reconstructStructFieldData(results, schema)
+
+		// Check result: should have 2 reconstructed struct fields
+		assert.Len(t, results.FieldsData, 2)
+		assert.Len(t, results.OutputFields, 2)
+
+		// Check both struct fields are reconstructed correctly
+		foundStruct1, foundStruct2 := false, false
+		for i, field := range results.FieldsData {
+			switch field.FieldId {
+			case 102:
+				assert.Equal(t, "struct1", field.FieldName)
+				assert.Equal(t, schemapb.DataType_ArrayOfStruct, field.Type)
+				assert.Equal(t, "struct1", results.OutputFields[i])
+
+				structArrays := field.GetStructArrays()
+				assert.NotNil(t, structArrays)
+				assert.Len(t, structArrays.Fields, 1)
+				assert.Equal(t, int64(1021), structArrays.Fields[0].FieldId)
+				foundStruct1 = true
+
+			case 103:
+				assert.Equal(t, "struct2", field.FieldName)
+				assert.Equal(t, schemapb.DataType_ArrayOfStruct, field.Type)
+				assert.Equal(t, "struct2", results.OutputFields[i])
+
+				structArrays := field.GetStructArrays()
+				assert.NotNil(t, structArrays)
+				assert.Len(t, structArrays.Fields, 2)
+
+				// Check struct2 contains two sub fields
+				subFieldIds := make([]int64, 0, 2)
+				for _, subField := range structArrays.Fields {
+					subFieldIds = append(subFieldIds, subField.FieldId)
+				}
+				assert.Contains(t, subFieldIds, int64(1031))
+				assert.Contains(t, subFieldIds, int64(1032))
+				foundStruct2 = true
+			}
+		}
+		assert.True(t, foundStruct1, "Should find struct1")
+		assert.True(t, foundStruct2, "Should find struct2")
+	})
+
+	t.Run("empty fields data", func(t *testing.T) {
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{},
+			FieldsData:   []*schemapb.FieldData{},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "sub_field",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		reconstructStructFieldData(results, schema)
+
+		// Empty data should remain unchanged
+		assert.Len(t, results.FieldsData, 0)
+		assert.Len(t, results.OutputFields, 0)
+	})
+
+	t.Run("no matching sub fields", func(t *testing.T) {
+		// Field data does not match any struct definition
+		regularField := &schemapb.FieldData{
+			FieldName: "regular_field",
+			FieldId:   200, // Not in any struct
+			Type:      schemapb.DataType_Int64,
+		}
+
+		results := &milvuspb.QueryResults{
+			OutputFields: []string{"regular_field"},
+			FieldsData:   []*schemapb.FieldData{regularField},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  200,
+					Name:     "regular_field",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{
+				{
+					FieldID: 102,
+					Name:    "test_struct",
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     1021,
+							Name:        "sub_field",
+							DataType:    schemapb.DataType_Array,
+							ElementType: schemapb.DataType_Int32,
+						},
+					},
+				},
+			},
+		}
+
+		reconstructStructFieldData(results, schema)
+
+		// Should only keep the regular field, no struct field
+		assert.Len(t, results.FieldsData, 1)
+		assert.Len(t, results.OutputFields, 1)
+		assert.Equal(t, int64(200), results.FieldsData[0].FieldId)
+		assert.Equal(t, "regular_field", results.OutputFields[0])
+	})
+}

@@ -143,9 +143,9 @@ func NewPartitionInfos(partitions *milvuspb.ShowPartitionsResponse) []*Partition
 	return partitionInfos
 }
 
-func NewFields(fields *schemapb.CollectionSchema) []*Field {
-	fieldInfos := make([]*Field, len(fields.Fields))
-	for i, f := range fields.Fields {
+func newFields(fields []*schemapb.FieldSchema) []*Field {
+	fieldInfos := make([]*Field, len(fields))
+	for i, f := range fields {
 		fieldInfos[i] = &Field{
 			FieldID:          strconv.FormatInt(f.FieldID, 10),
 			Name:             f.Name,
@@ -162,6 +162,23 @@ func NewFields(fields *schemapb.CollectionSchema) []*Field {
 			IsClusteringKey:  f.IsClusteringKey,
 			Nullable:         f.Nullable,
 			IsFunctionOutput: f.IsFunctionOutput,
+		}
+	}
+	return fieldInfos
+}
+
+func NewFields(fields *schemapb.CollectionSchema) []*Field {
+	return newFields(fields.GetFields())
+}
+
+func NewStructArrayFields(fields *schemapb.CollectionSchema) []*StructArrayField {
+	fieldInfos := make([]*StructArrayField, len(fields.StructArrayFields))
+	for i, f := range fields.StructArrayFields {
+		fieldInfos[i] = &StructArrayField{
+			FieldID:     strconv.FormatInt(f.FieldID, 10),
+			Name:        f.Name,
+			Description: f.Description,
+			Fields:      newFields(f.Fields),
 		}
 	}
 	return fieldInfos

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -303,4 +305,151 @@ func (s *WriteBufferSuite) TestDropPartitions() {
 
 func TestWriteBufferBase(t *testing.T) {
 	suite.Run(t, new(WriteBufferSuite))
+}
+
+// TestPrepareInsertWithMissingFields tests the missing field filling functionality
+func TestPrepareInsertWithMissingFields(t *testing.T) {
+	// Create a collection schema with multiple fields including nullable and default value fields
+	collSchema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, DataType: schemapb.DataType_Int64, Name: "RowID"},
+			{FieldID: common.TimeStampField, DataType: schemapb.DataType_Int64, Name: "Timestamp"},
+			{
+				FieldID:      100,
+				Name:         "pk",
+				DataType:     schemapb.DataType_Int64,
+				IsPrimaryKey: true,
+				AutoID:       true,
+			},
+			{
+				FieldID:  101,
+				Name:     "int32_field",
+				DataType: schemapb.DataType_Int32,
+				Nullable: false,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_IntData{
+						IntData: 42,
+					},
+				},
+			},
+			{
+				FieldID:  102,
+				Name:     "nullable_float_field",
+				DataType: schemapb.DataType_Float,
+				Nullable: true,
+			},
+			{
+				FieldID:  103,
+				Name:     "default_string_field",
+				DataType: schemapb.DataType_String,
+				Nullable: false,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_StringData{
+						StringData: "default_string",
+					},
+				},
+			},
+		},
+	}
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+
+	t.Run("test_missing_fields_with_default_values", func(t *testing.T) {
+		// Create insert message with only some fields
+		insertMsg := &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: 1000,
+				EndTimestamp:   1002,
+			},
+			InsertRequest: &msgpb.InsertRequest{
+				SegmentID:    1,
+				PartitionID:  1,
+				CollectionID: 1,
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldId:   common.RowIDField,
+						FieldName: "RowID",
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1, 2, 3},
+									},
+								},
+							},
+						},
+					},
+					{
+						FieldId:   common.TimeStampField,
+						FieldName: "Timestamp",
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1000, 1001, 1002},
+									},
+								},
+							},
+						},
+					},
+					{
+						FieldId:   100, // Primary key field
+						FieldName: "pk",
+						Type:      schemapb.DataType_Int64,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_LongData{
+									LongData: &schemapb.LongArray{
+										Data: []int64{1, 2, 3},
+									},
+								},
+							},
+						},
+					},
+					{
+						FieldId:   101, // field1 with default value
+						FieldName: "int32_field",
+						Type:      schemapb.DataType_Int32,
+						Field: &schemapb.FieldData_Scalars{
+							Scalars: &schemapb.ScalarField{
+								Data: &schemapb.ScalarField_IntData{
+									IntData: &schemapb.IntArray{
+										Data: []int32{1, 2, 3},
+									},
+								},
+							},
+						},
+					},
+				},
+				// Missing nullable_float_field (nullable)
+				// Missing default_string_field (with default value)
+				NumRows:    3,
+				Version:    msgpb.InsertDataVersion_ColumnBased,
+				Timestamps: []uint64{1, 1, 1},
+			},
+		}
+
+		insertMsgs := []*msgstream.InsertMsg{insertMsg}
+		result, err := PrepareInsert(collSchema, pkField, insertMsgs)
+
+		assert.NoError(t, err)
+		assert.Len(t, result, 1)
+		assert.Equal(t, int64(3), result[0].rowNum)
+
+		// Check that all fields are present in the result
+		insertData := result[0].data[0]
+		for i := 0; i < 3; i++ {
+			assert.Nil(t, insertData.Data[102].GetRow(i))
+			assert.Equal(t, "default_string", insertData.Data[103].GetRow(i))
+		}
+	})
 }

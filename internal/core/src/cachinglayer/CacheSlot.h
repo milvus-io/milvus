@@ -247,13 +247,15 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
                     dlist_->reserveMemoryWithTimeout(resource_needed, timeout));
                 LOG_TRACE(
                     "[MCL] CacheSlot reserveMemoryWithTimeout {} sec "
-                    "result: {} time: {} sec",
+                    "result: {} time: {} sec, resource_needed: {}, key: {}",
                     timeout.count() / 1000.0,
                     reservation_success ? "success" : "failed",
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - now)
                             .count() *
-                        1.0 / 1000);
+                        1.0 / 1000,
+                    resource_needed.ToString(),
+                    translator_->key());
 
                 if (!reservation_success) {
                     auto error_msg = fmt::format(

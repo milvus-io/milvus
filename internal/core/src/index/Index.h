@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/FieldData.h"
 #include "common/EasyAssert.h"
+#include "common/File.h"
 #include "common/JsonCastType.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -97,6 +98,8 @@ class IndexBase {
 
     IndexType index_type_ = "";
     size_t cell_size_ = 0;
+
+    std::unique_ptr<MmapFileRAII> mmap_file_raii_;
 };
 
 using IndexBasePtr = std::unique_ptr<IndexBase>;

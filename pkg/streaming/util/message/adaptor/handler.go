@@ -128,6 +128,13 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 			if msg.TimeTick() > m.Pendings[0].TimeTick() {
 				m.addMsgPackIntoPending(m.Pendings...)
 				m.Pendings = nil
+			} else if msg.TimeTick() < m.Pendings[0].TimeTick() {
+				m.Logger.Warn("message time tick is less than pendings",
+					zap.String("messageID", msg.MessageID().String()),
+					zap.String("pendingMessageID", m.Pendings[0].MessageID().String()),
+					zap.Uint64("timeTick", msg.TimeTick()),
+					zap.Uint64("pendingTimeTick", m.Pendings[0].TimeTick()))
+				return
 			}
 		}
 		m.Pendings = append(m.Pendings, msg)

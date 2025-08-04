@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -280,7 +282,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		expectedState commonpb.SegmentState
 	}{
 		{"segID=0, flushed to dropped", 0, true, false, 100, commonpb.SegmentState_Dropped},
-		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushing},
+		{"segID=1, sealed to flushing", 1, false, true, 100, commonpb.SegmentState_Flushed},
 		// empty segment flush should be dropped directly.
 		{"segID=2, sealed to dropped", 2, false, true, 0, commonpb.SegmentState_Dropped},
 	}
@@ -307,12 +309,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.EqualValues(0, len(segment.GetBinlogs()))
 			s.EqualValues(segment.NumOfRows, test.numOfRows)
 
-			flushing := []commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}
-			if lo.Contains(flushing, test.expectedState) {
-				s.True(lo.Contains(flushing, segment.GetState()))
-			} else {
-				s.Equal(test.expectedState, segment.GetState())
-			}
+			s.Equal(test.expectedState, segment.GetState())
 		})
 	}
 }
@@ -378,6 +375,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 		0: 0,
 		1: 0,
 		2: 0,
+		3: 0,
 	}
 	for segID, collID := range segments {
 		info := &datapb.SegmentInfo{
@@ -480,6 +478,194 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	segment = s.testServer.meta.GetSegment(context.TODO(), 2)
 	s.NotNil(segment)
 	s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    3,
+		CollectionID: 0,
+		Channel:      "ch1",
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		Field2StatslogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(2, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    3,
+		CollectionID: 0,
+		Channel:      "ch1",
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/3",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		Field2StatslogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/3",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   1,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(3, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[2].GetLogPath())
+	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:           3,
+		CollectionID:        0,
+		Channel:             "ch1",
+		Field2BinlogPaths:   []*datapb.FieldBinlog{},
+		Field2StatslogPaths: []*datapb.FieldBinlog{},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(3, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[2].GetLogPath())
+	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
 }
 
 func (s *ServerSuite) TestFlush_NormalCase() {
@@ -1035,7 +1221,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
-			SegmentID:    0,
+			SegmentID:    10087,
 			CollectionID: 0,
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
@@ -1076,8 +1262,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 					},
 				},
 			},
+			Flushed: true,
 		}
-		segment := createSegment(0, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
+		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -1104,6 +1291,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		err = svr.channelManager.Watch(context.Background(), &channelMeta{Name: "vchan1", CollectionID: 0})
 		assert.NoError(t, err)
 
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1117,7 +1307,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.NoError(t, merr.Error(resp.Status))
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.EqualValues(t, 1, len(resp.GetSegments()))
-		assert.EqualValues(t, 0, resp.GetSegments()[0].GetID())
+		assert.EqualValues(t, binlogReq.SegmentID, resp.GetSegments()[0].GetID())
 		assert.EqualValues(t, 0, len(resp.GetSegments()[0].GetBinlogs()))
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
@@ -1648,4 +1838,166 @@ func (s *GcControlServiceSuite) TestTimeoutCtx() {
 
 func TestGcControlService(t *testing.T) {
 	suite.Run(t, new(GcControlServiceSuite))
+}
+
+func TestFlushAll(t *testing.T) {
+	ctx := context.Background()
+	dbName := "test_db"
+	req := &datapb.FlushAllRequest{
+		DbName: dbName,
+	}
+
+	// Test normal case
+	mockey.PatchConvey("normal case", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		// Mock GetStateCode
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		// Mock AllocTimestamp
+		expectedTs := uint64(12345)
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(expectedTs, nil).Build()
+
+		// Mock broker.ShowCollectionIDs
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1, 2, 3},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		// Mock flushCollection
+		flushResult := &datapb.FlushResult{
+			CollectionID:    1,
+			SegmentIDs:      []int64{10, 11},
+			TimeOfSeal:      123456789,
+			FlushSegmentIDs: []int64{20, 21},
+			FlushTs:         expectedTs,
+			ChannelCps:      make(map[string]*msgpb.MsgPosition),
+		}
+		mockey.Mock((*Server).flushCollection).Return(flushResult, nil).Build()
+
+		// Execute test
+		resp, err := testServer.FlushAll(ctx, req)
+
+		// Verify results
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int64(expectedTs), int64(resp.GetFlushTs()))
+	})
+
+	// Test server unhealthy case
+	mockey.PatchConvey("server unhealthy", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Abnormal).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test ShowCollectionIDs failed case
+	mockey.PatchConvey("ShowCollectionIDs failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		expectedErr := errors.New("mock ShowCollectionIDs error")
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(nil, expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test AllocTimestamp failed case
+	mockey.PatchConvey("AllocTimestamp failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		expectedErr := errors.New("mock AllocTimestamp error")
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(uint64(0), expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+	})
+
+	// Test flushCollection failed case
+	mockey.PatchConvey("flushCollection failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		expectedTs := uint64(12345)
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(expectedTs, nil).Build()
+
+		expectedErr := errors.New("mock flushCollection error")
+		mockey.Mock((*Server).flushCollection).Return(nil, expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
 }

@@ -25,7 +25,7 @@ pub fn lindera_builder(
 ) -> Result<TextAnalyzerBuilder> {
     if params.is_none() {
         return Err(TantivyBindingError::InvalidArgument(
-            "lindera tokenizer must be costum".to_string(),
+            "lindera tokenizer must be customized".to_string(),
         ));
     }
     let tokenizer = LinderaTokenizer::from_json(params.unwrap())?;
@@ -51,7 +51,7 @@ pub fn get_builder_with_tokenizer(params: &json::Value) -> Result<TextAnalyzerBu
             }
             _ => {
                 return Err(TantivyBindingError::InvalidArgument(
-                    "costum tokenizer must set type".to_string(),
+                    "customized tokenizer must set type".to_string(),
                 ))
             }
         }

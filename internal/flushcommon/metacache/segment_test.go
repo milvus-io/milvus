@@ -56,6 +56,11 @@ func (s *SegmentSuite) TestClone() {
 	s.Equal(segment.Checkpoint(), cloned.Checkpoint())
 	s.Equal(segment.GetHistory(), cloned.GetHistory())
 	s.Equal(segment.startPosRecorded, cloned.startPosRecorded)
+	s.Equal(segment.Binlogs(), cloned.Binlogs())
+	s.Equal(segment.Statslogs(), cloned.Statslogs())
+	s.Equal(segment.Deltalogs(), cloned.Deltalogs())
+	s.Equal(segment.Bm25logs(), cloned.Bm25logs())
+	s.Equal(segment.GetBM25Stats(), cloned.GetBM25Stats())
 }
 
 func TestSegment(t *testing.T) {

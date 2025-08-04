@@ -467,7 +467,8 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
             T key = ParseKey(&data_ptr);
 
             roaring::Roaring value;
-            value = roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
+            value =
+                roaring::Roaring::read(reinterpret_cast<const char*>(data_ptr));
             for (const auto& v : value) {
                 valid_bitset_.set(v);
             }
@@ -499,7 +500,7 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
     }
 
     mmap_size_ = file_offset;
-    unlink(file_name.c_str());
+    this->mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
 
     char* ptr = mmap_data_;
     for (const auto& [key, value] : bitmaps) {
@@ -572,6 +573,8 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         index_files.value(), config[milvus::LOAD_PRIORITY]);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
+    // clear index_datas to free memory early
+    index_datas.clear();
     LoadWithoutAssemble(binary_set, config);
 }
 

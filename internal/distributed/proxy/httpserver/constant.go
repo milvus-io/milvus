@@ -17,6 +17,7 @@
 package httpserver
 
 import (
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 )
 
@@ -186,11 +187,8 @@ const (
 )
 
 const (
-	ParamAnnsField       = "anns_field"
-	Params               = "params"
-	ParamRoundDecimal    = "round_decimal"
-	ParamOffset          = "offset"
-	ParamLimit           = "limit"
+	Params               = proxy.ParamsKey
+	ParamRoundDecimal    = proxy.RoundDecimalKey
 	ParamRadius          = "radius"
 	ParamRangeFilter     = "range_filter"
 	ParamGroupByField    = "group_by_field"

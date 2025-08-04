@@ -143,27 +143,42 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_same_collection_different_params(self):
+    def test_milvus_client_create_collection_dup_name_different_params(self):
         """
-        target: test create same collection with different params
-        method: create same collection with different params
-        expected: raise exception
+        target: test create same collection with different parameters
+        method: create same collection with different dims, schemas, and primary fields
+        expected: raise exception for all different parameter cases
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        # 1. create collection
+        collection_name = cf.gen_collection_name_by_testcase_name()
         self.create_collection(client, collection_name, default_dim)
-        # 2. create collection with same params
-        self.create_collection(client, collection_name, default_dim)
-        # 3. create collection with same name and different params
+        # Test 1: Different dimensions
         error = {ct.err_code: 1, ct.err_msg: f"create duplicate collection with different parameters, "
                                              f"collection: {collection_name}"}
         self.create_collection(client, collection_name, default_dim + 1,
                                check_task=CheckTasks.err_res, check_items=error)
+        # Test 2: Different schemas  
+        schema_diff = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema_diff.add_field("new_id", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
+        schema_diff.add_field("new_vector", DataType.FLOAT_VECTOR, dim=128)
+        self.create_collection(client, collection_name, schema=schema_diff,
+                               check_task=CheckTasks.err_res, check_items=error)
+        # Test 3: Different primary fields
+        schema2 = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema2.add_field("id_2", DataType.INT64, is_primary=True, auto_id=False)
+        schema2.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema2,
+                               check_task=CheckTasks.err_res, check_items=error)
+        # Verify original collection's primary field is unchanged
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items={"collection_name": collection_name,
+                                             "dim": default_dim,
+                                             "id_name": "id"})
         self.drop_collection(client, collection_name)
 
+
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="pymilvus issue 1872")
     @pytest.mark.parametrize("metric_type", [1, " ", "invalid"])
     def test_milvus_client_collection_invalid_metric_type(self, metric_type):
         """
@@ -172,10 +187,10 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
-        error = {ct.err_code: 65535,
-                 ct.err_msg: "metric type not found or not supported, supported: [L2 IP COSINE HAMMING JACCARD]"}
+        error = {ct.err_code: 1100, ct.err_msg: f"float vector index does not support metric type: {metric_type}: "
+                                                f"invalid parameter[expected=valid index params][actual=invalid index params"}
         self.create_collection(client, collection_name, default_dim, metric_type=metric_type,
                                check_task=CheckTasks.err_res, check_items=error)
 
@@ -198,6 +213,42 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "metric type not found or not supported, supported: [L2 IP COSINE HAMMING JACCARD]"}
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_empty_fields(self):
+        """
+        target: test create collection with empty fields
+        method: create collection with schema that has no fields
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create an empty schema (no fields added)
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        error = {ct.err_code: 1100, ct.err_msg: "Schema must have a primary key field"}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_dup_field(self):
+        """
+        target: test create collection with duplicate field names
+        method: create schema with two fields having the same name
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with duplicate field names
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("int64_field", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("int64_field", DataType.INT64)
+        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
+
+        error = {ct.err_code: 1100, ct.err_msg: "duplicated field name"}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
+        has_collection = self.has_collection(client, collection_name)[0]
+        assert not has_collection
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_add_field_as_primary(self):
@@ -218,6 +269,43 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.add_collection_field(client, collection_name, field_name=field_name, data_type=DataType.INT64,
                                   nullable=True, is_primary=True, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_none_desc(self):
+        """
+        target: test create collection with none description
+        method: create collection with none description in schema
+        expected: raise exception due to invalid description type
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        
+        # Try to create schema with None description
+        schema = self.create_schema(client, enable_dynamic_field=False, description=None)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
+        
+        error = {ct.err_code: 1100, ct.err_msg: "description [None] has type NoneType, but expected one of: bytes, str"}
+        self.create_collection(client, collection_name, schema=schema,
+                                   check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_invalid_schema_multi_pk(self):
+        """
+        target: test create collection with schema containing multiple primary key fields
+        method: create schema with two primary key fields and use it to create collection
+        expected: raise exception due to multiple primary keys
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with multiple primary key fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
+        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
+        # Try to create collection with multiple primary keys
+        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
 
 class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
     """ Test case of create collection interface """
@@ -385,6 +473,69 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         assert sorted(index) == sorted(['embeddings', 'embeddings_1', 'embeddings_2', 'embeddings_3'])
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_create_collection_dup_name(self):
+        """
+        target: test create collection with same name
+        method: create collection with same name with same default params
+        expected: collection properties consistent
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. create collection
+        self.create_collection(client, collection_name, default_dim)
+        # 2. create collection with same params
+        self.create_collection(client, collection_name, default_dim)
+        
+        collections = self.list_collections(client)[0]
+        collection_count = collections.count(collection_name)
+        assert collection_name in collections
+        assert collection_count == 1, f"Expected only 1 collection named '{collection_name}', but found {collection_count}"
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_create_collection_dup_name_same_schema(self):
+        """
+        target: test create collection with dup name and same schema
+        method: create collection with dup name and same schema
+        expected: two collection object is available and properties consistent
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        dim = 128
+        description = "test collection description"
+        # Create schema
+        schema = self.create_schema(client, enable_dynamic_field=False, description=description)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("float_field", DataType.FLOAT)
+        schema.add_field("varchar_field", DataType.VARCHAR, max_length=100)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=dim)
+        # 1. Create collection with specific schema
+        self.create_collection(client, collection_name, schema=schema)
+        # Get first collection info
+        collection_info_1 = self.describe_collection(client, collection_name)[0]
+        description_1 = collection_info_1.get("description", "")
+        # 2. Create collection again with same name and same schema
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection still exists and properties are consistent
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        # Get second collection info and compare
+        collection_info_2 = self.describe_collection(client, collection_name)[0]
+        description_2 = collection_info_2.get("description", "")
+        # Verify collection properties are consistent
+        assert collection_info_1["collection_name"] == collection_info_2["collection_name"]
+        assert description_1 == description_2 == description
+        assert len(collection_info_1["fields"]) == len(collection_info_2["fields"])
+        # Verify field names and types are the same
+        fields_1 = {field["name"]: field["type"] for field in collection_info_1["fields"]}
+        fields_2 = {field["name"]: field["type"] for field in collection_info_2["fields"]}
+        assert fields_1 == fields_2
+        collection_count = collections.count(collection_name)
+        assert collection_count == 1, f"Expected only 1 collection named '{collection_name}', but found {collection_count}"
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_array_insert_search(self):
@@ -684,6 +835,91 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, new_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_dup_name_drop(self):
+        """
+        target: test collection with dup name, and drop
+        method: 1. create collection with client1
+                2. create collection with client2 with same name
+                3. use client2 to drop collection
+                4. verify collection is dropped and client1 operations fail
+        expected: collection is successfully dropped and subsequent operations from the first client should fail with collection not found error
+        """
+        client1 = self._client(alias="client1")
+        client2 = self._client(alias="client2") 
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. Create collection with client1
+        self.create_collection(client1, collection_name, default_dim)
+        # 2. Create collection with client2 using same name
+        self.create_collection(client2, collection_name, default_dim)
+        # 3. Use client2 to drop collection
+        self.drop_collection(client2, collection_name)
+        # 4. Verify collection is deleted
+        has_collection = self.has_collection(client1, collection_name)[0]
+        assert not has_collection
+        error = {ct.err_code: 100, ct.err_msg:  f"can't find collection[database=default]"
+                                                f"[collection={collection_name}]"}
+        self.describe_collection(client1, collection_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_long_desc(self):
+        """
+        target: test create collection with long description
+        method: create collection with description longer than 255 characters
+        expected: collection created successfully with long description
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create long description
+        long_desc = "a".join("a" for _ in range(256))
+        
+        # Create schema with long description
+        schema = self.create_schema(client, enable_dynamic_field=False, description=long_desc)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
+        
+        # Create collection with long description
+        self.create_collection(client, collection_name, schema=schema)
+        
+        collection_info = self.describe_collection(client, collection_name)[0]
+        actual_desc = collection_info.get("description", "")
+        assert actual_desc == long_desc
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("collection_name", ct.valid_resource_names)
+    def test_milvus_client_collection_valid_naming_rules(self, collection_name):
+        """
+        target: test create collection with valid names following naming rules
+        method: 1. create collection using names that follow all supported naming rule elements
+                2. create fields with names that also use naming rule elements
+                3. verify collection is created successfully with correct properties
+        expected: collection created successfully for all valid names
+        """
+        client = self._client()
+        
+        # Create schema with fields that also use naming rule elements
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("_1nt", DataType.INT64)  # field name using naming rule elements
+        schema.add_field("f10at_", DataType.FLOAT_VECTOR, dim=default_dim)  # vector field with naming elements
+        
+        # Create collection with valid name
+        self.create_collection(client, collection_name, schema=schema)
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        
+        collection_info = self.describe_collection(client, collection_name)[0]
+        assert collection_info["collection_name"] == collection_name
+        
+        field_names = [field["name"] for field in collection_info["fields"]]
+        assert ct.default_int64_field_name in field_names
+        assert "_1nt" in field_names
+        assert "f10at_" in field_names
+        
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of drop collection interface """
@@ -698,9 +934,9 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
     @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/pull/43064 change drop alias restraint")
     def test_milvus_client_drop_collection_invalid_collection_name(self, name):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: Test drop collection with invalid params
+        method: drop collection with invalid collection name
+        expected: raise exception
         """
         client = self._client()
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. "
@@ -719,6 +955,18 @@ class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str("nonexisted")
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("collection_name", ['', None])
+    def test_milvus_client_drop_collection_with_empty_or_None_collection_name(self, collection_name):
+        """
+        target: test drop invalid collection
+        method: drop collection with empty or None collection name
+        expected: raise exception
+        """
+        client = self._client()
+        # Set different error messages based on collection_name value
+        error = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {collection_name} is illegal"}
+        self.drop_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
 class TestMilvusClientReleaseCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of release collection interface """
