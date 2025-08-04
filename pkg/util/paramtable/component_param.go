@@ -844,7 +844,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.EnableStorageV2 = ParamItem{
 		Key:          "common.storage.enablev2",
 		Version:      "2.3.1",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
