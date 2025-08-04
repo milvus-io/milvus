@@ -1,5 +1,3 @@
-use error::TantivyBindingError;
-
 mod array;
 mod bitset_wrapper;
 mod data_type;

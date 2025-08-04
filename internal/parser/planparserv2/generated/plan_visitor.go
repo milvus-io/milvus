@@ -67,6 +67,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#AddSub.
 	VisitAddSub(ctx *AddSubContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#PhraseMatch.
+	VisitPhraseMatch(ctx *PhraseMatchContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#Relational.
 	VisitRelational(ctx *RelationalContext) interface{}
 

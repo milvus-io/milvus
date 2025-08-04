@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -515,6 +516,50 @@ func (v *ParserVisitor) VisitTextMatch(ctx *parser.TextMatchContext) interface{}
 					ColumnInfo: toColumnInfo(column),
 					Op:         planpb.OpType_TextMatch,
 					Value:      NewString(queryText),
+				},
+			},
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) VisitPhraseMatch(ctx *parser.PhraseMatchContext) interface{} {
+	column, err := v.translateIdentifier(ctx.Identifier().GetText())
+	if err != nil {
+		return err
+	}
+	if !typeutil.IsStringType(column.dataType) {
+		return errors.New("phrase match operation on non-string is unsupported")
+	}
+	queryText, err := convertEscapeSingle(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+	var slop int64 = 0
+	if ctx.Expr() != nil {
+		slopExpr := ctx.Expr().Accept(v)
+		slopValueExpr := getValueExpr(slopExpr)
+		if slopValueExpr == nil || slopValueExpr.GetValue() == nil {
+			return fmt.Errorf("\"slop\" should be a const integer expression with \"uint32\" value. \"slop\" expression passed: %s", ctx.Expr().GetText())
+		}
+		slop = slopValueExpr.GetValue().GetInt64Val()
+		if slop < 0 {
+			return fmt.Errorf("\"slop\" should not be a negative interger. \"slop\" passed: %s", ctx.Expr().GetText())
+		}
+
+		if slop > math.MaxUint32 {
+			return fmt.Errorf("\"slop\" exceeds the range of \"uint32\". \"slop\" expression passed: %s", ctx.Expr().GetText())
+		}
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_UnaryRangeExpr{
+				UnaryRangeExpr: &planpb.UnaryRangeExpr{
+					ColumnInfo:  toColumnInfo(column),
+					Op:          planpb.OpType_PhraseMatch,
+					Value:       NewString(queryText),
+					ExtraValues: []*planpb.GenericValue{NewInt(slop)},
 				},
 			},
 		},

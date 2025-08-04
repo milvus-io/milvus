@@ -836,6 +836,19 @@ struct TantivyIndexWrapper {
                    "TantivyIndexWrapper.match_query: invalid result type");
     }
 
+    void
+    phrase_match_query(const std::string& query, uint32_t slop, void* bitset) {
+        auto array =
+            tantivy_phrase_match_query(reader_, query.c_str(), slop, bitset);
+        auto res = RustResultWrapper(array);
+        AssertInfo(res.result_->success,
+                   "TantivyIndexWrapper.phrase_match_query: {}",
+                   res.result_->error);
+        AssertInfo(
+            res.result_->value.tag == Value::Tag::None,
+            "TantivyIndexWrapper.phrase_match_query: invalid result type");
+    }
+
  public:
     inline IndexWriter
     get_writer() {

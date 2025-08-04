@@ -1,5 +1,3 @@
-use crate::convert_to_rust_slice;
-use core::slice;
 use std::ffi::c_void;
 use std::ops::Bound;
 use tantivy::{directory::MmapDirectory, Index};
