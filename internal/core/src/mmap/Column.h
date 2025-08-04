@@ -331,9 +331,15 @@ class SingleChunkColumnBase : public ColumnBase {
     }
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+    StringViewsByOffsets(const FixedVector<int32_t>& offsets) const {
         PanicInfo(ErrorCode::Unsupported,
                   "viewsbyoffsets only supported for VariableColumn");
+    }
+
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+        PanicInfo(ErrorCode::Unsupported,
+                  "viewsbyoffsets only supported for ArrayColumn");
     }
 
     virtual std::string_view
@@ -719,7 +725,7 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
     }
 
     std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    ViewsByOffsets(const FixedVector<int32_t>& offsets) const {
+    StringViewsByOffsets(const FixedVector<int32_t>& offsets) const {
         std::vector<std::string_view> res;
         FixedVector<bool> valid;
         res.reserve(offsets.size());
@@ -728,7 +734,7 @@ class SingleChunkVariableColumn : public SingleChunkColumnBase {
             res.emplace_back(RawAt(offset));
             valid.emplace_back(IsValid(offset));
         }
-        return {res, valid};
+        return {std::move(res), std::move(valid)};
     }
 
     [[nodiscard]] std::vector<ViewType>
@@ -971,6 +977,19 @@ class SingleChunkArrayColumn : public SingleChunkColumnBase {
     std::pair<std::vector<ArrayView>, FixedVector<bool>>
     ArrayViews() const override {
         return {Views(), valid_data_};
+    }
+
+    std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    ArrayViewsByOffsets(const FixedVector<int32_t>& offsets) const override {
+        std::vector<ArrayView> views;
+        FixedVector<bool> valid;
+        views.reserve(offsets.size());
+        valid.reserve(offsets.size());
+        for (auto offset : offsets) {
+            views.emplace_back(this->operator[](offset));
+            valid.emplace_back(IsValid(offset));
+        }
+        return {std::move(views), std::move(valid)};
     }
 
  protected:

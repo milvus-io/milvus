@@ -212,16 +212,19 @@ class SegmentInternalInterface : public SegmentInterface {
             PanicInfo(ErrorCode::Unsupported,
                       "get chunk views not supported for growing segment");
         }
-        auto chunk_view = chunk_view_by_offsets(field_id, chunk_id, offsets);
         if constexpr (std::is_same_v<ViewType, std::string_view>) {
-            return chunk_view;
-        } else {
+            return chunk_string_views_by_offsets(field_id, chunk_id, offsets);
+        } else if constexpr (std::is_same_v<ViewType, Json>) {
+            auto chunk_view =
+                chunk_string_views_by_offsets(field_id, chunk_id, offsets);
             std::vector<ViewType> res;
             res.reserve(chunk_view.first.size());
             for (const auto& view : chunk_view.first) {
                 res.emplace_back(view);
             }
             return {res, chunk_view.second};
+        } else if constexpr (std::is_same_v<ViewType, ArrayView>) {
+            return chunk_array_views_by_offsets(field_id, chunk_id, offsets);
         }
     }
 
@@ -476,9 +479,15 @@ class SegmentInternalInterface : public SegmentInterface {
                      int64_t length) const = 0;
 
     virtual std::pair<std::vector<std::string_view>, FixedVector<bool>>
-    chunk_view_by_offsets(FieldId field_id,
-                          int64_t chunk_id,
-                          const FixedVector<int32_t>& offsets) const = 0;
+    chunk_string_views_by_offsets(
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual std::pair<std::vector<ArrayView>, FixedVector<bool>>
+    chunk_array_views_by_offsets(FieldId field_id,
+                                 int64_t chunk_id,
+                                 const FixedVector<int32_t>& offsets) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
     virtual const index::IndexBase*
