@@ -572,32 +572,26 @@ class ResponseChecker:
         if exp_limit is not None:
             assert len(query_res) == exp_limit
         # pk_name = check_items.get("pk_name", ct.default_primary_field_name)
-        # if with_vec:
         if exp_res is not None:
             if with_vec is True:
                 vector_type = check_items.get('vector_type', 'FLOAT_VECTOR')
                 vector_field = check_items.get('vector_field', 'vector')
                 if vector_type == DataType.FLOAT16_VECTOR:
-                    # for single_exp_res in exp_res:
-                    #     single_exp_res[vector_field] = single_exp_res[vector_field].tolist()
                     for single_query_result in query_res:
                         single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.float16).tolist()
                 if vector_type == DataType.BFLOAT16_VECTOR:
-                    # for single_exp_res in exp_res:
-                    #     single_exp_res[vector_field] = single_exp_res[vector_field].tolist()
                     for single_query_result in query_res:
                         single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=bfloat16).tolist()
                 if vector_type == DataType.INT8_VECTOR:
-                    # for single_exp_res in exp_res:
-                    #     if single_exp_res[vector_field].__class__ is not list:
-                    #         single_exp_res[vector_field] = single_exp_res[vector_field].tolist()
                     for single_query_result in query_res:
                         single_query_result[vector_field] = np.frombuffer(single_query_result[vector_field][0], dtype=np.int8).tolist()
             if isinstance(query_res, list):
-                # assert pc.equal_entities_list(exp=exp_res, actual=query_res, primary_field=pk_name, with_vec=with_vec)
-                # return True
-                assert pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res)
-                return True
+                result = pc.compare_lists_with_epsilon_ignore_dict_order(a=query_res, b=exp_res)
+                if result is False:
+                    log.debug(f"query expected: {exp_res}")
+                    log.debug(f"query actual: {query_res}")
+                assert result
+                return result
             else:
                 log.error(f"Query result {query_res} is not list")
                 return False

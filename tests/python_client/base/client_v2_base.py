@@ -30,7 +30,7 @@ class TestMilvusClientV2Base(Base):
         }
         self.async_milvus_client_wrap.init_async_client(**kwargs)
 
-    def _client(self, active_trace=False):
+    def _client(self, active_trace=False, **kwargs):
         """ return MilvusClient instance if connected successfully, otherwise return None"""
         if self.skip_connection:
             return None
@@ -38,7 +38,7 @@ class TestMilvusClientV2Base(Base):
             uri = cf.param_info.param_uri
         else:
             uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
-        res, is_succ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token, active_trace=active_trace)
+        res, is_succ = self.init_milvus_client(uri=uri, token=cf.param_info.param_token, active_trace=active_trace, **kwargs)
         if is_succ:
             # self.milvus_client = res
             log.info(f"server version: {res.get_server_version()}")
