@@ -130,6 +130,9 @@ class DList {
     void
     removeLoadingResource(const ResourceUsage& size);
 
+    void
+    removeLoadedResource(const ResourceUsage& size);
+
     const EvictionConfig&
     eviction_config() const {
         return eviction_config_;

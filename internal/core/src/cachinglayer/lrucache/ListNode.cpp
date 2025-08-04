@@ -59,8 +59,12 @@ ListNode::ListNode(DList* dlist, ResourceUsage size, bool evictable)
 
 ListNode::~ListNode() {
     if (dlist_) {
-        std::unique_lock<std::shared_mutex> lock(mtx_);
-        dlist_->removeItem(this, size_);
+        if (evictable_) {
+            std::unique_lock<std::shared_mutex> lock(mtx_);
+            dlist_->removeItem(this, size_);
+        } else {
+            dlist_->removeLoadedResource(size_);
+        }
     }
 }
 
