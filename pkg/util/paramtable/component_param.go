@@ -3066,7 +3066,7 @@ The higher the ratio, the more physical memory is reserved for evictable memory,
 resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
-It defaults to 0.3 (meaning 30% of evictable memory is cached), with a valid range of [0.0, 1.0].`,
+It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].`,
 		Export: true,
 	}
 	p.TieredEvictableMemoryCacheRatio.Init(base.mgr)
@@ -3087,7 +3087,7 @@ The higher the ratio, the more physical disk space is reserved for evictable dis
 resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
-It defaults to 0.3 (meaning 30% of evictable disk space is cached), with a valid range of [0.0, 1.0].`,
+It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].`,
 		Export: true,
 	}
 	p.TieredEvictableDiskCacheRatio.Init(base.mgr)
