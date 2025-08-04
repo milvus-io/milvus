@@ -1,21 +1,17 @@
 use super::fetch;
 use crate::error::{Result, TantivyBindingError};
-use lindera_dictionary::dictionary_builder::ipadic_neologd::IpadicNeologdBuilder;
-use tokio::runtime::Runtime;
-
 #[cfg(feature = "lindera-ipadic-neologd")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
+use lindera_dictionary::dictionary_builder::ipadic_neologd::IpadicNeologdBuilder;
 
 #[cfg(not(feature = "lindera-ipadic-neologd"))]
-async fn download(params: &fetch::FetchParams) -> Result<()> {
-    fetch::fetch(params, IpadicNeologdBuilder::new())
-        .await
-        .map_err(|e| {
-            TantivyBindingError::InternalError(format!(
-                "fetch ipadic-neologd failed with error: {}",
-                e.to_string()
-            ))
-        })
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::fetch(params, IpadicNeologdBuilder::new()).map_err(|e| {
+        TantivyBindingError::InternalError(format!(
+            "fetch ipadic-neologd failed with error: {}",
+            e.to_string()
+        ))
+    })
 }
 
 #[cfg(not(feature = "lindera-ipadic-neologd"))]
@@ -39,8 +35,7 @@ pub fn load_ipadic_neologd(
         params.download_urls = download_url
     }
 
-    let rt = Runtime::new().unwrap();
-    rt.block_on(download(&params))?;
+    download(&params)?;
     fetch::load(&params)
 }
 
