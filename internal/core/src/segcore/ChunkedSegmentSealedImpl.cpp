@@ -605,7 +605,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_view_by_offsets(
+ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
@@ -613,10 +613,27 @@ ChunkedSegmentSealedImpl::chunk_view_by_offsets(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
-        return it->second->ViewsByOffsets(chunk_id, offsets);
+        return it->second->StringViewsByOffsets(chunk_id, offsets);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_view_by_offsets only used for variable column field ");
+}
+
+PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->ArrayViewsByOffsets(chunk_id, offsets);
+    }
+    ThrowInfo(
+        ErrorCode::UnexpectedError,
+        "chunk_array_views_by_offsets only used for variable column field ");
 }
 
 PinWrapper<const index::IndexBase*>

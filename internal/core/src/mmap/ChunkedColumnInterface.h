@@ -86,8 +86,12 @@ class ChunkedColumnInterface {
 
     virtual PinWrapper<
         std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    ViewsByOffsets(int64_t chunk_id,
-                   const FixedVector<int32_t>& offsets) const = 0;
+    StringViewsByOffsets(int64_t chunk_id,
+                         const FixedVector<int32_t>& offsets) const = 0;
+
+    virtual PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    ArrayViewsByOffsets(int64_t chunk_id,
+                        const FixedVector<int32_t>& offsets) const = 0;
 
     // Convert a global offset to (chunk_id, offset_in_chunk) pair
     virtual std::pair<size_t, size_t>
