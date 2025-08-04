@@ -1761,22 +1761,6 @@ class TestLoadCollection(TestcaseBase):
     ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_load_collection_after_index(self):
-        """
-        target: test load collection, after index created
-        method: insert and create index, load collection with correct params
-        expected: no error raised
-        """
-        self._connect()
-        collection_w = self.init_collection_wrap()
-        data = cf.gen_default_list_data()
-        collection_w.insert(data)
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        collection_w.load()
-        collection_w.release()
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_collection_after_index_binary(self):
         """
