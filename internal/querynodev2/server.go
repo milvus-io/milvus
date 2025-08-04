@@ -398,6 +398,14 @@ func (node *QueryNode) InitSegcore() error {
 		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
 		overloadedMemoryThresholdPercentage, loadingMemoryFactor, maxDiskUsagePercentage, diskPath)
 
+	tieredEvictableMemoryCacheRatio := paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
+	tieredEvictableDiskCacheRatio := paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
+
+	log.Ctx(node.ctx).Info("tiered storage eviction cache ratio configured",
+		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
+		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
+	)
+
 	err = initcore.InitInterminIndexConfig(paramtable.Get())
 	if err != nil {
 		return err
