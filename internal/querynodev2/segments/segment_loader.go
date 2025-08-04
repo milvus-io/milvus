@@ -869,6 +869,17 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			return err
 		}
 		if !segment.HasRawData(fieldID) || field.GetIsPrimaryKey() {
+			// Skip loading raw data for fields in column group when using storage v2
+			if loadInfo.GetStorageVersion() == storage.StorageV2 &&
+				!storagecommon.IsVectorDataType(field.GetDataType()) &&
+				field.GetDataType() != schemapb.DataType_Text {
+				log.Info("skip loading raw data for field in short column group",
+					zap.Int64("fieldID", fieldID),
+					zap.String("index", info.IndexInfo.GetIndexName()),
+				)
+				continue
+			}
+
 			log.Info("field index doesn't include raw data, load binlog...",
 				zap.Int64("fieldID", fieldID),
 				zap.String("index", info.IndexInfo.GetIndexName()),
