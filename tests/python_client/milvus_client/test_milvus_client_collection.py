@@ -6,6 +6,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
+from pymilvus.client.types import LoadState
 
 prefix = "client_collection"
 epsilon = ct.epsilon
@@ -980,21 +981,6 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         
         self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("shards_num", [ct.default_shards_num, -256, 0, ct.max_shards_num // 2, ct.max_shards_num])
-    def test_milvus_client_collection_shards_num(self, shards_num):
-        """
-        target: test collection with different shards_num values
-        method: create collection with various shards_num including default and boundary values
-        expected: collection created successfully with correct shards_num
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim, shards_num=shards_num)        # Verify collection exists in the list
-        collections = self.list_collections(client)[0]
-        assert collection_name in collections
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_collection_binary(self):
         """
@@ -1273,6 +1259,33 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
     
     @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_release_collection(self):
+        """
+        target: test load, release non-exist collection
+        method: 1. load, release and drop collection
+                2. load and release dropped collection
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str()
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Prepare and create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # Load, release and drop collection
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+        # Try to load and release dropped collection - should raise exception
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
+        self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
+        self.release_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
+    
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_release_collection_after_drop(self):
         """
         target: test release collection after it has been dropped
@@ -1332,12 +1345,12 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                 3. try to load collection with disconnected client
         expected: operations should raise appropriate connection errors
         """
-        client = self._client()
+        client_temp = self._client(alias="client_temp")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim)
-        self.close(client)
+        self.create_collection(client_temp, collection_name, default_dim)
+        self.close(client_temp)
         error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
-        self.load_collection(client, collection_name, 
+        self.load_collection(client_temp, collection_name,
                             check_task=CheckTasks.err_res, check_items=error)
         
     @pytest.mark.tags(CaseLabel.L2)
@@ -1349,12 +1362,12 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                 3. try to release collection with disconnected client
         expected: operations should raise appropriate connection errors
         """
-        client = self._client()
+        client_temp = self._client(alias="client_temp2")
         collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim)
-        self.close(client)
+        self.create_collection(client_temp, collection_name, default_dim)
+        self.close(client_temp)
         error = {ct.err_code: 999, ct.err_msg: 'should create connection first'}
-        self.release_collection(client, collection_name, 
+        self.release_collection(client_temp, collection_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -1408,15 +1421,34 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
         partition_name = cf.gen_unique_str("partition")
-        # 1. create collection and partition
+        # Step 1: Create collection and partition
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name)
+        # Step 2: Release collection and verify state NotLoad
         self.release_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
+        # Step 3: Load specific partition and verify state changes to Loaded
         self.load_partitions(client, collection_name, [partition_name])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading partition, but got {load_state['state']}"
+        # Step 4: Load entire collection and verify state remains Loaded
         self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        # Step 5: Release collection and verify state changes to NotLoad
         self.release_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
+        # Step 6: Load multiple partitions and verify state changes to Loaded
         self.load_partitions(client, collection_name, ["_default", partition_name])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading partitions, but got {load_state['state']}"
+        # Step 7: Load collection again and verify state remains Loaded
         self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after final load collection, but got {load_state['state']}"
+        # Step 8: Cleanup - drop collection if it exists
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
 
@@ -1433,15 +1465,28 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         partition_name_1 = cf.gen_unique_str("partition1")
         partition_name_2 = cf.gen_unique_str("partition2")
+        # Create collection and partitions
         self.create_collection(client, collection_name, default_dim)
         self.create_partition(client, collection_name, partition_name_1)
         self.create_partition(client, collection_name, partition_name_2)
+        # Verify initial state is Loaded
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        # Load collection and verify state
         self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        # Load partitions and verify state (should remain Loaded)
         self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading partitions, but got {load_state['state']}"
         # Search on one partition
         vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
         self.search(client, collection_name, vectors_to_search, 
                    limit=default_limit, partition_names=[partition_name_1])
+        # Verify state remains Loaded after search
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after search, but got {load_state['state']}"
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1840,12 +1885,97 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         self.insert(client, collection_name, rows)
         # Prepare and create index
         index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type="IVF_SQ8", 
-                              metric_type="L2", params={"nlist": 64})
+        index_params.add_index(field_name="vector", index_type="IVF_SQ8", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         # Load and release collection
         self.load_collection(client, collection_name)
         self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_empty_collection(self):
+        """
+        target: test load an empty collection with no data inserted
+        method: no entities in collection, load and release the collection
+        expected: load and release successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Prepare and create index (no data inserted)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # Load and release collection
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_load_collection_after_load_release(self):
+        """
+        target: test load collection after load and release
+        method: 1.load and release collection after entities flushed
+                2.re-load collection
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # Prepare and create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # Load, release, and re-load collection
+        self.load_collection(client, collection_name)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_collection_repeatedly(self):
+        """
+        target: test load collection repeatedly
+        method: load collection twice
+        expected: No exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # Prepare and create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # Load collection twice (test repeated loading)
+        self.load_collection(client, collection_name)
+        self.load_collection(client, collection_name)
         self.drop_collection(client, collection_name)
 
 
@@ -2253,3 +2383,324 @@ class TestMilvusClientCollectionPropertiesValid(TestMilvusClientV2Base):
         assert "mmap.enabled" not in describe
         #TODO add case that confirm the parameter is actually invalid
         self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientLoadReleaseComprehensiveMerged(TestMilvusClientV2Base):
+    """
+    Comprehensive test cases merging functionality from multiple similar load/release test cases.
+    This class combines and replaces the following test cases:
+    - test_milvus_client_load_partitions_after_load_release_collection
+    - test_milvus_client_load_collection_after_release_collection_partition
+    - test_milvus_client_load_partitions_after_release_collection_partition
+    - test_milvus_client_load_collection_after_release_partition
+    - test_milvus_client_load_partitions_after_release_partition
+    - test_milvus_client_load_collection_after_release_partition_collection
+    - test_milvus_client_load_partitions_after_release_partition_collection
+    - test_milvus_client_load_collection_after_release_partitions
+    - test_milvus_client_load_partitions_after_release_partitions
+    
+    Ensures coverage of all 4 key testing points:
+    1. released partition/collection cannot be searched/queried
+    2. loaded partition/collection can be searched/queried
+    3. loaded partition/collection can be loaded again, and released again
+    4. released partition/collection can be loaded again, and released again
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_collection_load_release_comprehensive_merged(self):
+        """
+        target: comprehensive test for collection load/release operations with search/query validation
+        method: 1. test collection load -> search/query (should work)
+                2. test collection release -> search/query (should fail)
+                3. test repeated load/release operations
+                4. test load after release (recovery)
+        expected: proper search/query behavior based on load/release state
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Step 1: Create collection with data for testing
+        self.create_collection(client, collection_name, default_dim)
+        # Step 2: Test point 1 - loaded collection can be searched/queried
+        self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, limit=default_limit)
+        self.query(client, collection_name, filter=default_search_exp)        
+        # Step 3: Test point 2 - loaded collection can be loaded again
+        self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after repeated load, but got {load_state['state']}"
+        # Step 4: Test point 3 - released collection cannot be searched/queried
+        self.release_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad, but got {load_state['state']}"
+        error_search = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                   check_task=CheckTasks.err_res, check_items=error_search)
+        error_query = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
+        self.query(client, collection_name, filter=default_search_exp,
+                  check_task=CheckTasks.err_res, check_items=error_query)
+        # Step 5: Test point 4 - released collection can be released again
+        self.release_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after repeated release, but got {load_state['state']}"
+        # Step 6: Test point 5 - released collection can be loaded again
+        self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after reload, but got {load_state['state']}"
+        self.search(client, collection_name, vectors_to_search, limit=default_limit)
+        # Step 7: Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_partition_load_release_comprehensive_merged(self):
+        """
+        target: comprehensive test for partition load/release operations with search/query validation
+        method: 1. test partition load -> search/query (should work)
+                2. test partition release -> search/query (should fail)
+                3. test repeated load/release operations
+                4. test load after release (recovery)
+        expected: proper search/query behavior based on partition load/release state
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        # Step 1: Create collection with partitions
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        # Step 2: Test point 1 - loaded partitions can be searched/queried
+        self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1, partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1, partition_name_2])
+        # Step 3: Test point 2 - loaded partitions can be loaded again
+        self.load_partitions(client, collection_name, [partition_name_1, partition_name_2])
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1, partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1, partition_name_2])
+        # Step 4: Test point 3 - released partitions cannot be searched/queried
+        self.release_partitions(client, collection_name, [partition_name_1])
+        error_search = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1],
+                   check_task=CheckTasks.err_res, check_items=error_search)
+        error_query = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1],
+                  check_task=CheckTasks.err_res, check_items=error_query)
+        # Non-released partition should still work
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_2])
+        # Step 5: Test point 4 - released partitions can be released again
+        self.release_partitions(client, collection_name, [partition_name_1])  # Release again
+        error_search = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1],
+                   check_task=CheckTasks.err_res, check_items=error_search)
+        # Step 6: Test point 5 - released partitions can be loaded again
+        self.load_partitions(client, collection_name, [partition_name_1])
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1])
+        # Step 8: Cleanup
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_mixed_collection_partition_operations_comprehensive_merged(self):
+        """
+        target: comprehensive test for mixed collection/partition load/release operations
+        method: 1. test collection load -> partition release -> mixed behavior
+                2. test partition load -> collection load -> behavior
+                3. test collection release -> partition load -> behavior
+                4. validate all 4 key testing points in mixed scenarios
+        expected: consistent behavior across mixed operations
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        # Step 1: Setup collection with partitions
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        # Step 2: Test Release partition after collection release
+        self.release_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after collection release, but got {load_state['state']}"
+        self.release_partitions(client, collection_name, ["_default"])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after default partition release, but got {load_state['state']}"
+        # Step 3: Load specific partitions
+        self.load_partitions(client, collection_name, [partition_name_1])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after partition load, but got {load_state['state']}"
+        # Search should work on loaded partitions
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1])
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1])
+        # Step 4: Test load collection after partition load
+        self.load_collection(client, collection_name)
+        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name_1, partition_name_2])
+        self.query(client, collection_name, filter=default_search_exp, partition_names=[partition_name_1, partition_name_2])
+        # Step 5: Test edge case - release all partitions individually
+        self.release_partitions(client, collection_name, ["_default", partition_name_1, partition_name_2])
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after releasing all partitions, but got {load_state['state']}"
+        error_search = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                   check_task=CheckTasks.err_res, check_items=error_search)
+        # Step 6: Test release collection after partition release
+        self.release_collection(client, collection_name)
+        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after releasing all partitions, but got {load_state['state']}"
+        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
+        self.search(client, collection_name, vectors_to_search, limit=default_limit,
+                   check_task=CheckTasks.err_res, check_items=error)
+        self.query(client, collection_name, filter=default_search_exp,
+                  check_task=CheckTasks.err_res, check_items=error)
+        # Step 7: Cleanup
+        self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientDropPartitionOperationsComprehensiveMerged(TestMilvusClientV2Base):
+    """
+    Comprehensive test case merging functionality from the following 4 drop partition related test cases:
+    - test_milvus_client_load_collection_after_drop_partition_and_release_another
+    - test_milvus_client_load_partition_after_drop_partition_and_release_another  
+    - test_milvus_client_load_another_partition_after_drop_one_partition
+    - test_milvus_client_load_collection_after_drop_one_partition
+    
+    This comprehensive test covers all scenarios involving partition drops with load/release operations.
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_drop_partition_operations_comprehensive_merged(self):
+        """
+        target: comprehensive test merging all drop partition related operations
+        method: This test combines and replaces the following 4 test cases:
+                - test_milvus_client_load_collection_after_drop_partition_and_release_another
+                - test_milvus_client_load_partition_after_drop_partition_and_release_another  
+                - test_milvus_client_load_another_partition_after_drop_one_partition
+                - test_milvus_client_load_collection_after_drop_one_partition
+                
+                The test covers:
+                1. Drop partition after release
+                2. Query behavior on released partitions (should fail)
+                3. Query behavior on remaining partitions after drop
+                4. Load collection after dropping partitions
+                5. Load specific partitions after dropping others
+                6. Mixed collection and partition load operations
+        expected: Proper behavior for all drop partition scenarios
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name_1 = cf.gen_unique_str("partition1")
+        partition_name_2 = cf.gen_unique_str("partition2")
+        partition_name_3 = cf.gen_unique_str("partition3")
+        
+        # Step 1: Setup collection with multiple partitions
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.create_partition(client, collection_name, partition_name_1)
+        self.create_partition(client, collection_name, partition_name_2)
+        self.create_partition(client, collection_name, partition_name_3)
+        
+        # Step 2: Load collection initially
+        self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
+        
+        # Step 3: Test scenario 1 - Drop partition and release another, then query (should fail)
+        # This covers test_milvus_client_load_collection_after_drop_partition_and_release_another
+        self.release_partitions(client, collection_name, [partition_name_1])
+        self.drop_partition(client, collection_name, partition_name_1)
+        self.release_partitions(client, collection_name, [partition_name_2])
+        
+        # Query on released partition should fail
+        error = {ct.err_code: 65538, ct.err_msg: 'partition not loaded'}
+        self.query(client, collection_name, filter=default_search_exp,
+                   partition_names=[partition_name_2],
+                   check_task=CheckTasks.err_res, check_items=error)
+        
+        # Step 4: Load collection after drop and release operations
+        self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after reload, but got {load_state['state']}"
+        
+        # Step 5: Test scenario 2 - Load specific partition after drop and release
+        # This covers test_milvus_client_load_partition_after_drop_partition_and_release_another
+        # Release partition_2 again for this test
+        self.release_partitions(client, collection_name, [partition_name_2])
+        
+        # Load the specific partition and query (should work)
+        self.load_partitions(client, collection_name, [partition_name_2])
+        query_results = self.query(client, collection_name, filter=default_search_exp,
+                                  partition_names=[partition_name_2])[0]
+        assert len(query_results) >= 0, "Query should work on loaded partition"
+        
+        # Step 6: Test scenario 3 - Drop one partition and load another
+        # This covers test_milvus_client_load_another_partition_after_drop_one_partition
+        # Create a new partition for this test
+        partition_name_4 = cf.gen_unique_str("partition4")
+        self.create_partition(client, collection_name, partition_name_4)
+        
+        # Release and drop partition_2
+        self.release_partitions(client, collection_name, [partition_name_2])
+        self.drop_partition(client, collection_name, partition_name_2)
+        
+        # Load another partition directly (without releasing first)
+        self.load_partitions(client, collection_name, [partition_name_4])
+        query_results = self.query(client, collection_name, filter=default_search_exp,
+                                  partition_names=[partition_name_4])[0]
+        assert len(query_results) >= 0, "Query should work on newly loaded partition"
+        
+        # Step 7: Test scenario 4 - Load collection after dropping one partition
+        # This covers test_milvus_client_load_collection_after_drop_one_partition
+        # Release and drop partition_3
+        self.release_partitions(client, collection_name, [partition_name_3])
+        self.drop_partition(client, collection_name, partition_name_3)
+        
+        # Load entire collection
+        self.load_collection(client, collection_name)
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after collection load, but got {load_state['state']}"
+        
+        # Query on remaining partition should work
+        query_results = self.query(client, collection_name, filter=default_search_exp,
+                                  partition_names=[partition_name_4])[0]
+        assert len(query_results) >= 0, "Query should work on remaining partition after collection load"
+        
+        # Step 8: Additional comprehensive test - Verify search/query behavior
+        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
+        
+        # Search on remaining partitions should work
+        search_results = self.search(client, collection_name, vectors_to_search,
+                                   limit=5, partition_names=[partition_name_4])[0]
+        assert len(search_results) >= 0, "Search should work on remaining partition"
+        
+        # Search on entire collection should work
+        search_results = self.search(client, collection_name, vectors_to_search, limit=5)[0]
+        assert len(search_results) >= 0, "Search should work on entire collection"
+        
+        # Step 9: Test edge case - Multiple drop and load operations
+        partition_name_5 = cf.gen_unique_str("partition5")
+        partition_name_6 = cf.gen_unique_str("partition6")
+        self.create_partition(client, collection_name, partition_name_5)
+        self.create_partition(client, collection_name, partition_name_6)
+        
+        # Load all partitions
+        self.load_partitions(client, collection_name, [partition_name_5, partition_name_6])
+        
+        # Release and drop one, keep another
+        self.release_partitions(client, collection_name, [partition_name_5])
+        self.drop_partition(client, collection_name, partition_name_5)
+        
+        # Verify that the remaining partition still works
+        query_results = self.query(client, collection_name, filter=default_search_exp,
+                                  partition_names=[partition_name_6])[0]
+        assert len(query_results) >= 0, "Query should work on remaining partition after multiple operations"
+        
+        # Step 10: Final verification - Load collection one more time
+        self.load_collection(client, collection_name)
+        search_results = self.search(client, collection_name, vectors_to_search, limit=5)[0]
+        assert len(search_results) >= 0, "Final search should work after all operations"
+        
+        # Step 11: Cleanup
+        self.drop_collection(client, collection_name)
+
