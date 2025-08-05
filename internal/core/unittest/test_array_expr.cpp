@@ -1501,7 +1501,7 @@ TEST(Expr, TestArrayContainsEmptyValues) {
                   << std::endl;
         EXPECT_EQ(final.size(), N * num_iters);
         for (int i = 0; i < N * num_iters; ++i) {
-            ASSERT_EQ(final[i], true);
+            ASSERT_EQ(final[i], false);
         }
     }
 }

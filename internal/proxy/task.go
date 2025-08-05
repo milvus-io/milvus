@@ -63,7 +63,7 @@ const (
 	TopKKey              = "topk"
 	NQKey                = "nq"
 	MetricTypeKey        = common.MetricTypeKey
-	SearchParamsKey      = "params"
+	ParamsKey            = common.ParamsKey
 	ExprParamsKey        = "expr_params"
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
@@ -85,6 +85,7 @@ const (
 	HasPartitionTaskName          = "HasPartitionTask"
 	ShowPartitionTaskName         = "ShowPartitionTask"
 	FlushTaskName                 = "FlushTask"
+	FlushAllTaskName              = "FlushAllTask"
 	LoadCollectionTaskName        = "LoadCollectionTask"
 	ReleaseCollectionTaskName     = "ReleaseCollectionTask"
 	LoadPartitionTaskName         = "LoadPartitionsTask"
@@ -119,7 +120,6 @@ const (
 	minFloat32 = -1 * float32(math.MaxFloat32)
 
 	RankTypeKey      = "strategy"
-	RankParamsKey    = "params"
 	RRFParamsKey     = "k"
 	WeightsParamsKey = "weights"
 	NormScoreKey     = "norm_score"
@@ -280,6 +280,16 @@ func (t *createCollectionTask) validatePartitionKey(ctx context.Context) error {
 		}
 	}
 
+	// Fields in StructArrayFields should not be partition key
+	for _, field := range t.schema.StructArrayFields {
+		for _, subField := range field.Fields {
+			if subField.GetIsPartitionKey() {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("partition key is not supported for struct field, field name = %s", subField.Name))
+			}
+		}
+	}
+
 	mustPartitionKey := Params.ProxyCfg.MustUsePartitionKey.GetAsBool()
 	if mustPartitionKey && idx == -1 {
 		return merr.WrapErrParameterInvalidMsg("partition key must be set when creating the collection" +
@@ -315,6 +325,15 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 		}
 	}
 
+	// Fields in StructArrayFields should not be clustering key
+	for _, field := range t.schema.StructArrayFields {
+		for _, subField := range field.Fields {
+			if subField.GetIsClusteringKey() {
+				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
+					fmt.Sprintf("clustering key is not supported for struct field, field name = %s", subField.Name))
+			}
+		}
+	}
 	if idx != -1 {
 		log.Ctx(ctx).Info("create collection with clustering key",
 			zap.String("collectionName", t.CollectionName),
@@ -342,7 +361,8 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
 
-	if len(t.schema.Fields) > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+	totalFieldsNum := typeutil.GetTotalFieldsNum(t.schema)
+	if totalFieldsNum > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
 		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
@@ -361,7 +381,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	// validate whether field names duplicates
-	if err := validateDuplicatedFieldName(t.schema.Fields); err != nil {
+	if err := validateDuplicatedFieldName(t.schema); err != nil {
 		return err
 	}
 
@@ -402,6 +422,12 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	for _, field := range t.schema.Fields {
 		if err := ValidateField(field, t.schema); err != nil {
+			return err
+		}
+	}
+
+	for _, structArrayField := range t.schema.StructArrayFields {
+		if err := ValidateStructArrayField(structArrayField, t.schema); err != nil {
 			return err
 		}
 	}
@@ -762,11 +788,12 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result = &milvuspb.DescribeCollectionResponse{
 		Status: merr.Success(),
 		Schema: &schemapb.CollectionSchema{
-			Name:        "",
-			Description: "",
-			AutoID:      false,
-			Fields:      make([]*schemapb.FieldSchema, 0),
-			Functions:   make([]*schemapb.FunctionSchema, 0),
+			Name:              "",
+			Description:       "",
+			AutoID:            false,
+			Fields:            make([]*schemapb.FieldSchema, 0),
+			Functions:         make([]*schemapb.FunctionSchema, 0),
+			StructArrayFields: make([]*schemapb.StructArrayFieldSchema, 0),
 		},
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
@@ -813,28 +840,44 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.NumPartitions = result.NumPartitions
 	t.result.UpdateTimestamp = result.UpdateTimestamp
 	t.result.UpdateTimestampStr = result.UpdateTimestampStr
+	copyFieldSchema := func(field *schemapb.FieldSchema) *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			FieldID:          field.FieldID,
+			Name:             field.Name,
+			IsPrimaryKey:     field.IsPrimaryKey,
+			AutoID:           field.AutoID,
+			Description:      field.Description,
+			DataType:         field.DataType,
+			TypeParams:       field.TypeParams,
+			IndexParams:      field.IndexParams,
+			IsDynamic:        field.IsDynamic,
+			IsPartitionKey:   field.IsPartitionKey,
+			IsClusteringKey:  field.IsClusteringKey,
+			DefaultValue:     field.DefaultValue,
+			ElementType:      field.ElementType,
+			Nullable:         field.Nullable,
+			IsFunctionOutput: field.IsFunctionOutput,
+		}
+	}
+
 	for _, field := range result.Schema.Fields {
 		if field.IsDynamic {
 			continue
 		}
 		if field.FieldID >= common.StartOfUserFieldID {
-			t.result.Schema.Fields = append(t.result.Schema.Fields, &schemapb.FieldSchema{
-				FieldID:          field.FieldID,
-				Name:             field.Name,
-				IsPrimaryKey:     field.IsPrimaryKey,
-				AutoID:           field.AutoID,
-				Description:      field.Description,
-				DataType:         field.DataType,
-				TypeParams:       field.TypeParams,
-				IndexParams:      field.IndexParams,
-				IsDynamic:        field.IsDynamic,
-				IsPartitionKey:   field.IsPartitionKey,
-				IsClusteringKey:  field.IsClusteringKey,
-				DefaultValue:     field.DefaultValue,
-				ElementType:      field.ElementType,
-				Nullable:         field.Nullable,
-				IsFunctionOutput: field.IsFunctionOutput,
-			})
+			t.result.Schema.Fields = append(t.result.Schema.Fields, copyFieldSchema(field))
+		}
+	}
+
+	for i, structArrayField := range result.Schema.StructArrayFields {
+		t.result.Schema.StructArrayFields = append(t.result.Schema.StructArrayFields, &schemapb.StructArrayFieldSchema{
+			FieldID:     structArrayField.FieldID,
+			Name:        structArrayField.Name,
+			Description: structArrayField.Description,
+			Fields:      make([]*schemapb.FieldSchema, 0, len(structArrayField.Fields)),
+		})
+		for _, field := range structArrayField.Fields {
+			t.result.Schema.StructArrayFields[i].Fields = append(t.result.Schema.StructArrayFields[i].Fields, copyFieldSchema(field))
 		}
 	}
 
@@ -2016,6 +2059,8 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 
+	// todo(SpadeA): check vector field in StructArrayField when index is implemented
+
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
 		log.Debug(errMsg)
@@ -2275,6 +2320,8 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 			}
 		}
 	}
+
+	// todo(SpadeA): check vector field in StructArrayField when index is implemented
 
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)

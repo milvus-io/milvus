@@ -600,6 +600,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 
 	// s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
 	// s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything).Return(nil)
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 			if t.GetPlanID() == 2 {
@@ -693,6 +694,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	// s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 	s.mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Twice()
 	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
 		[]*SegmentInfo{segment},
 		&segMetricMutation{}, nil).Once()
@@ -887,6 +889,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 				},
 			},
 		}, nil).Once()
+	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("mock error"))
 
 	s.handler.submitTask(task)

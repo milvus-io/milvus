@@ -126,7 +126,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64, storageConfig *inde
 	}
 
 	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(record, v, r.schema.Fields)
+		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
 	})
 
 	if len(paths) < 2 {

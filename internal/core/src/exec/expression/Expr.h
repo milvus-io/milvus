@@ -498,7 +498,8 @@ class SegmentExpr : public Expr {
         if (segment_->type() == SegmentType::Sealed) {
             if (segment_->is_chunked()) {
                 if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>) {
+                              std::is_same_v<T, Json> ||
+                              std::is_same_v<T, ArrayView>) {
                     for (size_t i = 0; i < input->size(); ++i) {
                         int64_t offset = (*input)[i];
                         auto [chunk_id, chunk_offset] =
@@ -556,7 +557,8 @@ class SegmentExpr : public Expr {
                 return input->size();
             } else {
                 if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>) {
+                              std::is_same_v<T, Json> ||
+                              std::is_same_v<T, ArrayView>) {
                     return ProcessDataByOffsetsForSealedSeg<T>(
                         func, skip_func, input, res, valid_res, values...);
                 }
@@ -620,7 +622,6 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         ValTypes... values) {
         int64_t processed_size = 0;
-
         if constexpr (std::is_same_v<T, std::string_view> ||
                       std::is_same_v<T, Json>) {
             if (segment_->type() == SegmentType::Sealed) {
@@ -749,7 +750,8 @@ class SegmentExpr : public Expr {
             } else {
                 const bool* valid_data;
                 if constexpr (std::is_same_v<T, std::string_view> ||
-                              std::is_same_v<T, Json>) {
+                              std::is_same_v<T, Json> ||
+                              std::is_same_v<T, ArrayView>) {
                     auto pw = segment_->get_batch_views<T>(
                         field_id_, i, data_pos, size);
                     valid_data = pw.get().second.data();
@@ -1283,11 +1285,13 @@ class SegmentExpr : public Expr {
 
     bool
     CanUseNgramIndex(FieldId field_id) const {
-        if (segment_->type() != SegmentType::Sealed) {
-            return false;
-        }
-        auto cast_ptr = dynamic_cast<const segcore::SegmentSealed*>(segment_);
-        return (cast_ptr != nullptr && cast_ptr->HasNgramIndex(field_id));
+        return segment_->HasNgramIndex(field_id);
+    }
+
+    bool
+    CanUseNgramIndexForJson(FieldId field_id,
+                            const std::string& nested_path) const {
+        return segment_->HasNgramIndexForJson(field_id, nested_path);
     }
 
  protected:

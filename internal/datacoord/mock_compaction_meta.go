@@ -879,6 +879,52 @@ func (_c *MockCompactionMeta_UpdateSegmentsInfo_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// ValidateSegmentStateBeforeCompleteCompactionMutation provides a mock function with given fields: t
+func (_m *MockCompactionMeta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
+	ret := _m.Called(t)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateSegmentStateBeforeCompleteCompactionMutation")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask) error); ok {
+		r0 = rf(t)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateSegmentStateBeforeCompleteCompactionMutation'
+type MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call struct {
+	*mock.Call
+}
+
+// ValidateSegmentStateBeforeCompleteCompactionMutation is a helper method to define mock.On call
+//   - t *datapb.CompactionTask
+func (_e *MockCompactionMeta_Expecter) ValidateSegmentStateBeforeCompleteCompactionMutation(t interface{}) *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call {
+	return &MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call{Call: _e.mock.On("ValidateSegmentStateBeforeCompleteCompactionMutation", t)}
+}
+
+func (_c *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call) Run(run func(t *datapb.CompactionTask)) *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.CompactionTask))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call) Return(_a0 error) *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call) RunAndReturn(run func(*datapb.CompactionTask) error) *MockCompactionMeta_ValidateSegmentStateBeforeCompleteCompactionMutation_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockCompactionMeta creates a new instance of MockCompactionMeta. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockCompactionMeta(t interface {

@@ -107,8 +107,16 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual bool
     HasNgramIndex(FieldId field_id) const = 0;
 
+    virtual bool
+    HasNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const = 0;
+
     virtual PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(FieldId field_id) const override = 0;
+
+    virtual PinWrapper<index::NgramInvertedIndex*>
+    GetNgramIndexForJson(FieldId field_id,
+                         const std::string& nested_path) const override = 0;
 
     SegmentType
     type() const override {

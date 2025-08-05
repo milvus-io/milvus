@@ -99,7 +99,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
 			SegmentID:      segmentID,
-			FieldBinlogs:   lo.Values(fBinlogs),
+			FieldBinlogs:   storage.SortFieldBinlogs(fBinlogs),
 			Deltalogs:      []*datapb.FieldBinlog{deltalogs},
 			StorageVersion: storage.StorageV2,
 		},
@@ -161,7 +161,7 @@ func (s *ClusteringCompactionTaskStorageV2Suite) TestScalarCompactionNormal_V2To
 	s.task.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{
 		{
 			SegmentID:      segmentID,
-			FieldBinlogs:   lo.Values(fBinlogs),
+			FieldBinlogs:   storage.SortFieldBinlogs(fBinlogs),
 			Deltalogs:      []*datapb.FieldBinlog{deltalogs},
 			StorageVersion: storage.StorageV2,
 		},

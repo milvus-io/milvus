@@ -155,14 +155,16 @@ func (eNode *embeddingNode) Operate(in []Msg) []Msg {
 		return []Msg{fgMsg}
 	}
 
-	insertData, err := writebuffer.PrepareInsert(eNode.metaCache.GetSchema(fgMsg.TimeTick()), eNode.pkField, fgMsg.InsertMessages)
-	if err != nil {
-		log.Error("failed to prepare insert data", zap.Error(err))
-		panic(err)
+	insertData := make([]*writebuffer.InsertData, 0)
+	if len(fgMsg.InsertMessages) > 0 {
+		var err error
+		if insertData, err = writebuffer.PrepareInsert(eNode.metaCache.GetSchema(fgMsg.TimeTick()), eNode.pkField, fgMsg.InsertMessages); err != nil {
+			log.Error("failed to prepare insert data", zap.Error(err))
+			panic(err)
+		}
 	}
 
-	err = eNode.Embedding(insertData)
-	if err != nil {
+	if err := eNode.Embedding(insertData); err != nil {
 		log.Warn("failed to embedding insert data", zap.Error(err))
 		panic(err)
 	}

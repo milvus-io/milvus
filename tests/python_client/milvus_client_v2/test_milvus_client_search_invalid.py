@@ -993,7 +993,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
         # 3. load and search
         collection_w.load()
-        search_params = cf.gen_search_param(index)[0]
+        search_params = cf.get_search_params_params(index)
         collection_w.search(vectors[:default_nq], field_name, search_params,
                             default_limit, output_fields=[field_name],
                             check_task=CheckTasks.err_res,
@@ -1189,67 +1189,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 65535,
                                          "err_msg": "range_filter must more than radius when IP"})
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="It will report error before range search")
-    @pytest.mark.parametrize("metric", ["SUPERSTRUCTURE", "SUBSTRUCTURE"])
-    def test_range_search_data_type_metric_type_mismatch(self, metric):
-        """
-        target: test range search after unsupported metrics
-        method: test range search after SUPERSTRUCTURE and SUBSTRUCTURE metrics
-        expected: raise exception and report the error
-        """
-        # 1. initialize with data
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  dim=default_dim, is_index=False)[0:5]
-        # 2. create index and load
-        default_index = {"index_type": "BIN_FLAT",
-                         "params": {"nlist": 128}, "metric_type": metric}
-        collection_w.create_index("float_vector", default_index)
-        collection_w.load()
-        # 3. range search
-        search_params = cf.gen_search_param("BIN_FLAT", metric_type=metric)
-        vectors = [[random.random() for _ in range(default_dim)]
-                   for _ in range(default_nq)]
-        for search_param in search_params:
-            search_param["params"]["radius"] = 1000
-            search_param["params"]["range_filter"] = 0
-            log.info("Searching with search params: {}".format(search_param))
-            collection_w.search(vectors[:default_nq], default_search_field,
-                                search_param, default_limit,
-                                default_search_exp,
-                                check_task=CheckTasks.err_res,
-                                check_items={"err_code": 1,
-                                             "err_msg": f"Data type and metric type miss-match"})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="SUPERSTRUCTURE and SUBSTRUCTURE are supported again now")
-    @pytest.mark.parametrize("metric", ["SUPERSTRUCTURE", "SUBSTRUCTURE"])
-    def test_range_search_binary_not_supported_metrics(self, metric):
-        """
-        target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with SUPERSTRUCTURE
-                (1) The returned limit(topK) are impacted by dimension (dim) of data
-                (2) Searched topK is smaller than set limit when dim is large
-                (3) It does not support "BIN_IVF_FLAT" index
-                (4) Only two values for distance: 0 and 1, 0 means hits, 1 means not
-        expected: the return distance equals to the computed value
-        """
-        # 1. initialize with binary data
-        nq = 1
-        dim = 8
-        collection_w, _, binary_raw_vector, insert_ids, time_stamp \
-            = self.init_collection_general(prefix, True, default_nb, is_binary=True,
-                                           dim=dim, is_index=False)[0:5]
-        # 2. create index
-        default_index = {"index_type": "BIN_FLAT",
-                         "params": {"nlist": 128}, "metric_type": metric}
-        collection_w.create_index("binary_vector", default_index,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 1,
-                                               "err_msg": f"metric type {metric} not found or not supported, "
-                                                          "supported: [HAMMING JACCARD]"})
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_dynamic_compare_two_fields(self):
         """
@@ -1280,8 +1219,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, default_limit,
                             expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
-                                         "err_msg": "query failed: N6milvus21ExecOperatorExceptionE :Operator::GetOutput failed"})
+                            check_items={"err_code": 1100,
+                                         "err_msg": "error: two column comparison with JSON type is not supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_ef_less_than_limit(self):

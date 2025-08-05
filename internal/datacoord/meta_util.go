@@ -16,7 +16,13 @@
 
 package datacoord
 
-import "github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+import (
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+)
+
+var ErrIgnoredSegmentMetaOperation = errors.New("ignored segment meta operation")
 
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
 func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {

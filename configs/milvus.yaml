@@ -190,6 +190,7 @@ woodpecker:
     segmentRollingPolicy:
       maxSize: 256M # Maximum size of a segment.
       maxInterval: 10m # Maximum interval between two segments, default is 10 minutes.
+      maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
   logstore:
@@ -204,6 +205,11 @@ woodpecker:
       maxFlushThreads: 32 # Maximum number of threads to flush data
     segmentCompactionPolicy:
       maxSize: 2M # The maximum size of the merged files.
+      maxParallelUploads: 4 # The maximum number of parallel upload threads for compaction.
+      maxParallelReads: 8 # The maximum number of parallel read threads for compaction.
+    segmentReadPolicy:
+      maxBatchSize: 16M # Maximum size of a batch in bytes.
+      maxFetchThreads: 32 # Maximum number of threads to fetch data.
   storage:
     type: minio # The Type of the storage provider. Valid values: [minio, local]
     rootPath: /var/lib/milvus/woodpecker # The root path of the storage provider.
@@ -475,6 +481,24 @@ queryNode:
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
       evictionEnabled: false
+      # This ratio estimates how much evictable memory can be cached.
+      # The higher the ratio, the more physical memory is reserved for evictable memory,
+      # resulting in fewer evictions but fewer segments can be loaded.
+      # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
+      # This parameter is only valid when eviction is enabled.
+      # It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].
+      evictableMemoryCacheRatio: 0.3
+      # This ratio estimates how much evictable disk space can be cached.
+      # The higher the ratio, the more physical disk space is reserved for evictable disk usage,
+      # resulting in fewer evictions but fewer segments can be loaded.
+      # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
+      # This parameter is only valid when eviction is enabled.
+      # It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].
+      evictableDiskCacheRatio: 0.3
+      # Time in seconds after which an unaccessed cache cell will be evicted. 
+      # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
+      # If set to 0, time based eviction is disabled.
+      cacheTtl: 0
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     jsonKeyStatsCommitInterval: 200 # the commit interval for the JSON key Stats to commit
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
@@ -754,7 +778,7 @@ dataNode:
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
-    memoryLimitPercentage: 20 # The percentage of memory limit for import/pre-import tasks.
+    memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
   compaction:
     levelZeroBatchMemoryRatio: 0.5 # The minimal memory ratio of free memory for level zero compaction executing in batch mode
     levelZeroMaxBatchSize: -1 # Max batch size refers to the max number of L1/L2 segments in a batch when executing L0 compaction. Default to -1, any value that is less than 1 means no limit. Valid range: >= 1.
@@ -939,11 +963,11 @@ common:
           privileges: ShowCollections,DescribeDatabase,AlterDatabase,CreateCollection,DropCollection # Database level admin privileges
       collection:
         readonly:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases # Collection level readonly privileges
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport # Collection level readonly privileges
         readwrite:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition # Collection level readwrite privileges
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,AddCollectionField # Collection level readwrite privileges
         admin:
-          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,CreateAlias,DropAlias # Collection level admin privileges
+          privileges: Query,Search,IndexDetail,GetFlushState,GetLoadState,GetLoadingProgress,HasPartition,ShowPartitions,DescribeCollection,DescribeAlias,GetStatistics,ListAliases,GetImportProgress,ListImport,Load,Release,Insert,Delete,Upsert,Import,Flush,Compaction,LoadBalance,CreateIndex,DropIndex,CreatePartition,DropPartition,AddCollectionField,CreateAlias,DropAlias # Collection level admin privileges
     internaltlsEnabled: false
     tlsMode: 0
   session:
@@ -957,7 +981,7 @@ common:
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # maximum seconds for waiting wlock conditional
   storage:
-    enablev2: false
+    enablev2: true
   # Whether to disable the internal time messaging mechanism for the system.
   # If disabled (set to false), the system will not allow DML operations, including insertion, deletion, queries, and searches.
   # This helps Milvus-CDC synchronize incremental data
@@ -1133,7 +1157,7 @@ quotaAndLimits:
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
     forceDeny: false
     ttProtection:
-      enabled: true
+      enabled: false
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
@@ -1385,3 +1409,5 @@ function:
           enable: true # Whether to enable TEI rerank service
         vllm:
           enable: true # Whether to enable vllm rerank service
+  analyzer:
+    local_resource_path: /var/lib/milvus/analyzer

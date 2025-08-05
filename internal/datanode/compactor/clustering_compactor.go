@@ -122,6 +122,12 @@ func (b *ClusterBuffer) Write(v *storage.Value) error {
 func (b *ClusterBuffer) Flush() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	return b.writer.Flush()
+}
+
+func (b *ClusterBuffer) FlushChunk() error {
+	b.lock.Lock()
+	defer b.lock.Unlock()
 	return b.writer.FlushChunk()
 }
 
@@ -613,59 +619,67 @@ func (t *clusteringCompactionTask) mappingSegment(
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return err
 	}
-
-	reader := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(r, v, t.plan.Schema.Fields)
-	})
-	defer reader.Close()
+	defer rr.Close()
 
 	offset := int64(-1)
 	for {
-		v, err := reader.NextValue()
+		r, err := rr.Next()
 		if err != nil {
 			if err == sio.EOF {
-				reader.Close()
 				break
-			} else {
-				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
-				return err
 			}
-		}
-		offset++
-
-		if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
-			continue
-		}
-
-		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
-		if !ok {
-			log.Warn("convert interface to map wrong")
-			return errors.New("unexpected error")
-		}
-
-		clusteringKey := row[t.clusteringKeyField.FieldID]
-		var clusterBuffer *ClusterBuffer
-		if t.isVectorClusteringKey {
-			clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
-		} else {
-			clusterBuffer = t.keyToBufferFunc(clusteringKey)
-		}
-		if err := clusterBuffer.Write(*v); err != nil {
+			log.Warn("compact wrong, failed to iter through data", zap.Error(err))
 			return err
 		}
-		t.writtenRowNum.Inc()
-		remained++
 
-		if (remained+1)%100 == 0 {
-			currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
-			if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() {
-				// reach flushBinlog trigger threshold
-				log.Debug("largest buffer need to flush",
-					zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
-				if err := t.flushLargestBuffers(ctx); err != nil {
-					return err
+		vs := make([]*storage.Value, r.Len())
+		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
+			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
+			return err
+		}
+
+		for _, v := range vs {
+			offset++
+
+			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
+				continue
+			}
+
+			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
+			if !ok {
+				log.Warn("convert interface to map wrong")
+				return errors.New("unexpected error")
+			}
+
+			clusteringKey := row[t.clusteringKeyField.FieldID]
+			var clusterBuffer *ClusterBuffer
+			if t.isVectorClusteringKey {
+				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
+			} else {
+				clusterBuffer = t.keyToBufferFunc(clusteringKey)
+			}
+			if err := clusterBuffer.Write(v); err != nil {
+				return err
+			}
+			t.writtenRowNum.Inc()
+			remained++
+
+			if (remained+1)%100 == 0 {
+				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
+				if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() {
+					// reach flushBinlog trigger threshold
+					log.Debug("largest buffer need to flush",
+						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
+					if err := t.flushLargestBuffers(ctx); err != nil {
+						return err
+					}
 				}
 			}
+		}
+
+		// all cluster buffers are flushed for a certain record, since the values read from the same record are references instead of copies
+		for _, buffer := range t.clusterBuffers {
+			buffer.Flush()
 		}
 	}
 
@@ -733,7 +747,7 @@ func (t *clusteringCompactionTask) flushLargestBuffers(ctx context.Context) erro
 			zap.Uint64("WrittenUncompressed", size))
 
 		future := t.flushPool.Submit(func() (any, error) {
-			err := buffer.Flush()
+			err := buffer.FlushChunk()
 			if err != nil {
 				return nil, err
 			}
@@ -904,7 +918,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializer(r, v, selectedFields)
+		return storage.ValueDeserializerWithSelectedFields(r, v, selectedFields, true)
 	})
 	defer pkIter.Close()
 	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(pkIter, expiredFilter)

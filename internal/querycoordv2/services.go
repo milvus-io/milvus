@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -1186,8 +1185,21 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
 
-	jobs := make([]job.Job, 0, len(req.GetCollectionIDs()))
-	for _, collectionID := range req.GetCollectionIDs() {
+	err := s.updateLoadConfig(ctx, req.GetCollectionIDs(), req.GetReplicaNumber(), req.GetResourceGroups())
+	if err != nil {
+		msg := "failed to update load config"
+		log.Warn(msg, zap.Error(err))
+		return merr.Status(errors.Wrap(err, msg)), nil
+	}
+
+	log.Info("update load config request finished")
+
+	return merr.Success(), nil
+}
+
+func (s *Server) updateLoadConfig(ctx context.Context, collectionIDs []int64, newReplicaNum int32, newRGs []string) error {
+	jobs := make([]job.Job, 0, len(collectionIDs))
+	for _, collectionID := range collectionIDs {
 		collection := s.meta.GetCollection(ctx, collectionID)
 		if collection == nil {
 			err := merr.WrapErrCollectionNotLoaded(collectionID)
@@ -1196,13 +1208,16 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		}
 
 		collectionUsedRG := s.meta.ReplicaManager.GetResourceGroupByCollection(ctx, collection.GetCollectionID()).Collect()
-		left, right := lo.Difference(collectionUsedRG, req.GetResourceGroups())
+		left, right := lo.Difference(collectionUsedRG, newRGs)
 		rgChanged := len(left) > 0 || len(right) > 0
-		replicaChanged := collection.GetReplicaNumber() != req.GetReplicaNumber()
+		replicaChanged := collection.GetReplicaNumber() != newReplicaNum
 
-		subReq := proto.Clone(req).(*querypb.UpdateLoadConfigRequest)
-		subReq.CollectionIDs = []int64{collectionID}
-		if len(req.ResourceGroups) == 0 {
+		subReq := &querypb.UpdateLoadConfigRequest{
+			CollectionIDs:  []int64{collectionID},
+			ReplicaNumber:  newReplicaNum,
+			ResourceGroups: newRGs,
+		}
+		if len(subReq.GetResourceGroups()) == 0 {
 			subReq.ResourceGroups = collectionUsedRG
 			rgChanged = false
 		}
@@ -1239,14 +1254,7 @@ func (s *Server) UpdateLoadConfig(ctx context.Context, req *querypb.UpdateLoadCo
 		}
 	}
 
-	if err != nil {
-		msg := "failed to update load config"
-		log.Warn(msg, zap.Error(err))
-		return merr.Status(errors.Wrap(err, msg)), nil
-	}
-	log.Info("update load config request finished")
-
-	return merr.Success(), nil
+	return err
 }
 
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {

@@ -40,6 +40,12 @@ type VChannelTempStorage struct {
 
 func (ts *VChannelTempStorage) GetVChannelByPChannelOfCollection(ctx context.Context, collectionID int64, pchannel string) (string, error) {
 	if err := ts.updateVChannelByPChannelOfCollectionIfNotExist(ctx, collectionID); err != nil {
+		if ctx.Err() != nil {
+			// Because underlying mixcoord client may report grpc rpc ctx error,
+			// and the retry.Retry doesn't return the context.Error,
+			// so we check the ctx error here and return it directly to the caller.
+			return "", ctx.Err()
+		}
 		return "", err
 	}
 
@@ -91,5 +97,5 @@ func (ts *VChannelTempStorage) updateVChannelByPChannelOfCollectionIfNotExist(ct
 			ts.mu.Unlock()
 		}
 		return err
-	})
+	}, retry.AttemptAlways())
 }

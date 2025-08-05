@@ -27,6 +27,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -197,6 +198,10 @@ type SegmentManager interface {
 	// Deprecated: quick fix critical issue: #30857
 	// TODO: All Segment assigned to querynode should be managed by SegmentManager, including loading or releasing to perform a transaction.
 	Exist(segmentID typeutil.UniqueID, typ SegmentType) bool
+
+	AddLogicalResource(usage ResourceUsage)
+	SubLogicalResource(usage ResourceUsage)
+	GetLogicalResource() ResourceUsage
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -366,6 +371,12 @@ type segmentManager struct {
 
 	growingOnReleasingSegments *typeutil.ConcurrentSet[int64]
 	sealedOnReleasingSegments  *typeutil.ConcurrentSet[int64]
+
+	// logicalResource is the logical resource usage for all loaded segments of this querynode segment manager,
+	// which is to avoid memory and disk pressure when loading too many segments after eviction is enabled.
+	// only MemorySize and DiskSize are used, other fields are ignored.
+	logicalResource     ResourceUsage
+	logicalResourceLock sync.Mutex
 }
 
 func NewSegmentManager() *segmentManager {
@@ -374,7 +385,43 @@ func NewSegmentManager() *segmentManager {
 		secondaryIndex:             newSecondarySegmentIndex(),
 		growingOnReleasingSegments: typeutil.NewConcurrentSet[int64](),
 		sealedOnReleasingSegments:  typeutil.NewConcurrentSet[int64](),
+		logicalResourceLock:        sync.Mutex{},
 	}
+}
+
+func (mgr *segmentManager) AddLogicalResource(usage ResourceUsage) {
+	mgr.logicalResourceLock.Lock()
+	defer mgr.logicalResourceLock.Unlock()
+
+	mgr.logicalResource.MemorySize += usage.MemorySize
+	mgr.logicalResource.DiskSize += usage.DiskSize
+}
+
+func (mgr *segmentManager) SubLogicalResource(usage ResourceUsage) {
+	mgr.logicalResourceLock.Lock()
+	defer mgr.logicalResourceLock.Unlock()
+
+	// avoid overflow of memory and disk size
+	if mgr.logicalResource.MemorySize < usage.MemorySize {
+		mgr.logicalResource.MemorySize = 0
+		log.Warn("Logical memory size would be negative, setting to 0")
+	} else {
+		mgr.logicalResource.MemorySize -= usage.MemorySize
+	}
+
+	if mgr.logicalResource.DiskSize < usage.DiskSize {
+		mgr.logicalResource.DiskSize = 0
+		log.Warn("Logical disk size would be negative, setting to 0")
+	} else {
+		mgr.logicalResource.DiskSize -= usage.DiskSize
+	}
+}
+
+func (mgr *segmentManager) GetLogicalResource() ResourceUsage {
+	mgr.logicalResourceLock.Lock()
+	defer mgr.logicalResourceLock.Unlock()
+
+	return mgr.logicalResource
 }
 
 // put is the internal put method updating both global segments and secondary index.

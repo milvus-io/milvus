@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
+	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -38,26 +39,26 @@ func BrokerMetaWriter(broker broker.Broker, serverID int64, opts ...retry.Option
 }
 
 func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error {
-	var (
-		checkPoints                                 = []*datapb.CheckPoint{}
-		deltaFieldBinlogs                           = []*datapb.FieldBinlog{}
-		deltaBm25StatsBinlogs []*datapb.FieldBinlog = nil
-	)
-
-	insertFieldBinlogs := lo.MapToSlice(pack.insertBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
-	statsFieldBinlogs := lo.MapToSlice(pack.statsBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
-	if pack.deltaBinlog != nil && len(pack.deltaBinlog.Binlogs) > 0 {
-		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
-	}
-
-	if len(pack.bm25Binlogs) > 0 {
-		deltaBm25StatsBinlogs = lo.MapToSlice(pack.bm25Binlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })
-	}
+	checkPoints := []*datapb.CheckPoint{}
 	// only current segment checkpoint info
 	segment, ok := pack.metacache.GetSegmentByID(pack.segmentID)
 	if !ok {
 		return merr.WrapErrSegmentNotFound(pack.segmentID)
 	}
+
+	insertFieldBinlogs := append(segment.Binlogs(), storage.SortFieldBinlogs(pack.insertBinlogs)...)
+	statsFieldBinlogs := append(segment.Statslogs(), lo.MapToSlice(pack.statsBinlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })...)
+
+	deltaFieldBinlogs := segment.Deltalogs()
+	if pack.deltaBinlog != nil && len(pack.deltaBinlog.Binlogs) > 0 {
+		deltaFieldBinlogs = append(deltaFieldBinlogs, pack.deltaBinlog)
+	}
+
+	deltaBm25StatsBinlogs := segment.Bm25logs()
+	if len(pack.bm25Binlogs) > 0 {
+		deltaBm25StatsBinlogs = append(segment.Bm25logs(), lo.MapToSlice(pack.bm25Binlogs, func(_ int64, fieldBinlog *datapb.FieldBinlog) *datapb.FieldBinlog { return fieldBinlog })...)
+	}
+
 	checkPoints = append(checkPoints, &datapb.CheckPoint{
 		SegmentID: pack.segmentID,
 		NumOfRows: segment.FlushedRows() + pack.batchRows,
@@ -110,12 +111,13 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 
 		CheckPoints: checkPoints,
 
-		StartPositions: startPos,
-		Flushed:        pack.pack.isFlush,
-		Dropped:        pack.pack.isDrop,
-		Channel:        pack.channelName,
-		SegLevel:       pack.level,
-		StorageVersion: segment.GetStorageVersion(),
+		StartPositions:  startPos,
+		Flushed:         pack.pack.isFlush,
+		Dropped:         pack.pack.isDrop,
+		Channel:         pack.channelName,
+		SegLevel:        pack.level,
+		StorageVersion:  segment.GetStorageVersion(),
+		WithFullBinlogs: true,
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)
@@ -149,7 +151,12 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	}
 
 	pack.metacache.UpdateSegments(metacache.SetStartPosRecorded(true), metacache.WithSegmentIDs(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) int64 { return pos.GetSegmentID() })...))
-
+	pack.metacache.UpdateSegments(metacache.MergeSegmentAction(
+		metacache.UpdateBinlogs(insertFieldBinlogs),
+		metacache.UpdateStatslogs(statsFieldBinlogs),
+		metacache.UpdateDeltalogs(deltaFieldBinlogs),
+		metacache.UpdateBm25logs(deltaBm25StatsBinlogs),
+	), metacache.WithSegmentIDs(pack.segmentID))
 	return nil
 }
 

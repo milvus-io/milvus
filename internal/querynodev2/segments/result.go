@@ -95,7 +95,9 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		log.Debug("reduceSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK))
+			zap.Int64("topk", sData.TopK),
+			zap.Int("ids.len", typeutil.GetSizeOfIDs(sData.Ids)),
+			zap.Int("fieldsData.len", len(sData.FieldsData)))
 	}
 
 	searchReduce := InitSearchReducer(info)
@@ -235,7 +237,9 @@ func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 	return results, nil
 }
 
-func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.SearchResultData, nq int64, topk int64, metricType string) (searchResults *internalpb.SearchResults, err error) {
+func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.SearchResultData,
+	nq int64, topk int64, metricType string,
+) (searchResults *internalpb.SearchResults, err error) {
 	_, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "EncodeSearchResultData")
 	defer sp.End()
 

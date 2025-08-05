@@ -173,8 +173,6 @@ func TestExpr_Compare(t *testing.T) {
 		`Int64Field >= FloatField`,
 		`FloatField == DoubleField`,
 		`StringField != VarCharField`,
-		`JSONField["A"] > Int16Field`,
-		`$meta["A"] > Int16Field`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
