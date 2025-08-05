@@ -2071,8 +2071,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool is_proxy_column) {
     {
         std::unique_lock lck(mutex_);
-        AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
-                   "field {} data already loaded",
+        AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
+                       !get_bit(field_data_ready_bitset_, field_id),
+                   "non system field {} data already loaded",
                    field_id.get());
         AssertInfo(fields_.count(field_id) == 0,
                    "field {} column already exists",
