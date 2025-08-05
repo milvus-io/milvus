@@ -389,7 +389,7 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 				},
 			},
 		}, nil
-	}).Times(3)
+	}).Times(2)
 
 	rs, err := iter.Next(ctx)
 	s.NoError(err)
