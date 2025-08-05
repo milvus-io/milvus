@@ -356,7 +356,8 @@ GenerateRandomSparseFloatVector(size_t rows,
     return tensor;
 }
 
-inline SchemaPtr CreateTestSchema() {
+inline SchemaPtr
+CreateTestSchema() {
     auto schema = std::make_shared<milvus::Schema>();
     auto bool_field =
         schema->AddDebugField("bool", milvus::DataType::BOOL, true);
@@ -452,9 +453,7 @@ DataGen(SchemaPtr schema,
             insert_data->mutable_fields_data()->AddAllocated(array.release());
         };
 
-    std::default_random_engine er2(seed);
-    std::normal_distribution<> distr2(0, 1);
-    auto generate_float_vector = [&er2, &distr2, &offset, &random, &distr](
+    auto generate_float_vector = [&seed, &offset, &random, &distr](
                                      auto& field_meta, int64_t N) {
         auto dim = field_meta.get_dim();
         vector<float> final(dim * N);
@@ -464,6 +463,8 @@ DataGen(SchemaPtr schema,
             vector<float> data(dim);
             float sum = 0;
 
+            std::default_random_engine er2(seed + n);
+            std::normal_distribution<> distr2(0, 1);
             for (auto& x : data) {
                 x = distr2(er2) + offset;
                 sum += x * x;
