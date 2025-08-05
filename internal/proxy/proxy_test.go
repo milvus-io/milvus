@@ -594,7 +594,7 @@ func constructTestSearchRequest(dbName, collectionName, floatVecField, expr stri
 	}
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: MetricTypeKey, Value: metric.L2},
-		{Key: SearchParamsKey, Value: string(b)},
+		{Key: ParamsKey, Value: string(b)},
 		{Key: AnnsFieldKey, Value: floatVecField},
 		{Key: TopKKey, Value: strconv.Itoa(topk)},
 		{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
@@ -631,7 +631,7 @@ func constructTestSubSearchRequest(floatVecField, expr string, nq, nprobe, topk,
 	}
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: MetricTypeKey, Value: metric.L2},
-		{Key: SearchParamsKey, Value: string(b)},
+		{Key: ParamsKey, Value: string(b)},
 		{Key: AnnsFieldKey, Value: floatVecField},
 		{Key: TopKKey, Value: strconv.Itoa(topk)},
 		{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
@@ -654,7 +654,7 @@ func constructTestAdvancedSearchRequest(dbName, collectionName, floatVecField, e
 	}
 	rankParams := []*commonpb.KeyValuePair{
 		{Key: RankTypeKey, Value: "rrf"},
-		{Key: RankParamsKey, Value: string(b)},
+		{Key: ParamsKey, Value: string(b)},
 		{Key: LimitKey, Value: strconv.Itoa(topk)},
 		{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 	}
@@ -690,7 +690,7 @@ func constructTestEmbeddingListSearchRequest(dbName, collectionName, structFVec,
 	}
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: MetricTypeKey, Value: metric.MAX_SIM},
-		{Key: SearchParamsKey, Value: string(b)},
+		{Key: ParamsKey, Value: string(b)},
 		{Key: AnnsFieldKey, Value: structFVec},
 		{Key: TopKKey, Value: strconv.Itoa(topk)},
 		{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
@@ -739,7 +739,7 @@ func constructSearchByPksRequest(t *testing.T, dbName, collectionName, floatVecF
 	assert.NoError(t, err)
 	searchParams := []*commonpb.KeyValuePair{
 		{Key: MetricTypeKey, Value: metric.L2},
-		{Key: SearchParamsKey, Value: string(b)},
+		{Key: ParamsKey, Value: string(b)},
 		{Key: AnnsFieldKey, Value: floatVecField},
 		{Key: TopKKey, Value: strconv.Itoa(topk)},
 		{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
@@ -1068,263 +1068,12 @@ func TestProxy(t *testing.T) {
 	otherCollectionName := collectionName + "_other_" + funcutil.GenRandomStr()
 	partitionName := partitionPrefix + funcutil.GenRandomStr()
 	otherPartitionName := partitionPrefix + "_other_" + funcutil.GenRandomStr()
-<<<<<<< HEAD
 
 	var segmentIDs []int64
 
 	// an int64 field (pk) & a float vector field
 	schema := constructTestCollectionSchema(collectionName, int64Field, floatVecField, binaryVecField, structField, dim)
 	createCollectionReq := constructTestCreateCollectionRequest(dbName, collectionName, schema, shardsNum)
-=======
-	shardsNum := common.DefaultShardsNum
-	int64Field := "int64"
-	floatVecField := "fVec"
-	binaryVecField := "bVec"
-	dim := 128
-	rowNum := 500
-	floatIndexName := "float_index"
-	binaryIndexName := "binary_index"
-	structId := "structI32"
-	structFVec := "structFVec"
-	structField := "structField"
-	nlist := 10
-	nq := 10
-	var segmentIDs []int64
-
-	// an int64 field (pk) & a float vector field
-	constructCollectionSchema := func() *schemapb.CollectionSchema {
-		pk := &schemapb.FieldSchema{
-			FieldID:      100,
-			Name:         int64Field,
-			IsPrimaryKey: true,
-			Description:  "",
-			DataType:     schemapb.DataType_Int64,
-			TypeParams:   nil,
-			IndexParams:  nil,
-			AutoID:       true,
-		}
-		fVec := &schemapb.FieldSchema{
-			FieldID:      101,
-			Name:         floatVecField,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: strconv.Itoa(dim),
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		bVec := &schemapb.FieldSchema{
-			FieldID:      102,
-			Name:         binaryVecField,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_BinaryVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: strconv.Itoa(dim),
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		// struct schema fields
-		sId := &schemapb.FieldSchema{
-			FieldID:      104,
-			Name:         structId,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_Array,
-			ElementType:  schemapb.DataType_Int32,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "100",
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		sFVec := &schemapb.FieldSchema{
-			FieldID:      105,
-			Name:         structFVec,
-			IsPrimaryKey: false,
-			Description:  "",
-			DataType:     schemapb.DataType_ArrayOfVector,
-			ElementType:  schemapb.DataType_FloatVector,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.DimKey,
-					Value: strconv.Itoa(dim),
-				},
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "100",
-				},
-			},
-			IndexParams: nil,
-			AutoID:      false,
-		}
-		structF := &schemapb.StructArrayFieldSchema{
-			FieldID: 103,
-			Name:    structField,
-			Fields:  []*schemapb.FieldSchema{sId, sFVec},
-		}
-		return &schemapb.CollectionSchema{
-			Name:        collectionName,
-			Description: "",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				pk,
-				fVec,
-				bVec,
-			},
-			StructArrayFields: []*schemapb.StructArrayFieldSchema{structF},
-		}
-	}
-	schema := constructCollectionSchema()
-
-	constructCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
-		bs, err := proto.Marshal(schema)
-		assert.NoError(t, err)
-		return &milvuspb.CreateCollectionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			Schema:         bs,
-			ShardsNum:      shardsNum,
-		}
-	}
-	createCollectionReq := constructCreateCollectionRequest()
-
-	constructCollectionInsertRequest := func() *milvuspb.InsertRequest {
-		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
-		hashKeys := testutils.GenerateHashKeys(rowNum)
-		return &milvuspb.InsertRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  "",
-			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, structColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(rowNum),
-		}
-	}
-
-	constructPartitionInsertRequest := func() *milvuspb.InsertRequest {
-		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
-		hashKeys := testutils.GenerateHashKeys(rowNum)
-		return &milvuspb.InsertRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, structColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(rowNum),
-		}
-	}
-
-	constructCollectionUpsertRequestNoPK := func() *milvuspb.UpsertRequest {
-		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
-		hashKeys := testutils.GenerateHashKeys(rowNum)
-		return &milvuspb.UpsertRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, structColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(rowNum),
-		}
-	}
-
-	constructCollectionUpsertRequestWithPK := func() *milvuspb.UpsertRequest {
-		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
-		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
-		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		structColumn := newStructArrayFieldData(schema.StructArrayFields[0], structField, rowNum, dim)
-		hashKeys := testutils.GenerateHashKeys(rowNum)
-		return &milvuspb.UpsertRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn, bVecColumn, structColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(rowNum),
-		}
-	}
-
-	constructCreateIndexRequest := func(dataType schemapb.DataType, fieldName string) *milvuspb.CreateIndexRequest {
-		req := &milvuspb.CreateIndexRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-		}
-		switch dataType {
-		case schemapb.DataType_FloatVector:
-			{
-				req.FieldName = fieldName
-				req.IndexName = floatIndexName
-				req.ExtraParams = []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: strconv.Itoa(dim),
-					},
-					{
-						Key:   common.MetricTypeKey,
-						Value: metric.L2,
-					},
-					{
-						Key:   common.IndexTypeKey,
-						Value: "IVF_FLAT",
-					},
-					{
-						Key:   "nlist",
-						Value: strconv.Itoa(nlist),
-					},
-				}
-			}
-		case schemapb.DataType_BinaryVector:
-			{
-				req.FieldName = fieldName
-				req.IndexName = binaryIndexName
-				req.ExtraParams = []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: strconv.Itoa(dim),
-					},
-					{
-						Key:   common.MetricTypeKey,
-						Value: metric.JACCARD,
-					},
-					{
-						Key:   common.IndexTypeKey,
-						Value: "BIN_IVF_FLAT",
-					},
-					{
-						Key:   "nlist",
-						Value: strconv.Itoa(nlist),
-					},
-				}
-			}
-		}
-
-		return req
-	}
->>>>>>> master
 
 	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
@@ -1807,11 +1556,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("create index for floatVec field", func(t *testing.T) {
 		defer wg.Done()
-<<<<<<< HEAD
 		req := constructTestCreateIndexRequest(dbName, collectionName, schemapb.DataType_FloatVector, floatVecField, dim, nlist)
-=======
-		req := constructCreateIndexRequest(schemapb.DataType_FloatVector, floatVecField)
->>>>>>> master
 
 		resp, err := proxy.CreateIndex(ctx, req)
 		assert.NoError(t, err)
@@ -1953,11 +1698,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("create index for binVec field", func(t *testing.T) {
 		defer wg.Done()
-<<<<<<< HEAD
 		req := constructTestCreateIndexRequest(dbName, collectionName, schemapb.DataType_BinaryVector, binaryVecField, dim, nlist)
-=======
-		req := constructCreateIndexRequest(schemapb.DataType_BinaryVector, binaryVecField)
->>>>>>> master
 
 		resp, err := proxy.CreateIndex(ctx, req)
 		assert.NoError(t, err)
@@ -2227,91 +1968,6 @@ func TestProxy(t *testing.T) {
 	topk := 10
 	roundDecimal := 6
 	expr := fmt.Sprintf("%s > 0", int64Field)
-<<<<<<< HEAD
-=======
-	constructVectorsPlaceholderGroup := func(nq int) *commonpb.PlaceholderGroup {
-		values := make([][]byte, 0, nq)
-		for i := 0; i < nq; i++ {
-			bs := make([]byte, 0, dim*4)
-			for j := 0; j < dim; j++ {
-				var buffer bytes.Buffer
-				f := rand.Float32()
-				err := binary.Write(&buffer, common.Endian, f)
-				assert.NoError(t, err)
-				bs = append(bs, buffer.Bytes()...)
-			}
-			values = append(values, bs)
-		}
-
-		return &commonpb.PlaceholderGroup{
-			Placeholders: []*commonpb.PlaceholderValue{
-				{
-					Tag:    "$0",
-					Type:   commonpb.PlaceholderType_FloatVector,
-					Values: values,
-				},
-			},
-		}
-	}
-
-	constructSearchRequest := func(nq int) *milvuspb.SearchRequest {
-		plg := constructVectorsPlaceholderGroup(nq)
-		plgBs, err := proto.Marshal(plg)
-		assert.NoError(t, err)
-
-		params := make(map[string]string)
-		params["nprobe"] = strconv.Itoa(nprobe)
-		b, err := json.Marshal(params)
-		assert.NoError(t, err)
-		searchParams := []*commonpb.KeyValuePair{
-			{Key: MetricTypeKey, Value: metric.L2},
-			{Key: ParamsKey, Value: string(b)},
-			{Key: AnnsFieldKey, Value: floatVecField},
-			{Key: TopKKey, Value: strconv.Itoa(topk)},
-			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
-		}
-
-		return &milvuspb.SearchRequest{
-			Base:                nil,
-			DbName:              dbName,
-			CollectionName:      collectionName,
-			PartitionNames:      nil,
-			Dsl:                 expr,
-			PlaceholderGroup:    plgBs,
-			DslType:             commonpb.DslType_BoolExprV1,
-			OutputFields:        nil,
-			SearchParams:        searchParams,
-			TravelTimestamp:     0,
-			GuaranteeTimestamp:  0,
-			SearchByPrimaryKeys: false,
-		}
-	}
-
-	constructSubSearchRequest := func(nq int) *milvuspb.SubSearchRequest {
-		plg := constructVectorsPlaceholderGroup(nq)
-		plgBs, err := proto.Marshal(plg)
-		assert.NoError(t, err)
-
-		params := make(map[string]string)
-		params["nprobe"] = strconv.Itoa(nprobe)
-		b, err := json.Marshal(params)
-		assert.NoError(t, err)
-		searchParams := []*commonpb.KeyValuePair{
-			{Key: MetricTypeKey, Value: metric.L2},
-			{Key: ParamsKey, Value: string(b)},
-			{Key: AnnsFieldKey, Value: floatVecField},
-			{Key: TopKKey, Value: strconv.Itoa(topk)},
-			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
-		}
-
-		return &milvuspb.SubSearchRequest{
-			Dsl:              expr,
-			PlaceholderGroup: plgBs,
-			DslType:          commonpb.DslType_BoolExprV1,
-			SearchParams:     searchParams,
-		}
-	}
->>>>>>> master
 
 	wg.Add(1)
 	t.Run("search", func(t *testing.T) {
@@ -2331,38 +1987,6 @@ func TestProxy(t *testing.T) {
 		}
 	})
 
-<<<<<<< HEAD
-=======
-	constructAdvancedSearchRequest := func() *milvuspb.SearchRequest {
-		params := make(map[string]float64)
-		params[RRFParamsKey] = 60
-		b, err := json.Marshal(params)
-		assert.NoError(t, err)
-		rankParams := []*commonpb.KeyValuePair{
-			{Key: RankTypeKey, Value: "rrf"},
-			{Key: ParamsKey, Value: string(b)},
-			{Key: LimitKey, Value: strconv.Itoa(topk)},
-			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
-		}
-
-		req1 := constructSubSearchRequest(nq)
-		req2 := constructSubSearchRequest(nq)
-		ret := &milvuspb.SearchRequest{
-			Base:               nil,
-			DbName:             dbName,
-			CollectionName:     collectionName,
-			PartitionNames:     nil,
-			OutputFields:       nil,
-			SearchParams:       rankParams,
-			TravelTimestamp:    0,
-			GuaranteeTimestamp: 0,
-		}
-		ret.SubReqs = append(ret.SubReqs, req1)
-		ret.SubReqs = append(ret.SubReqs, req2)
-		return ret
-	}
-
->>>>>>> master
 	wg.Add(1)
 	t.Run("advanced search", func(t *testing.T) {
 		defer wg.Done()
@@ -2381,25 +2005,12 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
-<<<<<<< HEAD
 		{
 			Params.Save(Params.ProxyCfg.MustUsePartitionKey.Key, "true")
 			resp, err := proxy.Search(ctx, req)
 			assert.NoError(t, err)
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 			Params.Reset(Params.ProxyCfg.MustUsePartitionKey.Key)
-=======
-		params := make(map[string]string)
-		params["nprobe"] = strconv.Itoa(nprobe)
-		b, err := json.Marshal(params)
-		assert.NoError(t, err)
-		searchParams := []*commonpb.KeyValuePair{
-			{Key: MetricTypeKey, Value: metric.L2},
-			{Key: ParamsKey, Value: string(b)},
-			{Key: AnnsFieldKey, Value: floatVecField},
-			{Key: TopKKey, Value: strconv.Itoa(topk)},
-			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
->>>>>>> master
 		}
 	})
 
@@ -4307,198 +3918,6 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
 	})
 
-<<<<<<< HEAD
-=======
-	wg.Add(1)
-	// todo: when struct array field is done, this will be merged with above logic
-	t.Run("test struct array field", func(t *testing.T) {
-		defer wg.Done()
-
-		structCollectionName := prefix + "struct_" + funcutil.GenRandomStr()
-		structId := "structI32Array"
-		structVec := "structFloatVecArray"
-		structField := "struct"
-
-		constructStructCollectionSchema := func() *schemapb.CollectionSchema {
-			pk := &schemapb.FieldSchema{
-				FieldID:      100,
-				Name:         int64Field,
-				IsPrimaryKey: true,
-				Description:  "",
-				DataType:     schemapb.DataType_Int64,
-				TypeParams:   nil,
-				IndexParams:  nil,
-				AutoID:       true,
-			}
-			fVec := &schemapb.FieldSchema{
-				FieldID:      101,
-				Name:         floatVecField,
-				IsPrimaryKey: false,
-				Description:  "",
-				DataType:     schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: strconv.Itoa(dim),
-					},
-				},
-				IndexParams: nil,
-				AutoID:      false,
-			}
-			// struct schema fields
-			sId := &schemapb.FieldSchema{
-				FieldID:      103,
-				Name:         structId,
-				IsPrimaryKey: false,
-				Description:  "",
-				DataType:     schemapb.DataType_Array,
-				ElementType:  schemapb.DataType_Int32,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.MaxCapacityKey,
-						Value: "100",
-					},
-				},
-				IndexParams: nil,
-				AutoID:      false,
-			}
-			sVec := &schemapb.FieldSchema{
-				FieldID:      104,
-				Name:         structVec,
-				IsPrimaryKey: false,
-				Description:  "",
-				DataType:     schemapb.DataType_ArrayOfVector,
-				ElementType:  schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.DimKey,
-						Value: strconv.Itoa(dim),
-					},
-					{
-						Key:   common.MaxCapacityKey,
-						Value: "100",
-					},
-				},
-				IndexParams: nil,
-				AutoID:      false,
-			}
-			structF := &schemapb.StructArrayFieldSchema{
-				FieldID: 105,
-				Name:    structField,
-				Fields:  []*schemapb.FieldSchema{sId, sVec},
-			}
-			return &schemapb.CollectionSchema{
-				Name:        structCollectionName,
-				Description: "",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					pk,
-					fVec,
-				},
-				StructArrayFields: []*schemapb.StructArrayFieldSchema{structF},
-			}
-		}
-
-		structSchema := constructStructCollectionSchema()
-		constructStructCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
-			bs, err := proto.Marshal(structSchema)
-			assert.NoError(t, err)
-			return &milvuspb.CreateCollectionRequest{
-				Base:           nil,
-				DbName:         dbName,
-				CollectionName: structCollectionName,
-				Schema:         bs,
-				ShardsNum:      shardsNum,
-			}
-		}
-
-		createStructCollectionReq := constructStructCreateCollectionRequest()
-		resp, err := proxy.CreateCollection(ctx, createStructCollectionReq)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		reqInvalidField := constructStructCreateCollectionRequest()
-		invalidSchema := constructStructCollectionSchema()
-		invalidSchema.Fields = append(invalidSchema.Fields, &schemapb.FieldSchema{
-			Name:     "StringField",
-			DataType: schemapb.DataType_String,
-		})
-		bs, err := proto.Marshal(invalidSchema)
-		assert.NoError(t, err)
-		reqInvalidField.CollectionName = "invalid_field_coll"
-		reqInvalidField.Schema = bs
-
-		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		hasResp, err := proxy.HasCollection(ctx, &milvuspb.HasCollectionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: structCollectionName,
-			TimeStamp:      0,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, hasResp.GetStatus().GetErrorCode())
-		assert.True(t, hasResp.Value)
-
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, dbName, structCollectionName)
-		assert.NoError(t, err)
-
-		descResp, err := proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: structCollectionName,
-			CollectionID:   collectionID,
-			TimeStamp:      0,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, descResp.GetStatus().GetErrorCode())
-		assert.Equal(t, collectionID, descResp.CollectionID)
-
-		fieldsMap := make(map[string]*schemapb.FieldSchema)
-		for _, field := range descResp.Schema.Fields {
-			fieldsMap[field.Name] = field
-		}
-		for _, structField := range descResp.Schema.StructArrayFields {
-			for _, field := range structField.Fields {
-				fieldsMap[field.Name] = field
-			}
-		}
-		assert.Equal(t, len(fieldsMap), len(structSchema.Fields)+2)
-		for _, field := range structSchema.Fields {
-			fSchema, ok := fieldsMap[field.Name]
-			assert.True(t, ok)
-			assert.True(t, proto.Equal(field, fSchema))
-		}
-		for _, structField := range structSchema.StructArrayFields {
-			for _, field := range structField.Fields {
-				fSchema, ok := fieldsMap[field.Name]
-				assert.True(t, ok)
-				assert.True(t, proto.Equal(field, fSchema))
-			}
-		}
-
-		statsResp, err := proxy.GetCollectionStatistics(ctx, &milvuspb.GetCollectionStatisticsRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: structCollectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, statsResp.GetStatus().GetErrorCode())
-
-		showResp, err := proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
-			Base:      nil,
-			DbName:    dbName,
-			TimeStamp: 0,
-			Type:      milvuspb.ShowType_All,
-		})
-		assert.NoError(t, err)
-		assert.True(t, merr.Ok(showResp.GetStatus()))
-		assert.Contains(t, showResp.CollectionNames, structCollectionName)
-	})
-
->>>>>>> master
 	testServer.gracefulStop()
 	wg.Wait()
 	log.Info("case done")

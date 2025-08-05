@@ -3610,7 +3610,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 					Value: metric.MAX_SIM,
 				},
 				{
-					Key:   SearchParamsKey,
+					Key:   ParamsKey,
 					Value: `{"nprobe": 10}`,
 				},
 				{
@@ -3629,7 +3629,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			params := createSearchParams("embeddings_list")
 
 			// Add radius parameter for range search
-			resetSearchParamsValue(params, SearchParamsKey, `{"nprobe": 10, "radius": 0.2}`)
+			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
 
 			searchInfo, err := parseSearchInfo(params, schema, nil)
 			assert.Error(t, err)
@@ -3718,7 +3718,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 			params := createSearchParams("normal_vector")
 
 			// Add radius parameter for range search
-			resetSearchParamsValue(params, SearchParamsKey, `{"nprobe": 10, "radius": 0.2}`)
+			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
 
 			searchInfo, err := parseSearchInfo(params, schema, nil)
 			assert.NoError(t, err)
@@ -3762,7 +3762,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 		t.Run("vector array with range search", func(t *testing.T) {
 			schema := createSchemaWithVectorArray("embeddings_list")
 			params := createSearchParams("embeddings_list")
-			resetSearchParamsValue(params, SearchParamsKey, `{"nprobe": 10, "radius": 0.2}`)
+			resetSearchParamsValue(params, ParamsKey, `{"nprobe": 10, "radius": 0.2}`)
 
 			searchInfo, err := parseSearchInfo(params, schema, nil)
 			assert.Error(t, err)

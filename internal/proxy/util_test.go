@@ -3874,7 +3874,6 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 }
 
 func TestValidateFieldsInStruct(t *testing.T) {
-<<<<<<< HEAD
 	schema := &schemapb.CollectionSchema{
 		Name: "test_collection",
 	}
@@ -4515,7 +4514,4 @@ func Test_reconstructStructFieldDataCommon(t *testing.T) {
 		assert.True(t, foundStruct1, "Should find struct1")
 		assert.True(t, foundStruct2, "Should find struct2")
 	})
-=======
-	// todo(SpadeA): add test cases
->>>>>>> master
 }

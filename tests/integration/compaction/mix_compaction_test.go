@@ -239,11 +239,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-<<<<<<< HEAD
-	s.assertMixCompaction(ctx, collectionName, false)
-=======
 	s.assertMixCompaction(ctx, collectionName, paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool())
->>>>>>> master
 	s.assertQuery(ctx, collectionName)
 
 	// drop collection
@@ -268,9 +264,5 @@ func (s *CompactionSuite) TestMixCompactionV2() {
 	defer cancel()
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
-<<<<<<< HEAD
-	s.assertMixCompaction(ctx, collectionName, true)
-=======
 	s.assertMixCompaction(ctx, collectionName, paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool())
->>>>>>> master
 }

@@ -22,10 +22,6 @@ import (
 	"strconv"
 	"testing"
 
-<<<<<<< HEAD
-	"github.com/stretchr/testify/suite"
-=======
->>>>>>> master
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -249,10 +245,6 @@ func (s *ArrayStructDataNodeSuite) checkFieldsData(fieldsData []*schemapb.FieldD
 			default:
 				s.Fail(fmt.Sprintf("unsupported field type: %s", fieldData.FieldName))
 			}
-<<<<<<< HEAD
-
-=======
->>>>>>> master
 		}
 	}
 }
@@ -312,11 +304,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.IP)
 	params["radius"] = radius
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-<<<<<<< HEAD
 		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, s.dim, topk, roundDecimal)
-=======
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, s.dim, topk, roundDecimal)
->>>>>>> master
 
 	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 
@@ -334,10 +322,6 @@ func (s *ArrayStructDataNodeSuite) TestSwapQN() {
 }
 
 func TestArrayStructDataNodeUtil(t *testing.T) {
-<<<<<<< HEAD
-	suite.Run(t, new(ArrayStructDataNodeSuite))
-=======
 	// skip struct array test
 	// suite.Run(t, new(ArrayStructDataNodeSuite))
->>>>>>> master
 }
