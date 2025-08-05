@@ -38,6 +38,9 @@ const (
 	IteratorSearchLastBoundKey = "search_iter_last_bound"
 	IteratorSearchIDKey        = "search_iter_id"
 	CollectionIDKey            = `collection_id`
+
+	// Unlimited
+	Unlimited int64 = -1
 )
 
 var ErrServerVersionIncompatible = errors.New("server version incompatible")
@@ -53,10 +56,29 @@ type searchIteratorV2 struct {
 	client *Client
 	option SearchIteratorOption
 	schema *entity.Schema
+	limit  int64
 }
 
 func (it *searchIteratorV2) Next(ctx context.Context) (ResultSet, error) {
-	return it.next(ctx)
+	// limit reached, return EOF
+	if it.limit == 0 {
+		return ResultSet{}, io.EOF
+	}
+
+	rs, err := it.next(ctx)
+	if err != nil {
+		return rs, err
+	}
+
+	if it.limit == Unlimited {
+		return rs, err
+	}
+
+	if int64(rs.Len()) > it.limit {
+		rs = rs.Slice(0, int(it.limit))
+	}
+	it.limit -= int64(rs.Len())
+	return rs, nil
 }
 
 func (it *searchIteratorV2) next(ctx context.Context) (ResultSet, error) {
@@ -144,6 +166,7 @@ func newSearchIteratorV2(ctx context.Context, client *Client, option SearchItera
 	iter := &searchIteratorV2{
 		client: client,
 		option: option,
+		limit:  option.Limit(),
 	}
 	if err := iter.setupCollectionID(ctx); err != nil {
 		return nil, err
