@@ -256,7 +256,7 @@ func (node *DataNode) CreateJobV2(ctx context.Context, req *workerpb.CreateJobV2
 }
 
 func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJobRequest) (*commonpb.Status, error) {
-	log.Info("DataNode building index ...",
+	log.Ctx(ctx).Info("DataNode building index ...",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
@@ -277,6 +277,10 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		zap.Int64("taskSlot", req.GetTaskSlot()),
 		zap.Int64("lackBinlogRows", req.GetLackBinlogRows()),
 	)
+	if req.GetTaskSlot() <= 0 {
+		log.Ctx(ctx).Warn("receive index task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
+		req.TaskSlot = 64
+	}
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreIndexTask(req.GetClusterID(), req.GetBuildID(), &index.IndexTaskInfo{
 		Cancel: taskCancel,
@@ -314,7 +318,7 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 }
 
 func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.AnalyzeRequest) (*commonpb.Status, error) {
-	log.Info("receive analyze job", zap.Int64("collectionID", req.GetCollectionID()),
+	log.Ctx(ctx).Info("receive analyze job", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("fieldID", req.GetFieldID()),
 		zap.String("fieldName", req.GetFieldName()),
@@ -325,6 +329,11 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 		zap.Int64("numClusters", req.GetNumClusters()),
 		zap.Int64("taskSlot", req.GetTaskSlot()),
 	)
+
+	if req.GetTaskSlot() <= 0 {
+		log.Ctx(ctx).Warn("receive analyze task with invalid slot, set to 65535", zap.Int64("taskSlot", req.GetTaskSlot()))
+		req.TaskSlot = 65535
+	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreAnalyzeTask(req.GetClusterID(), req.GetTaskID(), &index.AnalyzeTaskInfo{
@@ -348,7 +357,7 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 }
 
 func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateStatsRequest) (*commonpb.Status, error) {
-	log.Info("receive stats job", zap.Int64("collectionID", req.GetCollectionID()),
+	log.Ctx(ctx).Info("receive stats job", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("partitionID", req.GetPartitionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Int64("numRows", req.GetNumRows()),
@@ -358,6 +367,11 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 		zap.Int64("endLogID", req.GetEndLogID()),
 		zap.Int64("taskSlot", req.GetTaskSlot()),
 	)
+
+	if req.GetTaskSlot() <= 0 {
+		log.Ctx(ctx).Warn("receive stats task with invalid slot, set to 64", zap.Int64("taskSlot", req.GetTaskSlot()))
+		req.TaskSlot = 64
+	}
 
 	taskCtx, taskCancel := context.WithCancel(node.ctx)
 	if oldInfo := node.taskManager.LoadOrStoreStatsTask(req.GetClusterID(), req.GetTaskID(), &index.StatsTaskInfo{

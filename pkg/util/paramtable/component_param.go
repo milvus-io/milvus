@@ -5076,7 +5076,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
 		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
@@ -5140,7 +5140,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
 		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
