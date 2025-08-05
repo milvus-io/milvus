@@ -1,14 +1,14 @@
 import sys
 import time
 from typing import Optional
-from pymilvus import MilvusClient
+from pymilvus import MilvusClient, DataType
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
 from utils.wrapper import trace
 from utils.util_log import test_log as log
-from common import common_func as cf
+from common import common_func as cf, common_type as ct
 from base.client_base import Base
 
 TIMEOUT = 120
@@ -73,6 +73,25 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        **kwargs).run()
         return res, check_result
+    
+    @trace()
+    def add_field(self, schema, field_name, datatype, check_task=None, check_items=None, **kwargs):
+
+        # Set default parameters for specific field types
+        if datatype == DataType.VARCHAR and 'max_length' not in kwargs:
+            kwargs['max_length'] = ct.default_length
+        elif datatype == DataType.ARRAY:
+            if 'element_type' not in kwargs:
+                kwargs['element_type'] = DataType.INT64
+            if 'max_capacity' not in kwargs:
+                kwargs['max_capacity'] = ct.default_max_capacity
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([schema.add_field, field_name, datatype], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       **kwargs).run()
+        return res, check_result
+    
 
     @trace()
     def create_collection(self, client, collection_name, dimension=None, primary_field_name='id',
@@ -308,6 +327,8 @@ class TestMilvusClientV2Base(Base):
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        collection_name=collection_name,
                                        **kwargs).run()
+        if check_result is True and collection_name in self.tear_down_collection_names:
+            self.tear_down_collection_names.remove(collection_name)
         return res, check_result
 
     @trace()

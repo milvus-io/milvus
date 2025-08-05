@@ -71,55 +71,10 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # 2. Insert data with null values for nullable fields
         num_inserts = 5  # insert data for 5 times
         total_rows = []
-        for batch in range(num_inserts):
-            vectors = list(cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)) \
-                if vector_type == DataType.FLOAT_VECTOR \
-                else cf.gen_vectors(default_nb, dim, vector_data_type=vector_type)
-            rows = []
-            start_id = batch * default_nb  # ensure id is not duplicated
-
-            for i in range(default_nb):
-                row = {
-                    "id": start_id + i,  # ensure id is not duplicated
-                    "vector": vectors[i]
-                }
-
-                # Add nullable fields with null values for every 5th record
-                if i % 5 == 0:
-                    row.update({
-                        "bool_field": None,
-                        "int8_field": None,
-                        "int16_field": None,
-                        "int32_field": None,
-                        "int64_field": None,
-                        "float_field": None,
-                        "double_field": None,
-                        "varchar_field": None,
-                        "json_field": None,
-                        "array_field": None
-                    })
-                else:
-                    row.update({
-                        "bool_field": i % 2 == 0,
-                        "int8_field": i % 128,
-                        "int16_field": i % 32768,
-                        "int32_field": i,
-                        "int64_field": i,
-                        "float_field": random.random(), 
-                        "double_field": random.random(),
-                        "varchar_field": f"varchar_{start_id + i}",
-                        "json_field": {"id": start_id + i, "value": f"json_{start_id + i}"},
-                        "array_field": [random.random() for _ in range(5)]
-                    })
-                rows.append(row)
-                total_rows.append(row)
-
-            t0 = time.time()
-            self.insert(client, collection_name, rows)
-            t1 = time.time()
-            time.sleep(0.5)
-            log.info(f"Insert batch {batch + 1}: {default_nb} entities cost {t1 - t0:.4f} seconds")
-
+        for i in range(num_inserts):
+            data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=i * default_nb)
+            self.insert(client, collection_name, data)
+            total_rows.extend(data)
         log.info(f"Total inserted {num_inserts * default_nb} entities")
 
         if flush_enable:
@@ -189,15 +144,9 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # 5. Query with filters on each scalar field
         t0 = time.time()
         # Query on boolean field
-        output_fields = ['id', 'int8_field', 'json_field']
+        output_fields = ['*']
         bool_filter = "bool_field == true"
-        bool_expected = [
-            {
-                'id': r['id'],
-                'int8_field': r['int8_field'],
-                'json_field': r['json_field']
-            }
-            for r in total_rows if r["bool_field"] is not None and r["bool_field"]]
+        bool_expected = [r for r in total_rows if r["bool_field"] is not None and r["bool_field"] is True]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -504,8 +453,8 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         )
 
         # JSON field is not null
-        json_not_null_filter = "json_field is not null and json_field['id'] < 100"
-        json_not_null_expected = [r for r in total_rows if r["json_field"] is not None and r["json_field"]["id"] < 100]
+        json_not_null_filter = "json_field is not null and json_field['count'] < 15"
+        json_not_null_expected = [r for r in total_rows if r["json_field"] is not None and r["json_field"]["count"] < 15]
         query_res, _ = self.query(
             client,
             collection_name,
@@ -635,3 +584,97 @@ class TestMilvusClientE2E(TestMilvusClientV2Base):
         # 8. Cleanup
         self.release_collection(client, collection_name)
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("flush_enable", [True, False])
+    @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR])
+    def test_milvus_client_data_consistent(self, vector_type, flush_enable):
+        client = self._client()
+        dim = 28
+
+        # 1. Create collection with custom schema
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Primary key and vector field
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", vector_type, dim=dim)
+        # Boolean type
+        schema.add_field("bool_field", DataType.BOOL, nullable=True)
+        # Integer types
+        schema.add_field("int16_field", DataType.INT16, nullable=True)
+        schema.add_field("int32_field", DataType.INT32, nullable=True)
+        schema.add_field("int64_field", DataType.INT64, nullable=True)
+        # Float types
+        schema.add_field("float_field", DataType.FLOAT, nullable=True)
+        schema.add_field("double_field", DataType.DOUBLE, nullable=True)
+        # String type
+        schema.add_field("varchar_field", DataType.VARCHAR, max_length=200, nullable=True)
+        # JSON type
+        schema.add_field("json_field", DataType.JSON, nullable=True)
+        # Array float type
+        schema.add_field("array_float_field", DataType.ARRAY, element_type=DataType.FLOAT, max_capacity=15, nullable=True)
+        # Array varchar type
+        schema.add_field("array_varchar_field", DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=15, max_length=100, nullable=True)
+
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+
+        # 2. Insert data with null values for nullable fields
+        num_inserts = 5  # insert data for 5 times
+        total_rows = []
+        for i in range(num_inserts):
+            data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=i * default_nb)
+            self.insert(client, collection_name, data)
+            total_rows.extend(data)
+        log.info(f"Total inserted {num_inserts * default_nb} entities")
+
+        if flush_enable:
+            self.flush(client, collection_name)
+            log.info("Flush enabled: executing flush operation")
+
+        # Create index parameters
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index("vector", metric_type="COSINE")
+        # 3. create index
+        self.create_index(client, collection_name, index_params)
+
+        # 4. Load collection
+        self.load_collection(client, collection_name)
+
+        # 4. Search
+        vectors_to_search = cf.gen_vectors(1, dim, vector_data_type=vector_type)
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 100}}
+        search_res, _ = self.search(
+            client,
+            collection_name,
+            vectors_to_search,
+            anns_field="vector",
+            search_params=search_params,
+            limit=default_limit,
+            output_fields=['*'],
+            check_task=CheckTasks.check_search_results,
+            check_items={"enable_milvus_client_api": True,
+                         "nq": len(vectors_to_search),
+                         "pk_name": "id",
+                         "limit": default_limit
+                         }
+        )
+
+        # use query iterator to get all the data and compare with the inserted original data
+        query_total_rows = []
+        query_iterator = self.query_iterator(client, collection_name, output_fields=["*"])[0]
+        while True:
+            res = query_iterator.next()
+            if len(res) == 0:
+                log.info("search iteration finished, close")
+                query_iterator.close()
+                break
+            query_total_rows.extend(res)
+
+        # 5. Query with filters on each scalar field
+        from check import param_check as pc
+        t1 = time.time()
+        compare_res = pc.compare_lists_with_epsilon_ignore_dict_order(a=query_total_rows, b=total_rows)
+        assert compare_res, "query result is not consistent with the inserted original data"
+        t2 = time.time()
+        log.info(f"Query results compare costs {t2 - t1:.4f} seconds")
