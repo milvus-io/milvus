@@ -357,6 +357,10 @@ test-streaming:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t streaming)
 
+test-mixcoord:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mixcoord)
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)

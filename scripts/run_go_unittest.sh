@@ -134,19 +134,16 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/dist
 
 function test_rootcoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/rootcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/rootcoord" -failfast  -ldflags="-r ${RPATH}"
 }
 
 function test_datacoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/datacoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
 function test_querycoord()
 {
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/querycoord/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/querycoordv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
@@ -171,6 +168,10 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${PKG_DIR}/streami
 popd
 }
 
+function test_mixcoord() {
+go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/distributed/mixcoord/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+}
+
 function test_all()
 {
 test_proxy
@@ -189,6 +190,7 @@ test_pkg
 test_metastore
 test_cmd
 test_streaming
+test_mixcoord
 }
 
 
@@ -244,6 +246,9 @@ case "${TEST_TAG}" in
         ;;
     streaming)
 	test_streaming
+        ;;
+    mixcoord)
+	test_mixcoord
         ;;
     *)   echo "Test All";
 	test_all
