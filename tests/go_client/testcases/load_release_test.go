@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	clientv2 "github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -255,7 +256,6 @@ func TestLoadCollectionSparse(t *testing.T) {
 }
 
 func TestLoadPartialFields(t *testing.T) {
-	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1.  verify the collection loaded successfully
 		2.  verify the loaded fields can be searched in expr and output_fields
@@ -277,32 +277,100 @@ func TestLoadPartialFields(t *testing.T) {
 	err = loadTask.Await(ctx)
 	common.CheckErr(t, err, true)
 
-	// search loaded fields & loaded fileds expr & output loaded fields
 	expr := fmt.Sprintf("%s > '2' ", common.DefaultVarcharFieldName)
 	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
-	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields("*").WithFilter(expr))
+	hintLoadedVectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBFloat16Vector)
+
+	// search loaded fields & loaded fields expr & output loaded fields
+	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(partialLoadedFields...).WithFilter(expr))
 	common.CheckErr(t, err, true)
 	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	common.CheckOutputFields(t, partialLoadedFields, searchRes[0].Fields)
 
-	// TODO: hybrid search with loaded fields
+	// search with loaded group by field
+	groupByRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithGroupByField(common.DefaultInt64FieldName))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, groupByRes, common.DefaultNq, common.DefaultLimit)
 
-	// search with not-loaded anns field -> Error
-	_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultBFloat16VecFieldName))
-	common.CheckErr(t, err, false, "ann field \"bf16Vec\" not loaded")
+	// group by with not-loaded fields
+	_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, hintLoadedVectors).WithGroupByField(common.DefaultBoolFieldName))
+	common.CheckErr(t, err, false, "multiple anns_fields exist, please specify a anns_field in search_params")
+	groupByRes, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, hintLoadedVectors).WithANNSField(common.DefaultBFloat16VecFieldName).WithGroupByField(common.DefaultInt32FieldName))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, groupByRes, common.DefaultNq, common.DefaultLimit)
 
-	// search with expr not loaded field -> Error
+	// search with not-loaded anns field -> ok
+	hintLoadedVectors2 := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloat16Vector)
+	searchRes, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, hintLoadedVectors2).WithANNSField(common.DefaultFloat16VecFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+
+	// search with expr not loaded field -> ok
 	invalidExpr := fmt.Sprintf("%s > 2.0 ", common.DefaultFloatFieldName)
 	_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithFilter(invalidExpr))
-	common.CheckErr(t, err, false, "data_type:Float is not loaded")
+	common.CheckErr(t, err, true)
 
-	// search with output_fields not loaded field -> Error
-	_, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields(common.DefaultBoolFieldName))
-	common.CheckErr(t, err, false, "field bool is not loaded")
+	// search with output_fields not loaded field -> ok
+	searchRes, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).WithOutputFields("*"))
+	common.CheckErr(t, err, true)
+	// actually, the output fields is all fields
+	allFieldsName := make([]string, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		allFieldsName = append(allFieldsName, field.Name)
+	}
+	common.CheckOutputFields(t, allFieldsName, searchRes[0].Fields)
+}
+
+func TestLoadPartialFieldsExpr(t *testing.T) {
+	/*
+		1.  verify the collection loaded successfully
+		2.  verify the loaded / not-loaded fields can be searched in expr
+		3.  verify the loaded / not-loaded fields can be searched in template expr
+	*/
+	// create collection -> insert -> flush -> index
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption())
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+
+	// load partial fields
+	partialLoadedFields := []string{common.DefaultInt64FieldName, common.DefaultFloatFieldName, common.DefaultFloatVecFieldName, common.DefaultFloat16VecFieldName}
+	loadTask, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(schema.CollectionName).WithLoadFields(partialLoadedFields...).WithSkipLoadDynamicField(true))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	expr := fmt.Sprintf("%s > 500.0 ", common.DefaultDoubleFieldName)
+	vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+
+	// search with loaded field expr
+	searchRes, err := mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).
+		WithOutputFields(common.DefaultDoubleFieldName).WithFilter(expr))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+	// verify search result meets expr condition
+	for _, res := range searchRes {
+		for _, value := range res.GetColumn(common.DefaultDoubleFieldName).(*column.ColumnDouble).Data() {
+			require.Greater(t, value, 500.0)
+		}
+	}
+	// search with not-loaded template expr
+	searchRes, err = mc.Search(ctx, clientv2.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithANNSField(common.DefaultFloatVecFieldName).
+		WithOutputFields(common.DefaultBoolFieldName).WithFilter("bool == {boolValue}").WithTemplateParam("boolValue", true))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
+	// verify search result meets expr condition
+	for _, res := range searchRes {
+		for _, value := range res.GetColumn(common.DefaultBoolFieldName).(*column.ColumnBool).Data() {
+			require.Equal(t, value, true)
+		}
+	}
 }
 
 func TestLoadSkipDynamicField(t *testing.T) {
-	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1. load -> search output dynamic field
 		2. reload and skip dynamic field
@@ -334,19 +402,18 @@ func TestLoadSkipDynamicField(t *testing.T) {
 	common.CheckErr(t, err, true)
 
 	// search and verify output dynamic fields
-	t.Log("https://github.com/milvus-io/milvus/issues/37857")
-	_, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields(common.DefaultDynamicNumberField).WithLimit(10))
-	common.CheckErr(t, err, false, fmt.Sprintf("field %s cannot be returned since dynamic field not loaded", common.DefaultDynamicNumberField))
+	res, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields(common.DefaultDynamicNumberField).WithLimit(10))
+	common.CheckErr(t, err, true)
+	common.CheckOutputFields(t, []string{common.DefaultDynamicNumberField, common.DefaultInt64FieldName}, res.Fields)
 
 	_, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithFilter(fmt.Sprintf("%s > 0", common.DefaultDynamicNumberField)))
-	common.CheckErr(t, err, false, "but dynamic field is not loaded")
+	common.CheckErr(t, err, true)
 }
 
-func TestLoadPartialVectorFields(t *testing.T) {
-	t.Skip("field partial load behavior changing @congqixia")
-	t.Skip("waiting for HybridSearch implementation")
+func TestLoadPartialHybridSearch(t *testing.T) {
 	/*
-		1.  verify load different vector fields has different hybrid search results
+		1.  load partial vector fields
+		2.  hybrid search with loaded and not-loaded fields
 	*/
 	// create collection -> insert -> flush -> index
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
@@ -359,17 +426,32 @@ func TestLoadPartialVectorFields(t *testing.T) {
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 
 	// load partial vector fields
-	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName).TWithLoadFields(common.DefaultFloatVecFieldName, common.DefaultFloat16VecFieldName))
-	// TODO: verify hybrid search results
-	// TODO: load partial vector fields
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName).TWithLoadFields(common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultBinaryVecFieldName))
+
+	// hybrid search with loaded fields
+	floatVectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloatVector)
+	binaryVectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector)
+	hybridSearchRes, err := mc.HybridSearch(ctx, clientv2.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit,
+		clientv2.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit, floatVectors...),
+		clientv2.NewAnnRequest(common.DefaultBinaryVecFieldName, common.DefaultLimit+5, binaryVectors...)))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, hybridSearchRes, common.DefaultNq, common.DefaultLimit)
+
+	// hybrid search with not-loaded fields
+	fp16Vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeFloat16Vector)
+	bf16Vectors := hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBFloat16Vector)
+	hybridSearchRes, err = mc.HybridSearch(ctx, clientv2.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit,
+		clientv2.NewAnnRequest(common.DefaultFloat16VecFieldName, common.DefaultLimit-1, fp16Vectors...),
+		clientv2.NewAnnRequest(common.DefaultBFloat16VecFieldName, common.DefaultLimit+5, bf16Vectors...)))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, hybridSearchRes, common.DefaultNq, common.DefaultLimit)
 }
 
 func TestLoadPartialFieldsPartitions(t *testing.T) {
-	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		1. insert data into default partition and parName partition
 		2. load default partition with partial fields -> succ & query
-		3. load parName partition with different partial fields -> error
+		3. load parName partition with different partial fields -> hint load different fields
 		4. load parName partition with same partial fields -> succ
 		5. query from default partition and parName partition -> count=2*nb
 	*/
@@ -406,7 +488,10 @@ func TestLoadPartialFieldsPartitions(t *testing.T) {
 	// load parName partition with different partial fields
 	diffFields := []string{common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultVarcharFieldName}
 	_, errPar := mc.LoadPartitions(ctx, clientv2.NewLoadPartitionsOption(schema.CollectionName, parName).WithLoadFields(diffFields...))
-	common.CheckErr(t, errPar, false, "can't change the load field list for loaded collection")
+	common.CheckErr(t, errPar, true)
+	queryPar, errPar := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields(diffFields...).WithPartitions(parName).WithLimit(common.DefaultLimit))
+	common.CheckErr(t, errPar, true)
+	common.CheckOutputFields(t, diffFields, queryPar.Fields)
 
 	// load parName partition with different partial fields
 	taskPar, errPar := mc.LoadPartitions(ctx, clientv2.NewLoadPartitionsOption(schema.CollectionName, parName).WithLoadFields(partitionFields...))
@@ -422,7 +507,6 @@ func TestLoadPartialFieldsPartitions(t *testing.T) {
 }
 
 func TestLoadPartialFieldsWithoutPartitionKey(t *testing.T) {
-	t.Skip("field partial load behavior changing @congqixia")
 	/*
 		code fields: pk, clustering key, partition key, part dynamic fields, non-vector fields -> error
 		not index: error
@@ -461,9 +545,8 @@ func TestLoadPartialFieldsWithoutPartitionKey(t *testing.T) {
 }
 
 func TestLoadPartialFieldsRepeated(t *testing.T) {
-	t.Skip("field partial load behavior changing @congqixia")
 	/*
-		1. repeated Load with different LoadFields -> error
+		1. repeated Load with different LoadFields -> hint loaded
 	*/
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
@@ -481,7 +564,43 @@ func TestLoadPartialFieldsRepeated(t *testing.T) {
 
 	// load with different fields
 	_, err = mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(schema.CollectionName).WithLoadFields(common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultVarcharArrayField))
-	common.CheckErr(t, err, false, "can't change the load field list for loaded collection")
+	common.CheckErr(t, err, true)
+
+	// query output *
+	resQuery, err := mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithOutputFields("*").WithLimit(common.DefaultLimit))
+	common.CheckErr(t, err, true)
+	expFieldsName := []string{common.DefaultDynamicFieldName}
+	for _, field := range schema.Fields {
+		expFieldsName = append(expFieldsName, field.Name)
+	}
+	common.CheckOutputFields(t, expFieldsName, resQuery.Fields)
+}
+
+func TestLoadPartialFieldsRelease(t *testing.T) {
+	/*
+		1. release collection after loading partial fields -> ok
+	*/
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create collection -> insert -> flush -> index -> load
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecArray), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), hp.TNewDataOption())
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+
+	loadTask, err := mc.LoadCollection(ctx, clientv2.NewLoadCollectionOption(schema.CollectionName).WithLoadFields(common.DefaultInt64FieldName, common.DefaultFloatVecFieldName, common.DefaultInt64ArrayField))
+	common.CheckErr(t, err, true)
+	err = loadTask.Await(ctx)
+	common.CheckErr(t, err, true)
+
+	// release collection
+	err = mc.ReleaseCollection(ctx, clientv2.NewReleaseCollectionOption(schema.CollectionName))
+	common.CheckErr(t, err, true)
+
+	// verify release
+	_, err = mc.Query(ctx, clientv2.NewQueryOption(schema.CollectionName).WithLimit(common.DefaultLimit))
+	common.CheckErr(t, err, false, "collection not loaded")
 }
 
 func TestReleaseCollection(t *testing.T) {

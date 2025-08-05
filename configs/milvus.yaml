@@ -486,15 +486,15 @@ queryNode:
       # resulting in fewer evictions but fewer segments can be loaded.
       # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
       # This parameter is only valid when eviction is enabled.
-      # It defaults to 1.0 (meaning all evictable memory is cached), with a valid range of [0.0, 1.0].
-      evictableMemoryCacheRatio: 1
+      # It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].
+      evictableMemoryCacheRatio: 0.3
       # This ratio estimates how much evictable disk space can be cached.
       # The higher the ratio, the more physical disk space is reserved for evictable disk usage,
       # resulting in fewer evictions but fewer segments can be loaded.
       # Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
       # This parameter is only valid when eviction is enabled.
-      # It defaults to 1.0 (meaning all evictable disk is cached), with a valid range of [0.0, 1.0].
-      evictableDiskCacheRatio: 1
+      # It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].
+      evictableDiskCacheRatio: 0.3
       # Time in seconds after which an unaccessed cache cell will be evicted. 
       # If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
       # If set to 0, time based eviction is disabled.
@@ -720,7 +720,7 @@ dataCoord:
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
-    clusteringCompactionUsage: 65536 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
+    clusteringCompactionUsage: 65535 # slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.
     mixCompactionUsage: 4 # slot usage of mix compaction task.
     l0DeleteCompactionUsage: 8 # slot usage of l0 compaction task.
     indexTaskSlotUsage: 64 # slot usage of index task per 512mb

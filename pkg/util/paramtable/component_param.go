@@ -3053,7 +3053,7 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 	p.TieredEvictableMemoryCacheRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictableMemoryCacheRatio",
 		Version:      "2.6.0",
-		DefaultValue: "1.0",
+		DefaultValue: "0.3",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3066,7 +3066,7 @@ The higher the ratio, the more physical memory is reserved for evictable memory,
 resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
-It defaults to 1.0 (meaning all evictable memory is cached), with a valid range of [0.0, 1.0].`,
+It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].`,
 		Export: true,
 	}
 	p.TieredEvictableMemoryCacheRatio.Init(base.mgr)
@@ -3074,7 +3074,7 @@ It defaults to 1.0 (meaning all evictable memory is cached), with a valid range 
 	p.TieredEvictableDiskCacheRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictableDiskCacheRatio",
 		Version:      "2.6.0",
-		DefaultValue: "1.0",
+		DefaultValue: "0.3",
 		Formatter: func(v string) string {
 			ratio := getAsFloat(v)
 			if ratio < 0 || ratio > 1 {
@@ -3087,7 +3087,7 @@ The higher the ratio, the more physical disk space is reserved for evictable dis
 resulting in fewer evictions but fewer segments can be loaded.
 Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
 This parameter is only valid when eviction is enabled.
-It defaults to 1.0 (meaning all evictable disk is cached), with a valid range of [0.0, 1.0].`,
+It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].`,
 		Export: true,
 	}
 	p.TieredEvictableDiskCacheRatio.Init(base.mgr)
@@ -5076,7 +5076,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
 		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
@@ -5140,7 +5140,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
 		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {

@@ -24,18 +24,26 @@ import (
 )
 
 type SearchIteratorOption interface {
+	// SearchOption returns the search option when iterate search
 	SearchOption() *searchOption
+	// Limit returns the overall limit of entries to iterate
+	Limit() int64
 }
 
 type searchIteratorOption struct {
 	*searchOption
-	batchSize int
+	batchSize     int
+	iteratorLimit int64
 }
 
 func (opt *searchIteratorOption) SearchOption() *searchOption {
 	opt.annRequest.topK = opt.batchSize
 	opt.WithSearchParam(IteratorSearchBatchSizeKey, fmt.Sprintf("%d", opt.batchSize))
 	return opt.searchOption
+}
+
+func (opt *searchIteratorOption) Limit() int64 {
+	return opt.iteratorLimit
 }
 
 func (opt *searchIteratorOption) WithBatchSize(batchSize int) *searchIteratorOption {
@@ -109,11 +117,17 @@ func (opt *searchIteratorOption) WithSearchParam(key, value string) *searchItera
 	return opt
 }
 
+func (opt *searchIteratorOption) WithIteratorLimit(limit int64) *searchIteratorOption {
+	opt.iteratorLimit = limit
+	return opt
+}
+
 func NewSearchIteratorOption(collectionName string, vector entity.Vector) *searchIteratorOption {
 	return &searchIteratorOption{
-		searchOption: NewSearchOption(collectionName, 100, []entity.Vector{vector}).
+		searchOption: NewSearchOption(collectionName, 1000, []entity.Vector{vector}).
 			WithSearchParam(IteratorKey, "true").
 			WithSearchParam(IteratorSearchV2Key, "true"),
-		batchSize: 1000,
+		batchSize:     1000,
+		iteratorLimit: Unlimited,
 	}
 }
