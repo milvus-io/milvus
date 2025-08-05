@@ -53,10 +53,11 @@ template <bool is_sealed = false>
 class DeletedRecord {
  public:
     DeletedRecord(InsertRecord<is_sealed>* insert_record,
-                  std::function<void(
-                      const std::vector<PkType>& pks,
-                      const Timestamp* timestamps,
-                      std::function<void(SegOffset offset, Timestamp ts)> cb)>
+                  std::function<void(const std::vector<PkType>& pks,
+                                     const Timestamp* timestamps,
+                                     std::function<void(SegOffset offset,
+                                                        const PkType& pk,
+                                                        Timestamp ts)> cb)>
                       search_pk_func,
                   int64_t segment_id)
         : insert_record_(insert_record),
@@ -118,7 +119,11 @@ class DeletedRecord {
             }
         }
         search_pk_func_(
-            pks, timestamps, [&](SegOffset offset, Timestamp delete_ts) {
+            pks,
+            timestamps,
+            [&](const SegOffset offset,
+                const PkType& pk,
+                const Timestamp delete_ts) {
                 auto row_id = offset.get();
                 // if already deleted, no need to add new record
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
@@ -324,9 +329,10 @@ class DeletedRecord {
     std::atomic<int64_t> n_ = 0;
     std::atomic<int64_t> mem_size_ = 0;
     InsertRecord<is_sealed>* insert_record_;
-    std::function<void(const std::vector<PkType>& pks,
-                       const Timestamp* timestamps,
-                       std::function<void(SegOffset offset, Timestamp ts)>)>
+    std::function<void(
+        const std::vector<PkType>& pks,
+        const Timestamp* timestamps,
+        std::function<void(SegOffset offset, PkType pk, Timestamp ts)>)>
         search_pk_func_;
     int64_t segment_id_{0};
     std::shared_ptr<SortedDeleteList> deleted_lists_;

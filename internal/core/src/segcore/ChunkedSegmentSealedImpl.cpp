@@ -916,17 +916,19 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
 void
 ChunkedSegmentSealedImpl::search_batch_pks(
     const std::vector<PkType>& pks,
-    const Timestamp* timestamps,
+    const std::function<Timestamp(const size_t idx)>& get_timestamp,
     bool include_same_ts,
-    const std::function<void(const SegOffset offset, const Timestamp ts)>&
-        callback) const {
+    const std::function<void(const SegOffset offset,
+                             const PkType& pk,
+                             const Timestamp ts)>& callback) const {
     // handle unsorted case
     if (!is_sorted_by_pk_) {
         for (size_t i = 0; i < pks.size(); i++) {
-            auto offsets = insert_record_.search_pk(
-                pks[i], timestamps[i], include_same_ts);
+            auto timestamp = get_timestamp(i);
+            auto offsets =
+                insert_record_.search_pk(pks[i], timestamp, include_same_ts);
             for (auto offset : offsets) {
-                callback(offset, timestamps[i]);
+                callback(offset, pks[i], timestamp);
             }
         }
         return;
@@ -956,7 +958,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                 for (size_t j = 0; j < pks.size(); j++) {
                     // get int64 pks
                     auto target = std::get<int64_t>(pks[j]);
-                    auto timestamp = timestamps[j];
+                    auto timestamp = get_timestamp(j);
                     auto it = std::lower_bound(
                         src,
                         src + chunk_row_num,
@@ -970,7 +972,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                         auto offset = it - src + num_rows_until_chunk;
                         if (timestamp_hit(insert_record_.timestamps_[offset],
                                           timestamp)) {
-                            callback(SegOffset(offset), timestamp);
+                            callback(SegOffset(offset), pks[j], timestamp);
                         }
                     }
                 }
@@ -988,7 +990,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                 for (size_t j = 0; j < pks.size(); ++j) {
                     // get varchar pks
                     auto& target = std::get<std::string>(pks[j]);
-                    auto timestamp = timestamps[j];
+                    auto timestamp = get_timestamp(j);
                     auto offset = string_chunk->binary_search_string(target);
                     for (; offset != -1 && offset < string_chunk->RowNums() &&
                            string_chunk->operator[](offset) == target;
@@ -997,7 +999,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                         if (timestamp_hit(
                                 insert_record_.timestamps_[segment_offset],
                                 timestamp)) {
-                            callback(SegOffset(segment_offset), timestamp);
+                            callback(
+                                SegOffset(segment_offset), pks[j], timestamp);
                         }
                     }
                 }
@@ -1140,9 +1143,14 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           &insert_record_,
           [this](const std::vector<PkType>& pks,
                  const Timestamp* timestamps,
-                 std::function<void(const SegOffset offset, const Timestamp ts)>
-                     callback) {
-              this->search_batch_pks(pks, timestamps, false, callback);
+                 std::function<void(const SegOffset offset,
+                                    const PkType pk,
+                                    const Timestamp ts)> callback) {
+              this->search_batch_pks(
+                  pks,
+                  [&](const size_t idx) { return timestamps[idx]; },
+                  false,
+                  callback);
           },
           segment_id) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -1766,14 +1774,11 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
     auto res_id_arr = std::make_unique<IdArray>();
     std::vector<SegOffset> res_offsets;
     res_offsets.reserve(pks.size());
-    for (auto& pk : pks) {
-        std::vector<SegOffset> pk_offsets;
-        if (!is_sorted_by_pk_) {
-            pk_offsets = insert_record_.search_pk(pk, timestamp);
-        } else {
-            pk_offsets = search_pk(pk, timestamp);
-        }
-        for (auto offset : pk_offsets) {
+    this->search_batch_pks(
+        pks,
+        [=](const size_t idx) { return timestamp; },
+        true,
+        [&](const SegOffset offset, const PkType& pk, const Timestamp ts) {
             switch (data_type) {
                 case DataType::INT64: {
                     res_id_arr->mutable_int_id()->add_data(
@@ -1782,7 +1787,7 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
                 }
                 case DataType::VARCHAR: {
                     res_id_arr->mutable_str_id()->add_data(
-                        std::get<std::string>(std::move(pk)));
+                        std::get<std::string>(pk));
                     break;
                 }
                 default: {
@@ -1791,8 +1796,7 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
                 }
             }
             res_offsets.push_back(offset);
-        }
-    }
+        });
     return {std::move(res_id_arr), std::move(res_offsets)};
 }
 

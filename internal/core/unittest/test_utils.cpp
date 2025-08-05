@@ -90,15 +90,17 @@ TEST(Util, GetDeleteBitmap) {
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](
-            const std::vector<PkType>& pks,
-            const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+        [&insert_record](const std::vector<PkType>& pks,
+                         const Timestamp* timestamps,
+                         std::function<void(const SegOffset offset,
+                                            const PkType& pk,
+                                            const Timestamp ts)> cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
+                auto& pk = pks[i];
                 auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pks[i], timestamp);
+                auto offsets = insert_record.search_pk(pk, timestamp);
                 for (auto offset : offsets) {
-                    cb(offset, timestamp);
+                    cb(offset, pk, timestamp);
                 }
             }
         },

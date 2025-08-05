@@ -207,10 +207,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     void
     search_batch_pks(
         const std::vector<PkType>& pks,
-        const Timestamp* timestamps,
+        const std::function<Timestamp(const size_t idx)>& get_timestamp,
         bool include_same_ts,
-        const std::function<void(const SegOffset offset, const Timestamp ts)>&
-            callback) const;
+        const std::function<void(const SegOffset offset,
+                                 const PkType& pk,
+                                 const Timestamp ts)>& callback) const;
 
  public:
     int64_t
