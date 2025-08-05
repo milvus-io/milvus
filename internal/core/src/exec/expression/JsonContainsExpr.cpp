@@ -34,9 +34,13 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             return;
         }
         if (expr_->op_ == proto::plan::JSONContainsExpr_JSONOp_ContainsAll) {
-            result = std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, true), TargetBitmap(real_batch_size, true));
+            result = std::make_shared<ColumnVector>(
+                TargetBitmap(real_batch_size, true),
+                TargetBitmap(real_batch_size, true));
         } else {
-            result = std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false), TargetBitmap(real_batch_size, true));
+            result = std::make_shared<ColumnVector>(
+                TargetBitmap(real_batch_size, false),
+                TargetBitmap(real_batch_size, true));
         }
         MoveCursor();
         return;

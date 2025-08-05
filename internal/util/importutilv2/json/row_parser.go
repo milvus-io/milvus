@@ -277,7 +277,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, err
 		}
 		return int32(num), nil
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		value, ok := obj.(json.Number)
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
@@ -582,6 +582,26 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{
 				DoubleData: &schemapb.DoubleArray{
+					Data: values,
+				},
+			},
+		}, nil
+	case schemapb.DataType_Timestamptz:
+		values := make([]int64, len(arr))
+		for i, v := range arr {
+			value, ok := v.(json.Number)
+			if !ok {
+				return nil, r.wrapArrayValueTypeError(arr, eleType)
+			}
+			num, err := strconv.ParseInt(value.String(), 0, 64)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse int64: %w", err)
+			}
+			values[i] = num
+		}
+		return &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_TimestamptzData{
+				TimestamptzData: &schemapb.TimestamptzArray{
 					Data: values,
 				},
 			},

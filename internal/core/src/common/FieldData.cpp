@@ -209,6 +209,18 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             }
             return FillFieldData(array_info.first, array_info.second);
         }
+        case DataType::TIMESTAMPTZ: {
+            auto array_info =
+                GetDataInfoFromArray<arrow::Int64Array,
+                                     arrow::Type::type::INT64>(array);
+            if (nullable_) {
+                return FillFieldData(array_info.first,
+                                     array->null_bitmap_data(),
+                                     element_count,
+                                     array->offset());
+            }
+            return FillFieldData(array_info.first, array_info.second);
+        }
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT: {
@@ -409,6 +421,17 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             return FillFieldData(
                 values.data(), valid_data_ptr.get(), element_count, 0);
         }
+        case DataType::TIMESTAMPTZ: {
+            FixedVector<int64_t> values(element_count);
+            if (default_value.has_value()) {
+                std::fill(values.begin(),
+                          values.end(),
+                          default_value->timestamptz_data());
+                return FillFieldData(values.data(), nullptr, element_count, 0);
+            }
+            return FillFieldData(
+                values.data(), valid_data_ptr.get(), element_count, 0);
+        }
         case DataType::STRING:
         case DataType::VARCHAR: {
             FixedVector<std::string> values(element_count);
@@ -484,6 +507,9 @@ InitScalarFieldData(const DataType& type, bool nullable, int64_t cap_rows) {
             return std::make_shared<FieldData<float>>(type, nullable, cap_rows);
         case DataType::DOUBLE:
             return std::make_shared<FieldData<double>>(
+                type, nullable, cap_rows);
+        case DataType::TIMESTAMPTZ:
+            return std::make_shared<FieldData<int64_t>>(
                 type, nullable, cap_rows);
         case DataType::STRING:
         case DataType::VARCHAR:

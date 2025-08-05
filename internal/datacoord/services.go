@@ -114,6 +114,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flushTs uint64, toFlushSegments []UniqueID) (*datapb.FlushResult, error) {
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
+	log.Debug(fmt.Sprintf("toFlushSegments size %d", len(toFlushSegments)))
 	if err != nil {
 		log.Warn("fail to get collection", zap.Error(err))
 		return nil, err

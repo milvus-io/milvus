@@ -414,6 +414,9 @@ create_chunk_writer(const FieldMeta& field_meta, Args&&... args) {
         case milvus::DataType::DOUBLE:
             return std::make_shared<ChunkWriter<arrow::DoubleArray, double>>(
                 dim, std::forward<Args>(args)..., nullable);
+        case milvus::DataType::TIMESTAMPTZ:
+            return std::make_shared<ChunkWriter<arrow::Int64Array, int64_t>>(
+                dim, std::forward<Args>(args)..., nullable);
         case milvus::DataType::VECTOR_FLOAT:
             return std::make_shared<
                 ChunkWriter<arrow::FixedSizeBinaryArray, knowhere::fp32>>(

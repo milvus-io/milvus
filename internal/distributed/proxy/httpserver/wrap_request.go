@@ -215,6 +215,22 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			},
 		}
 
+	case schemapb.DataType_Timestamptz:
+		data := []int64{}
+		err := json.Unmarshal(raw, &data)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_TimestamptzData{
+					TimestamptzData: &schemapb.TimestamptzArray{
+						Data: data,
+					},
+				},
+			},
+		}
+
 	case schemapb.DataType_FloatVector:
 		wrappedData := [][]float32{}
 		err := json.Unmarshal(raw, &wrappedData)
