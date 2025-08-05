@@ -322,7 +322,7 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     PinWrapper<std::vector<size_t>>
     VectorArrayLims(int64_t chunk_id) const override {
         if (!IsChunkedVectorArrayColumnDataType(data_type_)) {
-            PanicInfo(ErrorCode::Unsupported,
+            ThrowInfo(ErrorCode::Unsupported,
                       "VectorArrayLims only supported for "
                       "ChunkedVectorArrayColumn");
         }

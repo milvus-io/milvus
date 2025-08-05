@@ -1654,9 +1654,9 @@ inline std::vector<float>
 generate_float_vector(int64_t N, int64_t dim) {
     auto seed = 42;
     auto offset = 0;
-    vector<float> final(dim * N);
+    std::vector<float> final(dim * N);
     for (int n = 0; n < N; ++n) {
-        vector<float> data(dim);
+        std::vector<float> data(dim);
         float sum = 0;
 
         std::default_random_engine er2(seed + n);

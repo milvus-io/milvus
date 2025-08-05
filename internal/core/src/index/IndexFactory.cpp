@@ -521,11 +521,11 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_ARRAY: {
-                PanicInfo(Unsupported, "VECTOR_ARRAY is not supported");
+                ThrowInfo(Unsupported, "VECTOR_ARRAY for DiskAnnIndex is not supported");
             }
             case DataType::VECTOR_INT8: {
                 // TODO caiyd, not support yet
-                PanicInfo(Unsupported, "VECTOR_INT8 is not supported");
+                ThrowInfo(Unsupported, "VECTOR_INT8 for DiskAnnIndex is not supported");
             }
             default:
                 ThrowInfo(
@@ -595,7 +595,7 @@ IndexFactory::CreateVectorIndex(
                             use_knowhere_build_pool,
                             file_manager_context);
                     default:
-                        PanicInfo(NotImplemented,
+                        ThrowInfo(NotImplemented,
                                   fmt::format("not implemented data type to "
                                               "build mem index: {}",
                                               data_type));

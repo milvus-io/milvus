@@ -22,7 +22,7 @@ func newNgramIndexChecker() *NgramIndexChecker {
 	return &NgramIndexChecker{}
 }
 
-func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
+func (c *NgramIndexChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if dataType != schemapb.DataType_VarChar && dataType != schemapb.DataType_JSON {
 		return merr.WrapErrParameterInvalidMsg("Ngram index can only be created on VARCHAR or JSON field")
 	}

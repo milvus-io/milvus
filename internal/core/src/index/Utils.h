@@ -241,7 +241,8 @@ vector_element_size(const DataType data_type) {
         case DataType::VECTOR_INT8:
             return sizeof(int8);
         default:
-            PanicInfo(UnexpectedError, "invalid data type");
+            ThrowInfo(UnexpectedError,
+                      fmt::format("invalid data type: {}", data_type));
     }
 }
 

@@ -152,8 +152,7 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
             search_info,
             index_info,
             bitset_view,
-            DataType::VECTOR_SPARSE_FLOAT,
-            DataType::NONE);
+            DataType::VECTOR_SPARSE_FLOAT);
         auto iterators = result3.chunk_iterators();
         for (int i = 0; i < nq; i++) {
             auto it = iterators[i];

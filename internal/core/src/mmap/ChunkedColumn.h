@@ -275,7 +275,7 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
 
     virtual PinWrapper<std::vector<size_t>>
     VectorArrayLims(int64_t chunk_id) const override {
-        PanicInfo(
+        ThrowInfo(
             ErrorCode::Unsupported,
             "VectorArrayLims only supported for ChunkedVectorArrayColumn");
     }

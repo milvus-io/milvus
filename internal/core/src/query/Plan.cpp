@@ -73,7 +73,7 @@ ParsePlaceholderGroup(const Plan* plan,
 
             if (field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
                 if (field_meta.get_sizeof() != line_size) {
-                    PanicInfo(DimNotMatch,
+                    ThrowInfo(DimNotMatch,
                               fmt::format(
                                   "vector dimension mismatch, expected vector "
                                   "size(byte) {}, actual {}.",
