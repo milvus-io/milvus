@@ -1462,6 +1462,9 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		for _, sid := range req.GetSegmentIDs() {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
+			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
+			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
+			// use timetick for GetFlushState in-future but not segment list.
 			if segment == nil || isFlushState(segment.GetState()) {
 				continue
 			}

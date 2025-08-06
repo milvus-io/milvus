@@ -19,7 +19,6 @@ package delegator
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"runtime"
 	"time"
 
@@ -40,8 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	mqcommon "github.com/milvus-io/milvus/pkg/v2/mq/common"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -769,120 +766,6 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 	log.Info("load delete done")
 
 	return nil
-}
-
-func (sd *shardDelegator) createStreamFromMsgStream(ctx context.Context, position *msgpb.MsgPosition) (ch <-chan *msgstream.MsgPack, closer func(), err error) {
-	stream, err := sd.factory.NewTtMsgStream(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer stream.Close()
-	vchannelName := position.ChannelName
-	pChannelName := funcutil.ToPhysicalChannel(vchannelName)
-	position.ChannelName = pChannelName
-
-	ts, _ := tsoutil.ParseTS(position.Timestamp)
-
-	// Random the subname in case we trying to load same delta at the same time
-	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", paramtable.GetNodeID(), sd.collectionID, rand.Int())
-	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("vChannel", vchannelName), zap.String("subName", subName), zap.Time("positionTs", ts))
-	err = stream.AsConsumer(context.TODO(), []string{pChannelName}, subName, mqcommon.SubscriptionPositionUnknown)
-	if err != nil {
-		return nil, stream.Close, err
-	}
-
-	err = stream.Seek(context.TODO(), []*msgpb.MsgPosition{position}, false)
-	if err != nil {
-		return nil, stream.Close, err
-	}
-
-	dispatcher := msgstream.NewSimpleMsgDispatcher(stream, func(pm msgstream.ConsumeMsg) bool {
-		if pm.GetType() != commonpb.MsgType_Delete || pm.GetVChannel() != vchannelName {
-			return false
-		}
-		return true
-	})
-
-	return dispatcher.Chan(), dispatcher.Close, nil
-}
-
-// Only used in test.
-func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position *msgpb.MsgPosition, safeTs uint64, candidate *pkoracle.BloomFilterSet) (*storage.DeleteData, error) {
-	log := sd.getLogger(ctx).With(
-		zap.String("channel", position.ChannelName),
-		zap.Int64("segmentID", candidate.ID()),
-	)
-	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
-
-	var ch <-chan *msgstream.MsgPack
-	var closer func()
-	var err error
-	ch, closer, err = sd.createStreamFromMsgStream(ctx, position)
-	if closer != nil {
-		defer closer()
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	start := time.Now()
-	result := &storage.DeleteData{}
-	hasMore := true
-	for hasMore {
-		select {
-		case <-ctx.Done():
-			log.Debug("read delta msg from seek position done", zap.Error(ctx.Err()))
-			return nil, ctx.Err()
-		case msgPack, ok := <-ch:
-			if !ok {
-				err = fmt.Errorf("stream channel closed, pChannelName=%v, msgID=%v", pChannelName, position.GetMsgID())
-				log.Warn("fail to read delta msg",
-					zap.String("pChannelName", pChannelName),
-					zap.Binary("msgID", position.GetMsgID()),
-					zap.Error(err),
-				)
-				return nil, err
-			}
-
-			if msgPack == nil {
-				continue
-			}
-
-			for _, tsMsg := range msgPack.Msgs {
-				if tsMsg.Type() == commonpb.MsgType_Delete {
-					dmsg := tsMsg.(*msgstream.DeleteMsg)
-					if dmsg.CollectionID != sd.collectionID || (dmsg.GetPartitionID() != common.AllPartitionsID && dmsg.GetPartitionID() != candidate.Partition()) {
-						continue
-					}
-
-					pks := storage.ParseIDs2PrimaryKeys(dmsg.GetPrimaryKeys())
-					batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-					for idx := 0; idx < len(pks); idx += batchSize {
-						endIdx := idx + batchSize
-						if endIdx > len(pks) {
-							endIdx = len(pks)
-						}
-
-						lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
-						hits := candidate.BatchPkExist(lc)
-						for i, hit := range hits {
-							if hit {
-								result.Pks = append(result.Pks, pks[idx+i])
-								result.Tss = append(result.Tss, dmsg.Timestamps[idx+i])
-							}
-						}
-					}
-				}
-			}
-
-			// reach safe ts
-			if safeTs <= msgPack.EndPositions[0].GetTimestamp() {
-				hasMore = false
-			}
-		}
-	}
-	log.Info("successfully read delete from stream ", zap.Duration("time spent", time.Since(start)))
-	return result, nil
 }
 
 // ReleaseSegments releases segments local or remotely depending on the target node.

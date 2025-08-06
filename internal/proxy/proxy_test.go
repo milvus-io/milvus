@@ -23,13 +23,11 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"os"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,12 +48,13 @@ import (
 	mixc "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	grpcstreamingnode "github.com/milvus-io/milvus/internal/distributed/streamingnode"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -64,7 +63,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/tracer"
 	"github.com/milvus-io/milvus/pkg/v2/util"
 	"github.com/milvus-io/milvus/pkg/v2/util/crypto"
@@ -89,7 +87,6 @@ func init() {
 	Registry = prometheus.NewRegistry()
 	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	Registry.MustRegister(prometheus.NewGoCollector())
-	common.Version = semver.MustParse("2.5.9")
 }
 
 func runMixCoord(ctx context.Context, localMsg bool) *grpcmixcoord.Server {
@@ -117,6 +114,33 @@ func runMixCoord(ctx context.Context, localMsg bool) *grpcmixcoord.Server {
 
 	metrics.RegisterMixCoord(Registry)
 	return rc
+}
+
+func runStreamingNode(ctx context.Context, localMsg bool, alias string) *grpcstreamingnode.Server {
+	var sn *grpcstreamingnode.Server
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		factory := dependency.MockDefaultFactory(localMsg, Params)
+		var err error
+		sn, err = grpcstreamingnode.NewServer(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
+		if err = sn.Prepare(); err != nil {
+			panic(err)
+		}
+		err = sn.Run()
+		if err != nil {
+			panic(err)
+		}
+	}()
+	wg.Wait()
+
+	metrics.RegisterStreamingNode(Registry)
+	return sn
 }
 
 func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcquerynode.Server {
@@ -276,17 +300,9 @@ func TestProxy(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	testutil.ResetEnvironment()
-
-	wal := mock_streaming.NewMockWALAccesser(t)
-	b := mock_streaming.NewMockBroadcast(t)
-	wal.EXPECT().Broadcast().Return(b).Maybe()
-	b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
-	local := mock_streaming.NewMockLocal(t)
-	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
-	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
-	wal.EXPECT().Local().Return(local).Maybe()
-	streaming.SetWALForTest(wal)
-	defer streaming.RecoverWALForTest()
+	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
+	streamingutil.SetStreamingServiceEnabled()
+	defer streamingutil.UnsetStreamingServiceEnabled()
 
 	params.RootCoordGrpcServerCfg.IP = "localhost"
 	params.QueryCoordGrpcServerCfg.IP = "localhost"
@@ -295,15 +311,14 @@ func TestProxy(t *testing.T) {
 	params.QueryNodeGrpcServerCfg.IP = "localhost"
 	params.DataNodeGrpcServerCfg.IP = "localhost"
 	params.StreamingNodeGrpcServerCfg.IP = "localhost"
-
-	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
-	t.Setenv("ROCKSMQ_PATH", path)
-	defer os.RemoveAll(path)
+	params.Save(params.MQCfg.Type.Key, "pulsar")
+	params.CommonCfg.EnableStorageV2.SwapTempValue("false")
+	defer params.CommonCfg.EnableStorageV2.SwapTempValue("")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")
 	localMsg := true
-	factory := dependency.MockDefaultFactory(localMsg, Params)
+	factory := dependency.NewDefaultFactory(false)
 	alias := "TestProxy"
 
 	log.Info("Initialize parameter table of Proxy")
@@ -314,10 +329,15 @@ func TestProxy(t *testing.T) {
 	dn := runDataNode(ctx, localMsg, alias)
 	log.Info("running DataNode ...")
 
+	sn := runStreamingNode(ctx, localMsg, alias)
+	log.Info("running StreamingNode ...")
+
 	qn := runQueryNode(ctx, localMsg, alias)
 	log.Info("running QueryNode ...")
 
 	time.Sleep(10 * time.Millisecond)
+
+	streaming.Init()
 
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
@@ -331,9 +351,11 @@ func TestProxy(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSKey.GetValue(),
 		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	if err != nil {
+		panic(err)
+	}
 	defer etcdcli.Close()
 	assert.NoError(t, err)
-	proxy.SetEtcdClient(etcdcli)
 
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)
@@ -372,7 +394,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("Register proxy done")
 	defer func() {
-		a := []any{mix, qn, dn, proxy}
+		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
 		log.Info("start to stop the services")
@@ -1106,6 +1128,10 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		segmentIDs = resp.CollSegIDs[collectionName].Data
+		// TODO: Here's a Bug, because a growing segment may cannot be seen right away by mixcoord,
+		// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
+		// use timetick for GetFlushState in-future but not segment list.
+		time.Sleep(5 * time.Second)
 		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
 
 		f := func() bool {
@@ -4792,11 +4818,7 @@ func TestProxy_Import(t *testing.T) {
 	cache := globalMetaCache
 	defer func() { globalMetaCache = cache }()
 
-	wal := mock_streaming.NewMockWALAccesser(t)
-	b := mock_streaming.NewMockBroadcast(t)
-	wal.EXPECT().Broadcast().Return(b).Maybe()
-	streaming.SetWALForTest(wal)
-	defer streaming.RecoverWALForTest()
+	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {
 		proxy := &Proxy{}
@@ -4825,7 +4847,6 @@ func TestProxy_Import(t *testing.T) {
 		chMgr.EXPECT().getVChannels(mock.Anything).Return([]string{"foo"}, nil)
 		proxy.chMgr = chMgr
 
-		factory := dependency.NewDefaultFactory(true)
 		rc := mocks.NewMockRootCoordClient(t)
 		rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
 			ID:    rand.Int63(),
@@ -4839,18 +4860,11 @@ func TestProxy_Import(t *testing.T) {
 		proxy.tsoAllocator = &timestampAllocator{
 			tso: newMockTimestampAllocatorInterface(),
 		}
-		scheduler, err := newTaskScheduler(ctx, proxy.tsoAllocator, factory)
+		scheduler, err := newTaskScheduler(ctx, proxy.tsoAllocator)
 		assert.NoError(t, err)
 		proxy.sched = scheduler
 		err = proxy.sched.Start()
 		assert.NoError(t, err)
-
-		wal := mock_streaming.NewMockWALAccesser(t)
-		b := mock_streaming.NewMockBroadcast(t)
-		wal.EXPECT().Broadcast().Return(b)
-		b.EXPECT().Append(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil)
-		streaming.SetWALForTest(wal)
-		defer streaming.RecoverWALForTest()
 
 		req := &milvuspb.ImportRequest{
 			CollectionName: "dummy",

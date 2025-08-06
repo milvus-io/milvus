@@ -15,13 +15,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type deleteTaskByStreamingService struct {
-	*deleteTask
-}
-
 // Execute is a function to delete task by streaming service
 // we only overwrite the Execute function
-func (dt *deleteTaskByStreamingService) Execute(ctx context.Context) (err error) {
+func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
 	defer sp.End()
 

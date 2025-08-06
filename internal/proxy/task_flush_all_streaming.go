@@ -30,12 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-type flushAllTaskbyStreamingService struct {
-	*flushAllTask
-	chMgr channelsMgr
-}
-
-func (t *flushAllTaskbyStreamingService) Execute(ctx context.Context) error {
+func (t *flushAllTask) Execute(ctx context.Context) error {
 	dbNames := make([]string, 0)
 	if t.GetDbName() != "" {
 		dbNames = append(dbNames, t.GetDbName())
@@ -60,7 +55,7 @@ func (t *flushAllTaskbyStreamingService) Execute(ctx context.Context) error {
 			Base:   commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections)),
 			DbName: dbName,
 		})
-		if err != nil {
+		if err := merr.CheckRPCCall(showColRsp, err); err != nil {
 			log.Info("flush all task by streaming service failed, show collections failed", zap.String("dbName", dbName), zap.Error(err))
 			return err
 		}
