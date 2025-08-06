@@ -209,9 +209,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::vector<PkType>& pks,
         const std::function<Timestamp(const size_t idx)>& get_timestamp,
         bool include_same_ts,
-        const std::function<void(const SegOffset offset,
-                                 const PkType& pk,
-                                 const Timestamp ts)>& callback) const;
+        const std::function<void(const SegOffset offset, const Timestamp ts)>&
+            callback) const;
 
  public:
     int64_t
@@ -411,7 +410,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     void

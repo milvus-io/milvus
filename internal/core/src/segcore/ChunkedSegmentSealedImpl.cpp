@@ -918,9 +918,8 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     const std::vector<PkType>& pks,
     const std::function<Timestamp(const size_t idx)>& get_timestamp,
     bool include_same_ts,
-    const std::function<void(const SegOffset offset,
-                             const PkType& pk,
-                             const Timestamp ts)>& callback) const {
+    const std::function<void(const SegOffset offset, const Timestamp ts)>&
+        callback) const {
     // handle unsorted case
     if (!is_sorted_by_pk_) {
         for (size_t i = 0; i < pks.size(); i++) {
@@ -928,7 +927,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
             auto offsets =
                 insert_record_.search_pk(pks[i], timestamp, include_same_ts);
             for (auto offset : offsets) {
-                callback(offset, pks[i], timestamp);
+                callback(offset, timestamp);
             }
         }
         return;
@@ -972,7 +971,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                         auto offset = it - src + num_rows_until_chunk;
                         if (timestamp_hit(insert_record_.timestamps_[offset],
                                           timestamp)) {
-                            callback(SegOffset(offset), pks[j], timestamp);
+                            callback(SegOffset(offset), timestamp);
                         }
                     }
                 }
@@ -999,8 +998,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                         if (timestamp_hit(
                                 insert_record_.timestamps_[segment_offset],
                                 timestamp)) {
-                            callback(
-                                SegOffset(segment_offset), pks[j], timestamp);
+                            callback(SegOffset(segment_offset), timestamp);
                         }
                     }
                 }
@@ -1143,9 +1141,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
           &insert_record_,
           [this](const std::vector<PkType>& pks,
                  const Timestamp* timestamps,
-                 std::function<void(const SegOffset offset,
-                                    const PkType pk,
-                                    const Timestamp ts)> callback) {
+                 std::function<void(const SegOffset offset, const Timestamp ts)>
+                     callback) {
               this->search_batch_pks(
                   pks,
                   [&](const size_t idx) { return timestamps[idx]; },
@@ -1760,7 +1757,7 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::vector<SegOffset>
 ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
                                      Timestamp timestamp) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
@@ -1771,33 +1768,16 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    auto res_id_arr = std::make_unique<IdArray>();
     std::vector<SegOffset> res_offsets;
     res_offsets.reserve(pks.size());
     this->search_batch_pks(
         pks,
         [=](const size_t idx) { return timestamp; },
         true,
-        [&](const SegOffset offset, const PkType& pk, const Timestamp ts) {
-            switch (data_type) {
-                case DataType::INT64: {
-                    res_id_arr->mutable_int_id()->add_data(
-                        std::get<int64_t>(pk));
-                    break;
-                }
-                case DataType::VARCHAR: {
-                    res_id_arr->mutable_str_id()->add_data(
-                        std::get<std::string>(pk));
-                    break;
-                }
-                default: {
-                    ThrowInfo(DataTypeInvalid,
-                              fmt::format("unsupported type {}", data_type));
-                }
-            }
+        [&](const SegOffset offset, const Timestamp ts) {
             res_offsets.push_back(offset);
         });
-    return {std::move(res_id_arr), std::move(res_offsets)};
+    return std::move(res_offsets);
 }
 
 SegcoreError

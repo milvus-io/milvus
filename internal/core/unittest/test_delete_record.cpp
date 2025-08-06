@@ -42,17 +42,16 @@ TEST(DeleteMVCC, common_case) {
     auto segment_ptr = segment.get();
     DeletedRecord<true> delete_record(
         &insert_record,
-        [&insert_record](const std::vector<PkType>& pks,
-                         const Timestamp* timestamps,
-                         std::function<void(const SegOffset offset,
-                                            const PkType& pk,
-                                            const Timestamp ts)> cb) {
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
-                auto& pk = pks[i];
                 auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pk, timestamp);
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
                 for (auto offset : offsets) {
-                    cb(offset, pk, timestamp);
+                    cb(offset, timestamp);
                 }
             }
         },
@@ -169,17 +168,16 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const std::vector<PkType>& pks,
-                         const Timestamp* timestamps,
-                         std::function<void(const SegOffset offset,
-                                            const PkType& pk,
-                                            const Timestamp ts)> cb) {
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
-                auto& pk = pks[i];
                 auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pk, timestamp);
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
                 for (auto offset : offsets) {
-                    cb(offset, pk, timestamp);
+                    cb(offset, timestamp);
                 }
             }
         },
@@ -295,17 +293,16 @@ TEST(DeleteMVCC, snapshot) {
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const std::vector<PkType>& pks,
-                         const Timestamp* timestamps,
-                         std::function<void(const SegOffset offset,
-                                            const PkType& pk,
-                                            const Timestamp ts)> cb) {
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
-                auto& pk = pks[i];
                 auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pk, timestamp);
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
                 for (auto offset : offsets) {
-                    cb(offset, pk, timestamp);
+                    cb(offset, timestamp);
                 }
             }
         },
@@ -354,17 +351,16 @@ TEST(DeleteMVCC, insert_after_snapshot) {
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const std::vector<PkType>& pks,
-                         const Timestamp* timestamps,
-                         std::function<void(const SegOffset offset,
-                                            const PkType& pk,
-                                            const Timestamp ts)> cb) {
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
-                auto& pk = pks[i];
                 auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pk, timestamp);
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
                 for (auto offset : offsets) {
-                    cb(offset, pk, timestamp);
+                    cb(offset, timestamp);
                 }
             }
         },
@@ -460,17 +456,16 @@ TEST(DeleteMVCC, perform) {
     InsertRecord<false> insert_record(*schema, N);
     DeletedRecord<false> delete_record(
         &insert_record,
-        [&insert_record](const std::vector<PkType>& pks,
-                         const Timestamp* timestamps,
-                         std::function<void(const SegOffset offset,
-                                            const PkType& pk,
-                                            const Timestamp ts)> cb) {
+        [&insert_record](
+            const std::vector<PkType>& pks,
+            const Timestamp* timestamps,
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
-                auto& pk = pks[i];
                 auto timestamp = timestamps[i];
-                auto offsets = insert_record.search_pk(pk, timestamp);
+                auto offsets = insert_record.search_pk(pks[i], timestamp);
                 for (auto offset : offsets) {
-                    cb(offset, pk, timestamp);
+                    cb(offset, timestamp);
                 }
             }
         },
