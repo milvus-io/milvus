@@ -2041,7 +2041,7 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
+    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
     def test_milvus_client_has_collection_invalid_collection_name(self, name):
         """
         target: test fast create collection normal case
@@ -2049,11 +2049,32 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         expected: create collection with default schema, index, and load successfully
         """
         client = self._client()
-        error = {ct.err_code: 1100,
-                 ct.err_msg: f"Invalid collection name: {name}. "
-                             f"the first character of a collection name must be an underscore or letter"}
+        if name == "a".join("a" for i in range(256)):
+            error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {name}. "
+                                                f"the length of a collection name must be less than 255 characters: "
+                                                f"invalid parameter"}
+        else:
+            error = {ct.err_code: 1100,
+                     ct.err_msg: f"Invalid collection name: {name}. "
+                                 f"the first character of a collection name must be an underscore or letter"}
         self.has_collection(client, name,
                             check_task=CheckTasks.err_res, check_items=error)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("collection_name", ['', None])
+    def test_milvus_client_has_collection_with_empty_or_none_collection_name(self, collection_name):
+        """
+        target: test has collection with empty or None collection name
+        method: call has_collection with empty string or None as collection name
+        expected: raise exception with appropriate error message
+        """
+        client = self._client()
+        if collection_name is None:
+            error = {ct.err_code: -1, ct.err_msg: '`collection_name` value None is illegal'}
+        else:  # empty string
+            error = {ct.err_code: -1, ct.err_msg: '`collection_name` value  is illegal'}
+        self.has_collection(client, collection_name,
+                          check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_has_collection_not_existed(self):

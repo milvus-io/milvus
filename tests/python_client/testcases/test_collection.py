@@ -1654,42 +1654,6 @@ class TestHasCollection(TestcaseBase):
             t.join()
 
 
-class TestHasCollectionInvalid(TestcaseBase):
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
-    def test_has_collection_with_invalid_collection_name(self, name):
-        """
-        target: test list collections with invalid scenario
-        method: show collection with invalid collection name
-        expected: raise exception
-        """
-        self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(name)}
-        self.utility_wrap.has_collection(name, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_with_empty_collection_name(self):
-        """
-        target: test list collections with invalid scenario
-        method: show collection with empty collection name
-        expected: raise exception
-        """
-        self._connect()
-        error = {ct.err_code: -1, ct.err_msg: '`collection_name` value  is illegal'}
-        self.utility_wrap.has_collection('', check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_with_none_collection_name(self):
-        """
-        target: test list collections with invalid scenario
-        method: show collection with no collection name
-        expected: raise exception
-        """
-        self._connect()
-        error = {ct.err_code: -1, ct.err_msg: '`collection_name` value None is illegal'}
-        self.utility_wrap.has_collection(None, check_task=CheckTasks.err_res, check_items=error)
-
-
 class TestListCollections(TestcaseBase):
     """
     ******************************************************************
