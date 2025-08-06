@@ -29,6 +29,7 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
 	"github.com/cockroachdb/errors"
 
@@ -110,21 +111,48 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}
-	return &PackedWriter{cPackedWriter: cPackedWriter}, nil
+	return &PackedWriter{cPackedWriter: cPackedWriter, columnGroups: columnGroups, cColumnGroups: cColumnGroups}, nil
 }
 
 func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
-	var caa cdata.CArrowArray
-	var cas cdata.CArrowSchema
+	numColumnGroups := len(pw.columnGroups)
 
-	cdata.ExportArrowRecordBatch(recordBatch, &caa, &cas)
+	// Create arrays to hold the C ArrowArray and ArrowSchema objects for sub batches
+	cSubArrays := make([]CArrowArray, numColumnGroups)
+	cSubSchemas := make([]CArrowSchema, numColumnGroups)
 
-	cArr := (*C.struct_ArrowArray)(unsafe.Pointer(&caa))
-	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-	defer cdata.ReleaseCArrowSchema(&cas)
-	defer cdata.ReleaseCArrowArray(&caa)
+	// Create sub record batches based on column groups
+	for i, columnGroup := range pw.columnGroups {
+		// Collect arrays and fields for this column group
+		var groupArrays []arrow.Array
+		var groupFields []arrow.Field
 
-	status := C.WriteRecordBatch(pw.cPackedWriter, cArr, cSchema)
+		for _, colIdx := range columnGroup.Columns {
+			groupArrays = append(groupArrays, recordBatch.Column(colIdx))
+			groupFields = append(groupFields, recordBatch.Schema().Field(colIdx))
+		}
+
+		// Create a sub record batch for this column group
+		subSchema := arrow.NewSchema(groupFields, nil)
+		subRecordBatch := array.NewRecord(subSchema, groupArrays, recordBatch.NumRows())
+
+		// Export to C ArrowArray and ArrowSchema
+		var caa cdata.CArrowArray
+		var cas cdata.CArrowSchema
+		cdata.ExportArrowRecordBatch(subRecordBatch, &caa, &cas)
+
+		// Copy the data to our arrays
+		cSubArrays[i] = *(*CArrowArray)(unsafe.Pointer(&caa))
+		cSubSchemas[i] = *(*CArrowSchema)(unsafe.Pointer(&cas))
+	}
+
+	// Export the original schema
+	var originalCas cdata.CArrowSchema
+	cdata.ExportArrowSchema(recordBatch.Schema(), &originalCas)
+	originalCSchema := (*CArrowSchema)(unsafe.Pointer(&originalCas))
+
+	// Call the C function with sub arrays, sub schemas, column groups, and original schema
+	status := C.WriteRecordBatch(pw.cPackedWriter, &cSubArrays[0], &cSubSchemas[0], C.int64_t(numColumnGroups), pw.cColumnGroups, originalCSchema)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}

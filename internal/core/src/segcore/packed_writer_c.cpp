@@ -29,43 +29,6 @@
 #include "common/type_c.h"
 #include "monitor/scope_metric.h"
 
-// Deep copy ArrowArray and return a copied RecordBatch
-// This function creates a complete deep copy of the ArrowArray and returns it as a RecordBatch
-static std::shared_ptr<arrow::RecordBatch>
-ArrowArrayDeepCopyToRecordBatch(const struct ArrowArray* src,
-                                const struct ArrowSchema* schema) {
-    AssertInfo(src != nullptr, "[StorageV2] Source ArrowArray is null");
-    AssertInfo(schema != nullptr, "[StorageV2] Source ArrowSchema is null");
-
-    auto record_batch =
-        arrow::ImportRecordBatch(const_cast<struct ArrowArray*>(src),
-                                 const_cast<struct ArrowSchema*>(schema))
-            .ValueOrDie();
-
-    // Get the default CPU memory manager for deep copy
-    auto memory_manager = arrow::default_cpu_memory_manager();
-
-    // For true deep copy, we'll use Arrow's CopyTo() function
-    std::vector<std::shared_ptr<arrow::Array>> copied_arrays;
-    for (int i = 0; i < record_batch->num_columns(); i++) {
-        auto original_array = record_batch->column(i);
-
-        auto copied_data_result =
-            original_array->data()->CopyTo(memory_manager);
-        AssertInfo(copied_data_result.ok(),
-                   "[StorageV2] Failed to deep copy array data: {}",
-                   copied_data_result.status().ToString());
-
-        auto copied_data = copied_data_result.ValueOrDie();
-        auto copied_array = arrow::MakeArray(copied_data);
-        copied_arrays.push_back(copied_array);
-    }
-
-    // Create and return a new RecordBatch with the copied arrays
-    return arrow::RecordBatch::Make(
-        record_batch->schema(), record_batch->num_rows(), copied_arrays);
-}
-
 CStatus
 NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                                  const int64_t buffer_size,
@@ -174,8 +137,11 @@ NewPackedWriter(struct ArrowSchema* schema,
 
 CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
-                 struct ArrowArray* array,
-                 struct ArrowSchema* schema) {
+                 struct ArrowArray* sub_arrays,
+                 struct ArrowSchema* sub_schemas,
+                 int64_t num_sub_arrays,
+                 CColumnGroups column_groups,
+                 struct ArrowSchema* original_schema) {
     SCOPE_CGO_CALL_METRIC();
 
     try {
@@ -183,13 +149,52 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             static_cast<milvus_storage::PackedRecordBatchWriter*>(
                 c_packed_writer);
 
-        // Deep copy the ArrowArray and get a copied RecordBatch
-        auto record_batch = ArrowArrayDeepCopyToRecordBatch(array, schema);
-        if (record_batch == nullptr) {
+        // Get column groups information
+        auto column_groups_vec = *static_cast<std::vector<std::vector<int>>*>(column_groups);
+        
+        // Import the original schema
+        auto arrow_schema = arrow::ImportSchema(original_schema);
+        if (!arrow_schema.ok()) {
             return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
-                                          "Failed to copy ArrowArray");
+                                          "Failed to import original schema: " + arrow_schema.status().ToString());
         }
-        auto status = packed_writer->Write(record_batch);
+        
+        // Import all sub arrays to RecordBatches
+        std::vector<std::shared_ptr<arrow::RecordBatch>> sub_record_batches;
+        sub_record_batches.reserve(num_sub_arrays);
+        
+        for (int64_t i = 0; i < num_sub_arrays; i++) {
+            auto record_batch = arrow::ImportRecordBatch(&sub_arrays[i], &sub_schemas[i]);
+            if (!record_batch.ok()) {
+                return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
+                                              "Failed to import sub ArrowArray " + std::to_string(i) + ": " + record_batch.status().ToString());
+            }
+            sub_record_batches.push_back(record_batch.ValueOrDie());
+        }
+        
+        // Create arrays to hold all columns in the correct order
+        std::vector<std::shared_ptr<arrow::Array>> all_arrays;
+        all_arrays.resize(arrow_schema.ValueOrDie()->num_fields());
+        
+        // Distribute sub arrays to their correct positions based on column groups
+        for (size_t group_idx = 0; group_idx < column_groups_vec.size(); group_idx++) {
+            const auto& column_group = column_groups_vec[group_idx];
+            
+            auto sub_batch = sub_record_batches[group_idx];
+            
+            // Place each column from the sub batch to its correct position
+            for (size_t sub_col_idx = 0; sub_col_idx < column_group.size(); sub_col_idx++) {
+                int original_col_idx = column_group[sub_col_idx];
+                all_arrays[original_col_idx] = sub_batch->column(sub_col_idx);
+            }
+        }
+        
+        // Create the combined RecordBatch
+        auto combined_batch = arrow::RecordBatch::Make(
+            arrow_schema.ValueOrDie(), all_arrays[0]->length(), all_arrays);
+        
+        // Write the combined batch
+        auto status = packed_writer->Write(combined_batch);
         if (!status.ok()) {
             return milvus::FailureCStatus(milvus::ErrorCode::FileWriteFailed,
                                           status.ToString());
