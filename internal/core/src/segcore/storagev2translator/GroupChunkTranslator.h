@@ -43,7 +43,7 @@ class GroupChunkTranslator
         bool use_mmap,
         int64_t num_fields,
         milvus::proto::common::LoadPriority load_priority,
-        std::shared_ptr<CPluginContext> context);
+        std::shared_ptr<CPluginContext> context = nullptr);
 
     ~GroupChunkTranslator() override;
 

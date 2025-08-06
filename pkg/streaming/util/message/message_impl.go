@@ -3,9 +3,7 @@ package message
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
-	"go.uber.org/zap"
 )
 
 type messageImpl struct {
@@ -34,7 +32,6 @@ func (m *messageImpl) Version() Version {
 // Payload returns payload of current message.
 func (m *messageImpl) Payload() []byte {
 	if ch := m.cipherHeader(); ch != nil {
-		log.Info("YX: safeKey", zap.Any("safeKey", ch.SafeKey))
 		cipher := mustGetCipher()
 		decryptor, err := cipher.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
 		if err != nil {
