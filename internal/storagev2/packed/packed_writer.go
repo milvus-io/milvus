@@ -114,17 +114,22 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 }
 
 func (pw *PackedWriter) WriteRecordBatch(recordBatch arrow.Record) error {
-	var caa cdata.CArrowArray
+	cArrays := make([]CArrowArray, recordBatch.NumCols())
+	cSchemas := make([]CArrowSchema, recordBatch.NumCols())
+
+	for i := range recordBatch.NumCols() {
+		var caa cdata.CArrowArray
+		var cas cdata.CArrowSchema
+		cdata.ExportArrowArray(recordBatch.Column(int(i)), &caa, &cas)
+		cArrays[i] = *(*CArrowArray)(unsafe.Pointer(&caa))
+		cSchemas[i] = *(*CArrowSchema)(unsafe.Pointer(&cas))
+	}
+
 	var cas cdata.CArrowSchema
-
-	cdata.ExportArrowRecordBatch(recordBatch, &caa, &cas)
-
-	cArr := (*C.struct_ArrowArray)(unsafe.Pointer(&caa))
+	cdata.ExportArrowSchema(recordBatch.Schema(), &cas)
 	cSchema := (*C.struct_ArrowSchema)(unsafe.Pointer(&cas))
-	defer cdata.ReleaseCArrowSchema(&cas)
-	defer cdata.ReleaseCArrowArray(&caa)
 
-	status := C.WriteRecordBatch(pw.cPackedWriter, cArr, cSchema)
+	status := C.WriteRecordBatch(pw.cPackedWriter, &cArrays[0], &cSchemas[0], cSchema)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return err
 	}
