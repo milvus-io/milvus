@@ -327,13 +327,13 @@ fn fetch_lindera_token_filters(
 
 #[cfg(test)]
 mod tests {
-    use super::LinderaTokenizer;
-    use serde_json as json;
-    use tantivy::tokenizer::Tokenizer;
-
     #[test]
     #[cfg(feature = "lindera-ipadic")]
     fn test_lindera_tokenizer() {
+        use super::LinderaTokenizer;
+        use serde_json as json;
+        use tantivy::tokenizer::Tokenizer;
+
         let params = r#"{
             "type": "lindera",
             "dict_kind": "ipadic",
@@ -362,6 +362,10 @@ mod tests {
     #[test]
     #[cfg(feature = "lindera-cc-cedict")]
     fn test_lindera_tokenizer_cc() {
+        use super::LinderaTokenizer;
+        use serde_json as json;
+        use tantivy::tokenizer::Tokenizer;
+
         let params = r#"{
             "type": "lindera",
             "dict_kind": "cc-cedict"

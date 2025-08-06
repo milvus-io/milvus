@@ -106,4 +106,41 @@ mod tests {
         let res = reader.search_i64(&query).unwrap();
         assert_eq!(res, (0..10000).collect::<Vec<i64>>());
     }
+
+    #[test]
+    fn test_jeba() {
+        let tokenizer = create_analyzer("{\"tokenizer\": \"jieba\"}").unwrap();
+        let dir = TempDir::new().unwrap();
+
+        let mut writer = IndexWriterWrapper::create_text_writer(
+            "text".to_string(),
+            dir.path().to_str().unwrap().to_string(),
+            "jieba".to_string(),
+            tokenizer,
+            1,
+            50_000_000,
+            false,
+        );
+
+        writer.add_string("网球和滑雪", 0).unwrap();
+        writer.add_string("网球以及滑雪", 1).unwrap();
+
+        writer.commit().unwrap();
+
+        let slop = 1;
+        let reader = writer.create_reader(set_bitset).unwrap();
+        let mut res: Vec<u32> = vec![];
+        reader
+            .phrase_match_query("网球滑雪", slop, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0]);
+
+        let slop = 2;
+        let mut res: Vec<u32> = vec![];
+        let reader = writer.create_reader(set_bitset).unwrap();
+        reader
+            .phrase_match_query("网球滑雪", slop, &mut res as *mut _ as *mut c_void)
+            .unwrap();
+        assert_eq!(res, vec![0, 1]);
+    }
 }
