@@ -2031,9 +2031,46 @@ class TestMilvusClientDescribeCollectionInvalid(TestMilvusClientV2Base):
         self.describe_collection(client, collection_name,
                                  check_task=CheckTasks.err_res, check_items=error)
 
+class TestMilvusClientHasCollectionValid(TestMilvusClientV2Base):
+    """ Test case of has collection interface """
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_has_collection_multithread(self):
+        """
+        target: test has collection with multi-thread
+        method: create collection and use multi-thread to check if collection exists
+        expected: all threads should correctly identify that collection exists
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        threads_num = 4
+        threads = []
+
+        def has():
+            result = self.has_collection(client, collection_name)[0]
+            assert result == True
+        
+        for i in range(threads_num):
+            t = MyThread(target=has, args=())
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        
+        for t in threads:
+            t.join()
+
+        # Cleanup
+        self.drop_collection(client, collection_name)
+
+
 
 class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
-    """ Test case of search interface """
+    """ Test case of has collection interface """
     """
     ******************************************************************
     #  The following are invalid base cases
@@ -2102,6 +2139,24 @@ class TestMilvusClientHasCollectionInvalid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
         result = self.has_collection(client, collection_name)[0]
         assert result == False
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_has_collection_after_disconnect(self):
+        """
+        target: test has collection operation after connection is closed
+        method: 1. create collection with client
+                2. close the client connection
+                3. try to has_collection with disconnected client
+        expected: operation should raise appropriate connection error
+        """
+        client_temp = self._client(alias="client_has_collection")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client_temp, collection_name, default_dim)
+        self.close(client_temp)
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        self.has_collection(client_temp, collection_name,
+                          check_task=CheckTasks.err_res, check_items=error)
+
 
 
 class TestMilvusClientRenameCollectionInValid(TestMilvusClientV2Base):
