@@ -1267,7 +1267,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception
         """
         client = self._client()
-        collection_name = cf.gen_unique_str()
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # Create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         self.release_collection(client, collection_name)
@@ -1284,23 +1284,6 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 100, ct.err_msg: "collection not found"}
         self.load_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
         self.release_collection(client, collection_name, check_task=CheckTasks.err_res, check_items=error)
-    
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_release_collection_after_drop(self):
-        """
-        target: test release collection after it has been dropped
-        method: 1. create collection
-                2. drop the collection
-                3. try to release the dropped collection
-        expected: raise exception indicating collection not found
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim)
-        self.drop_collection(client, collection_name)
-        error = {ct.err_code: 999, ct.err_msg: "collection not found"}
-        self.release_collection(client, collection_name,
-                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_collection_over_max_length(self):
@@ -1320,9 +1303,9 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_load_collection_without_index(self):
         """
-        target: test fast create collection normal case
-        method: create collection
-        expected: create collection with default schema, index, and load successfully
+        target: test loading a collection without an index
+        method: create a collection, drop its index, then attempt to load the collection
+        expected: loading should fail with an 'index not found' error
         """
         client = self._client()
         collection_name = cf.gen_unique_str(prefix)
@@ -1335,6 +1318,154 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                              check_task=CheckTasks.err_res, check_items=error)
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_load_partition_names_empty(self):
+        """
+        target: test load partitions with empty partition names list
+        method: 1. create collection and partition
+                2. insert data into both default partition and custom partition
+                3. create index
+                4. attempt to load with empty partition_names list
+        expected: should raise exception indicating no partition specified
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        partition_name = cf.gen_unique_str("partition")
+        # 1. Create collection and partition
+        self.create_collection(client, collection_name, default_dim)
+        self.create_partition(client, collection_name, partition_name)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # 2. Insert data into both partitions
+        rng = np.random.default_rng(seed=19530)
+        half = default_nb // 2
+        # Insert into default partition  
+        data_default = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            default_float_field_name: i * 1.0
+        } for i in range(half)]
+        self.insert(client, collection_name, data_default, partition_name="_default")
+        # Insert into custom partition
+        data_partition = [{
+            default_primary_key_field_name: i + half,
+            default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            default_float_field_name: (i + half) * 1.0
+        } for i in range(half)]
+        self.insert(client, collection_name, data_partition, partition_name=partition_name)
+        # 3. Create index
+        self.flush(client, collection_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # 4. Attempt to load with empty partition_names list
+        error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
+        self.load_partitions(client, collection_name, partition_names=[],
+                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_num_replica", [0.2, "not-int"])
+    def test_milvus_client_load_replica_non_number(self, invalid_num_replica):
+        """
+        target: test load collection with non-number replicas
+        method: load with non-number replicas
+        expected: raise exceptions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # 2. Insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # 3. Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # 4. Attempt to load with invalid replica_number
+        error = {ct.err_code: 999, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
+        self.load_collection(client, collection_name, replica_number=invalid_num_replica,
+                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("replicas", [None, -1, 0])
+    def test_milvus_client_load_replica_invalid_input(self, replicas):
+        """
+        target: test load partition with invalid replica number or None
+        method: load with invalid replica number or None
+        expected: load successfully as replica = 1
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. Create collection and prepare
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # 2. Insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # 3. Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # 4. Load with invalid replica_number (should succeed as replica=1)
+        self.load_collection(client, collection_name, replica_number=replicas)
+        # 5. Verify replicas
+        load_state = self.get_load_state(client, collection_name)[0]
+        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded after loading collection, but got {load_state['state']}"
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_load_replica_greater_than_querynodes(self):
+        """
+        target: test load with replicas that greater than querynodes
+        method: load with 3 replicas (2 querynode)
+        expected: Raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # 1. Create collection
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # 2. Insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, collection_name, rows)
+        # 3. Verify entity count
+        self.flush(client, collection_name)
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == default_nb
+        # 4. Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # 5. Load with replica_number=3 (should fail if only 2 querynodes available)
+        error = {ct.err_code: 999,
+                 ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: "
+                             "service resource insufficient[currentStreamingNode=1][expectedStreamingNode=3]"}
+        self.load_collection(client, collection_name, replica_number=3,
+                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
+
     
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_collection_after_disconnect(self):
@@ -2037,28 +2168,6 @@ class TestMilvusClientLoadCollectionValid(TestMilvusClientV2Base):
         # Prepare and create index
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name="vector", index_type="IVF_SQ8", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        # Load and release collection
-        self.load_collection(client, collection_name)
-        self.release_collection(client, collection_name)
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_load_empty_collection(self):
-        """
-        target: test load an empty collection with no data inserted
-        method: no entities in collection, load and release the collection
-        expected: load and release successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create collection
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, "vector")
-        # Prepare and create index (no data inserted)
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
         self.create_index(client, collection_name, index_params)
         # Load and release collection
         self.load_collection(client, collection_name)

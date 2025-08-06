@@ -1777,109 +1777,6 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load()
         collection_w.release()
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_load_partition_names_empty(self):
-        """
-        target: test query another partition
-        method: 1. insert entities into two partitions
-                2.query on one partition and query result empty
-        expected: query result is empty
-        """
-        self._connect()
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-
-        # insert [0, half) into partition_w
-        half = ct.default_nb // 2
-        df_partition = cf.gen_default_dataframe_data(nb=half)
-        partition_w.insert(df_partition)
-        # insert [half, nb) into _default
-        df_default = cf.gen_default_dataframe_data(nb=half, start=half)
-        collection_w.insert(df_default)
-        # flush
-        collection_w.num_entities
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-
-        # load
-        error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
-        collection_w.load(partition_names=[], check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("invalid_num_replica", [0.2, "not-int"])
-    def test_load_replica_non_number(self, invalid_num_replica):
-        """
-        target: test load collection with non-number replicas
-        method: load with non-number replicas
-        expected: raise exceptions
-        """
-        # create, insert
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        insert_res, _ = collection_w.insert(df)
-        assert collection_w.num_entities == ct.default_nb
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-
-        # load with non-number replicas
-        error = {ct.err_code: 999, ct.err_msg: f"`replica_number` value {invalid_num_replica} is illegal"}
-        collection_w.load(replica_number=invalid_num_replica, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("replicas", [-1, 0])
-    def test_load_replica_invalid_number(self, replicas):
-        """
-        target: test load partition with invalid replica number
-        method: load with invalid replica number
-        expected: load successfully as replica = 1
-        """
-        # create, insert
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        insert_res, _ = collection_w.insert(df)
-        assert collection_w.num_entities == ct.default_nb
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-
-        collection_w.load(replica_number=replicas)
-        replicas = collection_w.get_replicas()[0]
-        groups = replicas.groups
-        assert len(groups) == 1
-        assert len(groups[0].shards) == 1
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("replicas", [None])
-    def test_load_replica_number_none(self, replicas):
-        """
-        target: test load partition with replica number none
-        method: load with replica number=None
-        expected: raise exceptions
-        """
-        # create, insert
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        insert_res, _ = collection_w.insert(df)
-        assert collection_w.num_entities == ct.default_nb
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-
-        collection_w.load(replica_number=replicas)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_load_replica_greater_than_querynodes(self):
-        """
-        target: test load with replicas that greater than querynodes
-        method: load with 3 replicas (2 querynode)
-        expected: Raise exception
-        """
-        # create, insert
-        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        insert_res, _ = collection_w.insert(df)
-        assert collection_w.num_entities == ct.default_nb
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-
-        error = {ct.err_code: 999,
-                 ct.err_msg: "call query coordinator LoadCollection: when load 3 replica count: service resource "
-                             "insufficient[currentStreamingNode=2][expectedStreamingNode=3]"}
-        collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_change(self):
         """
@@ -2169,17 +2066,6 @@ class TestLoadCollection(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{"count(*)": ct.default_nb}]})
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_load_collection_without_creating_index(self):
-        """
-        target: test drop index after load without release
-        method: create a collection without index, then load
-        expected: raise exception
-        """
-        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
-        collection_w.load(check_task=CheckTasks.err_res,
-                          check_items={"err_code": 1,
-                                       "err_msg": "index not found"})
 
 
 class TestDescribeCollection(TestcaseBase):
