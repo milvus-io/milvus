@@ -36,6 +36,7 @@ import (
 // prefix/partitions/collection_id/partition_id		-> PartitionInfo
 // prefix/aliases/alias_name						-> AliasInfo
 // prefix/fields/collection_id/field_id				-> FieldSchema
+// prefix/file_resource/resource_id             -> Resource
 
 type Catalog struct {
 	Txn      kv.TxnKV

@@ -1081,3 +1081,18 @@ func (s *mixCoordImpl) ListLoadedSegments(ctx context.Context, req *querypb.List
 func (s *mixCoordImpl) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
 	return s.datacoordServer.FlushAll(ctx, req)
 }
+
+// AddFileResource add file resource
+func (s *mixCoordImpl) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.AddFileResource(ctx, req)
+}
+
+// RemoveFileResource remove file resource
+func (s *mixCoordImpl) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	return s.datacoordServer.RemoveFileResource(ctx, req)
+}
+
+// ListFileResources list file resources
+func (s *mixCoordImpl) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	return s.datacoordServer.ListFileResources(ctx, req)
+}

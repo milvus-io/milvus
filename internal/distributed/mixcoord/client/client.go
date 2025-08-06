@@ -1860,3 +1860,36 @@ func (c *Client) ListLoadedSegments(ctx context.Context, req *querypb.ListLoaded
 		return client.ListLoadedSegments(ctx, req)
 	})
 }
+
+func (c *Client) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.AddFileResource(ctx, req)
+	})
+}
+
+func (c *Client) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.RemoveFileResource(ctx, req)
+	})
+}
+
+func (c *Client) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ListFileResourcesResponse, error) {
+		return client.ListFileResources(ctx, req)
+	})
+}

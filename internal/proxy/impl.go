@@ -6858,3 +6858,95 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 
 	return metricsResp, nil
 }
+
+// AddFileResource add file resource to rootcoord
+func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddFileResource")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("name", req.GetName()),
+		zap.String("path", req.GetPath()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive AddFileResource request")
+
+	status, err := node.mixCoord.AddFileResource(ctx, req)
+	if err != nil {
+		log.Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if err = merr.Error(status); err != nil {
+		log.Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("AddFileResource success")
+	return status, nil
+}
+
+// RemoveFileResource remove file resource from rootcoord
+func (node *Proxy) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RemoveFileResource")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("name", req.GetName()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive RemoveFileResource request")
+
+	status, err := node.mixCoord.RemoveFileResource(ctx, req)
+	if err != nil {
+		log.Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if err = merr.Error(status); err != nil {
+		log.Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("RemoveFileResource success")
+	return status, nil
+}
+
+// ListFileResources list file resources from rootcoord
+func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListFileResources")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive ListFileResources request")
+
+	resp, err := node.mixCoord.ListFileResources(ctx, req)
+	if err != nil {
+		log.Warn("ListFileResources fail", zap.Error(err))
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if err = merr.Error(resp.GetStatus()); err != nil {
+		log.Warn("ListFileResources fail", zap.Error(err))
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
+	return resp, nil
+}
