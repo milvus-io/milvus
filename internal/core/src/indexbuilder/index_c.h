@@ -45,6 +45,7 @@ CleanLocalData(CIndex index);
 CStatus
 SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result);
 
+// =========== Followings are used only in test ==========
 CStatus
 CreateIndexForUT(enum CDataType dtype,
                  const char* serialized_type_params,

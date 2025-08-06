@@ -48,7 +48,13 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
-	return hookutil.TidyDBCipherProperties(t.Req.Properties)
+	properties, err := hookutil.TidyDBCipherProperties(t.Req.Properties)
+	if err != nil {
+		return err
+	}
+
+	t.Req.Properties = properties
+	return nil
 }
 
 func (t *createDatabaseTask) Execute(ctx context.Context) error {

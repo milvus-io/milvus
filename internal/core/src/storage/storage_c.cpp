@@ -23,6 +23,7 @@
 #include "storage/MmapManager.h"
 #include "storage/ThreadPools.h"
 #include "monitor/scope_metric.h"
+#include "common/EasyAssert.h"
 
 CStatus
 GetLocalUsedSize(const char* c_dir, int64_t* size) {
@@ -176,7 +177,7 @@ CStatus
 PutOrRefPluginContext(CPluginContext c_plugin_context){
     auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
     if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::PluginLoadFailed, "cipher plugin not loaded");
+        return milvus::FailureCStatus(milvus::UnexpectedError, "cipher plugin not loaded");
     }
     cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, std::string(c_plugin_context.key));
     return milvus::SuccessCStatus();
@@ -186,7 +187,7 @@ CStatus
 UnRefPluginContext(CPluginContext c_plugin_context){
     auto cipherPluginPtr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
     if (!cipherPluginPtr) {
-        return milvus::FailureCStatus(milvus::PluginLoadFailed, "cipher plugin not loaded");
+        return milvus::FailureCStatus(milvus::UnexpectedError, "cipher plugin not loaded");
     }
     cipherPluginPtr->Update(c_plugin_context.ez_id, c_plugin_context.collection_id, "");
     return milvus::SuccessCStatus();

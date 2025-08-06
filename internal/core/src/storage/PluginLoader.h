@@ -29,7 +29,7 @@ public:
         // void *handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_DEEPBIND);
         if (!handle) {
             const char* error = dlerror();
-            ThrowInfo(PluginLoadFailed,
+            ThrowInfo(UnexpectedError,
                       fmt::format("Failed to load plugin: {}, err={}", path, error));
         }
 
@@ -42,7 +42,7 @@ public:
         const char* error = dlerror();
         if (error) {
             dlclose(handle);
-            ThrowInfo(PluginLoadFailed,
+            ThrowInfo(UnexpectedError,
                       fmt::format("Failed to load plugin: {}", error));
         }
 
@@ -50,7 +50,7 @@ public:
         auto pluginPtr = createPluginFunc();
         if (!pluginPtr) {
             dlclose(handle);
-            ThrowInfo(PluginLoadFailed,
+            ThrowInfo(UnexpectedError,
                       fmt::format("Failed to init plugin: {}, {}", path, error));
         }
 

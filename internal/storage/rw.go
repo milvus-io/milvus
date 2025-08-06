@@ -304,9 +304,11 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	option ...RwOption,
 ) (BinlogRecordWriter, error) {
 	rwOptions := DefaultWriterOptions()
+	option = append(option, WithCollectionID(collectionID))
 	for _, opt := range option {
 		opt(rwOptions)
 	}
+
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}

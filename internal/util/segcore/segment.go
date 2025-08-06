@@ -64,9 +64,10 @@ func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
 	var pluginContextPtr *C.CPluginContext
 	if req.EZ != nil {
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(req.EZ.EzID)
-		pluginContext.collection_id = C.int64_t(req.EZ.CollectionID)
+		pluginContext := C.CPluginContext{
+			ez_id:         C.int64_t(req.EZ.EzID),
+			collection_id: C.int64_t(req.EZ.CollectionID),
+		}
 		pluginContextPtr = &pluginContext
 	}
 	status := C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), pluginContextPtr)

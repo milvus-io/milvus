@@ -170,7 +170,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithUploader(func(ctx context.Context, kvs map[string][]byte) error {
 			return t.binlogIO.Upload(ctx, kvs)
 		}),
-		storage.WithCollectionID(t.collectionID),
 		storage.WithVersion(t.storageVersion),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 	)
