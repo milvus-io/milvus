@@ -39,9 +39,7 @@ import (
 type channelsMgr interface {
 	getChannels(collectionID UniqueID) ([]pChan, error)
 	getVChannels(collectionID UniqueID) ([]vChan, error)
-	getOrCreateDmlStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error)
 	removeDMLStream(collectionID UniqueID)
-	removeAllDMLStream()
 }
 
 type channelInfos struct {
@@ -52,7 +50,6 @@ type channelInfos struct {
 
 type streamInfos struct {
 	channelInfos channelInfos
-	stream       msgstream.MsgStream
 }
 
 func removeDuplicate(ss []string) []string {
@@ -114,9 +111,8 @@ type singleTypeChannelsMgr struct {
 	infos map[UniqueID]streamInfos // collection id -> stream infos
 	mu    sync.RWMutex
 
-	getChannelsFunc  getChannelsFuncType
-	repackFunc       repackFuncType
-	msgStreamFactory msgstream.Factory
+	getChannelsFunc getChannelsFuncType
+	repackFunc      repackFuncType
 }
 
 func (mgr *singleTypeChannelsMgr) getAllChannels(collectionID UniqueID) (channelInfos, error) {
@@ -167,27 +163,6 @@ func (mgr *singleTypeChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, 
 	return channelInfos.vchans, nil
 }
 
-func (mgr *singleTypeChannelsMgr) streamExistPrivate(collectionID UniqueID) bool {
-	streamInfos, ok := mgr.infos[collectionID]
-	return ok && streamInfos.stream != nil
-}
-
-func createStream(ctx context.Context, factory msgstream.Factory, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
-	var stream msgstream.MsgStream
-	var err error
-
-	stream, err = factory.NewMsgStream(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	stream.AsProducer(ctx, pchans)
-	if repack != nil {
-		stream.SetRepackFunc(repack)
-	}
-	return stream, nil
-}
-
 func incPChansMetrics(pchans []pChan) {
 	for _, pc := range pchans {
 		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), pc).Inc()
@@ -200,67 +175,6 @@ func decPChanMetrics(pchans []pChan) {
 	}
 }
 
-// createMsgStream create message stream for specified collection. Idempotent.
-// If stream already exists, directly return it and no error will be returned.
-func (mgr *singleTypeChannelsMgr) createMsgStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
-	mgr.mu.RLock()
-	infos, ok := mgr.infos[collectionID]
-	if ok && infos.stream != nil {
-		// already exist.
-		mgr.mu.RUnlock()
-		return infos.stream, nil
-	}
-	mgr.mu.RUnlock()
-
-	channelInfos, err := mgr.getChannelsFunc(collectionID)
-	if err != nil {
-		// What if stream created by other goroutines?
-		log.Error("failed to get channels", zap.Error(err), zap.Int64("collection", collectionID))
-		return nil, err
-	}
-
-	stream, err := createStream(ctx, mgr.msgStreamFactory, channelInfos.pchans, mgr.repackFunc)
-	if err != nil {
-		// What if stream created by other goroutines?
-		log.Error("failed to create message stream", zap.Error(err), zap.Int64("collection", collectionID))
-		return nil, err
-	}
-
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	if !mgr.streamExistPrivate(collectionID) {
-		log.Info("create message stream", zap.Int64("collection", collectionID),
-			zap.Strings("virtual_channels", channelInfos.vchans),
-			zap.Strings("physical_channels", channelInfos.pchans))
-		mgr.infos[collectionID] = streamInfos{channelInfos: channelInfos, stream: stream}
-		incPChansMetrics(channelInfos.pchans)
-	} else {
-		stream.Close()
-	}
-
-	return mgr.infos[collectionID].stream, nil
-}
-
-func (mgr *singleTypeChannelsMgr) lockGetStream(collectionID UniqueID) (msgstream.MsgStream, error) {
-	mgr.mu.RLock()
-	defer mgr.mu.RUnlock()
-	streamInfos, ok := mgr.infos[collectionID]
-	if ok {
-		return streamInfos.stream, nil
-	}
-	return nil, fmt.Errorf("collection not found: %d", collectionID)
-}
-
-// getOrCreateStream get message stream of specified collection.
-// If stream doesn't exist, call createMsgStream to create for it.
-func (mgr *singleTypeChannelsMgr) getOrCreateStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
-	if stream, err := mgr.lockGetStream(collectionID); err == nil {
-		return stream, nil
-	}
-
-	return mgr.createMsgStream(ctx, collectionID)
-}
-
 // removeStream remove the corresponding stream of the specified collection. Idempotent.
 // If stream already exists, remove it, otherwise do nothing.
 func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) {
@@ -268,34 +182,19 @@ func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) {
 	defer mgr.mu.Unlock()
 	if info, ok := mgr.infos[collectionID]; ok {
 		decPChanMetrics(info.channelInfos.pchans)
-		info.stream.Close()
 		delete(mgr.infos, collectionID)
 	}
 	log.Info("dml stream removed", zap.Int64("collection_id", collectionID))
 }
 
-// removeAllStream remove all message stream.
-func (mgr *singleTypeChannelsMgr) removeAllStream() {
-	mgr.mu.Lock()
-	defer mgr.mu.Unlock()
-	for _, info := range mgr.infos {
-		info.stream.Close()
-		decPChanMetrics(info.channelInfos.pchans)
-	}
-	mgr.infos = make(map[UniqueID]streamInfos)
-	log.Info("all dml stream removed")
-}
-
 func newSingleTypeChannelsMgr(
 	getChannelsFunc getChannelsFuncType,
-	msgStreamFactory msgstream.Factory,
 	repackFunc repackFuncType,
 ) *singleTypeChannelsMgr {
 	return &singleTypeChannelsMgr{
-		infos:            make(map[UniqueID]streamInfos),
-		getChannelsFunc:  getChannelsFunc,
-		repackFunc:       repackFunc,
-		msgStreamFactory: msgStreamFactory,
+		infos:           make(map[UniqueID]streamInfos),
+		getChannelsFunc: getChannelsFunc,
+		repackFunc:      repackFunc,
 	}
 }
 
@@ -315,25 +214,16 @@ func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error)
 	return mgr.dmlChannelsMgr.getVChannels(collectionID)
 }
 
-func (mgr *channelsMgrImpl) getOrCreateDmlStream(ctx context.Context, collectionID UniqueID) (msgstream.MsgStream, error) {
-	return mgr.dmlChannelsMgr.getOrCreateStream(ctx, collectionID)
-}
-
 func (mgr *channelsMgrImpl) removeDMLStream(collectionID UniqueID) {
 	mgr.dmlChannelsMgr.removeStream(collectionID)
-}
-
-func (mgr *channelsMgrImpl) removeAllDMLStream() {
-	mgr.dmlChannelsMgr.removeAllStream()
 }
 
 // newChannelsMgrImpl constructs a channels manager.
 func newChannelsMgrImpl(
 	getDmlChannelsFunc getChannelsFuncType,
 	dmlRepackFunc repackFuncType,
-	msgStreamFactory msgstream.Factory,
 ) *channelsMgrImpl {
 	return &channelsMgrImpl{
-		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc),
+		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, dmlRepackFunc),
 	}
 }

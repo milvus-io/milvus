@@ -12,8 +12,9 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
-	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
@@ -76,8 +77,8 @@ func TestBroadcaster(t *testing.T) {
 	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 	fbc := syncutil.NewFuture[Broadcaster]()
-	operator, appended := createOpeartor(t, fbc)
-	bc, err := RecoverBroadcaster(context.Background(), operator)
+	appended := createOpeartor(t, fbc)
+	bc, err := RecoverBroadcaster(context.Background())
 	fbc.Set(bc)
 	assert.NoError(t, err)
 	assert.NotNil(t, bc)
@@ -135,10 +136,10 @@ func ack(broadcaster Broadcaster, broadcastID uint64, vchannel string) {
 	}
 }
 
-func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) (*syncutil.Future[AppendOperator], *atomic.Int64) {
+func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *atomic.Int64 {
 	id := atomic.NewInt64(1)
 	appended := atomic.NewInt64(0)
-	operator := mock_broadcaster.NewMockAppendOperator(t)
+	operator := mock_streaming.NewMockWALAccesser(t)
 	f := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 		resps := types.AppendResponses{
 			Responses: make([]types.AppendResponse, len(msgs)),
@@ -174,9 +175,8 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) (*s
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(f)
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(f)
 
-	fOperator := syncutil.NewFuture[AppendOperator]()
-	fOperator.Set(operator)
-	return fOperator, appended
+	streaming.SetWALForTest(operator)
+	return appended
 }
 
 func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) message.BroadcastMutableMessage {
@@ -193,10 +193,11 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
 	msg := createNewBroadcastMsg(vchannels, rks...).WithBroadcastID(broadcastID)
+	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
+			Payload:    pb.Payload,
+			Properties: pb.Properties,
 		},
 		State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
 		AckedVchannelBitmap: make([]byte, len(vchannels)),
@@ -208,10 +209,11 @@ func createNewWaitAckBroadcastTaskFromMessage(
 	state streamingpb.BroadcastTaskState,
 	bitmap []byte,
 ) *streamingpb.BroadcastTask {
+	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
+			Payload:    pb.Payload,
+			Properties: pb.Properties,
 		},
 		State:               state,
 		AckedVchannelBitmap: bitmap,

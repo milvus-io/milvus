@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -63,8 +62,6 @@ type createIndexTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 
 	isAutoIndex    bool
 	newIndexParams []*commonpb.KeyValuePair
@@ -580,7 +577,6 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(cit.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, cit.replicateMsgStream, cit.req)
 	return nil
 }
 
@@ -595,8 +591,6 @@ type alterIndexTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 
 	collectionID UniqueID
 }
@@ -711,7 +705,6 @@ func (t *alterIndexTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.req)
 	return nil
 }
 
@@ -978,8 +971,6 @@ type dropIndexTask struct {
 	result   *commonpb.Status
 
 	collectionID UniqueID
-
-	replicateMsgStream msgstream.MsgStream
 }
 
 func (dit *dropIndexTask) TraceCtx() context.Context {
@@ -1073,7 +1064,6 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 		ctxLog.Warn("drop index failed", zap.Error(err))
 		return err
 	}
-	SendReplicateMessagePack(ctx, dit.replicateMsgStream, dit.DropIndexRequest)
 	return nil
 }
 

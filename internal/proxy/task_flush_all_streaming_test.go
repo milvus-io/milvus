@@ -33,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-func createTestFlushAllTaskByStreamingService(t *testing.T, dbName string) (*flushAllTaskbyStreamingService, *mocks.MockMixCoordClient, *msgstream.MockMsgStream, *MockChannelsMgr, context.Context) {
+func createTestFlushAllTaskByStreamingService(t *testing.T, dbName string) (*flushAllTask, *mocks.MockMixCoordClient, *msgstream.MockMsgStream, *MockChannelsMgr, context.Context) {
 	ctx := context.Background()
 	mixCoord := mocks.NewMockMixCoordClient(t)
 	replicateMsgStream := msgstream.NewMockMsgStream(t)
@@ -51,17 +51,11 @@ func createTestFlushAllTaskByStreamingService(t *testing.T, dbName string) (*flu
 			},
 			DbName: dbName,
 		},
-		ctx:                ctx,
-		mixCoord:           mixCoord,
-		replicateMsgStream: replicateMsgStream,
+		ctx:      ctx,
+		mixCoord: mixCoord,
+		chMgr:    chMgr,
 	}
-
-	task := &flushAllTaskbyStreamingService{
-		flushAllTask: baseTask,
-		chMgr:        chMgr,
-	}
-
-	return task, mixCoord, replicateMsgStream, chMgr, ctx
+	return baseTask, mixCoord, replicateMsgStream, chMgr, ctx
 }
 
 func TestFlushAllTask_WithSpecificDB(t *testing.T) {

@@ -18,7 +18,20 @@
 
 package streaming
 
-import kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+import (
+	"context"
+
+	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/anypb"
+
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
+)
+
+var expectErr = make(chan error, 10)
 
 // SetWALForTest initializes the singleton of wal for test.
 func SetWALForTest(w WALAccesser) {
@@ -28,4 +41,147 @@ func SetWALForTest(w WALAccesser) {
 func RecoverWALForTest() {
 	c, _ := kvfactory.GetEtcdAndPath()
 	singleton = newWALAccesser(c)
+}
+
+func ExpectErrorOnce(err error) {
+	expectErr <- err
+}
+
+func SetupNoopWALForTest() {
+	singleton = &noopWALAccesser{}
+}
+
+type noopLocal struct{}
+
+func (n *noopLocal) GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error) {
+	return 0, errors.New("not implemented")
+}
+
+func (n *noopLocal) GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error) {
+	return &types.StreamingNodeMetrics{}, nil
+}
+
+type noopBroadcast struct{}
+
+func (n *noopBroadcast) Append(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	if err := getExpectErr(); err != nil {
+		return nil, err
+	}
+	return &types.BroadcastAppendResult{
+		BroadcastID: 1,
+		AppendResults: map[string]*types.AppendResult{
+			"v1": {
+				MessageID: rmq.NewRmqID(1),
+				TimeTick:  10,
+				Extra:     &anypb.Any{},
+			},
+		},
+	}, nil
+}
+
+func (n *noopBroadcast) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
+	return nil
+}
+
+type noopTxn struct{}
+
+func (n *noopTxn) Append(ctx context.Context, msg message.MutableMessage, opts ...AppendOption) error {
+	if err := getExpectErr(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (n *noopTxn) Commit(ctx context.Context) (*types.AppendResult, error) {
+	if err := getExpectErr(); err != nil {
+		return nil, err
+	}
+	return &types.AppendResult{}, nil
+}
+
+func (n *noopTxn) Rollback(ctx context.Context) error {
+	if err := getExpectErr(); err != nil {
+		return err
+	}
+	return nil
+}
+
+type noopWALAccesser struct{}
+
+func (n *noopWALAccesser) WALName() string {
+	return "noop"
+}
+
+func (n *noopWALAccesser) Local() Local {
+	return &noopLocal{}
+}
+
+func (n *noopWALAccesser) Txn(ctx context.Context, opts TxnOption) (Txn, error) {
+	if err := getExpectErr(); err != nil {
+		return nil, err
+	}
+	return &noopTxn{}, nil
+}
+
+func (n *noopWALAccesser) RawAppend(ctx context.Context, msgs message.MutableMessage, opts ...AppendOption) (*types.AppendResult, error) {
+	if err := getExpectErr(); err != nil {
+		return nil, err
+	}
+	extra, _ := anypb.New(&messagespb.ManualFlushExtraResponse{
+		SegmentIds: []int64{1, 2, 3},
+	})
+	return &types.AppendResult{
+		MessageID: rmq.NewRmqID(1),
+		TimeTick:  10,
+		Extra:     extra,
+	}, nil
+}
+
+func (n *noopWALAccesser) Broadcast() Broadcast {
+	return &noopBroadcast{}
+}
+
+func (n *noopWALAccesser) Read(ctx context.Context, opts ReadOption) Scanner {
+	return &noopScanner{}
+}
+
+func (n *noopWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses {
+	if err := getExpectErr(); err != nil {
+		return AppendResponses{
+			Responses: []AppendResponse{
+				{
+					AppendResult: nil,
+					Error:        err,
+				},
+			},
+		}
+	}
+	return AppendResponses{}
+}
+
+func (n *noopWALAccesser) AppendMessagesWithOption(ctx context.Context, opts AppendOption, msgs ...message.MutableMessage) AppendResponses {
+	return AppendResponses{}
+}
+
+type noopScanner struct{}
+
+func (n *noopScanner) Done() <-chan struct{} {
+	return make(chan struct{})
+}
+
+func (n *noopScanner) Error() error {
+	return nil
+}
+
+func (n *noopScanner) Close() {
+}
+
+// getExpectErr is a helper function to get the error from the expectErr channel.
+func getExpectErr() error {
+	select {
+	case err := <-expectErr:
+		return err
+	default:
+		return nil
+	}
 }
