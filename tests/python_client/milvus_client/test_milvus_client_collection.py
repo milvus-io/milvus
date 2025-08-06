@@ -1320,7 +1320,8 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
             self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_load_partition_names_empty(self):
+    @pytest.mark.parametrize("partition_names", [[], None])
+    def test_milvus_client_load_partition_names_empty(self, partition_names):
         """
         target: test load partitions with empty partition names list
         method: 1. create collection and partition
@@ -1361,7 +1362,7 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
         self.create_index(client, collection_name, index_params)
         # 4. Attempt to load with empty partition_names list
         error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
-        self.load_partitions(client, collection_name, partition_names=[],
+        self.load_partitions(client, collection_name, partition_names=partition_names,
                            check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
