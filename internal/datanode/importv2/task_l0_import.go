@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -164,8 +165,15 @@ func (t *L0ImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			return
 		}
+
+		// Parse ts parameters from options
+		tsStart, tsEnd, err := importutilv2.ParseTimeRange(t.req.GetOptions())
+		if err != nil {
+			return
+		}
+
 		var reader binlog.L0Reader
-		reader, err = binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize)
+		reader, err = binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize, tsStart, tsEnd)
 		if err != nil {
 			return
 		}
