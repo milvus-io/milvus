@@ -104,6 +104,15 @@ func (s *SearchIteratorSuite) TestSearchIteratorInit() {
 	})
 
 	s.Run("failure", func() {
+		s.Run("option_error", func() {
+			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+			_, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+				return rand.Float32()
+			}))).WithBatchSize(-1).WithIteratorLimit(-2))
+			s.Error(err)
+		})
+
 		s.Run("describe_fail", func() {
 			collectionName := fmt.Sprintf("coll_%s", s.randString(6))
 
