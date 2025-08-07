@@ -84,15 +84,6 @@ type DataNodeComponent interface {
 
 	// SetEtcdClient set etcd client for DataNode
 	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// SetMixCoordClient set SetMixCoordClient for DataNode
-	// `mixCoord` is a client of root coordinator.
-	//
-	// Return a generic error in status:
-	//     If the mixCoord is nil or the mixCoord has been set before.
-	// Return nil in status:
-	//     The mixCoord is not nil.
-	SetMixCoordClient(mixCoord MixCoordClient) error
 }
 
 // DataCoordClient is the client interface for datacoord server
@@ -196,9 +187,6 @@ type ProxyComponent interface {
 
 	SetAddress(address string)
 	GetAddress() string
-	// SetEtcdClient set EtcdClient for Proxy
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// SetMixCoordClient set MixCoord for Proxy
 	// `mixCoord` is a client of mix coordinator.

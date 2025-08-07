@@ -65,7 +65,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/config"
@@ -382,9 +381,12 @@ func (node *QueryNode) InitSegcore() error {
 	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
 	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
+	cacheCellUnaccessedSurvivalTime := C.int64_t(paramtable.Get().QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())
 	loadingMemoryFactor := C.float(paramtable.Get().QueryNodeCfg.TieredLoadingMemoryFactor.GetAsFloat())
 	overloadedMemoryThresholdPercentage := C.float(memoryMaxRatio)
 	maxDiskUsagePercentage := C.float(diskMaxRatio)
+	diskPath := C.CString(paramtable.Get().LocalStorageCfg.Path.GetValue())
+	defer C.free(unsafe.Pointer(diskPath))
 
 	C.ConfigureTieredStorage(C.CacheWarmupPolicy(scalarFieldCacheWarmupPolicy),
 		C.CacheWarmupPolicy(vectorFieldCacheWarmupPolicy),
@@ -392,8 +394,16 @@ func (node *QueryNode) InitSegcore() error {
 		C.CacheWarmupPolicy(vectorIndexCacheWarmupPolicy),
 		memoryLowWatermarkBytes, memoryHighWatermarkBytes, memoryMaxBytes,
 		diskLowWatermarkBytes, diskHighWatermarkBytes, diskMaxBytes,
-		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs,
-		loadingMemoryFactor, overloadedMemoryThresholdPercentage, maxDiskUsagePercentage)
+		evictionEnabled, cacheTouchWindowMs, evictionIntervalMs, cacheCellUnaccessedSurvivalTime,
+		overloadedMemoryThresholdPercentage, loadingMemoryFactor, maxDiskUsagePercentage, diskPath)
+
+	tieredEvictableMemoryCacheRatio := paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat()
+	tieredEvictableDiskCacheRatio := paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat()
+
+	log.Ctx(node.ctx).Info("tiered storage eviction cache ratio configured",
+		zap.Float64("tieredEvictableMemoryCacheRatio", tieredEvictableMemoryCacheRatio),
+		zap.Float64("tieredEvictableDiskCacheRatio", tieredEvictableDiskCacheRatio),
+	)
 
 	err = initcore.InitInterminIndexConfig(paramtable.Get())
 	if err != nil {
@@ -517,11 +527,7 @@ func (node *QueryNode) Init() error {
 		node.manager = segments.NewManager()
 		node.loader = segments.NewLoader(node.ctx, node.manager, node.chunkManager)
 		node.manager.SetLoader(node.loader)
-		if streamingutil.IsStreamingServiceEnabled() {
-			node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
-		} else {
-			node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
-		}
+		node.dispClient = msgdispatcher.NewClientWithIncludeSkipWhenSplit(streaming.NewDelegatorMsgstreamFactory(), typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.dispClient, node.delegators)
 

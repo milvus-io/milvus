@@ -267,7 +267,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		node.clusterManager,
 		node.manager,
 		node.loader,
-		node.factory,
 		channel.GetSeekPosition().GetTimestamp(),
 		node.queryHook,
 		node.chunkManager,

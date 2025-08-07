@@ -202,8 +202,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
         auto file = File::Open(file_name, O_RDONLY);
         trie_.read(file.Descriptor());
     }
-    // make sure the file would be removed after we unmap & close it
-    unlink(file_name.c_str());
+    mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);
 
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;

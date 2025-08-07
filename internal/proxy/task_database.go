@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -25,8 +24,6 @@ type createDatabaseTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 }
 
 func (cdt *createDatabaseTask) TraceCtx() context.Context {
@@ -78,9 +75,6 @@ func (cdt *createDatabaseTask) Execute(ctx context.Context) error {
 	var err error
 	cdt.result, err = cdt.mixCoord.CreateDatabase(ctx, cdt.CreateDatabaseRequest)
 	err = merr.CheckRPCCall(cdt.result, err)
-	if err == nil {
-		SendReplicateMessagePack(ctx, cdt.replicateMsgStream, cdt.CreateDatabaseRequest)
-	}
 	return err
 }
 
@@ -95,8 +89,6 @@ type dropDatabaseTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 }
 
 func (ddt *dropDatabaseTask) TraceCtx() context.Context {
@@ -151,7 +143,6 @@ func (ddt *dropDatabaseTask) Execute(ctx context.Context) error {
 	err = merr.CheckRPCCall(ddt.result, err)
 	if err == nil {
 		globalMetaCache.RemoveDatabase(ctx, ddt.DbName)
-		SendReplicateMessagePack(ctx, ddt.replicateMsgStream, ddt.DropDatabaseRequest)
 	}
 	return err
 }
@@ -230,8 +221,6 @@ type alterDatabaseTask struct {
 	ctx      context.Context
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
-
-	replicateMsgStream msgstream.MsgStream
 }
 
 func (t *alterDatabaseTask) TraceCtx() context.Context {
@@ -323,8 +312,6 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterDatabaseRequest)
 	t.result = ret
 	return nil
 }

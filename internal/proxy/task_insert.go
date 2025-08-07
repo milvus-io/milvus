@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"go.opentelemetry.io/otel"
@@ -15,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
-	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -32,9 +30,7 @@ type insertTask struct {
 
 	result          *milvuspb.MutationResult
 	idAllocator     *allocator.IDAllocator
-	segIDAssigner   *segIDAssigner
 	chMgr           channelsMgr
-	chTicker        channelsTimeTicker
 	vChannels       []vChan
 	pChannels       []pChan
 	schema          *schemapb.CollectionSchema
@@ -288,76 +284,6 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	}
 
 	log.Debug("Proxy Insert PreExecute done")
-
-	return nil
-}
-
-func (it *insertTask) Execute(ctx context.Context) error {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
-	defer sp.End()
-
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
-
-	collectionName := it.insertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
-	log := log.Ctx(ctx)
-	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
-		return err
-	}
-	it.insertMsg.CollectionID = collID
-
-	getCacheDur := tr.RecordSpan()
-	stream, err := it.chMgr.getOrCreateDmlStream(ctx, collID)
-	if err != nil {
-		return err
-	}
-	getMsgStreamDur := tr.RecordSpan()
-
-	channelNames, err := it.chMgr.getVChannels(collID)
-	if err != nil {
-		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
-		it.result.Status = merr.Status(err)
-		return err
-	}
-
-	log.Debug("send insert request to virtual channels",
-		zap.String("partition", it.insertMsg.GetPartitionName()),
-		zap.Int64("collectionID", collID),
-		zap.Strings("virtual_channels", channelNames),
-		zap.Int64("task_id", it.ID()),
-		zap.Duration("get cache duration", getCacheDur),
-		zap.Duration("get msgStream duration", getMsgStreamDur))
-
-	// assign segmentID for insert data and repack data by segmentID
-	var msgPack *msgstream.MsgPack
-	if it.partitionKeys == nil {
-		msgPack, err = repackInsertData(it.TraceCtx(), channelNames, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
-	} else {
-		msgPack, err = repackInsertDataWithPartitionKey(it.TraceCtx(), channelNames, it.partitionKeys, it.insertMsg, it.result, it.idAllocator, it.segIDAssigner)
-	}
-	if err != nil {
-		log.Warn("assign segmentID and repack insert data failed", zap.Error(err))
-		it.result.Status = merr.Status(err)
-		return err
-	}
-	assignSegmentIDDur := tr.RecordSpan()
-
-	log.Debug("assign segmentID for insert data success",
-		zap.Duration("assign segmentID duration", assignSegmentIDDur))
-	err = stream.Produce(ctx, msgPack)
-	if err != nil {
-		log.Warn("fail to produce insert msg", zap.Error(err))
-		it.result.Status = merr.Status(err)
-		return err
-	}
-	sendMsgDur := tr.RecordSpan()
-	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
-	totalExecDur := tr.ElapseSpan()
-	log.Debug("Proxy Insert Execute done",
-		zap.String("collectionName", collectionName),
-		zap.Duration("send message duration", sendMsgDur),
-		zap.Duration("execute duration", totalExecDur))
 
 	return nil
 }

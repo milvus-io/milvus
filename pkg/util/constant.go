@@ -113,6 +113,9 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetFlushState.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadOnly.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGroupReadWrite.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListImport.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
@@ -303,6 +306,8 @@ var (
 		commonpb.ObjectPrivilege_PrivilegeDescribeAlias.String(),
 		commonpb.ObjectPrivilege_PrivilegeGetStatistics.String(),
 		commonpb.ObjectPrivilege_PrivilegeListAliases.String(),
+		commonpb.ObjectPrivilege_PrivilegeGetImportProgress.String(),
+		commonpb.ObjectPrivilege_PrivilegeListImport.String(),
 	})
 
 	CollectionReadWritePrivileges = append(CollectionReadOnlyPrivileges,
@@ -320,6 +325,7 @@ var (
 			commonpb.ObjectPrivilege_PrivilegeDropIndex.String(),
 			commonpb.ObjectPrivilege_PrivilegeCreatePartition.String(),
 			commonpb.ObjectPrivilege_PrivilegeDropPartition.String(),
+			commonpb.ObjectPrivilege_PrivilegeAddCollectionField.String(),
 		})...,
 	)
 

@@ -85,6 +85,7 @@ const (
 	HasPartitionTaskName          = "HasPartitionTask"
 	ShowPartitionTaskName         = "ShowPartitionTask"
 	FlushTaskName                 = "FlushTask"
+	FlushAllTaskName              = "FlushAllTask"
 	LoadCollectionTaskName        = "LoadCollectionTask"
 	ReleaseCollectionTaskName     = "ReleaseCollectionTask"
 	LoadPartitionTaskName         = "LoadPartitionsTask"
@@ -586,7 +587,6 @@ type dropCollectionTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 	chMgr    channelsMgr
-	chTicker channelsTimeTicker
 }
 
 func (t *dropCollectionTask) TraceCtx() context.Context {
@@ -1046,10 +1046,9 @@ type alterCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionRequest
-	ctx                context.Context
-	mixCoord           types.MixCoordClient
-	result             *commonpb.Status
-	replicateMsgStream msgstream.MsgStream
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 }
 
 func (t *alterCollectionTask) TraceCtx() context.Context {
@@ -1265,7 +1264,6 @@ func (t *alterCollectionTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterCollectionRequest)
 	return nil
 }
 
@@ -1277,10 +1275,9 @@ type alterCollectionFieldTask struct {
 	baseTask
 	Condition
 	*milvuspb.AlterCollectionFieldRequest
-	ctx                context.Context
-	mixCoord           types.MixCoordClient
-	result             *commonpb.Status
-	replicateMsgStream msgstream.MsgStream
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *commonpb.Status
 }
 
 func (t *alterCollectionFieldTask) TraceCtx() context.Context {
@@ -1494,7 +1491,6 @@ func (t *alterCollectionFieldTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.AlterCollectionFieldRequest)
 	return nil
 }
 
@@ -1937,8 +1933,7 @@ type loadCollectionTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 
-	collectionID       UniqueID
-	replicateMsgStream msgstream.MsgStream
+	collectionID UniqueID
 }
 
 func (t *loadCollectionTask) TraceCtx() context.Context {
@@ -2087,7 +2082,6 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return fmt.Errorf("call query coordinator LoadCollection: %s", err)
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.LoadCollectionRequest)
 	return nil
 }
 
@@ -2110,8 +2104,7 @@ type releaseCollectionTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 
-	collectionID       UniqueID
-	replicateMsgStream msgstream.MsgStream
+	collectionID UniqueID
 }
 
 func (t *releaseCollectionTask) TraceCtx() context.Context {
@@ -2185,7 +2178,6 @@ func (t *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleaseCollectionRequest)
 	return nil
 }
 
@@ -2201,8 +2193,7 @@ type loadPartitionsTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 
-	collectionID       UniqueID
-	replicateMsgStream msgstream.MsgStream
+	collectionID UniqueID
 }
 
 func (t *loadPartitionsTask) TraceCtx() context.Context {
@@ -2361,7 +2352,6 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.LoadPartitionsRequest)
 
 	return nil
 }
@@ -2378,8 +2368,7 @@ type releasePartitionsTask struct {
 	mixCoord types.MixCoordClient
 	result   *commonpb.Status
 
-	collectionID       UniqueID
-	replicateMsgStream msgstream.MsgStream
+	collectionID UniqueID
 }
 
 func (t *releasePartitionsTask) TraceCtx() context.Context {
@@ -2468,7 +2457,6 @@ func (t *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 	if err = merr.CheckRPCCall(t.result, err); err != nil {
 		return err
 	}
-	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.ReleasePartitionsRequest)
 	return nil
 }
 

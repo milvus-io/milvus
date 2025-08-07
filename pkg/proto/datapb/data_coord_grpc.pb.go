@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	DataCoord_Flush_FullMethodName                       = "/milvus.proto.data.DataCoord/Flush"
+	DataCoord_FlushAll_FullMethodName                    = "/milvus.proto.data.DataCoord/FlushAll"
 	DataCoord_AllocSegment_FullMethodName                = "/milvus.proto.data.DataCoord/AllocSegment"
 	DataCoord_AssignSegmentID_FullMethodName             = "/milvus.proto.data.DataCoord/AssignSegmentID"
 	DataCoord_GetSegmentInfo_FullMethodName              = "/milvus.proto.data.DataCoord/GetSegmentInfo"
@@ -76,6 +77,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataCoordClient interface {
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
+	FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(ctx context.Context, in *AllocSegmentRequest, opts ...grpc.CallOption) (*AllocSegmentResponse, error)
 	// Deprecated: Do not use.
@@ -141,6 +143,15 @@ func NewDataCoordClient(cc grpc.ClientConnInterface) DataCoordClient {
 func (c *dataCoordClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
 	out := new(FlushResponse)
 	err := c.cc.Invoke(ctx, DataCoord_Flush_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error) {
+	out := new(FlushAllResponse)
+	err := c.cc.Invoke(ctx, DataCoord_FlushAll_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -558,6 +569,7 @@ func (c *dataCoordClient) ListImports(ctx context.Context, in *internalpb.ListIm
 // for forward compatibility
 type DataCoordServer interface {
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
+	FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error)
 	// Deprecated: Do not use.
@@ -618,6 +630,9 @@ type UnimplementedDataCoordServer struct {
 
 func (UnimplementedDataCoordServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
+}
+func (UnimplementedDataCoordServer) FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FlushAll not implemented")
 }
 func (UnimplementedDataCoordServer) AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AllocSegment not implemented")
@@ -780,6 +795,24 @@ func _DataCoord_Flush_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataCoordServer).Flush(ctx, req.(*FlushRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_FlushAll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FlushAllRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).FlushAll(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_FlushAll_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).FlushAll(ctx, req.(*FlushAllRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1604,6 +1637,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Flush",
 			Handler:    _DataCoord_Flush_Handler,
+		},
+		{
+			MethodName: "FlushAll",
+			Handler:    _DataCoord_FlushAll_Handler,
 		},
 		{
 			MethodName: "AllocSegment",

@@ -1036,3 +1036,37 @@ class TestSearchPaginationIndependent(TestMilvusClientV2Base):
         self.do_search_pagination_and_assert(client, collection_name, limit=limit, pages=pages, dim=default_dim,
                                              vector_dtype=vector_dtype, index=index, metric_type=metric_type,
                                              expected_overlap_ratio=expected_overlap_ratio)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_pagination_offset_more_than_inserted_entities(self): 
+        """
+        target: test search pagination with offset more than inserted entities
+        method: create connection, collection, insert data, create index and search with offset more than inserted entities
+        expected: searched successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        
+        # create collection in fast mode
+        self.create_collection(client, collection_name, dimension=ct.default_dim)
+        c_info = self.describe_collection(client, collection_name)[0]
+
+        # insert data
+        data = cf.gen_row_data_by_schema(schema=c_info, nb=ct.default_nb)
+        self.insert(client, collection_name, data)
+
+        # search with offset more than inserted entities
+        search_vectors = cf.gen_vectors(ct.default_nq, ct.default_dim)
+        search_params = {"offset": ct.default_nb}
+        search_res1, _ = self.search(client, collection_name,
+                                     search_vectors,
+                                     search_params=search_params,
+                                     limit=ct.default_limit)
+        search_params = {"offset": ct.default_nb + 1}
+        search_res2, _ = self.search(client, collection_name,
+                                     search_vectors,
+                                     search_params=search_params,
+                                     limit=ct.default_limit)
+        for i in range(ct.default_nq):
+            assert len(search_res1[i]) == 0, "search result is not empty"
+            assert len(search_res2[i]) == 0, "search result is not empty"

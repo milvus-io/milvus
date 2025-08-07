@@ -70,6 +70,7 @@ func (suite *SegmentSuite) SetupTest() {
 
 	suite.sealed, err = NewSegment(ctx,
 		suite.collection,
+		suite.manager.Segment,
 		SegmentTypeSealed,
 		0,
 		&querypb.SegmentLoadInfo{
@@ -113,6 +114,7 @@ func (suite *SegmentSuite) SetupTest() {
 
 	suite.growing, err = NewSegment(ctx,
 		suite.collection,
+		suite.manager.Segment,
 		SegmentTypeGrowing,
 		0,
 		&querypb.SegmentLoadInfo{

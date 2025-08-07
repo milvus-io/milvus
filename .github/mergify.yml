@@ -9,8 +9,8 @@
 # ==============================================================================
 misc:
   # File pattern matchers
-  - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
-  - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &source_code_files files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &no_source_code_files -files~=^(?=.*((\.(rs|go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &only_go_unittest_files -files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
   - &morethan_go_unittest_files files~=^(?!(client|internal|pkg|tests)\/.*_test\.go).*$
   
@@ -146,7 +146,7 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for non go or c++ code changed
+  - name: Test passed for non rust go or c++ code changed
     conditions:
       - or: *BRANCHES
       - or: *WHEN_E2E_TEST_SUCCESS

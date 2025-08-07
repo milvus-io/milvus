@@ -752,4 +752,12 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, `{"proxy": {"tasks": 100}}`, resp.GetMetricsInfo())
 	})
+
+	t.Run("FlushAll", func(t *testing.T) {
+		req := &datapb.FlushAllRequest{}
+		mockMixCoord.EXPECT().FlushAll(mock.Anything, req).Return(&datapb.FlushAllResponse{Status: merr.Success()}, nil)
+		resp, err := server.FlushAll(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
 }

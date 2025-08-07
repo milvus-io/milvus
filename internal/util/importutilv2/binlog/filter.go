@@ -17,6 +17,7 @@
 package binlog
 
 import (
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -42,5 +43,13 @@ func FilterWithTimeRange(tsStart, tsEnd uint64) Filter {
 	return func(row map[int64]interface{}) bool {
 		ts := row[common.TimeStampField].(int64)
 		return uint64(ts) >= tsStart && uint64(ts) <= tsEnd
+	}
+}
+
+type L0Filter func(dl *storage.DeleteLog) bool
+
+func FilterDeleteWithTimeRange(tsStart, tsEnd uint64) L0Filter {
+	return func(dl *storage.DeleteLog) bool {
+		return dl.Ts >= tsStart && dl.Ts <= tsEnd
 	}
 }

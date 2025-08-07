@@ -18,12 +18,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-type insertTaskByStreamingService struct {
-	*insertTask
-}
-
 // we only overwrite the Execute function
-func (it *insertTaskByStreamingService) Execute(ctx context.Context) error {
+func (it *insertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
 

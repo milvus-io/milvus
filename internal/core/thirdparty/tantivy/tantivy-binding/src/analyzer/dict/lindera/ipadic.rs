@@ -1,21 +1,18 @@
 use super::fetch;
 use crate::error::{Result, TantivyBindingError};
 use lindera_dictionary::dictionary_builder::ipadic::IpadicBuilder;
-use tokio::runtime::Runtime;
 
 #[cfg(feature = "lindera-ipadic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
 #[cfg(not(feature = "lindera-ipadic"))]
-async fn download(params: &fetch::FetchParams) -> Result<()> {
-    fetch::fetch(params, IpadicBuilder::new())
-        .await
-        .map_err(|e| {
-            TantivyBindingError::InternalError(format!(
-                "fetch ipadic failed with error: {}",
-                e.to_string()
-            ))
-        })
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::fetch(params, IpadicBuilder::new()).map_err(|e| {
+        TantivyBindingError::InternalError(format!(
+            "fetch ipadic failed with error: {}",
+            e.to_string()
+        ))
+    })
 }
 
 #[cfg(not(feature = "lindera-ipadic"))]
@@ -40,8 +37,7 @@ pub fn load_ipadic(
         params.download_urls = download_url
     }
 
-    let rt = Runtime::new().unwrap();
-    rt.block_on(download(&params))?;
+    download(&params)?;
     fetch::load(&params)
 }
 

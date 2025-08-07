@@ -126,16 +126,14 @@ class ChunkWriter final : public ChunkWriterBase {
         // 2. Data values: Contiguous storage of data elements in the order:
         //    data1, data2, ..., dataN where each data element has size dim_*sizeof(T)
         if (nullable_) {
+            // tuple <data, size, offset>
+            std::vector<std::tuple<const uint8_t*, int64_t, int64_t>>
+                null_bitmaps;
             for (const auto& data : array_vec) {
-                auto null_bitmap = data->null_bitmap_data();
-                auto null_bitmap_n = (data->length() + 7) / 8;
-                if (null_bitmap) {
-                    target_->write(null_bitmap, null_bitmap_n);
-                } else {
-                    std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
-                    target_->write(null_bitmap.data(), null_bitmap_n);
-                }
+                null_bitmaps.emplace_back(
+                    data->null_bitmap_data(), data->length(), data->offset());
             }
+            write_null_bit_maps(null_bitmaps);
         }
 
         for (const auto& data : array_vec) {
@@ -148,8 +146,14 @@ class ChunkWriter final : public ChunkWriterBase {
     std::unique_ptr<Chunk>
     finish() override {
         auto [data, size] = target_->get();
-        return std::make_unique<FixedWidthChunk>(
-            row_nums_, dim_, data, size, sizeof(T), nullable_);
+        auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
+        return std::make_unique<FixedWidthChunk>(row_nums_,
+                                                 dim_,
+                                                 data,
+                                                 size,
+                                                 sizeof(T),
+                                                 nullable_,
+                                                 std::move(mmap_file_raii));
     }
 
  private:
@@ -177,17 +181,13 @@ ChunkWriter<arrow::BooleanArray, bool>::write(
     }
 
     if (nullable_) {
-        // chunk layout: nullbitmap, data1, data2, ..., datan
+        // tuple <data, size, offset>
+        std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
         for (const auto& data : array_vec) {
-            auto null_bitmap = data->null_bitmap_data();
-            auto null_bitmap_n = (data->length() + 7) / 8;
-            if (null_bitmap) {
-                target_->write(null_bitmap, null_bitmap_n);
-            } else {
-                std::vector<uint8_t> null_bitmap(null_bitmap_n, 0xff);
-                target_->write(null_bitmap.data(), null_bitmap_n);
-            }
+            null_bitmaps.emplace_back(
+                data->null_bitmap_data(), data->length(), data->offset());
         }
+        write_null_bit_maps(null_bitmaps);
     }
 
     for (const auto& data : array_vec) {

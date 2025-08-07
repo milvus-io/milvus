@@ -798,65 +798,17 @@ class TestCollectionRangeSearch(TestcaseBase):
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
         # 3. range search
-        search_params = cf.gen_search_param(index)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        for search_param in search_params:
-            search_param["params"]["radius"] = 1000
-            search_param["params"]["range_filter"] = 0
-            if index.startswith("IVF_"):
-                search_param["params"].pop("nprobe")
-            if index == "SCANN":
-                search_param["params"].pop("nprobe")
-                search_param["params"].pop("reorder_k")
-            log.info("Searching with search params: {}".format(search_param))
-            collection_w.search(vectors[:default_nq], default_search_field,
-                                search_param, default_limit,
-                                default_search_exp,
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": default_nq,
-                                             "ids": insert_ids,
-                                             "limit": default_limit,
-                                             "pk_name": ct.default_int64_field_name})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index", range_search_supported_indexes)
-    def test_range_search_after_index_different_metric_type(self, index):
-        """
-        target: test range search with different metric type
-        method: test range search with different metric type
-        expected: searched successfully
-        """
-        if index == "SCANN":
-            pytest.skip("https://github.com/milvus-io/milvus/issues/32648")
-        # 1. initialize with data
-        dim = 208
-        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
-                                                                                  partition_num=1,
-                                                                                  dim=dim, is_index=False)[0:5]
-        # 2. create different index
-        params = cf.get_index_params_params(index)
-        log.info("test_range_search_after_index_different_metric_type: Creating index-%s" % index)
-        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
-        collection_w.create_index("float_vector", default_index)
-        log.info("test_range_search_after_index_different_metric_type: Created index-%s" % index)
-        collection_w.load()
-        # 3. search
-        search_params = cf.gen_search_param(index, "IP")
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
-        for search_param in search_params:
-            search_param["params"]["radius"] = 0
-            search_param["params"]["range_filter"] = 1000
-            if index.startswith("IVF_"):
-                search_param["params"].pop("nprobe")
-            log.info("Searching with search params: {}".format(search_param))
-            collection_w.search(vectors[:default_nq], default_search_field,
-                                search_param, default_limit,
-                                default_search_exp,
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": default_nq,
-                                             "ids": insert_ids,
-                                             "limit": default_limit,
-                                             "pk_name": ct.default_int64_field_name})
+        search_vectors = cf.gen_vectors(ct.default_nq, dim)
+        search_params = cf.get_search_params_params(index)
+        search_params.update({"params": {"radius": 2, "range_filter": 0.1}})
+        collection_w.search(search_vectors, default_search_field,
+                            search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "pk_name": ct.default_int64_field_name})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_index_one_partition(self, _async):

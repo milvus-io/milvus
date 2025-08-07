@@ -3,7 +3,7 @@ use serde_json as json;
 use super::stop_words;
 use crate::error::{Result, TantivyBindingError};
 
-pub(crate) fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> {
+pub fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> {
     if !value.is_array() {
         return Err(TantivyBindingError::InternalError(
             format!("{} should be array", label).to_string(),

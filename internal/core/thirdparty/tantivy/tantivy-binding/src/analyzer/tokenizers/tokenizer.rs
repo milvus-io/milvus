@@ -102,7 +102,7 @@ pub fn get_builder_with_tokenizer(
             }
             _ => {
                 return Err(TantivyBindingError::InvalidArgument(format!(
-                    "costum tokenizer must set type"
+                    "customized tokenizer must set type"
                 )))
             }
         }

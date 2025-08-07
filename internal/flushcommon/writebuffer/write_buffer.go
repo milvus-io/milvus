@@ -18,8 +18,6 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -325,10 +323,8 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 
 			if syncTask.IsFlush() {
-				if paramtable.Get().DataNodeCfg.SkipBFStatsLoad.GetAsBool() || streamingutil.IsStreamingServiceEnabled() {
-					wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
-					log.Info("flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
-				}
+				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
+				log.Info("flushed segment removed", zap.Int64("segmentID", syncTask.SegmentID()), zap.String("channel", syncTask.ChannelName()))
 			}
 			return nil
 		})
@@ -601,8 +597,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithMetaWriter(wb.metaWriter).
 		WithMetaCache(wb.metaCache).
 		WithSchema(schema).
-		WithSyncPack(pack).
-		WithMultiPartUploadSize(packed.DefaultMultiPartUploadSize)
+		WithSyncPack(pack)
 	return task, nil
 }
 

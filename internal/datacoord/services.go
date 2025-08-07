@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -85,18 +86,40 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
-	coll, err := s.handler.GetCollection(ctx, req.GetCollectionID())
+	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
+	ts, err := s.allocator.AllocTimestamp(ctx)
 	if err != nil {
-		log.Warn("fail to get collection", zap.Error(err))
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return nil, err
+	}
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), ts, req.GetSegmentIDs())
+	if err != nil {
 		return &datapb.FlushResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
+
+	return &datapb.FlushResponse{
+		Status:          merr.Success(),
+		DbID:            req.GetDbID(),
+		CollectionID:    req.GetCollectionID(),
+		SegmentIDs:      flushResult.GetSegmentIDs(),
+		TimeOfSeal:      flushResult.GetTimeOfSeal(),
+		FlushSegmentIDs: flushResult.GetFlushSegmentIDs(),
+		FlushTs:         flushResult.GetFlushTs(),
+		ChannelCps:      flushResult.GetChannelCps(),
+	}, nil
+}
+
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flushTs uint64, toFlushSegments []UniqueID) (*datapb.FlushResult, error) {
+	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
+	coll, err := s.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		log.Warn("fail to get collection", zap.Error(err))
+		return nil, err
+	}
 	if coll == nil {
-		return &datapb.FlushResponse{
-			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID())),
-		}, nil
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 	// channel checkpoints must be gotten before sealSegment, make sure checkpoints is earlier than segment's endts
 	for _, vchannel := range coll.VChannelNames {
@@ -104,26 +127,14 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		channelCPs[vchannel] = cp
 	}
 
-	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
-	ts, err := s.allocator.AllocTimestamp(ctx)
-	if err != nil {
-		log.Warn("unable to alloc timestamp", zap.Error(err))
-		return &datapb.FlushResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	timeOfSeal, _ := tsoutil.ParseTS(ts)
-
+	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
 	if !streamingutil.IsStreamingServiceEnabled() {
 		for _, channel := range coll.VChannelNames {
-			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, req.GetSegmentIDs())
+			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
-				return &datapb.FlushResponse{
-					Status: merr.Status(errors.Wrapf(err, "failed to flush collection %d",
-						req.GetCollectionID())),
-				}, nil
+				return nil, errors.Wrapf(err, "failed to flush collection %d", collectionID)
 			}
 			for _, sealedSegmentID := range sealedSegmentIDs {
 				sealedSegmentsIDDict[sealedSegmentID] = true
@@ -131,7 +142,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}
 	}
 
-	segments := s.meta.GetSegmentsOfCollection(ctx, req.GetCollectionID())
+	segments := s.meta.GetSegmentsOfCollection(ctx, collectionID)
 	flushSegmentIDs := make([]UniqueID, 0, len(segments))
 	for _, segment := range segments {
 		if segment != nil &&
@@ -145,10 +156,10 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	if !streamingutil.IsStreamingServiceEnabled() {
 		var isUnimplemented bool
 		err = retry.Do(ctx, func() error {
-			nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(req.GetCollectionID())
+			nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(collectionID)
 
 			for nodeID, channelNames := range nodeChannels {
-				err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
+				err = s.cluster.FlushChannels(ctx, nodeID, flushTs, channelNames)
 				if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 					isUnimplemented = true
 					return nil
@@ -160,36 +171,89 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 			return nil
 		}, retry.Attempts(60)) // about 3min
 		if err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(err),
-			}, nil
+			return nil, err
 		}
 
 		if isUnimplemented {
 			// For compatible with rolling upgrade from version 2.2.x,
 			// fall back to the flush logic of version 2.2.x;
 			log.Warn("DataNode FlushChannels unimplemented", zap.Error(err))
-			ts = 0
+			flushTs = 0
 		}
 	}
 
 	log.Info("flush response with segments",
-		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("collectionID", collectionID),
 		zap.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		zap.Int("flushedSegmentsCount", len(flushSegmentIDs)),
 		zap.Time("timeOfSeal", timeOfSeal),
-		zap.Uint64("flushTs", ts),
-		zap.Time("flushTs in time", tsoutil.PhysicalTime(ts)))
+		zap.Uint64("flushTs", flushTs),
+		zap.Time("flushTs in time", tsoutil.PhysicalTime(flushTs)))
 
-	return &datapb.FlushResponse{
-		Status:          merr.Success(),
-		DbID:            req.GetDbID(),
-		CollectionID:    req.GetCollectionID(),
+	return &datapb.FlushResult{
+		CollectionID:    collectionID,
 		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
-		FlushTs:         ts,
+		FlushTs:         flushTs,
 		ChannelCps:      channelCPs,
+	}, nil
+}
+
+func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("receive flushAll request")
+	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
+	defer sp.End()
+
+	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
+		log.Info("server is not healthy", zap.Error(err), zap.Any("stateCode", s.GetStateCode()))
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	resp, err := s.broker.ShowCollectionIDs(ctx, req.GetDbName())
+	if err != nil {
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
+	ts, err := s.allocator.AllocTimestamp(ctx)
+	if err != nil {
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+		return nil, err
+	}
+
+	dbCollections := resp.GetDbCollections()
+	wg := errgroup.Group{}
+	// limit goroutine number to 100
+	wg.SetLimit(100)
+	for _, dbCollection := range dbCollections {
+		for _, collectionID := range dbCollection.GetCollectionIDs() {
+			cid := collectionID
+			wg.Go(func() error {
+				_, err := s.flushCollection(ctx, cid, ts, nil)
+				if err != nil {
+					log.Warn("failed to flush collection", zap.Int64("collectionID", cid), zap.Error(err))
+					return err
+				}
+				return nil
+			})
+		}
+	}
+	err = wg.Wait()
+	if err != nil {
+		return &datapb.FlushAllResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.FlushAllResponse{
+		Status:  merr.Success(),
+		FlushTs: ts,
 	}, nil
 }
 
@@ -519,6 +583,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.String("level", req.GetSegLevel().String()),
+		zap.Bool("withFullBinlogs", req.GetWithFullBinlogs()),
 	)
 
 	log.Info("receive SaveBinlogPaths request",
@@ -569,11 +634,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
-		if segment.State == commonpb.SegmentState_Flushed && !req.Dropped {
-			log.Info("save to flushed segment, ignore this request")
-			return merr.Success(), nil
-		}
-
 		if segment.State == commonpb.SegmentState_Dropped {
 			log.Info("save to dropped segment, ignore this request")
 			return merr.Success(), nil
@@ -603,25 +663,42 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 	}
 
+	if req.GetWithFullBinlogs() {
+		// check checkpoint will be executed at updateSegmentPack validation to ignore the illegal checkpoint update.
+		operators = append(operators, UpdateBinlogsFromSaveBinlogPathsOperator(
+			req.GetSegmentID(),
+			req.GetField2BinlogPaths(),
+			req.GetField2StatslogPaths(),
+			req.GetDeltalogs(),
+			req.GetField2Bm25LogPaths(),
+		), UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints(), true))
+	} else {
+		operators = append(operators, AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
+			UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()))
+	}
+
 	// save binlogs, start positions and checkpoints
 	operators = append(operators,
-		AddBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs(), req.GetField2Bm25LogPaths()),
 		UpdateStartPosition(req.GetStartPositions()),
-		UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()),
 		UpdateAsDroppedIfEmptyWhenFlushing(req.GetSegmentID()),
 	)
 
 	// Update segment info in memory and meta.
 	if err := s.meta.UpdateSegmentsInfo(ctx, operators...); err != nil {
-		log.Error("save binlog and checkpoints failed", zap.Error(err))
-		return merr.Status(err), nil
+		if !errors.Is(err, ErrIgnoredSegmentMetaOperation) {
+			log.Error("save binlog and checkpoints failed", zap.Error(err))
+			return merr.Status(err), nil
+		}
+		log.Info("save binlog and checkpoints failed with ignorable error", zap.Error(err))
 	}
 
 	s.meta.SetLastWrittenTime(req.GetSegmentID())
 	log.Info("SaveBinlogPaths sync segment with meta",
-		zap.Any("binlogs", req.GetField2BinlogPaths()),
-		zap.Any("deltalogs", req.GetDeltalogs()),
-		zap.Any("statslogs", req.GetField2StatslogPaths()),
+		zap.Any("checkpoints", req.GetCheckPoints()),
+		zap.Strings("binlogs", stringifyBinlogs(req.GetField2BinlogPaths())),
+		zap.Strings("deltalogs", stringifyBinlogs(req.GetDeltalogs())),
+		zap.Strings("statslogs", stringifyBinlogs(req.GetField2StatslogPaths())),
+		zap.Strings("bm25logs", stringifyBinlogs(req.GetField2Bm25LogPaths())),
 	)
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
@@ -1385,6 +1462,9 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		for _, sid := range req.GetSegmentIDs() {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
+			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
+			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
+			// use timetick for GetFlushState in-future but not segment list.
 			if segment == nil || isFlushState(segment.GetState()) {
 				continue
 			}

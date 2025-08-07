@@ -254,7 +254,7 @@ func (st *statsTask) sort(ctx context.Context) ([]*datapb.FieldBinlog, error) {
 	}
 
 	binlogs, stats, bm25stats := srw.GetLogs()
-	insertLogs := lo.Values(binlogs)
+	insertLogs := storage.SortFieldBinlogs(binlogs)
 	if err := binlog.CompressFieldBinlogs(insertLogs); err != nil {
 		return nil, err
 	}

@@ -605,7 +605,7 @@ ChunkedSegmentSealedImpl::chunk_string_view_impl(
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-ChunkedSegmentSealedImpl::chunk_view_by_offsets(
+ChunkedSegmentSealedImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
@@ -613,10 +613,27 @@ ChunkedSegmentSealedImpl::chunk_view_by_offsets(
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     if (auto it = fields_.find(field_id); it != fields_.end()) {
-        return it->second->ViewsByOffsets(chunk_id, offsets);
+        return it->second->StringViewsByOffsets(chunk_id, offsets);
     }
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_view_by_offsets only used for variable column field ");
+}
+
+PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto it = fields_.find(field_id); it != fields_.end()) {
+        auto& field_data = it->second;
+        return field_data->ArrayViewsByOffsets(chunk_id, offsets);
+    }
+    ThrowInfo(
+        ErrorCode::UnexpectedError,
+        "chunk_array_views_by_offsets only used for variable column field ");
 }
 
 PinWrapper<const index::IndexBase*>
@@ -896,6 +913,107 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
     });
 }
 
+void
+ChunkedSegmentSealedImpl::search_batch_pks(
+    const std::vector<PkType>& pks,
+    const Timestamp* timestamps,
+    bool include_same_ts,
+    const std::function<void(const SegOffset offset, const Timestamp ts)>&
+        callback) const {
+    // handle unsorted case
+    if (!is_sorted_by_pk_) {
+        for (size_t i = 0; i < pks.size(); i++) {
+            auto offsets = insert_record_.search_pk(
+                pks[i], timestamps[i], include_same_ts);
+            for (auto offset : offsets) {
+                callback(offset, timestamps[i]);
+            }
+        }
+        return;
+    }
+
+    auto pk_field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
+    AssertInfo(pk_field_id.get() != -1, "Primary key is -1");
+    auto pk_column = fields_.at(pk_field_id);
+
+    auto all_chunk_pins = pk_column->GetAllChunks();
+
+    auto timestamp_hit = include_same_ts
+                             ? [](const Timestamp& ts1,
+                                  const Timestamp& ts2) { return ts1 <= ts2; }
+                             : [](const Timestamp& ts1, const Timestamp& ts2) {
+                                   return ts1 < ts2;
+                               };
+
+    switch (schema_->get_fields().at(pk_field_id).get_data_type()) {
+        case DataType::INT64: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                auto pw = all_chunk_pins[i];
+                auto src =
+                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                for (size_t j = 0; j < pks.size(); j++) {
+                    // get int64 pks
+                    auto target = std::get<int64_t>(pks[j]);
+                    auto timestamp = timestamps[j];
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        if (timestamp_hit(insert_record_.timestamps_[offset],
+                                          timestamp)) {
+                            callback(SegOffset(offset), timestamp);
+                        }
+                    }
+                }
+            }
+
+            break;
+        }
+        case DataType::VARCHAR: {
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                auto pw = all_chunk_pins[i];
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                for (size_t j = 0; j < pks.size(); ++j) {
+                    // get varchar pks
+                    auto& target = std::get<std::string>(pks[j]);
+                    auto timestamp = timestamps[j];
+                    auto offset = string_chunk->binary_search_string(target);
+                    for (; offset != -1 && offset < string_chunk->RowNums() &&
+                           string_chunk->operator[](offset) == target;
+                         ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        if (timestamp_hit(
+                                insert_record_.timestamps_[segment_offset],
+                                timestamp)) {
+                            callback(SegOffset(segment_offset), timestamp);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            ThrowInfo(
+                DataTypeInvalid,
+                fmt::format(
+                    "unsupported type {}",
+                    schema_->get_fields().at(pk_field_id).get_data_type()));
+        }
+    }
+}
+
 template <typename Condition>
 std::vector<SegOffset>
 ChunkedSegmentSealedImpl::search_sorted_pk(const PkType& pk,
@@ -1020,8 +1138,11 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(
           &insert_record_,
-          [this](const PkType& pk, Timestamp timestamp) {
-              return this->search_pk(pk, timestamp);
+          [this](const std::vector<PkType>& pks,
+                 const Timestamp* timestamps,
+                 std::function<void(const SegOffset offset, const Timestamp ts)>
+                     callback) {
+              this->search_batch_pks(pks, timestamps, false, callback);
           },
           segment_id) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -1950,6 +2071,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool is_proxy_column) {
     {
         std::unique_lock lck(mutex_);
+        AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
+                       !get_bit(field_data_ready_bitset_, field_id),
+                   "non system field {} data already loaded",
+                   field_id.get());
+        AssertInfo(fields_.count(field_id) == 0,
+                   "field {} column already exists",
+                   field_id.get());
         fields_.emplace(field_id, column);
         if (enable_mmap) {
             mmap_fields_.insert(field_id);
@@ -1979,7 +2107,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     // set pks to offset
     if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");
-        AssertInfo(insert_record_.empty_pks(), "already exists");
+        AssertInfo(insert_record_.empty_pks(),
+                   "primary key records already exists, current field id {}",
+                   field_id.get());
         insert_record_.insert_pks(data_type, column.get());
         insert_record_.seal_pks();
     }
@@ -1987,6 +2117,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
     std::unique_lock lck(mutex_);
+    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+               "field {} data already loaded",
+               field_id.get());
     set_bit(field_data_ready_bitset_, field_id, true);
     update_row_count(num_rows);
     if (generated_interim_index) {
