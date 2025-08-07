@@ -376,7 +376,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        auto chunk = create_chunk(field_meta, r->reader);
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();

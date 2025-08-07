@@ -43,7 +43,7 @@ func (c *ColumnGeometryBytes) Slice(start, end int) Column {
 
 // Get returns value at index as interface{}.
 func (c *ColumnGeometryBytes) Get(idx int) (interface{}, error) {
-	if idx < 0 || idx > c.Len() {
+	if idx < 0 || idx >= c.Len() {
 		return nil, errors.New("index out of range")
 	}
 	return c.values[idx], nil
