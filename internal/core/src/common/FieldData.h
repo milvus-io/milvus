@@ -72,7 +72,7 @@ class FieldData<Json> : public FieldDataJsonImpl {
 template <>
 class FieldData<Geometry> : public FieldDataGeometryImpl {
  public:
-    static_assert(IsScalar<Geometry> || std::is_same_v<std::string, PkType>);
+    static_assert(IsScalar<Geometry>);
     explicit FieldData(DataType data_type,
                        bool nullable,
                        int64_t buffered_num_rows = 0)

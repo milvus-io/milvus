@@ -482,50 +482,6 @@ class TempDir {
     boost::filesystem::path dir_;
 };
 
-TEST(chunk, multiple_chunk_mmap) {
-    TempDir temp;
-    std::string temp_dir = temp.dir();
-    auto file = File::Open(temp_dir + "/multi_chunk_mmap", O_CREAT | O_RDWR);
-
-    FixedVector<int64_t> data = {1, 2, 3, 4, 5};
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::INT64);
-    field_data->FillFieldData(data.data(), data.size());
-    storage::InsertEventData event_data;
-    auto payload_reader =
-        std::make_shared<milvus::storage::PayloadReader>(field_data);
-    event_data.payload_reader = payload_reader;
-    auto ser_data = event_data.Serialize();
-    auto buffer = std::make_shared<arrow::io::BufferReader>(
-        ser_data.data() + 2 * sizeof(milvus::Timestamp),
-        ser_data.size() - 2 * sizeof(milvus::Timestamp));
-
-    parquet::arrow::FileReaderBuilder reader_builder;
-    auto s = reader_builder.Open(buffer);
-    EXPECT_TRUE(s.ok());
-    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-    s = reader_builder.Build(&arrow_reader);
-    EXPECT_TRUE(s.ok());
-
-    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
-    s = arrow_reader->GetRecordBatchReader(&rb_reader);
-    EXPECT_TRUE(s.ok());
-
-    FieldMeta field_meta(
-        FieldName("a"), milvus::FieldId(1), DataType::INT64, false);
-    int file_offset = 0;
-    auto page_size = sysconf(_SC_PAGESIZE);
-    auto chunk = create_chunk(field_meta, 1, file, file_offset, rb_reader);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
-    file_offset += chunk->Size();
-
-    std::shared_ptr<::arrow::RecordBatchReader> rb_reader2;
-    s = arrow_reader->GetRecordBatchReader(&rb_reader2);
-    EXPECT_TRUE(s.ok());
-    auto chunk2 = create_chunk(field_meta, 1, file, file_offset, rb_reader2);
-    EXPECT_TRUE(chunk->Size() % page_size == 0);
-}
-
 TEST(chunk, test_geometry_field) {
     // Create simple geometry data - just a few points
     FixedVector<std::string> data;
@@ -567,7 +523,7 @@ TEST(chunk, test_geometry_field) {
 
     FieldMeta field_meta(
         FieldName("a"), milvus::FieldId(1), DataType::GEOMETRY, false);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
 
     // Since GeometryChunk is an alias for StringChunk, we can use StringViews
     auto views = std::dynamic_pointer_cast<GeometryChunk>(chunk)->StringViews(
@@ -610,7 +566,7 @@ TEST(chunk, test_geometry_field_nullable_all_valid) {
 
     FieldMeta field_meta(
         FieldName("geo"), milvus::FieldId(1), DataType::GEOMETRY, true);
-    auto chunk = create_chunk(field_meta, 1, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
 
     auto [views, valid] =
         std::dynamic_pointer_cast<GeometryChunk>(chunk)->StringViews(
@@ -663,7 +619,7 @@ TEST(chunk, test_geometry_field_mmap_with_nulls) {
 
     FieldMeta field_meta(
         FieldName("geo"), milvus::FieldId(1), DataType::GEOMETRY, true);
-    auto chunk = create_chunk(field_meta, 1, file, file_offset, rb_reader);
+    auto chunk = create_chunk(field_meta, rb_reader);
 
     auto [views, valid] =
         std::dynamic_pointer_cast<GeometryChunk>(chunk)->StringViews(

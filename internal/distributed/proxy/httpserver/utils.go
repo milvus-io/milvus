@@ -555,7 +555,6 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error,
 						log.Warn("proxy can not decode datastring with base64", zap.String("WktString:", dataString))
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray, validDataMap
 					}
-					fmt.Println("before unmarshal wkt:", string(WktString))
 					geomT, err := wkt.Unmarshal(string(WktString))
 					if err != nil {
 						log.Warn("proxy change wkt to geomtyr failed!!", zap.String("WktString:", dataString))

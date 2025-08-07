@@ -246,7 +246,7 @@ func (cit *createIndexTask) parseIndexParams(ctx context.Context) error {
 				return "", fmt.Errorf("create auto index on type:%s is not supported", dataType.String())
 			}()
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalid("supported field", err.Error())
 			}
 
 			indexParamsMap[common.IndexTypeKey] = indexType
