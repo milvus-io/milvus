@@ -9,11 +9,13 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -119,6 +121,10 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 
+	log.Info("Retrieve返回结果",
+		zap.Int("resultsCount", len(results)),
+		zap.Int("pinnedSegmentsCount", len(pinnedSegments)))
+
 	reducer := segments.CreateSegCoreReducer(
 		t.req,
 		t.collection.Schema(),
@@ -128,10 +134,21 @@ func (t *QueryTask) Execute() error {
 
 	reduceResults := make([]*segcorepb.RetrieveResults, 0, len(results))
 	querySegments := make([]segments.Segment, 0, len(results))
-	for _, result := range results {
+	for i, result := range results {
+		log.Info("处理结果",
+			zap.Int("index", i),
+			zap.Bool("resultNotNil", result.Result != nil),
+			zap.Bool("segmentNotNil", result.Segment != nil),
+			zap.Int("fieldsCount", len(result.Result.FieldsData)))
+
 		reduceResults = append(reduceResults, result.Result)
 		querySegments = append(querySegments, result.Segment)
 	}
+
+	log.Info("准备调用Reduce",
+		zap.Int("reduceResultsCount", len(reduceResults)),
+		zap.Int("querySegmentsCount", len(querySegments)))
+
 	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(

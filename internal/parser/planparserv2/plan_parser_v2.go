@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -77,6 +78,10 @@ func handleInternal(exprStr string) (ast planparserv2.IExprContext, err error) {
 }
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
+	return handleExprWithAliases(schema, exprStr, nil)
+}
+
+func handleExprWithAliases(schema *typeutil.SchemaHelper, exprStr string, aliasMap map[string]*typeutil.SchemaHelper) (result interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = fmt.Errorf("unsupported expression: %s", exprStr)
@@ -92,6 +97,12 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface
 	}
 
 	visitor := NewParserVisitor(schema)
+	// 设置别名映射
+	if aliasMap != nil {
+		for alias, aliasSchema := range aliasMap {
+			visitor.SetAlias(alias, aliasSchema)
+		}
+	}
 	return ast.Accept(visitor)
 }
 
@@ -140,7 +151,64 @@ func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc
 	return checkFunc(predicate.expr)
 }
 
+// isDistanceQueryExpression 检测是否是距离查询表达式
+func isDistanceQueryExpression(exprStr string) bool {
+	// 检查是否包含distance函数
+	hasDistance := strings.Contains(strings.ToLower(exprStr), "distance(")
+	
+	// 检查是否包含别名语法 (as _distance 或类似)
+	hasAlias := strings.Contains(strings.ToLower(exprStr), " as ")
+	
+	// 检查是否包含别名字段引用 (a.vector, b.vector)
+	hasAliasedField := strings.Contains(exprStr, ".vector") || strings.Contains(exprStr, ".float_vector")
+	
+	return hasDistance && (hasAlias || hasAliasedField)
+}
+
 func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
+	return CreateRetrievePlanWithAliases(schema, exprStr, exprTemplateValues, nil)
+}
+
+func CreateRetrievePlanWithAliases(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, aliasMap map[string]*typeutil.SchemaHelper) (*planpb.PlanNode, error) {
+	// 检查是否是距离查询语法 (包含 distance(...) as ...)
+	if isDistanceQueryExpression(exprStr) {
+		// 对于距离查询，使用宽松的解析规则，支持别名
+		ret := handleExprWithAliases(schema, exprStr, aliasMap)
+		
+		if err := getError(ret); err != nil {
+			return nil, fmt.Errorf("cannot parse distance expression: %s, error: %s", exprStr, err)
+		}
+
+		predicate := getExpr(ret)
+		if predicate == nil {
+			return nil, fmt.Errorf("cannot parse distance expression: %s", exprStr)
+		}
+		
+		// 距离查询不需要检查布尔类型
+		valueMap, err := UnmarshalExpressionValues(exprTemplateValues)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := FillExpressionValue(predicate.expr, valueMap); err != nil {
+			return nil, err
+		}
+
+		// 检测是否为距离查询
+		isDistanceQuery := containsDistanceExpression(predicate.expr)
+
+		planNode := &planpb.PlanNode{
+			Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{
+					Predicates:      predicate.expr,
+					IsDistanceQuery: isDistanceQuery,
+				},
+			},
+		}
+		return planNode, nil
+	}
+	
+	// 标准查询处理
 	expr, err := ParseExpr(schema, exprStr, exprTemplateValues)
 	if err != nil {
 		return nil, err
@@ -154,6 +222,58 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 		},
 	}
 	return planNode, nil
+}
+
+// CreateDistanceQueryPlan 创建距离查询计划
+func CreateDistanceQueryPlan(schema *typeutil.SchemaHelper, exprStr string, fromSources []*planpb.QueryFromSource, outputAliases []string, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
+	expr, err := ParseExpr(schema, exprStr, exprTemplateValues)
+	if err != nil {
+		return nil, err
+	}
+
+	// 检测是否为距离查询
+	isDistanceQuery := containsDistanceExpression(expr)
+
+	planNode := &planpb.PlanNode{
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates:      expr,
+				IsDistanceQuery: isDistanceQuery,
+				FromSources:     fromSources,
+				OutputAliases:   outputAliases,
+			},
+		},
+	}
+	return planNode, nil
+}
+
+// containsDistanceExpression 检测表达式是否包含距离计算
+func containsDistanceExpression(expr *planpb.Expr) bool {
+	if expr == nil {
+		return false
+	}
+
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_DistanceExpr:
+		return true
+	case *planpb.Expr_AliasedExpr:
+		return containsDistanceExpression(e.AliasedExpr.GetExpr())
+	case *planpb.Expr_UnaryExpr:
+		return containsDistanceExpression(e.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		return containsDistanceExpression(e.BinaryExpr.GetLeft()) || containsDistanceExpression(e.BinaryExpr.GetRight())
+	case *planpb.Expr_BinaryArithExpr:
+		return containsDistanceExpression(e.BinaryArithExpr.GetLeft()) || containsDistanceExpression(e.BinaryArithExpr.GetRight())
+	case *planpb.Expr_CallExpr:
+		for _, param := range e.CallExpr.GetFunctionParameters() {
+			if containsDistanceExpression(param) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {

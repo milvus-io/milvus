@@ -28,6 +28,9 @@ expr:
 	| (JSONContainsAny | ArrayContainsAny)'('expr',' expr')'                     # JSONContainsAny
 	| ArrayLength'('(Identifier | JSONIdentifier)')'                             # ArrayLength
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                             # Call
+	| DISTANCE '(' expr ',' expr (',' StringLiteral)? ')'                        # DistanceCall
+	| Identifier '.' Identifier                                                   # AliasedIdentifier
+	| expr AS Identifier                                                          # AliasExpression
 	| expr op1 = (LT | LE) (Identifier | JSONIdentifier) op2 = (LT | LE) expr	 # Range
 	| expr op1 = (GT | GE) (Identifier | JSONIdentifier) op2 = (GT | GE) expr    # ReverseRange
 	| expr op = (LT | LE | GT | GE) expr					                     # Relational
@@ -64,6 +67,8 @@ EXISTS: 'exists' | 'EXISTS';
 TEXTMATCH: 'text_match'|'TEXT_MATCH';
 PHRASEMATCH: 'phrase_match'|'PHRASE_MATCH';
 RANDOMSAMPLE: 'random_sample' | 'RANDOM_SAMPLE';
+DISTANCE: 'distance' | 'DISTANCE';
+AS: 'as' | 'AS';
 
 ADD: '+';
 SUB: '-';

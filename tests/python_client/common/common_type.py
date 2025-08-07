@@ -63,7 +63,6 @@ all_vector_types = [
         DataType.FLOAT16_VECTOR,
         DataType.BFLOAT16_VECTOR,
         DataType.SPARSE_FLOAT_VECTOR,
-        DataType.INT8_VECTOR,
         DataType.BINARY_VECTOR,
     ]
 
@@ -72,7 +71,6 @@ default_metric_for_vector_type = {
     DataType.FLOAT16_VECTOR: "L2",
     DataType.BFLOAT16_VECTOR: "IP",
     DataType.SPARSE_FLOAT_VECTOR: "IP",
-    DataType.INT8_VECTOR: "COSINE",
     DataType.BINARY_VECTOR: "HAMMING",
 }
 
@@ -111,6 +109,8 @@ default_field_name_map = {
 append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
 all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR]
 all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+all_vector_data_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
+default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
 default_resource_group_capacity = 1000000

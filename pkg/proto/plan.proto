@@ -217,6 +217,59 @@ message RandomSampleExpr {
 
 message AlwaysTrueExpr {}
 
+// 距离度量类型枚举 - 便于扩展和类型安全
+enum DistanceMetric {
+  DISTANCE_METRIC_UNSPECIFIED = 0;  // 未指定
+  DISTANCE_METRIC_L2 = 1;           // 欧几里得距离
+  DISTANCE_METRIC_IP = 2;           // 内积距离
+  DISTANCE_METRIC_COSINE = 3;       // 余弦距离
+  DISTANCE_METRIC_HAMMING = 4;      // 汉明距离（二进制向量）
+  DISTANCE_METRIC_JACCARD = 5;      // 杰卡德距离（二进制向量）
+  // 预留位置，便于未来扩展新的距离算法
+}
+
+// 距离表达式 - 支持向量距离计算
+message DistanceExpr {
+  Expr left_vector = 1;                     // 左侧向量表达式
+  Expr right_vector = 2;                    // 右侧向量表达式
+  
+  // 距离度量类型：优先使用枚举，兼容字符串
+  oneof metric {
+    DistanceMetric metric_enum = 3;         // 推荐：使用枚举类型
+    string metric_string = 4;               // 兼容：字符串类型（向后兼容）
+  }
+  
+  map<string, string> parameters = 5;       // 算法参数，如 {"p": "2"} for Minkowski距离
+  string alias = 6;                         // 可选的结果别名，如 "_distance"
+  int32 version = 7;                        // 协议版本，便于兼容性处理
+}
+
+// 别名表达式 - 支持 expr AS alias 语法
+message AliasedExpr {
+  Expr expr = 1;           // 原始表达式
+  string alias = 2;        // 别名
+}
+
+// 查询数据源定义 - 支持 from 语法
+message QueryFromSource {
+  string alias = 1;        // 数据源别名，如 "a", "b"
+  oneof source {
+    string collection_name = 2;              // 集合名称
+    ExternalVectorData external_vectors = 3;  // 外部向量数据
+  }
+  string filter = 4;       // 过滤条件，如 "id IN [1,2,3]"
+}
+
+// 外部向量数据
+message ExternalVectorData {
+  repeated GenericValue vectors = 1;        // 向量数据
+  int32 dimension = 2;                     // 向量维度
+  VectorType vector_type = 3;              // 向量类型
+  map<string, string> metadata = 4;        // 元数据，如 {"source": "external", "format": "dense"}
+  int32 version = 5;                       // 数据格式版本
+  string encoding = 6;                     // 编码格式，如 "float32", "int8"
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -235,6 +288,8 @@ message Expr {
     CallExpr call_expr = 14;
     NullExpr null_expr = 15;
     RandomSampleExpr random_sample_expr = 16;
+    DistanceExpr distance_expr = 17;     // 新增：距离表达式
+    AliasedExpr aliased_expr = 18;       // 新增：别名表达式
   };
   bool is_template = 20;
 }
@@ -251,6 +306,11 @@ message QueryPlanNode {
   Expr predicates = 1;
   bool is_count = 2;
   int64 limit = 3;
+  
+  // 距离查询扩展
+  bool is_distance_query = 4;               // 是否为距离查询
+  repeated QueryFromSource from_sources = 5; // 查询数据源列表
+  repeated string output_aliases = 6;        // 输出字段别名
 };
 
 message PlanNode {

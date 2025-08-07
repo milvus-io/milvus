@@ -28,6 +28,21 @@
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
 
+// Check if the data type is a vector type
+static bool
+IsDistanceVectorDataType(DataType data_type) {
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT:
+        case DataType::VECTOR_BINARY:
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+        case DataType::VECTOR_SPARSE_FLOAT:
+            return true;
+        default:
+            return false;
+    }
+}
+
 std::unique_ptr<VectorPlanNode>
 ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     // TODO: add more buffs
@@ -365,6 +380,63 @@ ProtoParser::ParseNullExprs(const proto::plan::NullExpr& expr_pb) {
 }
 
 expr::TypedExprPtr
+ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
+    LOG_DEBUG("ParseDistanceExprs called - implementing real distance expression parsing");
+    
+    // 验证必要的字段
+    if (!expr_pb.has_left_vector()) {
+        PanicInfo(ExprInvalid, "Distance expression missing left vector");
+    }
+    if (!expr_pb.has_right_vector()) {
+        PanicInfo(ExprInvalid, "Distance expression missing right vector");
+    }
+    
+    // 解析左侧和右侧向量表达式
+    auto left_expr = this->ParseExprs(expr_pb.left_vector(), TypeIsAny);
+    auto right_expr = this->ParseExprs(expr_pb.right_vector(), TypeIsAny);
+    
+    // 验证向量表达式类型
+    if (!IsDistanceVectorDataType(left_expr->type()) && left_expr->type() != DataType::NONE) {
+        LOG_WARN("Left vector expression has non-vector type: {}", left_expr->type());
+    }
+    if (!IsDistanceVectorDataType(right_expr->type()) && right_expr->type() != DataType::NONE) {
+        LOG_WARN("Right vector expression has non-vector type: {}", right_expr->type());
+    }
+    
+    // 创建距离表达式
+    std::shared_ptr<expr::DistanceExpr> distance_expr;
+    
+    // 根据metric字段类型创建表达式
+    switch (expr_pb.metric_case()) {
+        case proto::plan::DistanceExpr::kMetricEnum: {
+            LOG_DEBUG("Using enum metric: {}", proto::plan::DistanceMetric_Name(expr_pb.metric_enum()));
+            distance_expr = std::make_shared<expr::DistanceExpr>(
+                left_expr, right_expr, expr_pb.metric_enum());
+            break;
+        }
+        case proto::plan::DistanceExpr::kMetricString: {
+            LOG_DEBUG("Using string metric: {}", expr_pb.metric_string());
+            distance_expr = std::make_shared<expr::DistanceExpr>(
+                left_expr, right_expr, expr_pb.metric_string());
+            break;
+        }
+        case proto::plan::DistanceExpr::METRIC_NOT_SET: {
+            LOG_DEBUG("No metric specified, using default L2");
+            // 默认使用L2距离
+            distance_expr = std::make_shared<expr::DistanceExpr>(
+                left_expr, right_expr, proto::plan::DistanceMetric::DISTANCE_METRIC_L2);
+            break;
+        }
+        default: {
+            PanicInfo(ExprInvalid, "Unknown metric type in distance expression");
+        }
+    }
+    
+    LOG_DEBUG("ParseDistanceExprs completed successfully: {}", distance_expr->ToString());
+    return distance_expr;
+}
+
+expr::TypedExprPtr
 ProtoParser::ParseBinaryRangeExprs(
     const proto::plan::BinaryRangeExpr& expr_pb) {
     auto& columnInfo = expr_pb.column_info();
@@ -572,6 +644,29 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kNullExpr: {
             result = ParseNullExprs(expr_pb.null_expr());
+            break;
+        }
+        case ppe::kDistanceExpr: {
+            result = ParseDistanceExprs(expr_pb.distance_expr());
+            break;
+        }
+        case ppe::kAliasedExpr: {
+            // 处理别名表达式 (如 distance(...) as _distance)
+            LOG_DEBUG("Parsing AliasedExpr with alias: {}", expr_pb.aliased_expr().alias());
+            LOG_DEBUG("ParseExprs: Processing AliasedExpr");
+
+            const auto& aliased_expr = expr_pb.aliased_expr();
+            if (aliased_expr.has_expr()) {
+                const auto& inner_expr = aliased_expr.expr();
+                // 添加额外的安全检查
+                if (inner_expr.expr_case() != proto::plan::Expr::EXPR_NOT_SET) {
+                    result = ParseExprs(inner_expr);
+                } else {
+                    PanicInfo(ExprInvalid, "AliasedExpr inner expression is not set");
+                }
+            } else {
+                PanicInfo(ExprInvalid, "AliasedExpr missing inner expression");
+            }
             break;
         }
         default: {
