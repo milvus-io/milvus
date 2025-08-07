@@ -63,6 +63,7 @@ all_vector_types = [
         DataType.FLOAT16_VECTOR,
         DataType.BFLOAT16_VECTOR,
         DataType.SPARSE_FLOAT_VECTOR,
+        DataType.INT8_VECTOR,
         DataType.BINARY_VECTOR,
     ]
 
@@ -71,6 +72,7 @@ default_metric_for_vector_type = {
     DataType.FLOAT16_VECTOR: "L2",
     DataType.BFLOAT16_VECTOR: "IP",
     DataType.SPARSE_FLOAT_VECTOR: "IP",
+    DataType.INT8_VECTOR: "COSINE",
     DataType.BINARY_VECTOR: "HAMMING",
 }
 
