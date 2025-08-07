@@ -402,21 +402,8 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	for i, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
-
-		// 添加详细的调试信息
-		log.Info("MergeSegcoreRetrieveResults处理结果",
-			zap.Int("index", i),
-			zap.Bool("resultNotNil", r != nil),
-			zap.Int("offsetCount", len(r.GetOffset())),
-			zap.Int("idSize", size),
-			zap.Int("fieldsDataCount", len(r.GetFieldsData())))
-
 		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
-			log.Info("filter out invalid retrieve result",
-				zap.Int("index", i),
-				zap.Bool("resultIsNil", r == nil),
-				zap.Int("offsetLen", len(r.GetOffset())),
-				zap.Int("idSize", size))
+			log.Debug("filter out invalid retrieve result")
 			continue
 		}
 		tr, err := NewTimestampedRetrieveResult(r)
