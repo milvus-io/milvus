@@ -318,9 +318,6 @@ func (mr *MilvusRoles) Run() {
 	thw.Start()
 	defer thw.Stop()
 
-	internalmetrics.InitHolmes()
-	defer internalmetrics.CloseHolmes()
-
 	// only standalone enable localMsg
 	if mr.Local {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
@@ -354,6 +351,9 @@ func (mr *MilvusRoles) Run() {
 		paramtable.Init()
 		paramtable.SetRole(mr.ServerType)
 	}
+
+	internalmetrics.InitHolmes()
+	defer internalmetrics.CloseHolmes()
 
 	// init tracer before run any component
 	tracer.Init()
