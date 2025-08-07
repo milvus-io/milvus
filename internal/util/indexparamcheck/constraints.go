@@ -52,8 +52,8 @@ const (
 )
 
 var (
-	FloatVectorMetrics  = []string{metric.L2, metric.IP, metric.COSINE}                                        // const
-	BinaryVectorMetrics = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, , metric.MHJACCARD} // const
+	FloatVectorMetrics  = []string{metric.L2, metric.IP, metric.COSINE}                                                          // const
+	BinaryVectorMetrics = []string{metric.HAMMING, metric.JACCARD, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE, metric.MHJACCARD} // const
 )
 
 // BinIDMapMetrics is a set of all metric types supported for binary vector.
