@@ -62,7 +62,7 @@ CollectionIndexMeta::GetIndexMaxRowCount() const {
 }
 
 bool
-CollectionIndexMeta::HasFiled(FieldId fieldId) const {
+CollectionIndexMeta::HasField(FieldId fieldId) const {
     return fieldMetas_.count(fieldId);
 }
 

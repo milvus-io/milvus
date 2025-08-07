@@ -81,9 +81,12 @@ class IndexBase {
     }
 
     // TODO: how to get the cell byte size?
-    virtual size_t
+    virtual cachinglayer::ResourceUsage
     CellByteSize() const {
-        return cell_size_;
+        if (mmap_file_raii_) {
+            return {0, static_cast<int64_t>(cell_size_)};
+        }
+        return {static_cast<int64_t>(cell_size_), 0};
     }
 
     virtual void
