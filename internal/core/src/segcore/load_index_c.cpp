@@ -98,7 +98,6 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info,
     }
 }
 
-
 CStatus
 appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     SCOPE_CGO_CALL_METRIC();

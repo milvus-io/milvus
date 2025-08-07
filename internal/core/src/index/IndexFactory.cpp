@@ -521,11 +521,13 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             case DataType::VECTOR_ARRAY: {
-                ThrowInfo(Unsupported, "VECTOR_ARRAY for DiskAnnIndex is not supported");
+                ThrowInfo(Unsupported,
+                          "VECTOR_ARRAY for DiskAnnIndex is not supported");
             }
             case DataType::VECTOR_INT8: {
                 // TODO caiyd, not support yet
-                ThrowInfo(Unsupported, "VECTOR_INT8 for DiskAnnIndex is not supported");
+                ThrowInfo(Unsupported,
+                          "VECTOR_INT8 for DiskAnnIndex is not supported");
             }
             default:
                 ThrowInfo(

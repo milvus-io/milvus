@@ -35,6 +35,7 @@ struct LoadIndexInfo {
     int64_t segment_id;
     int64_t field_id;
     DataType field_type;
+    // The element type of the field. It's DataType::NONE if field_type is array/vector_array.
     DataType element_type;
     bool enable_mmap;
     std::string mmap_dir_path;

@@ -540,8 +540,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_float_ =
-                std::make_shared<SetElement<float>>(expr_->vals_);
+            arg_set_float_ = std::make_shared<SetElement<float>>(expr_->vals_);
         }
         arg_inited_ = true;
     }

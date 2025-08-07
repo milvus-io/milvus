@@ -103,8 +103,8 @@ const (
 	floatVecField  = "fVec"
 	binaryVecField = "bVec"
 	structField    = "structField"
-	testStructId   = "structI32"
-	testStructFVec = "structFVec"
+	subFieldI32    = "structI32"
+	subFieldFVec   = "structFVec"
 )
 
 const (
@@ -379,7 +379,7 @@ func constructTestCollectionSchema(collectionName, int64Field, floatVecField, bi
 	// struct schema fields
 	sId := &schemapb.FieldSchema{
 		FieldID:      104,
-		Name:         testStructId,
+		Name:         subFieldI32,
 		IsPrimaryKey: false,
 		Description:  "",
 		DataType:     schemapb.DataType_Array,
@@ -395,7 +395,7 @@ func constructTestCollectionSchema(collectionName, int64Field, floatVecField, bi
 	}
 	sFVec := &schemapb.FieldSchema{
 		FieldID:      105,
-		Name:         testStructFVec,
+		Name:         subFieldFVec,
 		IsPrimaryKey: false,
 		Description:  "",
 		DataType:     schemapb.DataType_ArrayOfVector,
@@ -1708,7 +1708,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("create index for embedding list field", func(t *testing.T) {
 		defer wg.Done()
-		req := constructTestCreateIndexRequest(dbName, collectionName, schemapb.DataType_ArrayOfVector, testStructFVec, dim, nlist)
+		req := constructTestCreateIndexRequest(dbName, collectionName, schemapb.DataType_ArrayOfVector, subFieldFVec, dim, nlist)
 
 		resp, err := proxy.CreateIndex(ctx, req)
 		assert.NoError(t, err)
@@ -1742,7 +1742,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      testStructFVec,
+			FieldName:      subFieldFVec,
 			IndexName:      testStructFVecIndexName,
 		})
 		err = merr.CheckRPCCall(resp, err)
@@ -1759,7 +1759,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      testStructFVec,
+			FieldName:      subFieldFVec,
 			IndexName:      testStructFVecIndexName,
 		})
 		err = merr.CheckRPCCall(resp, err)
@@ -1788,7 +1788,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      testStructFVec,
+			FieldName:      subFieldFVec,
 			IndexName:      testStructFVecIndexName,
 		})
 		assert.NoError(t, err)
@@ -1802,7 +1802,7 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-			FieldName:      testStructFVec,
+			FieldName:      subFieldFVec,
 			IndexName:      testStructFVecIndexName,
 		})
 		assert.NoError(t, err)
@@ -1999,7 +1999,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("embedding list search", func(t *testing.T) {
 		defer wg.Done()
-		req := constructTestEmbeddingListSearchRequest(dbName, collectionName, testStructFVec, expr, nq, nprobe, topk, roundDecimal, dim)
+		req := constructTestEmbeddingListSearchRequest(dbName, collectionName, subFieldFVec, expr, nq, nprobe, topk, roundDecimal, dim)
 
 		resp, err := proxy.Search(ctx, req)
 		assert.NoError(t, err)

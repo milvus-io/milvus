@@ -395,6 +395,14 @@ class VectorArrayChunk : public Chunk {
           dim_(dim),
           element_type_(element_type) {
         offsets_lens_ = reinterpret_cast<uint32_t*>(data);
+
+        auto offset = 0;
+        lims_.reserve(row_nums_ + 1);
+        lims_.push_back(offset);
+        for (int64_t i = 0; i < row_nums_; i++) {
+            offset += offsets_lens_[i * 2 + 1];
+            lims_.push_back(offset);
+        }
     }
 
     VectorArrayView
@@ -429,25 +437,18 @@ class VectorArrayChunk : public Chunk {
         return data_ + offsets_lens_[0];
     }
 
-    // The name 'Lims' is consistent with knowhere::DataSet::SetLims which describes the number of vectors
-    // in each vector array (embedding list). This is needed as vectors are flattened in the chunk.
-    const std::vector<size_t>
+    const size_t*
     Lims() const {
-        auto offset = 0;
-        std::vector<size_t> offsets;
-        offsets.reserve(row_nums_ + 1);
-        offsets.push_back(offset);
-        for (int64_t i = 0; i < row_nums_; i++) {
-            offset += offsets_lens_[i * 2 + 1];
-            offsets.push_back(offset);
-        }
-        return offsets;
+        return lims_.data();
     }
 
  private:
     int64_t dim_;
     uint32_t* offsets_lens_;
     milvus::DataType element_type_;
+    // The name 'Lims' is consistent with knowhere::DataSet::SetLims which describes the number of vectors
+    // in each vector array (embedding list). This is needed as vectors are flattened in the chunk.
+    std::vector<size_t> lims_;
 };
 
 class SparseFloatVectorChunk : public Chunk {

@@ -153,15 +153,13 @@ SearchOnSealedColumn(const Schema& schema,
         auto raw_dataset =
             query::dataset::RawDataset{offset, dim, chunk_size, vec_data};
 
-        PinWrapper<std::vector<size_t>> offset_pw;
-        std::vector<size_t> offsets;
+        PinWrapper<const size_t*> lims_pw;
         if (data_type == DataType::VECTOR_ARRAY) {
             AssertInfo(query_lims != nullptr,
                        "query_lims is nullptr, but data_type is vector array");
 
-            offset_pw = column->VectorArrayLims(i);
-            offsets = offset_pw.get();
-            raw_dataset.raw_data_lims = offsets.data();
+            lims_pw = column->VectorArrayLims(i);
+            raw_dataset.raw_data_lims = lims_pw.get();
         }
 
         if (milvus::exec::UseVectorIterator(search_info)) {

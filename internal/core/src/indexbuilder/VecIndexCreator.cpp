@@ -35,7 +35,7 @@ VecIndexCreator::VecIndexCreator(
     const storage::FileManagerContext& file_manager_context)
     : config_(config), data_type_(data_type) {
     if (data_type == DataType::VECTOR_ARRAY) {
-        // TODO(SpadeA): record dim in config as there's the dim cannot be infered in
+        // TODO(SpadeA): record dim in config as there's the dim cannot be inferred in
         // parquet due to the serialize method of vector array.
         // This should be a temp solution.
         config_[DIM_KEY] = file_manager_context.indexMeta.dim;
