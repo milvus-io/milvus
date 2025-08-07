@@ -192,11 +192,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		}},
 	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
-		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-			return s.mq, nil
-		},
-	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 }
@@ -214,11 +210,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.rootPath = s.Suite.T().Name()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, &msgstream.MockMqFactory{
-		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-			return s.mq, nil
-		},
-	}, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -806,11 +798,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.workerManager,
 			s.manager,
 			s.loader,
-			&msgstream.MockMqFactory{
-				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
-					return s.mq, nil
-				},
-			}, 10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+			10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())
@@ -1522,39 +1510,6 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	delegator.deleteBuffer.UnRegister(uint64(21))
 	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
-}
-
-func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	s.mq.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mq.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mq.EXPECT().Close()
-	ch := make(chan *msgstream.ConsumeMsgPack, 10)
-	s.mq.EXPECT().Chan().Return(ch)
-
-	oracle := pkoracle.NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-	oracle.UpdateBloomFilter([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)})
-
-	baseMsg := &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete}
-
-	datas := []*msgstream.MsgPack{
-		{EndTs: 10, EndPositions: []*msgpb.MsgPosition{{Timestamp: 10}}, Msgs: []msgstream.TsMsg{
-			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 1, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{1}}},
-			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: -1, PrimaryKeys: storage.ParseInt64s2IDs(2), Timestamps: []uint64{5}}},
-			// invalid msg because partition wrong
-			&msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 2, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{10}}},
-		}},
-	}
-
-	for _, data := range datas {
-		ch <- msgstream.BuildConsumeMsgPack(data)
-	}
-
-	result, err := s.delegator.readDeleteFromMsgstream(ctx, &msgpb.MsgPosition{Timestamp: 0}, 10, oracle)
-	s.NoError(err)
-	s.Equal(2, len(result.Pks))
 }
 
 func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {

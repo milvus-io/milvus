@@ -3858,7 +3858,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	scheduler, err := newTaskScheduler(ctx, node.tsoAllocator, factory)
+	scheduler, err := newTaskScheduler(ctx, node.tsoAllocator)
 	assert.NoError(t, err)
 	node.sched = scheduler
 	err = node.sched.Start()

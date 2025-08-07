@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -47,6 +48,7 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	gin.SetMode(gin.TestMode)
+	streaming.SetupNoopWALForTest()
 	code := m.Run()
 	os.Exit(code)
 }

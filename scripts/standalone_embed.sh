@@ -47,6 +47,7 @@ EOF
         -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
         -e ETCD_CONFIG_PATH=/milvus/configs/embedEtcd.yaml \
         -e COMMON_STORAGETYPE=local \
+        -e DEPLOY_MODE=STANDALONE \
         -v $(pwd)/volumes/milvus:/var/lib/milvus \
         -v $(pwd)/embedEtcd.yaml:/milvus/configs/embedEtcd.yaml \
         -v $(pwd)/user.yaml:/milvus/configs/user.yaml \
@@ -58,7 +59,7 @@ EOF
         --health-start-period=90s \
         --health-timeout=20s \
         --health-retries=3 \
-        milvusdb/milvus:v2.5.16 \
+        milvusdb/milvus:v2.6.0 \
         milvus run standalone  1> /dev/null
 }
 
@@ -131,11 +132,17 @@ delete_container() {
 }
 
 delete() {
-    delete_container
-    sudo rm -rf $(pwd)/volumes
-    sudo rm -rf $(pwd)/embedEtcd.yaml
-    sudo rm -rf $(pwd)/user.yaml
-    echo "Delete successfully."
+    read -p "Please confirm if you'd like to proceed with the delete. This operation will delete the container and data. Confirm with 'y' for yes or 'n' for no. > " check
+    if [ "$check" == "y" ] ||[ "$check" == "Y" ];then
+        delete_container
+        sudo rm -rf $(pwd)/volumes
+        sudo rm -rf $(pwd)/embedEtcd.yaml
+        sudo rm -rf $(pwd)/user.yaml
+        echo "Delete successfully."
+    else
+        echo "Exit delete"
+        exit 0
+    fi
 }
 
 upgrade() {

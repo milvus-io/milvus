@@ -182,6 +182,7 @@ func newMockedConsumerImpl(t *testing.T, ctx context.Context, h message.Handler)
 func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *streamingpb.ConsumeResponse {
 	msg.WithTimeTick(tsoutil.GetCurrentTime())
 	msg.WithLastConfirmed(walimplstest.NewTestMessageID(0))
+	pb := msg.IntoMessageProto()
 	return &streamingpb.ConsumeResponse{
 		Response: &streamingpb.ConsumeResponse_Consume{
 			Consume: &streamingpb.ConsumeMessageReponse{
@@ -189,8 +190,8 @@ func newConsumeResponse(id message.MessageID, msg message.MutableMessage) *strea
 					Id: &messagespb.MessageID{
 						Id: id.Marshal(),
 					},
-					Payload:    msg.Payload(),
-					Properties: msg.Properties().ToRawMap(),
+					Payload:    pb.Payload,
+					Properties: pb.Properties,
 				},
 			},
 		},

@@ -34,10 +34,10 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	if w.Channel().AccessMode != types.AccessModeRW {
 		panic("write on a wal that is not in read-write mode")
 	}
-
+	pb := msg.IntoMessageProto()
 	id, err := w.p.SendForStreamingService(&common.ProducerMessage{
-		Payload:    msg.Payload(),
-		Properties: msg.Properties().ToRawMap(),
+		Payload:    pb.Payload,
+		Properties: pb.Properties,
 	})
 	if err != nil {
 		w.Log().RatedWarn(1, "send message to rmq failed", zap.Error(err))

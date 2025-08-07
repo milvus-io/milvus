@@ -2068,6 +2068,13 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool is_proxy_column) {
     {
         std::unique_lock lck(mutex_);
+        AssertInfo(SystemProperty::Instance().IsSystem(field_id) ||
+                       !get_bit(field_data_ready_bitset_, field_id),
+                   "non system field {} data already loaded",
+                   field_id.get());
+        AssertInfo(fields_.count(field_id) == 0,
+                   "field {} column already exists",
+                   field_id.get());
         fields_.emplace(field_id, column);
         if (enable_mmap) {
             mmap_fields_.insert(field_id);
@@ -2097,7 +2104,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     // set pks to offset
     if (schema_->get_primary_field_id() == field_id && !is_sorted_by_pk_) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");
-        AssertInfo(insert_record_.empty_pks(), "already exists");
+        AssertInfo(insert_record_.empty_pks(),
+                   "primary key records already exists, current field id {}",
+                   field_id.get());
         insert_record_.insert_pks(data_type, column.get());
         insert_record_.seal_pks();
     }
@@ -2105,6 +2114,9 @@ ChunkedSegmentSealedImpl::load_field_data_common(
     bool generated_interim_index = generate_interim_index(field_id, num_rows);
 
     std::unique_lock lck(mutex_);
+    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+               "field {} data already loaded",
+               field_id.get());
     set_bit(field_data_ready_bitset_, field_id, true);
     update_row_count(num_rows);
     if (generated_interim_index) {
