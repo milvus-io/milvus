@@ -33,10 +33,11 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
 
-func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig) (*PackedWriter, error) {
+func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedWriter, error) {
 	cFilePaths := make([]*C.char, len(filePaths))
 	for i, path := range filePaths {
 		cFilePaths[i] = C.CString(path)
@@ -71,6 +72,18 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 	var cPackedWriter C.CPackedWriter
 	var status C.CStatus
 
+	var pluginContextPtr *C.CPluginContext
+	if storagePluginContext != nil {
+		ckey := C.CString(storagePluginContext.EncryptionKey)
+		defer C.free(unsafe.Pointer(ckey))
+
+		var pluginContext C.CPluginContext
+		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
+		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
+		pluginContext.key = ckey
+		pluginContextPtr = &pluginContext
+	}
+
 	if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
@@ -103,9 +116,9 @@ func NewPackedWriter(filePaths []string, schema *arrow.Schema, bufferSize int64,
 		defer C.free(unsafe.Pointer(cStorageConfig.sslCACert))
 		defer C.free(unsafe.Pointer(cStorageConfig.region))
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
-		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter)
+		status = C.NewPackedWriterWithStorageConfig(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, cStorageConfig, &cPackedWriter, pluginContextPtr)
 	} else {
-		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter)
+		status = C.NewPackedWriter(cSchema, cBufferSize, cFilePathsArray, cNumPaths, cMultiPartUploadSize, cColumnGroups, &cPackedWriter, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

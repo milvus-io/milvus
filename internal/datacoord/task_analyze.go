@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -35,17 +36,24 @@ type analyzeTask struct {
 
 	times *taskcommon.Times
 
-	meta *meta
+	schema *schemapb.CollectionSchema
+	meta   *meta
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
 
 func newAnalyzeTask(t *indexpb.AnalyzeTask, meta *meta) *analyzeTask {
-	return &analyzeTask{
+	task := &analyzeTask{
 		AnalyzeTask: t,
 		times:       taskcommon.NewTimes(),
 		meta:        meta,
 	}
+	coll := meta.GetCollection(t.CollectionID)
+	if coll != nil {
+		task.schema = coll.Schema
+	}
+
+	return task
 }
 
 func (at *analyzeTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -142,6 +150,7 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		Version:       task.Version + 1,
 		StorageConfig: createStorageConfig(),
 	}
+	WrapPluginContext(task.CollectionID, at.schema.GetProperties(), req)
 
 	var err error
 	defer func() {

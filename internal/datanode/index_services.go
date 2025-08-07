@@ -98,7 +98,11 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager)
+	pluginContext, err := ParseCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		log.Warn("DataNode failed to schedule",
@@ -302,7 +306,13 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 		metrics.DataNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		return merr.Status(err), nil
 	}
-	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager)
+
+	pluginContext, err := ParseCPluginContext(req.GetPluginContext(), req.GetCollectionID())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
 		log.Warn("DataNode failed to schedule",

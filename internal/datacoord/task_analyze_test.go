@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type analyzeTaskSuite struct {
@@ -81,6 +82,7 @@ func (s *analyzeTaskSuite) SetupSuite() {
 
 	s.mt = &meta{
 		analyzeMeta: analyzeMt,
+		collections: typeutil.NewConcurrentMap[int64, *collectionInfo](),
 	}
 }
 

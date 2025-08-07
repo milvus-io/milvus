@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -60,11 +61,19 @@ const (
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
 	CipherConfigKeyKmsKeyArn   = "cipher.kmsKeyArn"
+	CipherConfigUnsafeEZK      = "cipher.ezk"
 )
 
 type EZ struct {
 	EzID         int64
 	CollectionID int64
+}
+
+func (ez *EZ) AsMessageConfig() *message.CipherConfig {
+	if ez == nil {
+		return nil
+	}
+	return &message.CipherConfig{EzID: ez.EzID, CollectionID: ez.CollectionID}
 }
 
 type CipherContext struct {
@@ -78,6 +87,7 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 			zap.Any("insertCodec collID", collectionID),
 			zap.Any("properties", collProperties),
 		)
+		return nil
 	}
 	for _, property := range collProperties {
 		if property.Key == EncryptionEzIDKey {
