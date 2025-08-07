@@ -20,6 +20,7 @@
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
 #include "exec/expression/function/FunctionFactory.h"
+#include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
