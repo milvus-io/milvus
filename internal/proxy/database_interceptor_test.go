@@ -53,6 +53,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.LoadCollectionRequest{},
 			&milvuspb.ReleaseCollectionRequest{},
 			&milvuspb.DescribeCollectionRequest{},
+			&milvuspb.BatchDescribeCollectionRequest{},
 			&milvuspb.GetStatisticsRequest{},
 			&milvuspb.GetCollectionStatisticsRequest{},
 			&milvuspb.ShowCollectionsRequest{},

@@ -82,10 +82,12 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		meta.ListCollectionsFunc = func(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
 			return []*model.Collection{
 				{
-					Name: "test coll",
+					Name:      "test coll",
+					ShardsNum: 2,
 				},
 				{
-					Name: "test coll2",
+					Name:      "test coll2",
+					ShardsNum: 3,
 				},
 			}, nil
 		}
@@ -103,6 +105,8 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, int32(2), task.Rsp.GetShardsNum()[0])
+		assert.Equal(t, int32(3), task.Rsp.GetShardsNum()[1])
 	})
 }
 
@@ -581,6 +585,7 @@ func TestShowCollectionsAuth(t *testing.T) {
 				CollectionID: 100,
 				Name:         "test_collection",
 				CreateTime:   tsoutil.GetCurrentTime(),
+				ShardsNum:    2,
 			},
 		}, nil).Once()
 
@@ -594,5 +599,6 @@ func TestShowCollectionsAuth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
 		assert.Equal(t, "test_collection", task.Rsp.GetCollectionNames()[0])
+		assert.Equal(t, int32(2), task.Rsp.GetShardsNum()[0])
 	})
 }
