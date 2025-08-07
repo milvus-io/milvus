@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 )
 
 func Test_IndexEngineVersionManager_GetMergedIndexVersion(t *testing.T) {

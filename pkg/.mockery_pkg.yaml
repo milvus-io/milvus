@@ -47,3 +47,14 @@ packages:
       Cipher:
       Encryptor:
       Decryptor:
+  github.com/milvus-io/milvus/pkg/v2/streaming/util/service/discoverer:
+    interfaces:
+      Discoverer:
+      AssignmentDiscoverWatcher:
+  github.com/milvus-io/milvus/pkg/v2/streaming/util/service/lazygrpc:
+    interfaces:
+      Service:
+  github.com/milvus-io/milvus/pkg/v2/streaming/util/service/resolver:
+    interfaces:
+      Resolver:
+      Builder:

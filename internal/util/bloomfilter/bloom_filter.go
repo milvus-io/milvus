@@ -23,7 +23,7 @@ import (
 	"github.com/zeebo/xxh3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/json"
 )
 
 type BFType int

@@ -16,8 +16,8 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	"github.com/milvus-io/milvus/cmd/tools/migration/console"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 )
 
 type Runner struct {

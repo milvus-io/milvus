@@ -11,7 +11,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
+	sessionutil "github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 
 	x509 "crypto/x509"
 )
@@ -530,7 +530,8 @@ func (_c *MockGrpcClient_SetSession_Call[T]) RunAndReturn(run func(*sessionutil.
 func NewMockGrpcClient[T grpcclient.GrpcComponent](t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockGrpcClient[T] {
+},
+) *MockGrpcClient[T] {
 	mock := &MockGrpcClient[T]{}
 	mock.Mock.Test(t)
 
