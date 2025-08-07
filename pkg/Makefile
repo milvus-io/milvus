@@ -12,6 +12,7 @@ getdeps:
 	$(MAKE) -C $(ROOTPATH) getdeps
 
 generate-mockery: getdeps
+	rm -r $(PWD)/mocks/* || true
 	$(INSTALL_PATH)/mockery --config $(PWD)/.mockery_pkg.yaml
 	$(INSTALL_PATH)/mockery --name=MsgStream --dir=$(PWD)/mq/msgstream --output=$(PWD)/mq/msgstream --filename=mock_msgstream.go --with-expecter --structname=MockMsgStream --outpkg=msgstream --inpackage
 	$(INSTALL_PATH)/mockery --name=Factory --dir=$(PWD)/mq/msgstream --output=$(PWD)/mq/msgstream --filename=mock_msgstream_factory.go --with-expecter --structname=MockFactory --outpkg=msgstream --inpackage

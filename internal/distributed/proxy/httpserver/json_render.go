@@ -19,7 +19,7 @@ package httpserver
 import (
 	"net/http"
 
-	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/json"
 )
 
 var jsonContentType = []string{"application/json; charset=utf-8"}

@@ -3,7 +3,7 @@
 package datacoord
 
 import (
-	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
+	sessionutil "github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -382,7 +382,8 @@ func (_c *MockVersionManager_Update_Call) RunAndReturn(run func(*sessionutil.Ses
 func NewMockVersionManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockVersionManager {
+},
+) *MockVersionManager {
 	mock := &MockVersionManager{}
 	mock.Mock.Test(t)
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	kvfactory "github.com/milvus-io/milvus/pkg/v2/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"

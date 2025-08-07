@@ -24,7 +24,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	kvfactory "github.com/milvus-io/milvus/pkg/v2/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
