@@ -118,7 +118,9 @@ class DeletedRecord {
             }
         }
         search_pk_func_(
-            pks, timestamps, [&](SegOffset offset, Timestamp delete_ts) {
+            pks,
+            timestamps,
+            [&](const SegOffset offset, const Timestamp delete_ts) {
                 auto row_id = offset.get();
                 // if already deleted, no need to add new record
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {

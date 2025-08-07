@@ -45,7 +45,8 @@ TEST(DeleteMVCC, common_case) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -170,7 +171,8 @@ TEST(DeleteMVCC, delete_exist_duplicate_pks) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -294,7 +296,8 @@ TEST(DeleteMVCC, snapshot) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -351,7 +354,8 @@ TEST(DeleteMVCC, insert_after_snapshot) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
@@ -455,7 +459,8 @@ TEST(DeleteMVCC, perform) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);
