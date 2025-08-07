@@ -1410,3 +1410,176 @@ func (s *DistributionSuite) TestSyncTargetVersion_RedundantGrowingLogic() {
 		})
 	}
 }
+
+func TestPinReadableSegments(t *testing.T) {
+	// Create test distribution
+	queryView := NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion)
+	dist := NewDistribution("test-channel", queryView)
+
+	// Add some test segments
+	dist.AddDistributions([]SegmentEntry{
+		{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1},
+		{NodeID: 1, SegmentID: 2, PartitionID: 1, Version: 1},
+	}...)
+
+	// Setup query view
+	dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1000,
+		SealedSegmentRowCount: map[int64]int64{1: 100, 2: 100},
+		GrowingInTarget:       []int64{},
+	}, []int64{1})
+
+	// Test case 1: requireFullResult=true, Serviceable=false
+	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
+	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.8).Build()
+
+	sealed, growing, _, _, err := dist.PinReadableSegments(1.0, 1)
+
+	assert.Error(t, err)
+	assert.Nil(t, sealed)
+	assert.Nil(t, growing)
+	assert.Contains(t, err.Error(), "channel distribution is not serviceable")
+
+	// Test case 2: requireFullResult=true, Serviceable=true
+	mockServiceable.UnPatch()
+	mockServiceable = mockey.Mock((*channelQueryView).Serviceable).Return(true).Build()
+
+	sealed, growing, _, _, err = dist.PinReadableSegments(1.0, 1)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, sealed)
+	assert.NotNil(t, growing)
+
+	// Test case 3: requireFullResult=false, loadRatioSatisfy=false
+	mockServiceable.UnPatch()
+	mockGetLoadedRatio.UnPatch()
+	mockGetLoadedRatio = mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.5).Build()
+
+	sealed, growing, _, _, err = dist.PinReadableSegments(0.8, 1)
+
+	assert.Error(t, err)
+	assert.Nil(t, sealed)
+	assert.Nil(t, growing)
+	assert.Contains(t, err.Error(), "channel distribution is not serviceable")
+
+	// Test case 4: requireFullResult=false, loadRatioSatisfy=true
+	mockGetLoadedRatio.UnPatch()
+	mockGetLoadedRatio = mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.9).Build()
+	defer mockGetLoadedRatio.UnPatch()
+
+	sealed, growing, _, _, err = dist.PinReadableSegments(0.8, 1)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, sealed)
+	assert.NotNil(t, growing)
+}
+
+func TestPinReadableSegments_ServiceableLogic(t *testing.T) {
+	// Create test distribution
+	queryView := NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion)
+	dist := NewDistribution("test-channel", queryView)
+
+	// Add test segments
+	dist.AddDistributions([]SegmentEntry{
+		{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1},
+	}...)
+
+	// Setup query view
+	dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1000,
+		SealedSegmentRowCount: map[int64]int64{1: 100},
+		GrowingInTarget:       []int64{},
+	}, []int64{1})
+
+	// Test case: requireFullResult=true, Serviceable=false, GetLoadedRatio=1.0
+	// This tests the case where load ratio is satisfied but serviceable is false
+	mockServiceable := mockey.Mock((*channelQueryView).Serviceable).Return(false).Build()
+	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(1.0).Build()
+	defer mockServiceable.UnPatch()
+	defer mockGetLoadedRatio.UnPatch()
+
+	sealed, growing, _, _, err := dist.PinReadableSegments(1.0, 1)
+
+	assert.Error(t, err)
+	assert.Nil(t, sealed)
+	assert.Nil(t, growing)
+	assert.Contains(t, err.Error(), "channel distribution is not serviceable")
+}
+
+func TestPinReadableSegments_LoadRatioLogic(t *testing.T) {
+	// Create test distribution
+	queryView := NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion)
+	dist := NewDistribution("test-channel", queryView)
+
+	// Add test segments
+	dist.AddDistributions([]SegmentEntry{
+		{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1},
+	}...)
+
+	// Setup query view
+	dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1000,
+		SealedSegmentRowCount: map[int64]int64{1: 100},
+		GrowingInTarget:       []int64{},
+	}, []int64{1})
+
+	// Test case: requireFullResult=false, loadRatioSatisfy=false
+	// This tests the case where partial result is requested but load ratio is insufficient
+	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.3).Build()
+	defer mockGetLoadedRatio.UnPatch()
+
+	sealed, growing, _, _, err := dist.PinReadableSegments(0.5, 1)
+
+	assert.Error(t, err)
+	assert.Nil(t, sealed)
+	assert.Nil(t, growing)
+	assert.Contains(t, err.Error(), "channel distribution is not serviceable")
+}
+
+func TestPinReadableSegments_EdgeCases(t *testing.T) {
+	// Create test distribution
+	queryView := NewChannelQueryView(nil, nil, []int64{1}, initialTargetVersion)
+	dist := NewDistribution("test-channel", queryView)
+
+	// Add test segments
+	dist.AddDistributions([]SegmentEntry{
+		{NodeID: 1, SegmentID: 1, PartitionID: 1, Version: 1},
+	}...)
+
+	// Setup query view
+	dist.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         1000,
+		SealedSegmentRowCount: map[int64]int64{1: 100},
+		GrowingInTarget:       []int64{},
+	}, []int64{1})
+
+	// Test case 1: requiredLoadRatio = 0.0 (edge case)
+	mockGetLoadedRatio := mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
+
+	sealed, growing, _, _, err := dist.PinReadableSegments(0.0, 1)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, sealed)
+	assert.NotNil(t, growing)
+
+	// Test case 2: requiredLoadRatio = 0.0, GetLoadedRatio = 0.0 (exact match)
+	mockGetLoadedRatio.UnPatch()
+	mockGetLoadedRatio = mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.0).Build()
+
+	sealed, growing, _, _, err = dist.PinReadableSegments(0.0, 1)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, sealed)
+	assert.NotNil(t, growing)
+
+	// Test case 3: requiredLoadRatio = 0.0, GetLoadedRatio = 0.1 (satisfied)
+	mockGetLoadedRatio.UnPatch()
+	mockGetLoadedRatio = mockey.Mock((*channelQueryView).GetLoadedRatio).Return(0.1).Build()
+	defer mockGetLoadedRatio.UnPatch()
+
+	sealed, growing, _, _, err = dist.PinReadableSegments(0.0, 1)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, sealed)
+	assert.NotNil(t, growing)
+}
