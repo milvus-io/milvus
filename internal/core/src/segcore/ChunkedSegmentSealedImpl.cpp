@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
@@ -558,7 +559,7 @@ ChunkedSegmentSealedImpl::num_rows_until_chunk(FieldId field_id,
 bool
 ChunkedSegmentSealedImpl::is_mmap_field(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    return mmap_fields_.find(field_id) != mmap_fields_.end();
+    return mmap_field_ids_.find(field_id) != mmap_field_ids_.end();
 }
 
 PinWrapper<SpanBase>
@@ -2136,7 +2137,7 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 bool
 ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
                                                  int64_t num_rows) {
-    if (col_index_meta_ == nullptr || !col_index_meta_->HasFiled(field_id)) {
+    if (col_index_meta_ == nullptr || !col_index_meta_->HasField(field_id)) {
         return false;
     }
     auto& field_meta = schema_->operator[](field_id);
@@ -2297,7 +2298,7 @@ ChunkedSegmentSealedImpl::load_field_data_common(
                    field_id.get());
         fields_.emplace(field_id, column);
         if (enable_mmap) {
-            mmap_fields_.insert(field_id);
+            mmap_field_ids_.insert(field_id);
         }
     }
     // system field only needs to emplace column to fields_ map
@@ -2360,11 +2361,7 @@ ChunkedSegmentSealedImpl::init_timestamp_index(
     // use special index
     std::unique_lock lck(mutex_);
     AssertInfo(insert_record_.timestamps_.empty(), "already exists");
-    insert_record_.timestamps_.set_data_raw(
-        0, timestamps.data(), timestamps.size());
-    insert_record_.timestamp_index_ = std::move(index);
-    AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
-               "num chunk not equal to 1 for sealed segment");
+    insert_record_.init_timestamps(timestamps, index);
     stats_.mem_size += sizeof(Timestamp) * num_rows;
 }
 

@@ -61,9 +61,9 @@ struct FieldChunkMetrics {
         return {lower_bound, upper_bound};
     }
 
-    size_t
+    cachinglayer::ResourceUsage
     CellByteSize() const {
-        return 0;
+        return {0, 0};
     }
 };
 
@@ -91,11 +91,11 @@ class FieldChunkMetricsTranslator
     cell_id_of(milvus::cachinglayer::uid_t uid) const override {
         return uid;
     }
-    milvus::cachinglayer::ResourceUsage
+    std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
     estimated_byte_size_of_cell(
         milvus::cachinglayer::cid_t cid) const override {
         // TODO(tiered storage 1): provide a better estimation.
-        return {0, 0};
+        return {{0, 0}, {0, 0}};
     }
     const std::string&
     key() const override {

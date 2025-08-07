@@ -136,7 +136,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         // Get the expected memory size from the file directly
         auto expected_memory_size = static_cast<int64_t>(
             row_group_metadata_vector.Get(row_group_idx).memory_size());
-        auto usage = translator->estimated_byte_size_of_cell(i);
+        auto usage = translator->estimated_byte_size_of_cell(i).first;
         EXPECT_EQ(usage.memory_bytes, expected_memory_size);
     }
 
@@ -281,7 +281,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
     for (size_t i = 0; i < translator->num_cells(); ++i) {
         auto [file_idx, row_group_idx] =
             translator->get_file_and_row_group_index(i);
-        auto usage = translator->estimated_byte_size_of_cell(i);
+        auto usage = translator->estimated_byte_size_of_cell(i).first;
 
         // Get the expected memory size from the corresponding file
         auto fr = std::make_shared<milvus_storage::FileRowGroupReader>(
