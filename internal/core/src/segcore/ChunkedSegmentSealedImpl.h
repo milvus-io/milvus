@@ -474,6 +474,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     // scalar field index
     std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings_;
+
     // vector field index
     SealedIndexingRecord vector_indexings_;
 
@@ -489,7 +490,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     int64_t id_;
     mutable std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
         fields_;
-    std::unordered_set<FieldId> mmap_fields_;
+    std::unordered_set<FieldId> mmap_field_ids_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;

@@ -31,9 +31,10 @@ struct TestCell {
     TestCell(int d, cid_t id) : data(d), cid(id) {
     }
 
-    size_t
+    milvus::cachinglayer::ResourceUsage
     CellByteSize() const {
-        return sizeof(data) + sizeof(cid);
+        return milvus::cachinglayer::ResourceUsage(sizeof(data) + sizeof(cid),
+                                                   0);
     }
 };
 
@@ -79,13 +80,13 @@ class MockTranslator : public Translator<TestCell> {
         return static_cast<cid_t>(num_unique_cids_);
     }
 
-    ResourceUsage
+    std::pair<ResourceUsage, ResourceUsage>
     estimated_byte_size_of_cell(cid_t cid) const override {
         auto it = cell_sizes_.find(cid);
         if (it != cell_sizes_.end()) {
-            return ResourceUsage{it->second, 0};
+            return {{it->second, 0}, {it->second, 0}};
         }
-        return ResourceUsage{1, 0};
+        return {{1, 0}, {1, 0}};
     }
 
     const std::string&
@@ -249,7 +250,7 @@ TEST_F(CacheSlotTest, PinSingleCellSuccess) {
     cl_uid_t target_uid = 30;
     cid_t expected_cid = 2;
     ResourceUsage expected_size =
-        translator_->estimated_byte_size_of_cell(expected_cid);
+        translator_->estimated_byte_size_of_cell(expected_cid).first;
 
     translator_->ResetCounters();
     auto future = cache_slot_->PinCells({target_uid});
@@ -277,7 +278,8 @@ TEST_F(CacheSlotTest, PinMultipleCellsSuccess) {
     std::sort(expected_cids.begin(), expected_cids.end());
     ResourceUsage expected_total_size;
     for (cid_t cid : expected_cids) {
-        expected_total_size += translator_->estimated_byte_size_of_cell(cid);
+        expected_total_size +=
+            translator_->estimated_byte_size_of_cell(cid).first;
     }
 
     translator_->ResetCounters();
@@ -308,7 +310,8 @@ TEST_F(CacheSlotTest, PinMultipleUidsMappingToSameCid) {
     std::sort(expected_unique_cids.begin(), expected_unique_cids.end());
     ResourceUsage expected_total_size;
     for (cid_t cid : expected_unique_cids) {
-        expected_total_size += translator_->estimated_byte_size_of_cell(cid);
+        expected_total_size +=
+            translator_->estimated_byte_size_of_cell(cid).first;
     }
 
     translator_->ResetCounters();
@@ -398,7 +401,7 @@ TEST_F(CacheSlotTest, PinAlreadyLoadedCell) {
     cl_uid_t target_uid = 40;
     cid_t expected_cid = 3;
     ResourceUsage expected_size =
-        translator_->estimated_byte_size_of_cell(expected_cid);
+        translator_->estimated_byte_size_of_cell(expected_cid).first;
 
     translator_->ResetCounters();
 
@@ -436,7 +439,7 @@ TEST_F(CacheSlotTest, PinAlreadyLoadedCellViaDifferentUid) {
     cl_uid_t uid2 = 31;
     cid_t expected_cid = 2;
     ResourceUsage expected_size =
-        translator_->estimated_byte_size_of_cell(expected_cid);
+        translator_->estimated_byte_size_of_cell(expected_cid).first;
 
     translator_->ResetCounters();
 
@@ -481,8 +484,8 @@ TEST_F(CacheSlotTest, TranslatorReturnsExtraCells) {
     cl_uid_t extra_uid = 20;
 
     ResourceUsage expected_size =
-        translator_->estimated_byte_size_of_cell(requested_cid) +
-        translator_->estimated_byte_size_of_cell(extra_cid);
+        translator_->estimated_byte_size_of_cell(requested_cid).first +
+        translator_->estimated_byte_size_of_cell(extra_cid).first;
 
     translator_->ResetCounters();
     translator_->SetExtraReturnCids({{requested_cid, {extra_cid}}});
@@ -526,9 +529,9 @@ TEST_F(CacheSlotTest, EvictionTest) {
 
     std::vector<cl_uid_t> uids_012 = {10, 20, 30};
     std::vector<cid_t> cids_012 = {0, 1, 2};
-    ResourceUsage size_012 = translator_->estimated_byte_size_of_cell(0) +
-                             translator_->estimated_byte_size_of_cell(1) +
-                             translator_->estimated_byte_size_of_cell(2);
+    ResourceUsage size_012 = translator_->estimated_byte_size_of_cell(0).first +
+                             translator_->estimated_byte_size_of_cell(1).first +
+                             translator_->estimated_byte_size_of_cell(2).first;
     ASSERT_EQ(size_012, ResourceUsage(50 + 150 + 100, 0));
 
     // 1. Load cells 0, 1, 2
@@ -550,7 +553,8 @@ TEST_F(CacheSlotTest, EvictionTest) {
     // 3. Load cell 3 (size 200), requires eviction
     cl_uid_t uid_3 = 40;
     cid_t cid_3 = 3;
-    ResourceUsage size_3 = translator_->estimated_byte_size_of_cell(cid_3);
+    ResourceUsage size_3 =
+        translator_->estimated_byte_size_of_cell(cid_3).first;
     ASSERT_EQ(size_3, ResourceUsage(200, 0));
 
     translator_->ResetCounters();

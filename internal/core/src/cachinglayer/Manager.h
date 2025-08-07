@@ -54,6 +54,27 @@ class Manager {
         return cache_slot;
     }
 
+    bool
+    ReserveLoadingResourceWithTimeout(const ResourceUsage& size,
+                                     std::chrono::milliseconds timeout) {
+        return SemiInlineGet(dlist_->reserveLoadingResourceWithTimeout(size, timeout));
+    }
+
+    void
+    ReleaseLoadingResource(const ResourceUsage& size) {
+        dlist_->releaseLoadingResource(size);
+    }
+
+    void
+    IncreaseLoadedResource(const ResourceUsage& size) {
+        dlist_->increaseLoadedResource(size);
+    }
+
+    void
+    DecreaseLoadedResource(const ResourceUsage& size) {
+        dlist_->decreaseLoadedResource(size);
+    }
+
     // memory overhead for managing all cache slots/cells/translators/policies.
     size_t
     memory_overhead() const;

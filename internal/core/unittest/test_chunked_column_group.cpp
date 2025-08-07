@@ -192,16 +192,16 @@ TEST_F(ChunkedColumnGroupTest, GroupChunk) {
     EXPECT_EQ(group_chunk->Size(), expected_size);
 
     // Cell byte size
-    uint64_t expected_cell_size = int64_chunk->CellByteSize() +
-                                  string_chunk->CellByteSize() +
-                                  new_int64_chunk->CellByteSize();
-    EXPECT_EQ(group_chunk->CellByteSize(), expected_cell_size);
+    uint64_t expected_cell_size = int64_chunk->CellByteSize().memory_bytes +
+                                  string_chunk->CellByteSize().memory_bytes +
+                                  new_int64_chunk->CellByteSize().memory_bytes;
+    EXPECT_EQ(group_chunk->CellByteSize().memory_bytes, expected_cell_size);
 
     // Test empty group chunk
     auto empty_group_chunk = std::make_unique<GroupChunk>();
     EXPECT_EQ(empty_group_chunk->RowNums(), 0);
     EXPECT_EQ(empty_group_chunk->Size(), 0);
-    EXPECT_EQ(empty_group_chunk->CellByteSize(), 0);
+    EXPECT_EQ(empty_group_chunk->CellByteSize().memory_bytes, 0);
 }
 
 TEST_F(ChunkedColumnGroupTest, ChunkedColumnGroup) {

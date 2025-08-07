@@ -71,9 +71,9 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
         return uid;
     }
 
-    ResourceUsage
+    std::pair<ResourceUsage, ResourceUsage>
     estimated_byte_size_of_cell(cid_t cid) const override {
-        return ResourceUsage(0, 0);
+        return {{0, 0}, {0, 0}};
     }
 
     const std::string&
@@ -141,9 +141,9 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
         return uid;
     }
 
-    ResourceUsage
+    std::pair<ResourceUsage, ResourceUsage>
     estimated_byte_size_of_cell(cid_t cid) const override {
-        return {0, 0};
+        return {{0, 0}, {0, 0}};
     }
 
     const std::string&
@@ -200,9 +200,9 @@ class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
         return uid;
     }
 
-    ResourceUsage
+    std::pair<ResourceUsage, ResourceUsage>
     estimated_byte_size_of_cell(cid_t cid) const override {
-        return ResourceUsage(0, 0);
+        return {{0, 0}, {0, 0}};
     }
 
     const std::string&
@@ -255,12 +255,12 @@ class DListTestFriend {
  public:
     static ResourceUsage
     get_used_memory(const DList& dlist) {
-        return dlist.used_resources_.load();
+        return dlist.loaded_size_.load();
     }
     static ResourceUsage
     get_max_memory(const DList& dlist) {
         std::lock_guard lock(dlist.list_mtx_);
-        return dlist.max_memory_;
+        return dlist.max_resource_limit_;
     }
     static ListNode*
     get_head(const DList& dlist) {
@@ -285,7 +285,7 @@ class DListTestFriend {
     static void
     test_add_used_memory(DList* dlist, const ResourceUsage& size) {
         std::lock_guard lock(dlist->list_mtx_);
-        dlist->used_resources_ += size;
+        dlist->loaded_size_ += size;
     }
 
     // nodes are from tail to head
@@ -314,7 +314,7 @@ class DListTestFriend {
 
         while (current != nullptr) {
             EXPECT_EQ(current->prev_, prev);
-            total_size += current->size();
+            total_size += current->loaded_size();
             prev = current;
             current = current->next_;
         }
@@ -322,7 +322,7 @@ class DListTestFriend {
         EXPECT_EQ(prev, dlist->head_);
         EXPECT_EQ(dlist->head_->next_, nullptr);
 
-        EXPECT_EQ(total_size, dlist->used_resources_.load());
+        EXPECT_EQ(total_size, dlist->loaded_size_.load());
     }
 };
 }  // namespace cachinglayer::internal

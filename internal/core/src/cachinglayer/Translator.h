@@ -57,11 +57,14 @@ class Translator {
     virtual cid_t
     cell_id_of(uid_t uid) const = 0;
     // For resource reservation when a cell is about to be loaded.
+    // There are two types of resource usage for a cell: the first is the usage after it has been loaded,
+    // and the second is the usage during loading. Typically, the loading usage is greater than the loaded usage
+    // due to the preprocessing stage.
     // If a cell is about to be pinned and loaded, and there are not enough resource for it, EvictionManager
     // will try to evict some other cells to make space. Thus this estimation should generally be greater
     // than or equal to the actual size. If the estimation is smaller than the actual size, with insufficient
     // resource reserved, the load may fail.
-    virtual ResourceUsage
+    virtual std::pair<ResourceUsage, ResourceUsage>
     estimated_byte_size_of_cell(cid_t cid) const = 0;
     // must be unique to identify a CacheSlot.
     virtual const std::string&
@@ -70,10 +73,13 @@ class Translator {
     virtual Meta*
     meta() = 0;
 
-    // Translator may choose to fetch more than requested cells.
-    // TODO(tiered storage 2): This has a problem: when loading, the resource manager will only reserve the size of the
-    // requested cells, How can translator be sure the extra cells can fit? Currently if bonus cells are returned,
-    // used memory in cache may exceed the limit. Maybe try to reserve memory for bonus cells, and drop cell if failed.
+    // Translator may choose to fetch more than requested cells. The default behavior is to not include extra cells.
+    virtual std::vector<cid_t>
+    cell_ids_to_be_loaded(const std::vector<cid_t>& cids) {
+        return cids;
+    }
+
+    // extra cells strategy should be added in cell_ids_to_be_loaded(), get_cells() should just a load executor.
     virtual std::vector<std::pair<cid_t, std::unique_ptr<CellT>>>
     get_cells(const std::vector<cid_t>& cids) = 0;
     virtual ~Translator() = default;

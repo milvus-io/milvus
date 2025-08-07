@@ -122,7 +122,8 @@ ChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return uid;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage,
+          milvus::cachinglayer::ResourceUsage>
 ChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     AssertInfo(cid < file_infos_.size(), "cid out of range");
@@ -130,10 +131,10 @@ ChunkTranslator::estimated_byte_size_of_cell(
     int64_t memory_size = file_infos_[cid].memory_size;
     if (use_mmap_) {
         // For mmap, the memory is counted as disk usage
-        return {0, memory_size};
+        return {{0, memory_size}, {memory_size * 2, memory_size}};
     } else {
         // For non-mmap, the memory is counted as memory usage
-        return {memory_size, 0};
+        return {{memory_size, 0}, {memory_size * 2, 0}};
     }
 }
 

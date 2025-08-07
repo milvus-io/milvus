@@ -56,11 +56,11 @@ DefaultValueChunkTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
 DefaultValueChunkTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
     // TODO(tiered storage 1): provide a better estimation.
-    return milvus::cachinglayer::ResourceUsage{0, 0};
+    return {{0, 0}, {0, 0}};
 }
 
 const std::string&

@@ -49,10 +49,10 @@ V1SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-milvus::cachinglayer::ResourceUsage
+std::pair<milvus::cachinglayer::ResourceUsage, milvus::cachinglayer::ResourceUsage>
 V1SealedIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t cid) const {
-    return {0, 0};
+    return {{0, 0}, {0, 0}};
 }
 
 const std::string&

@@ -34,7 +34,7 @@ class DList {
           ResourceUsage low_watermark,
           ResourceUsage high_watermark,
           EvictionConfig eviction_config)
-        : max_memory_(max_memory),
+        : max_resource_limit_(max_memory),
           low_watermark_(low_watermark),
           high_watermark_(high_watermark),
           eviction_config_(eviction_config),
@@ -93,21 +93,31 @@ class DList {
     IsEmpty() const;
 
     folly::SemiFuture<bool>
-    reserveMemoryWithTimeout(const ResourceUsage& size,
-                             std::chrono::milliseconds timeout);
-
-    // Called when a node becomes evictable (pin count drops to 0), or when a node is loaded as a bonus.
-    void
-    increaseEvictableSize(const ResourceUsage& size);
+    reserveLoadingResourceWithTimeout(const ResourceUsage& size,
+                               std::chrono::milliseconds timeout);
 
     // Called when a node is pinned(pin count increases from 0), or when a node is removed(evicted or released).
     void
     decreaseEvictableSize(const ResourceUsage& size);
 
-    // Used only when load failed. This will only cause used_resources_ to decrease, which will not affect the correctness
-    // of concurrent reserveMemoryWithTimeout() even without lock.
+    // Called when a evictable node is unpinned(pin count decreases to 0).
     void
-    releaseMemory(const ResourceUsage& size);
+    increaseEvictableSize(const ResourceUsage& size);
+
+    void
+    increaseLoadingResource(const ResourceUsage& size);
+
+    void
+    increaseLoadedResource(const ResourceUsage& size);
+
+    void
+    decreaseLoadingResource(const ResourceUsage& size);
+
+    void
+    decreaseLoadedResource(const ResourceUsage& size);
+
+    void
+    releaseLoadingResource(const ResourceUsage& loading_size);
 
     // Caller must guarantee that the current thread holds the lock of list_node->mtx_.
     // touchItem is used in 2 places:
@@ -128,10 +138,7 @@ class DList {
     removeItem(ListNode* list_node, ResourceUsage size);
 
     void
-    removeLoadingResource(const ResourceUsage& size);
-
-    void
-    removeLoadedResource(const ResourceUsage& size);
+    freezeItem(ListNode* list_node, ResourceUsage size);
 
     const EvictionConfig&
     eviction_config() const {
@@ -241,13 +248,9 @@ class DList {
 
     // TODO(tiered storage 3): benchmark folly::DistributedMutex for this usecase.
     mutable std::mutex list_mtx_;
-    // access to used_resources_ and max_memory_ must be done under the lock of list_mtx_
-    std::atomic<ResourceUsage> used_resources_{};
-    // Track estimated resources currently being loaded
-    std::atomic<ResourceUsage> loading_{};
     ResourceUsage low_watermark_;
     ResourceUsage high_watermark_;
-    ResourceUsage max_memory_;
+    ResourceUsage max_resource_limit_;
     const EvictionConfig eviction_config_;
 
     std::thread eviction_thread_;
@@ -270,6 +273,10 @@ class DList {
 
     // Total size of nodes that are loaded and unpinned
     std::atomic<ResourceUsage> evictable_size_{};
+
+    // Total size of nodes that are loading and loaded
+    std::atomic<ResourceUsage> loading_size_{};
+    std::atomic<ResourceUsage> loaded_size_{};
 
     // EventBase and thread for handling timeout operations
     std::unique_ptr<folly::EventBase> event_base_;

@@ -46,7 +46,8 @@ class ListNode {
         ListNode* node_;
     };
     ListNode() = default;
-    ListNode(DList* dlist, ResourceUsage size, bool evictable);
+    ListNode(DList* dlist,
+             bool evictable);
     virtual ~ListNode();
 
     // ListNode is not movable/copyable because it contains a shared_mutex.
@@ -72,7 +73,7 @@ class ListNode {
     pin();
 
     const ResourceUsage&
-    size() const;
+    loaded_size() const;
 
     // Manually evicts the cell if it is not pinned.
     // Returns true if the cell ends up in a state other than LOADED.
@@ -100,46 +101,52 @@ class ListNode {
         {
             std::unique_lock<std::shared_mutex> lock(mtx_);
             if (requesting_thread) {
-                AssertInfo(
-                    state_ != State::NOT_LOADED,
-                    "Programming error: mark_loaded(requesting_thread=true) "
-                    "called on a {} cell",
-                    state_to_string(state_));
-                // no need to touch() here: node is pinned thus not eligible for eviction.
-                // we can delay touch() to when unpin() is called.
-                if (state_ == State::LOADING) {
-                    cb();
-                    state_ = State::LOADED;
-                    promise = std::move(load_promise_);
-                    remove_self_from_loading_resource();
-                } else {
-                    // LOADED: cell has been loaded by another thread, do nothing.
-                    return;
+                switch (state_) {
+                    case State::LOADING: {
+                        // no need to touch() here: node is pinned thus not eligible for eviction.
+                        // we can delay touch() to when unpin() is called.
+                        cb();
+                        state_ = State::LOADED;
+                        promise = std::move(load_promise_);
+                        break;
+                    }
+                    case State::LOADED: {
+                        // This state can only happen when this node is loaded as a bonus.
+                        // touch() has been called by the bonus loading thread.
+                        promise = std::move(load_promise_);
+                        break;
+                    }
+                    default:
+                        ThrowInfo(ErrorCode::UnexpectedError,
+                                  "Programming error: "
+                                  "mark_loaded(requesting_thread=true) "
+                                  "called on a {} cell",
+                                  state_to_string(state_));
                 }
             } else {
-                // Even though this thread did not request loading this cell, translator still
-                // decided to download it because the adjacent cells are requested.
-                if (state_ == State::NOT_LOADED) {
-                    state_ = State::LOADED;
-                    cb();
-                    // memory of this cell is not reserved, touch() to track it.
-                    if (evictable_) {
-                        touch(true);
+                switch (state_) {
+                    case State::NOT_LOADED: {
+                        // Even though this thread did not request loading this cell, translator still
+                        // decided to download it because the adjacent cells are requested.
+                        cb();
+                        state_ = State::LOADED;
+                        // memory of this cell is not reserved, touch() to track it.
+                        if (evictable_) {
+                            touch(true);
+                        }
+                        break;
                     }
-                } else if (state_ == State::LOADING) {
-                    // another thread has explicitly requested loading this cell, we did it first
-                    // thus we set up the state first.
-                    cb();
-                    state_ = State::LOADED;
-                    promise = std::move(load_promise_);
-                    // the node that marked LOADING has already reserved memory, do not double count.
-                    if (evictable_) {
-                        touch(false);
+                    case State::LOADING: {
+                        // another thread has explicitly requested loading this cell, we did it first
+                        // thus we set up the state first.
+                        cb();
+                        state_ = State::LOADED;
+                        // the node that marked LOADING has already reserved memory, do not double count.
+                        if (evictable_) {
+                            touch(false);
+                        }
                     }
-                    remove_self_from_loading_resource();
-                } else {
-                    // LOADED: cell has been loaded by another thread, do nothing.
-                    return;
+                    default:;  // LOADED: cell has been loaded by another thread, do nothing.
                 }
             }
         }
@@ -151,15 +158,12 @@ class ListNode {
     void
     set_error(folly::exception_wrapper error);
 
-    void
-    remove_self_from_loading_resource();
-
     State state_{State::NOT_LOADED};
 
     static std::string
     state_to_string(State state);
 
-    ResourceUsage size_{};
+    ResourceUsage loaded_size_{};
 
  private:
     friend class DList;
@@ -181,7 +185,7 @@ class ListNode {
 
     // must be called under the lock of mtx_.
     void
-    touch(bool update_used_memory = true);
+    touch(bool update_evictable_size);
 
     mutable std::shared_mutex mtx_;
     // if a ListNode is in a DList, last_touch_ is the time when the node was lastly pushed

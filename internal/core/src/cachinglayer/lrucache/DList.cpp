@@ -25,20 +25,20 @@
 namespace milvus::cachinglayer::internal {
 
 folly::SemiFuture<bool>
-DList::reserveMemoryWithTimeout(const ResourceUsage& size,
-                                std::chrono::milliseconds timeout) {
+DList::reserveLoadingResourceWithTimeout(const ResourceUsage& size,
+                                         std::chrono::milliseconds timeout) {
     // First try immediate reservation
     {
         std::unique_lock<std::mutex> list_lock(list_mtx_);
-        if (!max_memory_.CanHold(size)) {
+        if (!max_resource_limit_.CanHold(size)) {
             LOG_ERROR(
                 "[MCL] Failed to reserve size={} as it exceeds max_memory_={}.",
                 size.ToString(),
-                max_memory_.ToString());
+                max_resource_limit_.ToString());
             return false;
         }
         if (reserveMemoryInternal(size)) {
-            return folly::makeSemiFuture(true);
+            return true;
         }
     }
 
@@ -86,10 +86,10 @@ DList::reserveMemoryWithTimeout(const ResourceUsage& size,
 
 bool
 DList::reserveMemoryInternal(const ResourceUsage& size) {
-    auto used = used_resources_.load();
+    auto used = loaded_size_.load();
 
     // Combined logical and physical memory limit check
-    bool logical_limit_exceeded = !max_memory_.CanHold(used + size);
+    bool logical_limit_exceeded = !max_resource_limit_.CanHold(used + size);
     auto physical_eviction_needed = checkPhysicalResourceLimit(size);
 
     // If either limit is exceeded, attempt unified eviction
@@ -102,7 +102,7 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
         if (logical_limit_exceeded) {
             // Calculate logical eviction requirements
             eviction_target = used + size - low_watermark_;
-            min_eviction = used + size - max_memory_;
+            min_eviction = used + size - max_resource_limit_;
 
             // Ensure non-negative values
             if (eviction_target.memory_bytes < 0)
@@ -163,15 +163,9 @@ DList::reserveMemoryInternal(const ResourceUsage& size) {
             physical_eviction_needed.ToString());
     }
 
-    // Reserve resources (both checks passed)
-    used_resources_ += size;
-    loading_ += size * eviction_config_.loading_memory_factor;
-    LOG_TRACE(
-        "[MCL] reserveMemoryInternal success, size={}, used_resources_={}, "
-        "loading_={}",
-        size.ToString(),
-        used_resources_.load().ToString(),
-        loading_.load().ToString());
+    // Reserve loading resources (both checks passed)
+    loading_size_ += size;
+
     return true;
 }
 
@@ -185,7 +179,7 @@ DList::evictionLoop() {
                 })) {
             break;
         }
-        auto used = used_resources_.load();
+        auto used = loaded_size_.load();
         // if usage is above high watermark, evict until low watermark is reached.
         tryEvict(
             {
@@ -204,20 +198,21 @@ DList::evictionLoop() {
 
 std::string
 DList::usageInfo() const {
-    auto used = used_resources_.load();
+    auto used = loaded_size_.load();
+    auto loading = loading_size_.load();
     static double precision = 100.0;
     std::string info = fmt::format(
         "low_watermark_: {}; high_watermark_: {}; "
         "max_memory_: {}; used_resources_: {} (",
         low_watermark_.ToString(),
         high_watermark_.ToString(),
-        max_memory_.ToString(),
+        max_resource_limit_.ToString(),
         used.ToString());
 
     if (used.memory_bytes > 0) {
         info += fmt::format(", {:.2}% of max, {:.2}% of high_watermark memory",
                             static_cast<double>(used.memory_bytes) /
-                                max_memory_.memory_bytes * precision,
+                                max_resource_limit_.memory_bytes * precision,
                             static_cast<double>(used.memory_bytes) /
                                 high_watermark_.memory_bytes * precision);
     }
@@ -225,14 +220,14 @@ DList::usageInfo() const {
     if (used.file_bytes > 0) {
         info += fmt::format(", {:.2}% of max, {:.2}% of high_watermark disk",
                             static_cast<double>(used.file_bytes) /
-                                max_memory_.file_bytes * precision,
+                                max_resource_limit_.file_bytes * precision,
                             static_cast<double>(used.file_bytes) /
                                 high_watermark_.file_bytes * precision);
     }
 
     info += fmt::format("); evictable_size_: {}; loading: {}; ",
                         evictable_size_.load().ToString(),
-                        loading_.load().ToString());
+                        loading_size_.load().ToString());
 
     return info;
 }
@@ -244,7 +239,7 @@ DList::chainString() const {
     ss << "[MCL] DList chain: ";
     size_t num_nodes = 0;
     for (auto it = tail_; it != nullptr; it = it->next_) {
-        ss << "(" << it->key() << ", " << it->size().ToString()
+        ss << "(" << it->key() << ", " << it->loaded_size().ToString()
            << ", pins=" << it->pin_count_ << ")";
         num_nodes++;
         if (it->next_ != nullptr) {
@@ -302,7 +297,7 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
     for (ListNode* it = tail_; it != nullptr; it = it->next_) {
         bool need_lock = (!first_node_checked) ||
                          (current_node_time < time_threshold) ||
-                         would_help(it->size());
+                         would_help(it->loaded_size());
 
         if (!need_lock) {
             continue;
@@ -325,9 +320,10 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
         current_node_time = it->last_touch_;
         first_node_checked = true;
 
-        if (current_node_time < time_threshold || would_help(it->size())) {
+        if (current_node_time < time_threshold ||
+            would_help(it->loaded_size())) {
             to_evict.push_back(it);
-            size_to_evict += it->size();
+            size_to_evict += it->loaded_size();
         } else {
             // Release lock if node is neither expired nor helpful
             item_locks.pop_back();
@@ -378,13 +374,14 @@ DList::tryEvict(const ResourceUsage& expected_eviction,
 
     internal::cache_eviction_event_count().Increment();
     for (auto* list_node : to_evict) {
-        auto size = list_node->size();
+        auto size = list_node->loaded_size();
         internal::cache_cell_eviction_count(size.storage_type()).Increment();
-        popItem(list_node);
+        popItem(
+            list_node);  // must succeed, otherwise the node is not in the list
         list_node->clear_data();
-        used_resources_ -= size;
-        decreaseEvictableSize(size);  // It was evictable, now it's gone.
     }
+    decreaseEvictableSize(size_to_evict);
+    decreaseLoadedResource(size_to_evict);
 
     LOG_TRACE("[MCL] Logically evicted size: {}", size_to_evict.ToString());
 
@@ -417,7 +414,7 @@ DList::UpdateLimit(const ResourceUsage& new_limit) {
                new_limit.ToString(),
                high_watermark_.ToString());
     std::unique_lock<std::mutex> list_lock(list_mtx_);
-    auto used = used_resources_.load();
+    auto used = loaded_size_.load();
     if (!new_limit.CanHold(used)) {
         // positive means amount owed
         auto deficit = used - new_limit;
@@ -427,11 +424,11 @@ DList::UpdateLimit(const ResourceUsage& new_limit) {
             return false;
         }
     }
-    max_memory_ = new_limit;
+    max_resource_limit_ = new_limit;
     milvus::monitor::internal_cache_capacity_bytes_memory.Set(
-        max_memory_.memory_bytes);
+        max_resource_limit_.memory_bytes);
     milvus::monitor::internal_cache_capacity_bytes_disk.Set(
-        max_memory_.file_bytes);
+        max_resource_limit_.file_bytes);
     return true;
 }
 
@@ -459,21 +456,17 @@ DList::UpdateHighWatermark(const ResourceUsage& new_high_watermark) {
         "equal to low watermark. new_high_watermark: {}, low_watermark: {}",
         new_high_watermark.ToString(),
         low_watermark_.ToString());
-    AssertInfo((max_memory_ - new_high_watermark).AllGEZero(),
+    AssertInfo((max_resource_limit_ - new_high_watermark).AllGEZero(),
                "[MCL] high watermark must be less than or equal to max "
-               "memory. new_high_watermark: {}, max_memory: {}",
+               "resource limit. new_high_watermark: {}, max_resource_limit: {}",
                new_high_watermark.ToString(),
-               max_memory_.ToString());
+               max_resource_limit_.ToString());
     high_watermark_ = new_high_watermark;
 }
 
 void
-DList::releaseMemory(const ResourceUsage& size) {
-    // safe to substract on atomic without lock
-    used_resources_ -= size;
-    // this is called when a cell failed to load.
-    loading_ -= size * eviction_config_.loading_memory_factor;
-
+DList::releaseLoadingResource(const ResourceUsage& loading_size) {
+    loading_size_ -= loading_size;
     // Notify waiting requests that resources are available
     std::unique_lock<std::mutex> lock(list_mtx_);
     notifyWaitingRequests();
@@ -485,8 +478,6 @@ DList::touchItem(ListNode* list_node, std::optional<ResourceUsage> size) {
     popItem(list_node);
     pushHead(list_node);
     if (size.has_value()) {
-        used_resources_ += size.value();
-        // A bonus cell is loaded, so it's evictable.
         evictable_size_ += size.value();
         // If there are waiters, try to satisfy them
         if (!waiting_queue_empty_) {
@@ -500,11 +491,13 @@ void
 DList::removeItem(ListNode* list_node, ResourceUsage size) {
     std::lock_guard<std::mutex> list_lock(list_mtx_);
     if (popItem(list_node)) {
-        used_resources_ -= size;
-        if (list_node->pin_count_ == 0) {
-            decreaseEvictableSize(size);
-        }
+        decreaseEvictableSize(size);
     }
+}
+
+void
+DList::freezeItem(ListNode* list_node [[maybe_unused]], ResourceUsage size) {
+    decreaseEvictableSize(size);
 }
 
 void
@@ -552,13 +545,23 @@ DList::IsEmpty() const {
 }
 
 void
-DList::removeLoadingResource(const ResourceUsage& size) {
-    loading_ -= size * eviction_config_.loading_memory_factor;
+DList::increaseLoadingResource(const ResourceUsage& size) {
+    loading_size_ += size;
 }
 
 void
-DList::removeLoadedResource(const ResourceUsage& size) {
-    used_resources_ -= size;
+DList::increaseLoadedResource(const ResourceUsage& size) {
+    loaded_size_ += size;
+}
+
+void
+DList::decreaseLoadingResource(const ResourceUsage& size) {
+    loading_size_ -= size;
+}
+
+void
+DList::decreaseLoadedResource(const ResourceUsage& size) {
+    loaded_size_ -= size;
 }
 
 void
@@ -652,7 +655,7 @@ DList::checkPhysicalResourceLimit(const ResourceUsage& original) const {
                         : infinity;
 
     auto used = ResourceUsage{sys_mem.used_bytes, sys_disk.used_bytes};
-    auto current_loading = loading_.load();
+    auto current_loading = loading_size_.load();
     auto projected_usage = current_loading + size + used;
 
     auto limit = ResourceUsage{
