@@ -58,3 +58,12 @@ packages:
     interfaces:
       Resolver:
       Builder:
+  google.golang.org/grpc:
+    interfaces:
+      ClientStream:
+  google.golang.org/grpc/resolver:
+    interfaces:
+      ClientConn:
+  google.golang.org/grpc/balancer:
+    interfaces:
+      SubConn:

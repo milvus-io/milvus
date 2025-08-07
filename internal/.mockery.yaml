@@ -69,9 +69,6 @@ packages:
   github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab:
     interfaces:
       ROWriteAheadBuffer:
-  google.golang.org/grpc:
-    interfaces:
-      ClientStream:
   github.com/milvus-io/milvus/internal/streamingnode/server/walmanager:
     interfaces:
       Manager:
@@ -91,9 +88,4 @@ packages:
   github.com/milvus-io/milvus/internal/flushcommon/util:
     interfaces:
       MsgHandler:
-  google.golang.org/grpc/resolver:
-    interfaces:
-      ClientConn:
-  google.golang.org/grpc/balancer:
-    interfaces:
-      SubConn:
+  

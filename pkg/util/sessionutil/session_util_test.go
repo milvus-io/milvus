@@ -3,12 +3,10 @@ package sessionutil
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/url"
 	"os"
 	"path"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,11 +23,10 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/common"
+	kvfactory "github.com/milvus-io/milvus/pkg/v2/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v2/json"
 	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -38,26 +35,13 @@ import (
 func TestGetServerIDConcurrently(t *testing.T) {
 	ctx := context.Background()
 	paramtable.Init()
-	params := paramtable.Get()
-
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
-	assert.NoError(t, err)
-
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix(ctx, "")
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
 	var wg sync.WaitGroup
 	muList := sync.Mutex{}
 
-	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s := NewSession(ctx)
 	res := make([]int64, 0)
 
 	getIDFunc := func() {
@@ -80,23 +64,10 @@ func TestGetServerIDConcurrently(t *testing.T) {
 
 func TestInit(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-	params := paramtable.Get()
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
-	assert.NoError(t, err)
-
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix(ctx, "")
-
-	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s := NewSession(ctx)
 	s.Init("inittest", "testAddr", false, false)
 	assert.NotEqual(t, int64(0), s.LeaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
@@ -108,21 +79,8 @@ func TestInit(t *testing.T) {
 
 func TestInitNoArgs(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-	params := paramtable.Get()
-
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
-	assert.NoError(t, err)
-
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix(ctx, "")
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
 	s := NewSession(ctx)
 	s.Init("inittest", "testAddr", false, false)
@@ -136,24 +94,17 @@ func TestInitNoArgs(t *testing.T) {
 
 func TestUpdateSessions(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-	params := paramtable.Get()
+	tempRootPath := funcutil.GenRandomStr()
+	v := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(tempRootPath)
+	defer paramtable.Get().EtcdCfg.RootPath.SwapTempValue(v)
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	etcdEndpoints := strings.Split(endpoints, ",")
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "")
-
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix(ctx, "")
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
 	var wg sync.WaitGroup
 	muList := sync.Mutex{}
 
-	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
+	s := NewSession(ctx, WithResueNodeID(false))
 
 	sessions, rev, err := s.GetSessions("test")
 	assert.NoError(t, err)
@@ -163,9 +114,7 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-		require.NoError(t, err)
-		singleS := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
+		singleS := NewSession(ctx, WithResueNodeID(false))
 		singleS.Init("test", "testAddr", false, false)
 		singleS.Register()
 		muList.Lock()
@@ -187,7 +136,7 @@ func TestUpdateSessions(t *testing.T) {
 	notExistSessions, _, _ := s.GetSessions("testt")
 	assert.Equal(t, len(notExistSessions), 0)
 
-	etcdKV.RemoveWithPrefix(ctx, metaRoot)
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 	assert.Eventually(t, func() bool {
 		sessions, _, _ := s.GetSessions("test")
 		return len(sessions) == 0
@@ -213,16 +162,15 @@ func TestUpdateSessions(t *testing.T) {
 }
 
 func TestSessionLivenessCheck(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
+	ctx := context.Background()
+	tempRootPath := funcutil.GenRandomStr()
+	v := paramtable.Get().EtcdCfg.RootPath.SwapTempValue(tempRootPath)
+	defer paramtable.Get().EtcdCfg.RootPath.SwapTempValue(v)
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	s := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
+	s := NewSession(ctx)
 	s.Register()
 	ch := make(chan struct{})
 	s.liveCh = ch
@@ -245,8 +193,10 @@ func TestSessionLivenessCheck(t *testing.T) {
 	assert.True(t, flag.Load())
 
 	// test context done, liveness exit, callback shouldn't trigger
-	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s1 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
+	tempRootPath = funcutil.GenRandomStr()
+	v = paramtable.Get().EtcdCfg.RootPath.SwapTempValue(tempRootPath)
+	defer paramtable.Get().EtcdCfg.RootPath.SwapTempValue(v)
+	s1 := NewSession(ctx)
 	s1.Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	flag.Store(false)
@@ -259,8 +209,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	assert.False(t, flag.Load())
 
 	// test context done, liveness start failed, callback should trigger
-	metaRoot = fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	s2 := NewSessionWithEtcd(context.Background(), metaRoot, etcdCli)
+	s2 := NewSession(ctx)
 	s2.Register()
 	ctx, cancel = context.WithCancel(context.Background())
 	signal = make(chan struct{}, 1)
@@ -276,21 +225,10 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 func TestWatcherHandleWatchResp(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-	params := paramtable.Get()
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	etcdEndpoints := strings.Split(endpoints, ",")
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
-
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/by-dev/session-ut")
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix(ctx, "/by-dev/session-ut")
-	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s := NewSession(ctx)
 	defer s.Revoke(time.Second)
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
@@ -399,7 +337,6 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 
 	t.Run("err handled but list failed", func(t *testing.T) {
 		s := NewSessionWithEtcd(ctx, "/by-dev/session-ut", etcdCli)
-		s.etcdCli.Close()
 		w := getWatcher(s, func(sessions map[string]*Session) error {
 			return nil
 		})
@@ -631,21 +568,8 @@ func TestSessionWithVersionRange(t *testing.T) {
 
 func TestSessionProcessActiveStandBy(t *testing.T) {
 	ctx := context.TODO()
-	// initial etcd
-	paramtable.Init()
-	params := paramtable.Get()
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s1", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
-	assert.NoError(t, err)
-
-	defer etcdKV.Close()
-	defer etcdKV.RemoveWithPrefix(ctx, "")
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
 	var wg sync.WaitGroup
 	signal := make(chan struct{})
@@ -653,7 +577,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 1, will be active
 	ctx1 := context.Background()
-	s1 := NewSessionWithEtcd(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
+	s1 := NewSession(ctx1, WithResueNodeID(false))
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
@@ -674,7 +598,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 2, will be standby
 	ctx2 := context.Background()
-	s2 := NewSessionWithEtcd(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
+	s2 := NewSession(ctx2, WithResueNodeID(false))
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
@@ -777,23 +701,12 @@ func TestSession_apply(t *testing.T) {
 
 func TestIntegrationMode(t *testing.T) {
 	ctx := context.Background()
-	paramtable.Init()
-	params := paramtable.Get()
-	params.Save(params.IntegrationTestCfg.IntegrationMode.Key, "true")
+	etcdCli, path := kvfactory.GetEtcdAndPath()
+	etcdCli.Delete(ctx, path, clientv3.WithPrefix())
 
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
-	err = etcdKV.RemoveWithPrefix(ctx, "")
-	assert.NoError(t, err)
-
-	s1 := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s1 := NewSession(ctx)
 	assert.Equal(t, false, s1.reuseNodeID)
-	s2 := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
+	s2 := NewSession(ctx)
 	assert.Equal(t, false, s2.reuseNodeID)
 	s1.Init("inittest1", "testAddr1", false, false)
 	s1.Init("inittest2", "testAddr2", false, false)

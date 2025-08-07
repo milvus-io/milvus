@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/attributes"
 	"google.golang.org/grpc/resolver"
 
-	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_resolver"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/google.golang.org/grpc/mock_resolver"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/service/mock_discoverer"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"

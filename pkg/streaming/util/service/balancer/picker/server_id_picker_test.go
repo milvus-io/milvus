@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/balancer/base"
 	"google.golang.org/grpc/resolver"
 
-	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/grpc/mock_balancer"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/google.golang.org/grpc/mock_balancer"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/service/attributes"
 	bbalancer "github.com/milvus-io/milvus/pkg/v2/streaming/util/service/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/service/contextutil"

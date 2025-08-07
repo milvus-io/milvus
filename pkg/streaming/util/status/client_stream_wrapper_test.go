@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/mocks/google.golang.org/mock_grpc"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/google.golang.org/mock_grpc"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
