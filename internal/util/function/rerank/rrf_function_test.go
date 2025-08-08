@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/embedding"
 )
 
 func TestRRFFunction(t *testing.T) {
@@ -126,7 +126,7 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		nq := int64(1)
 		f, err := newRRFFunction(schema, functionSchema)
 		s.NoError(err)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 		s.NoError(err)
@@ -139,7 +139,7 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		nq := int64(3)
 		f, err := newRRFFunction(schema, functionSchema)
 		s.NoError(err)
-		data := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
+		data := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE"}), inputs)
 		s.NoError(err)
@@ -154,9 +154,9 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		f, err := newRRFFunction(schema, functionSchema)
 		s.NoError(err)
 		// id data: 0 - 9
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
 		// empty
-		data2 := function.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "", 0)
+		data2 := embedding.GenSearchResultData(nq, 0, schemapb.DataType_Int64, "", 0)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 0, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
@@ -170,9 +170,9 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		f, err := newRRFFunction(schema, functionSchema)
 		s.NoError(err)
 		// id data: 0 - 9
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
 		// id data: 0 - 3
-		data2 := function.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "", 0)
+		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "", 0)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
@@ -188,11 +188,11 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		// nq1 id data: 0 - 9
 		// nq2 id data: 10 - 19
 		// nq3 id data: 20 - 29
-		data1 := function.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
+		data1 := embedding.GenSearchResultData(nq, 10, schemapb.DataType_Int64, "", 0)
 		// nq1 id data: 0 - 3
 		// nq2 id data: 4 - 7
 		// nq3 id data: 8 - 11
-		data2 := function.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "", 0)
+		data2 := embedding.GenSearchResultData(nq, 4, schemapb.DataType_Int64, "", 0)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), false)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, -1, 1, false, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
@@ -208,11 +208,11 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		// nq1 id data: 0 - 9
 		// nq2 id data: 10 - 19
 		// nq3 id data: 20 - 29
-		data1 := function.GenSearchResultDataWithGrouping(nq, 10, schemapb.DataType_Int64, "", 0, "ts", 102, 1)
+		data1 := embedding.GenSearchResultDataWithGrouping(nq, 10, schemapb.DataType_Int64, "", 0, "ts", 102, 1)
 		// nq1 id data: 0 - 3
 		// nq2 id data: 4 - 7
 		// nq3 id data: 8 - 11
-		data2 := function.GenSearchResultDataWithGrouping(nq, 4, schemapb.DataType_Int64, "", 0, "ts", 102, 1)
+		data2 := embedding.GenSearchResultDataWithGrouping(nq, 4, schemapb.DataType_Int64, "", 0, "ts", 102, 1)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), true)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, -1, 102, 1, true, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)
@@ -230,11 +230,11 @@ func (s *RRFFunctionSuite) TestRRFFuctionProcess() {
 		// nq1 id data: 0 - 29, group value: 0,0,0,1,1,1, ... , 9,9,9
 		// nq2 id data: 30 - 59, group value: 10,10,10,11,11,11, ... , 19,19,19
 		// nq3 id data: 60 - 99, group value: 20,20,20,21,21,21, ... , 29,29,29
-		data1 := function.GenSearchResultDataWithGrouping(nq, 10, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
+		data1 := embedding.GenSearchResultDataWithGrouping(nq, 10, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
 		// nq1 id data: 0 - 11, group value: 0,0,0,1,1,1,2,2,2,3,3,3,
 		// nq2 id data: 12 - 23, group value: 4,4,4,5,5,5,6,6,6,7,7,7
 		// nq3 id data: 24 - 35, group value: 8,8,8,9,9,9,10,10,10,11,11,11
-		data2 := function.GenSearchResultDataWithGrouping(nq, 4, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
+		data2 := embedding.GenSearchResultDataWithGrouping(nq, 4, schemapb.DataType_Int64, "", 0, "ts", 102, 3)
 		inputs, _ := newRerankInputs([]*schemapb.SearchResultData{data1, data2}, f.GetInputFieldIDs(), true)
 		ret, err := f.Process(context.Background(), NewSearchParams(nq, 3, 2, 3, 102, 3, true, "", []string{"COSINE", "COSINE"}), inputs)
 		s.NoError(err)

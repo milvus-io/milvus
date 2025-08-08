@@ -83,10 +83,26 @@ func (p *functionConfig) init(base *BaseTable) {
 		Export:    true,
 		DocFunc: func(key string) string {
 			switch key {
+			case "tei.credential":
+				return "The name in the crendential configuration item"
 			case "tei.enable":
 				return "Whether to enable TEI rerank service"
+			case "vllm.credential":
+				return "The name in the crendential configuration item"
 			case "vllm.enable":
 				return "Whether to enable vllm rerank service"
+			case "siliconflow.credential":
+				return "The name in the crendential configuration item"
+			case "siliconflow.url":
+				return "Your siliconflow rerank url, Default is the official rerank url"
+			case "voyageai.credential":
+				return "The name in the crendential configuration item"
+			case "voyageai.url":
+				return "Your voyageai rerank url, Default is the official rerank url"
+			case "cohere.credential":
+				return "The name in the crendential configuration item"
+			case "cohere.url":
+				return "Your cohere rerank url, Default is the official rerank url"
 			default:
 				return ""
 			}
