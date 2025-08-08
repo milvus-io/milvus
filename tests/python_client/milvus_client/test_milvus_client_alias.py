@@ -494,3 +494,37 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
         self.drop_alias(client, alias)
         self.drop_alias(client, another_alias)
         self.drop_collection(client, collection_name)
+
+class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
+    """ This is a migration test case for alias operation """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_alias_create_operation_default(self):
+        """
+        target: test collection creating alias
+        method: 
+                1.create a collection and create 10 partitions for it
+                2.collection create an alias, then init a collection with this alias but not create partitions
+        expected: collection is equal to alias
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str(prefix)
+
+        # Create the collection before creating partitions
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+
+        # method 1: create partitions and check the partition exists
+        for _ in range(10):
+            partition_name = cf.gen_unique_str("partition")
+            # create partition with different names and check the partition exists
+            self.create_partition(client, collection_name, partition_name)
+
+        # method 2: create alias from collection, then init a collection with this alias but not create partitions
+        alias = cf.gen_unique_str(prefix)
+        self.create_alias(client, collection_name, alias)
+        # assert collection is equal to alias according to partitions
+        partition_name_list = self.list_partitions(client, collection_name)[0]
+        partition_name_list_alias = self.list_partitions(client, alias)[0]
+        assert partition_name_list == partition_name_list_alias
+        self.drop_alias(client, alias)
+        self.drop_collection(client, collection_name)
