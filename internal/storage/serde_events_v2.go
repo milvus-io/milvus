@@ -23,14 +23,12 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/etcdpb"
@@ -257,19 +255,6 @@ func NewPackedRecordWriter(bucketName string, paths []string, schema *schemapb.C
 	}, nil
 }
 
-func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemapb.CollectionSchema, bufferSize int64,
-	multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup, batchSize int,
-) (*SerializeWriterImpl[*Value], error) {
-	packedRecordWriter, err := NewPackedRecordWriter(bucketName, paths, schema, bufferSize, multiPartUploadSize, columnGroups, nil)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternal(
-			fmt.Sprintf("can not new packed record writer %s", err.Error()))
-	}
-	return NewSerializeRecordWriter(packedRecordWriter, func(v []*Value) (Record, error) {
-		return ValueSerializer(v, schema)
-	}, batchSize), nil
-}
-
 var _ BinlogRecordWriter = (*PackedBinlogRecordWriter)(nil)
 
 type PackedBinlogRecordWriter struct {
@@ -288,13 +273,11 @@ type PackedBinlogRecordWriter struct {
 	storageConfig       *indexpb.StorageConfig
 
 	// writer and stats generated at runtime
-	writer              *packedRecordWriter
-	pkstats             *PrimaryKeyStats
-	bm25Stats           map[int64]*BM25Stats
-	tsFrom              typeutil.Timestamp
-	tsTo                typeutil.Timestamp
-	rowNum              int64
-	writtenUncompressed uint64
+	writer    *packedRecordWriter
+	pkstats   *PrimaryKeyStats
+	bm25Stats map[int64]*BM25Stats
+	tsRange   *TimestampRange
+	rowNum    int64
 
 	// results
 	fieldBinlogs map[FieldID]*datapb.FieldBinlog
@@ -307,44 +290,13 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 		return err
 	}
 
-	tsArray := r.Column(common.TimeStampField).(*array.Int64)
-	rows := r.Len()
-	for i := 0; i < rows; i++ {
-		ts := typeutil.Timestamp(tsArray.Value(i))
-		if ts < pw.tsFrom {
-			pw.tsFrom = ts
-		}
-		if ts > pw.tsTo {
-			pw.tsTo = ts
-		}
-
-		switch schemapb.DataType(pw.pkstats.PkType) {
-		case schemapb.DataType_Int64:
-			pkArray := r.Column(pw.pkstats.FieldID).(*array.Int64)
-			pk := &Int64PrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			pw.pkstats.Update(pk)
-		case schemapb.DataType_VarChar:
-			pkArray := r.Column(pw.pkstats.FieldID).(*array.String)
-			pk := &VarCharPrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			pw.pkstats.Update(pk)
-		default:
-			panic("invalid data type")
-		}
-
-		for fieldID, stats := range pw.bm25Stats {
-			field, ok := r.Column(fieldID).(*array.Binary)
-			if !ok {
-				return errors.New("bm25 field value not found")
-			}
-			stats.AppendBytes(field.Value(i))
-		}
+	rows, err := updateStats(r, pw.pkstats, pw.bm25Stats, pw.tsRange)
+	if err != nil {
+		return err
 	}
+	pw.rowNum += rows
 
-	err := pw.writer.Write(r)
+	err = pw.writer.Write(r)
 	if err != nil {
 		return merr.WrapErrServiceInternal(fmt.Sprintf("write record batch error: %s", err.Error()))
 	}
@@ -375,7 +327,7 @@ func (pw *PackedBinlogRecordWriter) initWriters(r Record) error {
 }
 
 func (pw *PackedBinlogRecordWriter) GetWrittenUncompressed() uint64 {
-	return pw.writtenUncompressed
+	return pw.writer.GetWrittenUncompressed()
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
@@ -399,7 +351,6 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 		return
 	}
 	pw.rowNum = pw.writer.GetWrittenRowNum()
-	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	if pw.fieldBinlogs == nil {
 		pw.fieldBinlogs = make(map[FieldID]*datapb.FieldBinlog, len(pw.columnGroups))
 	}
@@ -415,8 +366,8 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 			MemorySize:    int64(pw.writer.GetColumnGroupWrittenUncompressed(columnGroupID)),
 			LogPath:       pw.writer.GetWrittenPaths(columnGroupID),
 			EntriesNum:    pw.writer.GetWrittenRowNum(),
-			TimestampFrom: pw.tsFrom,
-			TimestampTo:   pw.tsTo,
+			TimestampFrom: pw.tsRange.tsFrom,
+			TimestampTo:   pw.tsRange.tsTo,
 		})
 	}
 }
@@ -576,8 +527,6 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		pkstats:             stats,
 		bm25Stats:           bm25Stats,
 		storageConfig:       storageConfig,
-
-		tsFrom: typeutil.MaxTimestamp,
-		tsTo:   0,
+		tsRange:             &TimestampRange{tsFrom: typeutil.MaxTimestamp, tsTo: 0},
 	}, nil
 }
