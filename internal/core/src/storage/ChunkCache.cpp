@@ -80,12 +80,10 @@ ChunkCache::Read(const std::string& filepath,
             auto dir = path.parent_path();
             std::filesystem::create_directories(dir);
 
-            auto file = File::Open(path.string(), O_CREAT | O_TRUNC | O_RDWR);
             chunk = create_chunk(
-                field_meta, dim, file, 0, field_data->GetReader()->reader);
+                field_meta, field_data->GetReader()->reader, path.string());
         } else {
-            chunk =
-                create_chunk(field_meta, dim, field_data->GetReader()->reader);
+            chunk = create_chunk(field_meta, field_data->GetReader()->reader);
         }
 
         auto data_type = field_meta.get_data_type();

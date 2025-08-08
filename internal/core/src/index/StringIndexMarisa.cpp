@@ -38,6 +38,7 @@
 #include "index/Index.h"
 #include "marisa/base.h"
 #include "storage/Util.h"
+#include "storage/FileWriter.h"
 
 namespace milvus::index {
 
@@ -194,19 +195,16 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
 
-    auto file = File::Open(file_name, O_RDWR | O_CREAT | O_EXCL);
-    auto written = file.Write(index->data.get(), len);
-    if (written != len) {
-        file.Close();
-        remove(file_name.c_str());
-        PanicInfo(ErrorCode::UnistdError,
-                  fmt::format("write index to fd error: {}", strerror(errno)));
+    {
+        auto file_writer = storage::FileWriter(file_name);
+        file_writer.Write(index->data.get(), len);
+        file_writer.Finish();
     }
 
-    file.Seek(0, SEEK_SET);
     if (config.contains(MMAP_FILE_PATH)) {
         trie_.mmap(file_name.c_str());
     } else {
+        auto file = File::Open(file_name, O_RDONLY);
         trie_.read(file.Descriptor());
     }
     mmap_file_raii_ = std::make_unique<MmapFileRAII>(file_name);

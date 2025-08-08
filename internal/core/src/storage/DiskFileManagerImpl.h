@@ -157,9 +157,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
                         get_remote_path) noexcept;
 
     void
-    CacheIndexToDiskInternal(
-        const std::vector<std::string>& remote_files,
-        const std::function<std::string()>& get_local_index_prefix);
+    CacheIndexToDiskInternal(const std::vector<std::string>& remote_files,
+                             const std::string& local_index_prefix);
 
  private:
     // local file path (abs path)

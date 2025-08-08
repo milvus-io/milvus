@@ -43,7 +43,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                       IndexMetaPtr index_meta,
                                       const SegcoreConfig& segcore_config,
                                       int64_t segment_id,
-                                      bool TEST_skip_index_for_retrieve = false,
                                       bool is_sorted_by_pk = false);
     ~ChunkedSegmentSealedImpl() override;
     void
@@ -426,10 +425,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 
     SegmentStats stats_{};
-
-    // for sparse vector unit test only! Once a type of sparse index that
-    // doesn't has raw data is added, this should be removed.
-    bool TEST_skip_index_for_retrieve_ = false;
 
     // whether the segment is sorted by the pk
     bool is_sorted_by_pk_ = false;

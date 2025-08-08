@@ -198,6 +198,18 @@ func InitMmapManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitMmapManager failed")
 }
 
+func InitFileWriterConfig(params *paramtable.ComponentParam) error {
+	mode := params.CommonCfg.DiskWriteMode.GetValue()
+	bufferSize := params.CommonCfg.DiskWriteBufferSizeKb.GetAsUint64()
+	numThreads := params.CommonCfg.DiskWriteNumThreads.GetAsInt()
+	cMode := C.CString(mode)
+	cBufferSize := C.uint64_t(bufferSize)
+	cNumThreads := C.int(numThreads)
+	defer C.free(unsafe.Pointer(cMode))
+	status := C.InitFileWriterConfig(cMode, cBufferSize, cNumThreads)
+	return HandleCStatus(&status, "InitFileWriterConfig failed")
+}
+
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	enableInterminIndex := C.bool(params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool())
 	C.SegcoreSetEnableInterminSegmentIndex(enableInterminIndex)

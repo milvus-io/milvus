@@ -282,7 +282,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
                 auto chunk = std::dynamic_pointer_cast<FixedWidthChunk>(
-                    create_chunk(field_meta, 1, r->reader));
+                    create_chunk(field_meta, r->reader));
                 std::copy_n(static_cast<const Timestamp*>(chunk->Span().data()),
                             chunk->Span().row_count(),
                             timestamps.data() + offset);
@@ -344,7 +344,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        auto chunk = create_chunk(field_meta, r->reader);
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();
@@ -360,7 +360,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        auto chunk = create_chunk(field_meta, r->reader);
                         var_column->AddChunk(chunk);
                     }
                     // var_column->Seal();
@@ -374,7 +374,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         std::make_shared<ChunkedArrayColumn>(field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        auto chunk = create_chunk(field_meta, r->reader);
                         var_column->AddChunk(chunk);
                     }
                     column = std::move(var_column);
@@ -385,7 +385,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         std::make_shared<ChunkedSparseFloatColumn>(field_meta);
                     std::shared_ptr<milvus::ArrowDataWrapper> r;
                     while (data.arrow_reader_channel->pop(r)) {
-                        auto chunk = create_chunk(field_meta, 1, r->reader);
+                        auto chunk = create_chunk(field_meta, r->reader);
                         col->AddChunk(chunk);
                     }
                     column = std::move(col);
@@ -404,14 +404,7 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             column = std::make_shared<ChunkedColumn>(field_meta);
             std::shared_ptr<milvus::ArrowDataWrapper> r;
             while (data.arrow_reader_channel->pop(r)) {
-                auto chunk =
-                    create_chunk(field_meta,
-                                 IsVectorDataType(field_meta.get_data_type()) &&
-                                         !IsSparseFloatVectorDataType(
-                                             field_meta.get_data_type())
-                                     ? field_meta.get_dim()
-                                     : 1,
-                                 r->reader);
+                auto chunk = create_chunk(field_meta, r->reader);
                 // column->AppendBatch(field_data);
                 // stats_.mem_size += field_data->Size();
                 column->AddChunk(chunk);
@@ -482,13 +475,10 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
 void
 ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
                                        FieldDataInfo& data) {
-    auto filepath = std::filesystem::path(data.mmap_dir_path) /
-                    std::to_string(get_segment_id()) /
-                    std::to_string(field_id.get());
-    auto dir = filepath.parent_path();
-    std::filesystem::create_directories(dir);
-
-    auto file = File::Open(filepath.string(), O_CREAT | O_TRUNC | O_RDWR);
+    auto chunk_dir = std::filesystem::path(data.mmap_dir_path) /
+                     std::to_string(get_segment_id()) /
+                     std::to_string(field_id.get());
+    std::filesystem::create_directories(chunk_dir);
 
     auto& field_meta = (*schema_)[field_id];
     auto data_type = field_meta.get_data_type();
@@ -499,7 +489,7 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
     // FixedVector<bool> valid_data{};
     std::shared_ptr<milvus::ArrowDataWrapper> r;
 
-    size_t file_offset = 0;
+    size_t chunk_id = 0;
     std::vector<std::shared_ptr<Chunk>> chunks;
     while (data.arrow_reader_channel->pop(r)) {
         // WriteFieldData(file,
@@ -509,17 +499,10 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
         //                indices,
         //                element_indices,
         //                valid_data);
-        auto chunk = create_chunk(
-            field_meta,
-            IsVectorDataType(field_meta.get_data_type()) &&
-                    !IsSparseFloatVectorDataType(field_meta.get_data_type())
-                ? field_meta.get_dim()
-                : 1,
-            file,
-            file_offset,
-            r->reader);
-        file_offset += chunk->Size();
-        chunks.push_back(chunk);
+        auto chunkpath = chunk_dir / std::to_string(chunk_id);
+        auto chunk = create_chunk(field_meta, r->reader, chunkpath.string());
+        chunks.push_back(std::move(chunk));
+        ++chunk_id;
     }
     // WriteFieldPadding(file, data_type, total_written);
     std::shared_ptr<ChunkedColumnBase> column{};
@@ -976,7 +959,7 @@ ChunkedSegmentSealedImpl::get_vector(FieldId field_id,
     auto metric_type = vec_index->GetMetricType();
     auto has_raw_data = vec_index->HasRawData();
 
-    if (has_raw_data && !TEST_skip_index_for_retrieve_) {
+    if (has_raw_data) {
         // If index has raw data, get vector from memory.
         auto ids_ds = GenIdsDataset(count, ids);
         if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
@@ -1283,7 +1266,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     IndexMetaPtr index_meta,
     const SegcoreConfig& segcore_config,
     int64_t segment_id,
-    bool TEST_skip_index_for_retrieve,
     bool is_sorted_by_pk)
     : segcore_config_(segcore_config),
       field_data_ready_bitset_(schema->size()),
@@ -1294,7 +1276,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       schema_(schema),
       id_(segment_id),
       col_index_meta_(index_meta),
-      TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve),
       is_sorted_by_pk_(is_sorted_by_pk),
       deleted_record_(&insert_record_, this) {
     mmap_descriptor_ = std::shared_ptr<storage::MmapChunkDescriptor>(
