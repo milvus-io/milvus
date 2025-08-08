@@ -3272,69 +3272,6 @@ class TestCollectionMmap(TestcaseBase):
                                               ct.err_msg: f"collection not found"})
 
 
-class TestCollectionNullInvalid(TestcaseBase):
-    """ Test case of collection interface """
-
-    """
-    ******************************************************************
-    #  The followings are invalid cases
-    ******************************************************************
-    """
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes[:1])
-    def test_create_collection_set_nullable_on_pk_field(self, vector_type):
-        """
-        target: test create collection with set nullable=True on pk field
-        method: create collection with multiple vector fields
-        expected: raise exception
-        """
-        self._connect()
-        int_fields = []
-        c_name = cf.gen_unique_str(prefix)
-        # add other vector fields to maximum fields num
-        int_fields.append(cf.gen_int64_field(is_primary=True, nullable=True))
-        int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type))
-        schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 1100, ct.err_msg: "primary field not support null"}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
-    def test_create_collection_set_nullable_on_vector_field(self, vector_type):
-        """
-        target: test create collection with set nullable=True on vector field
-        method: create collection with multiple vector fields
-        expected: raise exception
-        """
-        self._connect()
-        int_fields = []
-        c_name = cf.gen_unique_str(prefix)
-        # add other vector fields to maximum fields num
-        int_fields.append(cf.gen_int64_field(is_primary=True))
-        int_fields.append(cf.gen_float_vec_field(vector_data_type=vector_type, nullable=True))
-        schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 1100, ct.err_msg: "vector type not support null"}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_create_collection_set_nullable_on_partition_key_field(self):
-        """
-        target: test create collection with set nullable=True on partition key field
-        method: set nullable=True and is_partition_key=True on one field
-        expected: raise exception
-        """
-        self._connect()
-        int_fields = []
-        c_name = cf.gen_unique_str(prefix)
-        # add other vector fields to maximum fields num
-        int_fields.append(cf.gen_int64_field(is_primary=True))
-        int_fields.append(cf.gen_string_field(is_partition_key=True, nullable=True))
-        int_fields.append(cf.gen_float_vec_field())
-        schema = cf.gen_collection_schema(fields=int_fields)
-        error = {ct.err_code: 1100, ct.err_msg: "partition key field not support nullable: invalid parameter"}
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
-
-
 class TestCollectionDefaultValueInvalid(TestcaseBase):
     """ Test case of collection interface """
 

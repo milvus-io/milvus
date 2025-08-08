@@ -2612,6 +2612,73 @@ class TestMilvusClientCollectionPropertiesValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
 
+class TestMilvusClientCollectionNullInvalid(TestMilvusClientV2Base):
+    """ Test case of collection interface """
+
+    """
+    ******************************************************************
+    #  The followings are invalid cases
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
+    def test_milvus_client_collection_set_nullable_on_pk_field(self, vector_type):
+        """
+        target: test create collection with nullable=True on primary key field
+        method: create collection schema with primary key field set as nullable
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with nullable primary key field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False, nullable=True)
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            schema.add_field("vector", vector_type)
+        else:
+            schema.add_field("vector", vector_type, dim=default_dim)
+        error = {ct.err_code: 1100, ct.err_msg: "primary field not support null"}
+        self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("vector_type", ct.all_float_vector_dtypes)
+    def test_milvus_client_collection_set_nullable_on_vector_field(self, vector_type):
+        """
+        target: test create collection with nullable=True on vector field
+        method: create collection schema with vector field set as nullable
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with nullable vector field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        if vector_type == DataType.SPARSE_FLOAT_VECTOR:
+            schema.add_field("vector", vector_type, nullable=True)
+        else:
+            schema.add_field("vector", vector_type, dim=default_dim, nullable=True)
+        error = {ct.err_code: 1100, ct.err_msg: "vector type not support null"}
+        self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_set_nullable_on_partition_key_field(self):
+        """
+        target: test create collection with nullable=True on partition key field
+        method: create collection schema with partition key field set as nullable
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with nullable partition key field
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("partition_key", DataType.VARCHAR, max_length=64, is_partition_key=True, nullable=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        error = {ct.err_code: 1100, ct.err_msg: "partition key field not support nullable: invalid parameter"}
+        self.create_collection(client, collection_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
+
+
+
 class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
     """ Test case of collection interface """
 
