@@ -28,6 +28,15 @@
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
 
+void
+ProtoParser::PlanOptionsFromProto(
+    const proto::plan::PlanOption& plan_option_proto,
+    PlanOptions& plan_options) {
+    plan_options.expr_use_json_stats = plan_option_proto.expr_use_json_stats();
+    LOG_INFO("plan_options.expr_use_json_stats: {}",
+             plan_options.expr_use_json_stats);
+}
+
 std::unique_ptr<VectorPlanNode>
 ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     // TODO: add more buffs
@@ -208,6 +217,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     plan_node->plannodes_ = plannode;
 
+    PlanOptionsFromProto(plan_node_proto.plan_options(),
+                         plan_node->plan_options_);
+
     return plan_node;
 }
 
@@ -289,6 +301,9 @@ ProtoParser::RetrievePlanNodeFromProto(
         }
         return node;
     }();
+
+    PlanOptionsFromProto(plan_node_proto.plan_options(),
+                         plan_node->plan_options_);
 
     return plan_node;
 }

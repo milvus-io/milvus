@@ -38,7 +38,8 @@ StringChunkWriter::write(const arrow::ArrayVector& array_vec) {
     // tuple <data, size, offset>
     std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
     for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::StringArray>(data);
+        // for bson, we use binary array to store the string
+        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
         for (int i = 0; i < array->length(); i++) {
             auto str = array->GetView(i);
             strs.emplace_back(str);

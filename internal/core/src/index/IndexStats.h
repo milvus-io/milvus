@@ -70,6 +70,11 @@ class IndexStats {
     int64_t
     GetSerializedSize() const;
 
+    const std::vector<SerializedIndexFileInfo>&
+    GetSerializedIndexFileInfo() const {
+        return serialized_index_infos_;
+    }
+
  private:
     IndexStats(int64_t mem_size,
                std::vector<SerializedIndexFileInfo>&& serialized_index_infos);

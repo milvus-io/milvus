@@ -138,7 +138,9 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
                                                      active_count,
                                                      timestamp_,
                                                      collection_ttl_timestamp_,
-                                                     consystency_level_);
+                                                     consystency_level_,
+                                                     node.plan_options_);
+
     query_context->set_search_info(node.search_info_);
     query_context->set_placeholder_group(placeholder_group_);
 
@@ -194,7 +196,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                                      active_count,
                                                      timestamp_,
                                                      collection_ttl_timestamp_,
-                                                     consystency_level_);
+                                                     consystency_level_,
+                                                     node.plan_options_);
 
     // Do task execution
     auto bitset_holder = ExecuteTask(plan, query_context);
