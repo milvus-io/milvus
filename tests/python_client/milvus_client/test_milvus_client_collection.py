@@ -1102,6 +1102,22 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         for collection_name in collection_names:
             assert not self.has_collection(client, collection_name)[0]
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_count_no_vectors(self):
+        """
+        target: test collection rows_count is correct or not, if collection is empty
+        method: create collection and no vectors in it,
+                assert the value returned by get_collection_stats is equal to 0
+        expected: the count is equal to 0
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        # Get collection stats for empty collection
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == 0
+        self.drop_collection(client, collection_name)
+
 
 class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of drop collection interface """
@@ -2827,5 +2843,55 @@ class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
         # Verify both collections are the same
         assert collection_1 == collection_2
         # Clean up: drop the collection
+        self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientCollectionCountIP(TestMilvusClientV2Base):
+    """
+    Test collection count functionality with different entity counts
+    params means different nb, the nb value may trigger merge, or not
+    """
+
+    @pytest.fixture(
+        scope="function",
+        params=[
+            1,
+            1000,
+            2001
+        ],
+    )
+    def insert_count(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_count_after_index_created(self, insert_count):
+        """
+        target: test count_entities, after index have been created
+        method: add vectors in db, and create index, then calling get_collection_stats with correct params
+        expected: count_entities returns correct count
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, default_vector_field_name)
+        # Prepare and insert data
+        rng = np.random.default_rng(seed=19530)
+        rows = [{
+            default_primary_key_field_name: i,
+            default_vector_field_name: list(rng.random((1, default_dim))[0]),
+            default_float_field_name: i * 1.0,
+            default_string_field_name: str(i)
+        } for i in range(insert_count)]
+        self.insert(client, collection_name, rows)
+        self.flush(client, collection_name)
+        # Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=default_vector_field_name, index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # Verify entity count
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == insert_count
         self.drop_collection(client, collection_name)
 

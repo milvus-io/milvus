@@ -1098,54 +1098,6 @@ class TestCollectionDataframe(TestcaseBase):
         assert collection_w.num_entities == self.collection_wrap.num_entities
 
 
-class TestCollectionCount(TestcaseBase):
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_no_vectors(self):
-        """
-        target: test collection rows_count is correct or not, if collection is empty
-        method: create collection and no vectors in it,
-                assert the value returned by num_entities attribute is equal to 0
-        expected: the count is equal to 0
-        """
-        self._connect()
-        collection_w = self.init_collection_wrap()
-        assert collection_w.num_entities == 0
-
-
-class TestCollectionCountIP(TestcaseBase):
-    """
-    params means different nb, the nb value may trigger merge, or not
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            1000,
-            2001
-        ],
-    )
-    def insert_count(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_count_after_index_created(self, insert_count):
-        """
-        target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling num_entities with correct params
-        expected: count_entities raise exception
-        """
-        self._connect()
-        collection_w = self.init_collection_wrap()
-
-        data = cf.gen_default_list_data(insert_count, ct.default_dim)
-        collection_w.insert(data)
-
-        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
-                                  index_name=ct.default_index_name)
-        assert collection_w.num_entities == insert_count
-
-
 class TestCollectionCountBinary(TestcaseBase):
     """
     params means different nb, the nb value may trigger merge, or not
