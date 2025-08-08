@@ -1767,6 +1767,64 @@ func (_c *RootCoordCatalog_ListDatabases_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// ListFileResource provides a mock function with given fields: ctx
+func (_m *RootCoordCatalog) ListFileResource(ctx context.Context) ([]*model.FileResource, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFileResource")
+	}
+
+	var r0 []*model.FileResource
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.FileResource, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*model.FileResource); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.FileResource)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_ListFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFileResource'
+type RootCoordCatalog_ListFileResource_Call struct {
+	*mock.Call
+}
+
+// ListFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *RootCoordCatalog_Expecter) ListFileResource(ctx interface{}) *RootCoordCatalog_ListFileResource_Call {
+	return &RootCoordCatalog_ListFileResource_Call{Call: _e.mock.On("ListFileResource", ctx)}
+}
+
+func (_c *RootCoordCatalog_ListFileResource_Call) Run(run func(ctx context.Context)) *RootCoordCatalog_ListFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListFileResource_Call) Return(_a0 []*model.FileResource, _a1 error) *RootCoordCatalog_ListFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListFileResource_Call) RunAndReturn(run func(context.Context) ([]*model.FileResource, error)) *RootCoordCatalog_ListFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListGrant provides a mock function with given fields: ctx, tenant, entity
 func (_m *RootCoordCatalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	ret := _m.Called(ctx, tenant, entity)
@@ -2125,6 +2183,53 @@ func (_c *RootCoordCatalog_ListUserRole_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// RemoveFileResource provides a mock function with given fields: ctx, resourceID
+func (_m *RootCoordCatalog) RemoveFileResource(ctx context.Context, resourceID int64) error {
+	ret := _m.Called(ctx, resourceID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, resourceID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_RemoveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveFileResource'
+type RootCoordCatalog_RemoveFileResource_Call struct {
+	*mock.Call
+}
+
+// RemoveFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceID int64
+func (_e *RootCoordCatalog_Expecter) RemoveFileResource(ctx interface{}, resourceID interface{}) *RootCoordCatalog_RemoveFileResource_Call {
+	return &RootCoordCatalog_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", ctx, resourceID)}
+}
+
+func (_c *RootCoordCatalog_RemoveFileResource_Call) Run(run func(ctx context.Context, resourceID int64)) *RootCoordCatalog_RemoveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_RemoveFileResource_Call) Return(_a0 error) *RootCoordCatalog_RemoveFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_RemoveFileResource_Call) RunAndReturn(run func(context.Context, int64) error) *RootCoordCatalog_RemoveFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RestoreRBAC provides a mock function with given fields: ctx, tenant, meta
 func (_m *RootCoordCatalog) RestoreRBAC(ctx context.Context, tenant string, meta *milvuspb.RBACMeta) error {
 	ret := _m.Called(ctx, tenant, meta)
@@ -2169,6 +2274,53 @@ func (_c *RootCoordCatalog_RestoreRBAC_Call) Return(_a0 error) *RootCoordCatalog
 }
 
 func (_c *RootCoordCatalog_RestoreRBAC_Call) RunAndReturn(run func(context.Context, string, *milvuspb.RBACMeta) error) *RootCoordCatalog_RestoreRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveFileResource provides a mock function with given fields: ctx, resource
+func (_m *RootCoordCatalog) SaveFileResource(ctx context.Context, resource *model.FileResource) error {
+	ret := _m.Called(ctx, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.FileResource) error); ok {
+		r0 = rf(ctx, resource)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_SaveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveFileResource'
+type RootCoordCatalog_SaveFileResource_Call struct {
+	*mock.Call
+}
+
+// SaveFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resource *model.FileResource
+func (_e *RootCoordCatalog_Expecter) SaveFileResource(ctx interface{}, resource interface{}) *RootCoordCatalog_SaveFileResource_Call {
+	return &RootCoordCatalog_SaveFileResource_Call{Call: _e.mock.On("SaveFileResource", ctx, resource)}
+}
+
+func (_c *RootCoordCatalog_SaveFileResource_Call) Run(run func(ctx context.Context, resource *model.FileResource)) *RootCoordCatalog_SaveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.FileResource))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_SaveFileResource_Call) Return(_a0 error) *RootCoordCatalog_SaveFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_SaveFileResource_Call) RunAndReturn(run func(context.Context, *model.FileResource) error) *RootCoordCatalog_SaveFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -52,11 +52,13 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         "representing the memory consumption of the cell");
 
     CacheSlot(std::unique_ptr<Translator<CellT>> translator,
-              internal::DList* dlist)
+              internal::DList* dlist,
+              bool evictable)
         : translator_(std::move(translator)),
           cell_id_mapping_mode_(translator_->meta()->cell_id_mapping_mode),
           cells_(translator_->num_cells()),
-          dlist_(dlist) {
+          dlist_(dlist),
+          evictable_(evictable) {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
             new (&cells_[i])
                 CacheCell(this, i, translator_->estimated_byte_size_of_cell(i));
@@ -89,7 +91,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
         for (cid_t i = 0; i < translator_->num_cells(); ++i) {
             cids.push_back(i);
         }
-        SemiInlineGet(PinCells(std::move(cids)));
+        SemiInlineGet(PinCells(cids));
     }
 
     folly::SemiFuture<std::shared_ptr<CellAccessor<CellT>>>
@@ -306,9 +308,11 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
      public:
         CacheCell() = default;
         CacheCell(CacheSlot<CellT>* slot, cid_t cid, ResourceUsage size)
-            : internal::ListNode(slot->dlist_, size), slot_(slot), cid_(cid) {
+            : internal::ListNode(slot->dlist_, size, slot->evictable_),
+              slot_(slot),
+              cid_(cid) {
         }
-        ~CacheCell() {
+        ~CacheCell() override {
             if (state_ == State::LOADING) {
                 LOG_ERROR("[MCL] CacheSlot Cell {} destroyed while loading",
                           key());
@@ -386,6 +390,7 @@ class CacheSlot final : public std::enable_shared_from_this<CacheSlot<CellT>> {
     std::vector<CacheCell> cells_;
     CellIdMappingMode cell_id_mapping_mode_;
     internal::DList* dlist_;
+    const bool evictable_;
 };
 
 // - A thin wrapper for accessing cells in a CacheSlot.

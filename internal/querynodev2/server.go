@@ -250,15 +250,15 @@ func (node *QueryNode) InitSegcore() error {
 
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
-	C.InitIndexSliceSize(cIndexSliceSize)
+	C.SetIndexSliceSize(cIndexSliceSize)
 
 	// set up thread pool for different priorities
 	cHighPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.GetAsFloat())
-	C.InitHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
+	C.SetHighPriorityThreadCoreCoefficient(cHighPriorityThreadCoreCoefficient)
 	cMiddlePriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsFloat())
-	C.InitMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
+	C.SetMiddlePriorityThreadCoreCoefficient(cMiddlePriorityThreadCoreCoefficient)
 	cLowPriorityThreadCoreCoefficient := C.float(paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat())
-	C.InitLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
+	C.SetLowPriorityThreadCoreCoefficient(cLowPriorityThreadCoreCoefficient)
 
 	node.RegisterSegcoreConfigWatcher()
 
@@ -274,22 +274,22 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
 
 	cExprBatchSize := C.int64_t(paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.GetAsInt64())
-	C.InitDefaultExprEvalBatchSize(cExprBatchSize)
+	C.SetDefaultExprEvalBatchSize(cExprBatchSize)
 
 	cOptimizeExprEnabled := C.bool(paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool())
-	C.InitDefaultOptimizeExprEnable(cOptimizeExprEnabled)
+	C.SetDefaultOptimizeExprEnable(cOptimizeExprEnabled)
 
 	cJSONKeyStatsCommitInterval := C.int64_t(paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.GetAsInt64())
-	C.InitDefaultJSONKeyStatsCommitInterval(cJSONKeyStatsCommitInterval)
+	C.SetDefaultJSONKeyStatsCommitInterval(cJSONKeyStatsCommitInterval)
 
 	cGrowingJSONKeyStatsEnabled := C.bool(paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.GetAsBool())
-	C.InitDefaultGrowingJSONKeyStatsEnable(cGrowingJSONKeyStatsEnabled)
+	C.SetDefaultGrowingJSONKeyStatsEnable(cGrowingJSONKeyStatsEnabled)
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
 
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
-	C.InitDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
+	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
 
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)

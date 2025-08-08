@@ -557,6 +557,11 @@ DList::removeLoadingResource(const ResourceUsage& size) {
 }
 
 void
+DList::removeLoadedResource(const ResourceUsage& size) {
+    used_resources_ -= size;
+}
+
+void
 DList::notifyWaitingRequests() {
     while (!waiting_queue_.empty()) {
         auto& request_ptr_ref =

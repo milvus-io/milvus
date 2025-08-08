@@ -14,6 +14,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <utility>
 
 #include <fmt/core.h>
 #include <folly/ExceptionWrapper.h>
@@ -47,19 +48,23 @@ ListNode::NodePin::operator=(NodePin&& other) {
     return *this;
 }
 
-ListNode::ListNode(DList* dlist, ResourceUsage size)
+ListNode::ListNode(DList* dlist, ResourceUsage size, bool evictable)
     : last_touch_(dlist ? (std::chrono::high_resolution_clock::now() -
                            2 * dlist->eviction_config().cache_touch_window)
                         : std::chrono::high_resolution_clock::now()),
       dlist_(dlist),
       size_(size),
-      state_(State::NOT_LOADED) {
+      evictable_(evictable) {
 }
 
 ListNode::~ListNode() {
     if (dlist_) {
-        std::unique_lock<std::shared_mutex> lock(mtx_);
-        dlist_->removeItem(this, size_);
+        if (evictable_) {
+            std::unique_lock<std::shared_mutex> lock(mtx_);
+            dlist_->removeItem(this, size_);
+        } else {
+            dlist_->removeLoadedResource(size_);
+        }
     }
 }
 
@@ -103,7 +108,8 @@ ListNode::pin() {
                    "Programming error: read_op called on a {} cell",
                    state_to_string(state_));
         // pin the cell now so that we can avoid taking the lock again in deferValue.
-        if (pin_count_.fetch_add(1) == 0 && state_ == State::LOADED && dlist_) {
+        if (pin_count_.fetch_add(1) == 0 && state_ == State::LOADED && dlist_ &&
+            evictable_) {
             // node became inevictable, decrease evictable size
             dlist_->decreaseEvictableSize(size_);
         }
@@ -166,7 +172,7 @@ ListNode::set_error(folly::exception_wrapper error) {
     // setException may call continuation of bound futures inline, and those continuation may also need to acquire the
     // lock, which may cause deadlock. So we release the lock before calling setException.
     if (promise) {
-        promise->setException(error);
+        promise->setException(std::move(error));
     }
 }
 
@@ -187,9 +193,11 @@ void
 ListNode::unpin() {
     std::unique_lock<std::shared_mutex> lock(mtx_);
     if (pin_count_.fetch_sub(1) == 1) {
-        touch(false);
+        if (evictable_) {
+            touch(false);
+        }
         // Notify DList that this node became evictable
-        if (dlist_ && state_ == State::LOADED) {
+        if (dlist_ && evictable_ && state_ == State::LOADED) {
             dlist_->increaseEvictableSize(size_);
         }
     }
