@@ -92,6 +92,65 @@ func (_c *MockProxy_AddCollectionField_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// AddFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AddFileResource(_a0 context.Context, _a1 *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AddFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddFileResource'
+type MockProxy_AddFileResource_Call struct {
+	*mock.Call
+}
+
+// AddFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddFileResourceRequest
+func (_e *MockProxy_Expecter) AddFileResource(_a0 interface{}, _a1 interface{}) *MockProxy_AddFileResource_Call {
+	return &MockProxy_AddFileResource_Call{Call: _e.mock.On("AddFileResource", _a0, _a1)}
+}
+
+func (_c *MockProxy_AddFileResource_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddFileResourceRequest)) *MockProxy_AddFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AddFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AddFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AddFileResource_Call) RunAndReturn(run func(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)) *MockProxy_AddFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AddUserTags provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) AddUserTags(_a0 context.Context, _a1 *milvuspb.AddUserTagsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -560,6 +619,65 @@ func (_c *MockProxy_BackupRBAC_Call) Return(_a0 *milvuspb.BackupRBACMetaResponse
 }
 
 func (_c *MockProxy_BackupRBAC_Call) RunAndReturn(run func(context.Context, *milvuspb.BackupRBACMetaRequest) (*milvuspb.BackupRBACMetaResponse, error)) *MockProxy_BackupRBAC_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// BatchDescribeCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) BatchDescribeCollection(_a0 context.Context, _a1 *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BatchDescribeCollection")
+	}
+
+	var r0 *milvuspb.BatchDescribeCollectionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.BatchDescribeCollectionRequest) *milvuspb.BatchDescribeCollectionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.BatchDescribeCollectionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.BatchDescribeCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_BatchDescribeCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BatchDescribeCollection'
+type MockProxy_BatchDescribeCollection_Call struct {
+	*mock.Call
+}
+
+// BatchDescribeCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.BatchDescribeCollectionRequest
+func (_e *MockProxy_Expecter) BatchDescribeCollection(_a0 interface{}, _a1 interface{}) *MockProxy_BatchDescribeCollection_Call {
+	return &MockProxy_BatchDescribeCollection_Call{Call: _e.mock.On("BatchDescribeCollection", _a0, _a1)}
+}
+
+func (_c *MockProxy_BatchDescribeCollection_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.BatchDescribeCollectionRequest)) *MockProxy_BatchDescribeCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.BatchDescribeCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_BatchDescribeCollection_Call) Return(_a0 *milvuspb.BatchDescribeCollectionResponse, _a1 error) *MockProxy_BatchDescribeCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_BatchDescribeCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error)) *MockProxy_BatchDescribeCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4959,6 +5077,65 @@ func (_c *MockProxy_ListDatabases_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
+// ListFileResources provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) ListFileResources(_a0 context.Context, _a1 *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFileResources")
+	}
+
+	var r0 *milvuspb.ListFileResourcesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest) *milvuspb.ListFileResourcesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListFileResourcesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListFileResourcesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_ListFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFileResources'
+type MockProxy_ListFileResources_Call struct {
+	*mock.Call
+}
+
+// ListFileResources is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListFileResourcesRequest
+func (_e *MockProxy_Expecter) ListFileResources(_a0 interface{}, _a1 interface{}) *MockProxy_ListFileResources_Call {
+	return &MockProxy_ListFileResources_Call{Call: _e.mock.On("ListFileResources", _a0, _a1)}
+}
+
+func (_c *MockProxy_ListFileResources_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListFileResourcesRequest)) *MockProxy_ListFileResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListFileResourcesRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_ListFileResources_Call) Return(_a0 *milvuspb.ListFileResourcesResponse, _a1 error) *MockProxy_ListFileResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_ListFileResources_Call) RunAndReturn(run func(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)) *MockProxy_ListFileResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImportTasks provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) ListImportTasks(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6180,6 +6357,65 @@ func (_c *MockProxy_ReleasePartitions_Call) Return(_a0 *commonpb.Status, _a1 err
 }
 
 func (_c *MockProxy_ReleasePartitions_Call) RunAndReturn(run func(context.Context, *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error)) *MockProxy_ReleasePartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) RemoveFileResource(_a0 context.Context, _a1 *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RemoveFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RemoveFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_RemoveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveFileResource'
+type MockProxy_RemoveFileResource_Call struct {
+	*mock.Call
+}
+
+// RemoveFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RemoveFileResourceRequest
+func (_e *MockProxy_Expecter) RemoveFileResource(_a0 interface{}, _a1 interface{}) *MockProxy_RemoveFileResource_Call {
+	return &MockProxy_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", _a0, _a1)}
+}
+
+func (_c *MockProxy_RemoveFileResource_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RemoveFileResourceRequest)) *MockProxy_RemoveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RemoveFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_RemoveFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_RemoveFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_RemoveFileResource_Call) RunAndReturn(run func(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)) *MockProxy_RemoveFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }
