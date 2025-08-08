@@ -140,9 +140,19 @@ class SegmentInterface {
     GetTextIndex(FieldId field_id) const = 0;
 
     virtual PinWrapper<index::IndexBase*>
-    GetJsonIndex(FieldId field_id, std::string path) const {
+    GetJsonIndex(FieldId field_id,
+                 const std::string& path,
+                 DataType data_type,
+                 bool any_type,
+                 bool is_array) const {
         return nullptr;
     }
+
+    virtual PinWrapper<index::IndexBase*>
+    GetIndex(FieldId field_id) const {
+        return nullptr;
+    };
+
     virtual index::JsonKeyStatsInvertedIndex*
     GetJsonKeyIndex(FieldId field_id) const = 0;
 
@@ -275,8 +285,12 @@ class SegmentInternalInterface : public SegmentInterface {
     PinWrapper<const index::IndexBase*>
     chunk_json_index(FieldId field_id,
                      std::string& json_path,
+                     DataType data_type,
+                     bool any_type,
+                     bool is_array,
                      int64_t chunk_id) const {
-        return chunk_index_impl(field_id, json_path, chunk_id);
+        return chunk_index_impl(
+            field_id, json_path, data_type, any_type, is_array, chunk_id);
     }
 
     // union(segment_id, field_id) as unique id
@@ -284,18 +298,6 @@ class SegmentInternalInterface : public SegmentInterface {
     GetUniqueFieldId(int64_t field_id) const {
         return std::to_string(get_segment_id()) + "_" +
                std::to_string(field_id);
-    }
-
-    template <typename T>
-    PinWrapper<const index::ScalarIndex<T>*>
-    chunk_scalar_index(FieldId field_id,
-                       std::string path,
-                       int64_t chunk_id) const {
-        using IndexType = index::ScalarIndex<T>;
-        auto pw = chunk_index_impl(field_id, path, chunk_id);
-        auto ptr = dynamic_cast<const IndexType*>(pw.get());
-        AssertInfo(ptr, "entry mismatch");
-        return PinWrapper<const index::ScalarIndex<T>*>(pw, ptr);
     }
 
     std::unique_ptr<SearchResult>
@@ -553,6 +555,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id,
                      const std::string& path,
+                     DataType data_type,
+                     bool any_type,
+                     bool is_array,
                      int64_t chunk_id) const {
         ThrowInfo(ErrorCode::NotImplemented, "not implemented");
     };

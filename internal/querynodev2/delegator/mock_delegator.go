@@ -140,6 +140,53 @@ func (_c *MockShardDelegator_Collection_Call) RunAndReturn(run func() int64) *Mo
 	return _c
 }
 
+// DropIndex provides a mock function with given fields: ctx, req
+func (_m *MockShardDelegator) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DropIndexRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_DropIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropIndex'
+type MockShardDelegator_DropIndex_Call struct {
+	*mock.Call
+}
+
+// DropIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.DropIndexRequest
+func (_e *MockShardDelegator_Expecter) DropIndex(ctx interface{}, req interface{}) *MockShardDelegator_DropIndex_Call {
+	return &MockShardDelegator_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, req)}
+}
+
+func (_c *MockShardDelegator_DropIndex_Call) Run(run func(ctx context.Context, req *querypb.DropIndexRequest)) *MockShardDelegator_DropIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.DropIndexRequest))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_DropIndex_Call) Return(_a0 error) *MockShardDelegator_DropIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_DropIndex_Call) RunAndReturn(run func(context.Context, *querypb.DropIndexRequest) error) *MockShardDelegator_DropIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetChannelQueryView provides a mock function with no fields
 func (_m *MockShardDelegator) GetChannelQueryView() *channelQueryView {
 	ret := _m.Called()

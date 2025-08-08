@@ -1627,3 +1627,33 @@ func (node *QueryNode) getDistributionModifyTS() int64 {
 	defer node.lastModifyLock.RUnlock()
 	return node.lastModifyTs
 }
+
+func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+	if req.GetNeedTransfer() {
+		shardDelegator, ok := node.delegators.Get(req.GetChannel())
+		if !ok {
+			return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel())), nil
+		}
+		req.NeedTransfer = false
+		if err := shardDelegator.DropIndex(ctx, req); err != nil {
+			return merr.Status(err), nil
+		}
+	}
+	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()))
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	if len(segments) == 0 {
+		return merr.Success(), nil
+	}
+	defer node.manager.Segment.Unpin(segments)
+
+	segment := segments[0]
+	indexIDs := req.GetIndexIDs()
+	for _, indexID := range indexIDs {
+		segment.DropIndex(ctx, indexID)
+	}
+
+	return merr.Success(), nil
+}
