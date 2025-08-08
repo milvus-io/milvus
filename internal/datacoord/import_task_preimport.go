@@ -154,6 +154,9 @@ func (p *preImportTask) QueryTaskOnWorker(cluster session.Cluster) {
 	}
 	actions := []UpdateAction{}
 	if resp.GetState() == datapb.ImportTaskStateV2_InProgress || resp.GetState() == datapb.ImportTaskStateV2_Completed {
+		if resp.GetFileStats() == nil {
+			return
+		}
 		actions = append(actions, UpdateFileStats(resp.GetFileStats()))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
