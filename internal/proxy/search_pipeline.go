@@ -438,6 +438,28 @@ func newOrganizeOperator(t *searchTask, _ map[string]any) (operator, error) {
 	}, nil
 }
 
+func (op *organizeOperator) emptyFieldDataAccordingFieldSchema(fieldData *schemapb.FieldData) *schemapb.FieldData {
+	ret := &schemapb.FieldData{
+		Type:      fieldData.Type,
+		FieldName: fieldData.FieldName,
+		FieldId:   fieldData.FieldId,
+		IsDynamic: fieldData.IsDynamic,
+		ValidData: make([]bool, 0),
+	}
+	if fieldData.Type == schemapb.DataType_FloatVector ||
+		fieldData.Type == schemapb.DataType_BinaryVector ||
+		fieldData.Type == schemapb.DataType_BFloat16Vector ||
+		fieldData.Type == schemapb.DataType_Float16Vector ||
+		fieldData.Type == schemapb.DataType_Int8Vector {
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: fieldData.GetVectors().GetDim(),
+			},
+		}
+	}
+	return ret
+}
+
 func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	_, sp := otel.Tracer(typeutil.ProxyRole).Start(op.traceCtx, "organizeOperator")
 	defer sp.End()
@@ -464,12 +486,7 @@ func (op *organizeOperator) run(ctx context.Context, span trace.Span, inputs ...
 		if typeutil.GetSizeOfIDs(ids) == 0 {
 			emptyFields := []*schemapb.FieldData{}
 			for _, field := range fields {
-				emptyFields = append(emptyFields, &schemapb.FieldData{
-					Type:      field.Type,
-					FieldName: field.FieldName,
-					FieldId:   field.FieldId,
-					IsDynamic: field.IsDynamic,
-				})
+				emptyFields = append(emptyFields, op.emptyFieldDataAccordingFieldSchema(field))
 			}
 			allFieldData[idx] = emptyFields
 			continue
