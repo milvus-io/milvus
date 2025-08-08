@@ -19,11 +19,19 @@ func (v *BasePlanVisitor) VisitParens(ctx *ParensContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitDistanceCall(ctx *DistanceCallContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitString(ctx *StringContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
 func (v *BasePlanVisitor) VisitFloating(ctx *FloatingContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitAliasedIdentifier(ctx *AliasedIdentifierContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -140,6 +148,10 @@ func (v *BasePlanVisitor) VisitBitXor(ctx *BitXorContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitExists(ctx *ExistsContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitAliasExpression(ctx *AliasExpressionContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 

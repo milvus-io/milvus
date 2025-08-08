@@ -15,13 +15,76 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
+// DistanceExpressionError represents structured error types for distance expressions
+type DistanceExpressionError struct {
+	Type    DistanceErrorType
+	Message string
+	Context string
+}
+
+// DistanceErrorType defines specific error categories
+type DistanceErrorType int
+
+const (
+	DistanceErrorInvalidContext DistanceErrorType = iota
+	DistanceErrorMissingAlias
+	DistanceErrorInvalidMetric
+	DistanceErrorVectorTypeMismatch
+)
+
+func (e *DistanceExpressionError) Error() string {
+	return fmt.Sprintf("distance expression error [%s]: %s", e.getTypeString(), e.Message)
+}
+
+func (e *DistanceExpressionError) getTypeString() string {
+	switch e.Type {
+	case DistanceErrorInvalidContext:
+		return "INVALID_CONTEXT"
+	case DistanceErrorMissingAlias:
+		return "MISSING_ALIAS"
+	case DistanceErrorInvalidMetric:
+		return "INVALID_METRIC"
+	case DistanceErrorVectorTypeMismatch:
+		return "VECTOR_TYPE_MISMATCH"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// NewDistanceContextError creates a context-specific distance error
+func NewDistanceContextError(message string) *DistanceExpressionError {
+	return &DistanceExpressionError{
+		Type:    DistanceErrorInvalidContext,
+		Message: "distance expressions should be used in SELECT context, not in WHERE clauses",
+		Context: message,
+	}
+}
+
+// isDistanceContextError checks if error is about context usage
+func isDistanceContextError(err error) bool {
+	if distErr, ok := err.(*DistanceExpressionError); ok {
+		return distErr.Type == DistanceErrorInvalidContext
+	}
+	// Legacy fallback for existing string-based errors
+	return strings.Contains(err.Error(), "distance expressions should be used in SELECT context")
+}
+
 type ParserVisitor struct {
 	parser.BasePlanVisitor
-	schema *typeutil.SchemaHelper
+	schema   *typeutil.SchemaHelper
+	aliasMap map[string]*typeutil.SchemaHelper // Support alias mapping
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper) *ParserVisitor {
-	return &ParserVisitor{schema: schema}
+	return &ParserVisitor{
+		schema:   schema,
+		aliasMap: make(map[string]*typeutil.SchemaHelper),
+	}
+}
+
+// SetAlias sets an alias for a schema helper
+func (v *ParserVisitor) SetAlias(alias string, schema *typeutil.SchemaHelper) {
+	v.aliasMap[alias] = schema
 }
 
 // VisitParens unpack the parentheses.
@@ -31,6 +94,51 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 
 func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
 	identifier = decodeUnicode(identifier)
+
+	// Process aliased fields (e.g. "a.vector")
+	if strings.Contains(identifier, ".") {
+		parts := strings.SplitN(identifier, ".", 2)
+		alias := parts[0]
+		fieldName := parts[1]
+
+		// Check if there is a corresponding alias schema
+		if aliasSchema, exists := v.aliasMap[alias]; exists {
+			field, err := aliasSchema.GetFieldFromNameDefaultJSON(fieldName)
+			if err != nil {
+				return nil, fmt.Errorf("field %s not found in alias %s: %w", fieldName, alias, err)
+			}
+			var nestedPath []string
+			if fieldName != field.Name {
+				nestedPath = append(nestedPath, fieldName)
+			}
+
+			// Create aliased column expression
+			return &ExprWithType{
+				expr: &planpb.Expr{
+					Expr: &planpb.Expr_ColumnExpr{
+						ColumnExpr: &planpb.ColumnExpr{
+							Info: &planpb.ColumnInfo{
+								FieldId:         field.FieldID,
+								DataType:        field.DataType,
+								IsPrimaryKey:    field.IsPrimaryKey,
+								IsAutoID:        field.AutoID,
+								NestedPath:      nestedPath,
+								IsPartitionKey:  field.IsPartitionKey,
+								IsClusteringKey: field.IsClusteringKey,
+								ElementType:     field.GetElementType(),
+								Nullable:        field.GetNullable(),
+							},
+						},
+					},
+				},
+				dataType:      field.DataType,
+				nodeDependent: true,
+			}, nil
+		}
+
+	}
+
+	// Original logic: directly search for field
 	field, err := v.schema.GetFieldFromNameDefaultJSON(identifier)
 	if err != nil {
 		return nil, err
@@ -1604,4 +1712,397 @@ func (v *ParserVisitor) VisitTemplateVariable(ctx *parser.TemplateVariableContex
 			IsTemplate: true,
 		},
 	}
+}
+
+// VisitDistanceCall implements the distance function
+func (v *ParserVisitor) VisitDistanceCall(ctx *parser.DistanceCallContext) interface{} {
+	// Constants definition
+	const (
+		defaultMetricType    = "L2"
+		errContextNil        = "distance call context is nil"
+		errInsufficientExpr  = "insufficient expressions for distance call"
+		errInvalidLeftExpr   = "invalid left expression in distance call"
+		errInvalidRightExpr  = "invalid right expression in distance call"
+		errInvalidMetricType = "invalid metric type in distance call"
+	)
+
+	// Enhanced input validation
+	if ctx == nil {
+		return fmt.Errorf(errContextNil)
+	}
+
+	// Validate expression count
+	expressions := ctx.AllExpr()
+	if len(expressions) < 2 {
+		return fmt.Errorf(errInsufficientExpr)
+	}
+
+	if expressions[0] == nil || expressions[1] == nil {
+		return fmt.Errorf(errInsufficientExpr)
+	}
+
+	// Process left vector expression
+	leftResult := expressions[0].Accept(v)
+	if leftResult == nil {
+		return fmt.Errorf(errInvalidLeftExpr)
+	}
+
+	if err := getError(leftResult); err != nil {
+		// Use typed error checking instead of string matching
+		if isDistanceContextError(err) {
+			return err // Return the specific error directly
+		}
+		return fmt.Errorf("left vector expression error: %w", err)
+	}
+
+	leftVector, ok := leftResult.(*ExprWithType)
+	if !ok || leftVector == nil {
+		return fmt.Errorf(errInvalidLeftExpr)
+	}
+
+	// Process right vector expression
+	rightResult := expressions[1].Accept(v)
+	if rightResult == nil {
+		return fmt.Errorf(errInvalidRightExpr)
+	}
+
+	if err := getError(rightResult); err != nil {
+		// Use typed error checking instead of string matching
+		if isDistanceContextError(err) {
+			return err // Return the specific error directly
+		}
+		return fmt.Errorf("right vector expression error: %w", err)
+	}
+
+	rightVector, ok := rightResult.(*ExprWithType)
+	if !ok || rightVector == nil {
+		return fmt.Errorf(errInvalidRightExpr)
+	}
+
+	// get distance metric type with enhanced validation
+	metricType := defaultMetricType
+	if ctx.StringLiteral() != nil {
+		metricTypeStr := ctx.StringLiteral().GetText()
+		if metricTypeStr == "" {
+			return fmt.Errorf(errInvalidMetricType)
+		}
+
+		// remove quotes and validate
+		metricType = strings.Trim(metricTypeStr, `"'`)
+		if metricType == "" {
+			return fmt.Errorf(errInvalidMetricType)
+		}
+
+		// validate if it's a supported metric type
+		if !isValidMetricType(metricType) {
+			return fmt.Errorf("unsupported metric type: %s", metricType)
+		}
+	}
+
+	// create distance expression with proper metric handling
+	distanceExpr := &planpb.DistanceExpr{
+		LeftVector:  leftVector.expr,
+		RightVector: rightVector.expr,
+	}
+
+	// use enum for performance when possible, fallback to string for compatibility
+	if metricEnum, ok := getMetricEnum(metricType); ok {
+		distanceExpr.Metric = &planpb.DistanceExpr_MetricEnum{
+			MetricEnum: metricEnum,
+		}
+	} else {
+		distanceExpr.Metric = &planpb.DistanceExpr_MetricString{
+			MetricString: metricType,
+		}
+	}
+
+	// create distance expression node
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_DistanceExpr{
+				DistanceExpr: distanceExpr,
+			},
+		},
+		dataType: schemapb.DataType_Float, // distance always returns float
+	}
+}
+
+// VisitAliasedIdentifier implements aliased field references like a.vector
+func (v *ParserVisitor) VisitAliasedIdentifier(ctx *parser.AliasedIdentifierContext) interface{} {
+	// Constants definition - avoid hardcoded strings
+	const (
+		errDistanceSelectContext = "distance expressions should be used in SELECT context, not in WHERE clauses"
+		errFieldNotFound         = "field not found: %s.%s"
+		errFieldNotFoundInAlias  = "field '%s' not found in alias '%s'"
+		errContextNil            = "context is nil"
+		errInvalidContext        = "invalid identifier context"
+		errNoSchemaAvailable     = "no schema available for field resolution"
+		errTextFieldNotSupported = "filter on text field (%s.%s) is not supported yet"
+	)
+
+	// Enhanced input validation
+	if ctx == nil {
+		return fmt.Errorf(errContextNil)
+	}
+
+	// Validate identifier existence and count
+	identifiers := ctx.AllIdentifier()
+	if len(identifiers) < 2 {
+		return fmt.Errorf(errInvalidContext)
+	}
+
+	if identifiers[0] == nil || identifiers[1] == nil {
+		return fmt.Errorf(errInvalidContext)
+	}
+
+	aliasName := identifiers[0].GetText()
+	fieldName := identifiers[1].GetText()
+
+	// Prevent empty strings
+	if aliasName == "" || fieldName == "" {
+		return fmt.Errorf(errInvalidContext)
+	}
+
+	// Find schema corresponding to alias
+	var targetSchema *typeutil.SchemaHelper
+	aliasExists := false
+
+	if v.aliasMap != nil {
+		if aliasSchema, exists := v.aliasMap[aliasName]; exists && aliasSchema != nil {
+			targetSchema = aliasSchema
+			aliasExists = true
+		}
+	}
+
+	// If alias not found, use default schema
+	if !aliasExists {
+		if v.schema == nil {
+			return fmt.Errorf(errNoSchemaAvailable)
+		}
+		targetSchema = v.schema
+	}
+
+	// Parse field
+	fieldName = decodeUnicode(fieldName)
+	field, err := targetSchema.GetFieldFromNameDefaultJSON(fieldName)
+	if err != nil {
+		// Precise error judgment logic
+		if !aliasExists {
+			// When alias doesn't exist, need more precise judgment of distance query misuse
+			if isLikelyDistanceQueryMisuse(aliasName, fieldName) {
+				return fmt.Errorf(errDistanceSelectContext)
+			}
+			// Try to find field in default schema
+			if v.schema != nil {
+				if _, schemaErr := v.schema.GetFieldFromNameDefaultJSON(fieldName); schemaErr != nil {
+					// Field doesn't exist in default schema either, likely distance query syntax misuse
+					return fmt.Errorf(errDistanceSelectContext)
+				}
+			}
+			return fmt.Errorf(errFieldNotFound, aliasName, fieldName)
+		} else {
+			// Alias exists but field parsing failed
+			return fmt.Errorf(errFieldNotFoundInAlias, fieldName, aliasName)
+		}
+	}
+
+	var nestedPath []string
+	if fieldName != field.Name {
+		nestedPath = append(nestedPath, fieldName)
+	}
+
+	if field.DataType == schemapb.DataType_Text {
+		return fmt.Errorf(errTextFieldNotSupported, aliasName, field.Name)
+	}
+
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_ColumnExpr{
+				ColumnExpr: &planpb.ColumnExpr{
+					Info: &planpb.ColumnInfo{
+						FieldId:         field.FieldID,
+						DataType:        field.DataType,
+						IsPrimaryKey:    field.IsPrimaryKey,
+						IsAutoID:        field.AutoID,
+						IsPartitionKey:  field.IsPartitionKey,
+						IsClusteringKey: field.IsClusteringKey,
+						NestedPath:      nestedPath,
+						ElementType:     field.GetElementType(),
+						Nullable:        field.GetNullable(),
+					},
+				},
+			},
+		},
+		dataType:      field.DataType,
+		nodeDependent: true,
+	}
+}
+
+// getMetricEnum converts metric string to enum if possible
+func getMetricEnum(metricString string) (planpb.DistanceMetric, bool) {
+	switch strings.ToUpper(metricString) {
+	case "L2":
+		return planpb.DistanceMetric_DISTANCE_METRIC_L2, true
+	case "IP":
+		return planpb.DistanceMetric_DISTANCE_METRIC_IP, true
+	case "COSINE":
+		return planpb.DistanceMetric_DISTANCE_METRIC_COSINE, true
+	case "HAMMING":
+		return planpb.DistanceMetric_DISTANCE_METRIC_HAMMING, true
+	case "JACCARD":
+		return planpb.DistanceMetric_DISTANCE_METRIC_JACCARD, true
+	default:
+		return planpb.DistanceMetric_DISTANCE_METRIC_UNSPECIFIED, false
+	}
+}
+
+// isValidMetricType validates if distance metric type is valid
+func isValidMetricType(metricType string) bool {
+	// Supported distance metric types
+	validMetrics := map[string]bool{
+		"L2":     true, // Euclidean distance
+		"IP":     true, // Inner product distance
+		"COSINE": true, // Cosine distance
+		// More supported metric types can be added as needed
+		"HAMMING": true, // Hamming distance (for binary vectors)
+		"JACCARD": true, // Jaccard distance (for binary vectors)
+	}
+
+	// Support case insensitive
+	return validMetrics[strings.ToUpper(metricType)]
+}
+
+// VisitAliasExpression implements AS expressions like expr AS alias
+func (v *ParserVisitor) VisitAliasExpression(ctx *parser.AliasExpressionContext) interface{} {
+	// Constants definition
+	const (
+		errContextNil   = "alias expression context is nil"
+		errNoExpression = "no expression found in alias expression"
+		errNoIdentifier = "no identifier found in alias expression"
+		errInvalidExpr  = "invalid expression in alias expression"
+		errEmptyAlias   = "alias cannot be empty"
+		errInvalidAlias = "invalid alias format"
+	)
+
+	// Enhanced input validation
+	if ctx == nil {
+		return fmt.Errorf(errContextNil)
+	}
+
+	// Validate expression exists
+	if ctx.Expr() == nil {
+		return fmt.Errorf(errNoExpression)
+	}
+
+	// Validate identifier exists
+	if ctx.Identifier() == nil {
+		return fmt.Errorf(errNoIdentifier)
+	}
+
+	// Get expression
+	exprResult := ctx.Expr().Accept(v)
+	if exprResult == nil {
+		return fmt.Errorf(errInvalidExpr)
+	}
+
+	if err := getError(exprResult); err != nil {
+		return fmt.Errorf("expression error in alias: %w", err)
+	}
+
+	expr, ok := exprResult.(*ExprWithType)
+	if !ok || expr == nil {
+		return fmt.Errorf(errInvalidExpr)
+	}
+
+	// Get alias and validate
+	alias := ctx.Identifier().GetText()
+	if alias == "" {
+		return fmt.Errorf(errEmptyAlias)
+	}
+
+	// Validate alias format (letters, numbers, underscores)
+	if !isValidAliasFormat(alias) {
+		return fmt.Errorf("%s: %s", errInvalidAlias, alias)
+	}
+
+	// Create aliased expression - using new AliasedExpr protocol
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr: &planpb.Expr_AliasedExpr{
+				AliasedExpr: &planpb.AliasedExpr{
+					Expr:  expr.expr,
+					Alias: alias,
+				},
+			},
+		},
+		dataType: expr.dataType,
+	}
+}
+
+// isValidAliasFormat validates if alias format is valid
+func isValidAliasFormat(alias string) bool {
+	if len(alias) == 0 || len(alias) > 64 {
+		return false
+	}
+
+	// Must start with letter or underscore
+	first := alias[0]
+	if !((first >= 'a' && first <= 'z') ||
+		(first >= 'A' && first <= 'Z') ||
+		first == '_') {
+		return false
+	}
+
+	// Remaining characters must be letters, numbers or underscores
+	for i := 1; i < len(alias); i++ {
+		char := alias[i]
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_') {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isLikelyDistanceQueryMisuse 智能判断是否可能是距离查询的误用
+// Based on context analysis, not hardcoded aliases
+func isLikelyDistanceQueryMisuse(aliasName, fieldName string) bool {
+	// Check if field name contains vector-related keywords
+	fieldNameLower := strings.ToLower(fieldName)
+	vectorKeywords := []string{"vector", "embedding", "embed", "feature", "vec"}
+
+	for _, keyword := range vectorKeywords {
+		if strings.Contains(fieldNameLower, keyword) {
+			return true
+		}
+	}
+
+	// Check if it's a short alias (like a, b, x, y), which are common in distance queries
+	if len(aliasName) <= 2 && isAlphaOnly(aliasName) {
+		return true
+	}
+
+	// Check if it's a typical distance query alias pattern
+	aliasNameLower := strings.ToLower(aliasName)
+	typicalAliases := []string{"left", "right", "src", "dst", "from", "to"}
+	for _, alias := range typicalAliases {
+		if aliasNameLower == alias {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isAlphaOnly checks if string contains only letters
+func isAlphaOnly(s string) bool {
+	for _, char := range s {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')) {
+			return false
+		}
+	}
+	return true
 }

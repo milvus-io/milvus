@@ -1658,6 +1658,148 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
 }
 
+// translateOutputFieldsForDistanceQuery 专门为距离查询翻译输出字段（支持别名语法）
+func translateOutputFieldsForDistanceQuery(outputFields []string, schema *schemaInfo, removePkField bool) ([]string, []string, []string, bool, error) {
+	var primaryFieldName string
+	allFieldNameMap := make(map[string]*schemapb.FieldSchema)
+	resultFieldNameMap := make(map[string]bool)
+	resultFieldNames := make([]string, 0)
+	userOutputFieldsMap := make(map[string]bool)
+	userOutputFields := make([]string, 0)
+	userDynamicFieldsMap := make(map[string]bool)
+	userDynamicFields := make([]string, 0)
+	useAllDyncamicFields := false
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			primaryFieldName = field.Name
+		}
+		allFieldNameMap[field.Name] = field
+	}
+
+	userRequestedPkFieldExplicitly := false
+
+	for _, outputFieldName := range outputFields {
+		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == primaryFieldName {
+			userRequestedPkFieldExplicitly = true
+		}
+		
+		// 检查是否为距离查询的特殊字段
+		if isDistanceQueryField(outputFieldName) {
+			// 对于距离查询的特殊字段（如 "_distance", "a.id as id1"），
+			// 我们不需要在schema中验证，让后端处理
+			userOutputFieldsMap[outputFieldName] = true
+			continue
+		}
+		
+		if outputFieldName == "*" {
+			userRequestedPkFieldExplicitly = true
+			for fieldName, field := range allFieldNameMap {
+				if schema.CanRetrieveRawFieldData(field) {
+					resultFieldNameMap[fieldName] = true
+					userOutputFieldsMap[fieldName] = true
+				}
+			}
+			useAllDyncamicFields = true
+		} else {
+			if field, ok := allFieldNameMap[outputFieldName]; ok {
+				if !schema.CanRetrieveRawFieldData(field) {
+					return nil, nil, nil, false, fmt.Errorf("not allowed to retrieve raw data of field %s", outputFieldName)
+				}
+				resultFieldNameMap[outputFieldName] = true
+				userOutputFieldsMap[outputFieldName] = true
+			} else {
+				if schema.EnableDynamicField {
+					dynamicNestedPath := outputFieldName
+					err := planparserv2.ParseIdentifier(schema.schemaHelper, outputFieldName, func(expr *planpb.Expr) error {
+						columnInfo := expr.GetColumnExpr().GetInfo()
+						// there must be no error here
+						dynamicField, _ := schema.schemaHelper.GetDynamicField()
+						// only $meta["xxx"] is allowed for now
+						if dynamicField.GetFieldID() != columnInfo.GetFieldId() {
+							return errors.New("not support getting subkeys of json field yet")
+						}
+						nestedPaths := columnInfo.GetNestedPath()
+						// $meta["A"]["B"] not allowed for now
+						if len(nestedPaths) != 1 {
+							return errors.New("not support getting multiple level of dynamic field for now")
+						}
+						// $meta["dyn_field"], output field name could be:
+						// 1. "dyn_field", outputFieldName == nestedPath
+						// 2. `$meta["dyn_field"]` explicit form
+						if nestedPaths[0] != outputFieldName {
+							// use "dyn_field" as userDynamicFieldsMap when outputField = `$meta["dyn_field"]`
+							dynamicNestedPath = nestedPaths[0]
+						}
+						return nil
+					})
+					if err != nil {
+						log.Info("parse output field name failed", zap.String("field name", outputFieldName), zap.Error(err))
+						return nil, nil, nil, false, fmt.Errorf("parse output field name failed: %s", outputFieldName)
+					}
+					resultFieldNameMap[common.MetaFieldName] = true
+					userOutputFieldsMap[outputFieldName] = true
+					userDynamicFieldsMap[dynamicNestedPath] = true
+				} else {
+					return nil, nil, nil, false, fmt.Errorf("field %s not exist", outputFieldName)
+				}
+			}
+		}
+	}
+
+	if removePkField {
+		delete(resultFieldNameMap, primaryFieldName)
+		delete(userOutputFieldsMap, primaryFieldName)
+	}
+
+	for fieldName := range resultFieldNameMap {
+		resultFieldNames = append(resultFieldNames, fieldName)
+	}
+	for fieldName := range userOutputFieldsMap {
+		userOutputFields = append(userOutputFields, fieldName)
+	}
+	if !useAllDyncamicFields {
+		for fieldName := range userDynamicFieldsMap {
+			userDynamicFields = append(userDynamicFields, fieldName)
+		}
+	}
+
+	return resultFieldNames, userOutputFields, userDynamicFields, userRequestedPkFieldExplicitly, nil
+}
+
+// isDistanceQueryField 检查字段是否为距离查询的特殊字段
+func isDistanceQueryField(fieldName string) bool {
+	// 检查距离字段
+	if fieldName == "_distance" {
+		return true
+	}
+	
+	// 检查别名语法：如 "a.id as id1", "b.vector as vec"
+	if strings.Contains(fieldName, " as ") {
+		return true
+	}
+	
+	// 检查简单的别名引用：如 "a.id", "b.vector"  
+	if strings.Contains(fieldName, ".") {
+		return true
+	}
+	
+	// 检查distance函数调用：如 "distance(vector, vector, 'L2')", "distance(a.vector, b.vector, 'L2') as _distance"
+	if strings.Contains(fieldName, "distance(") {
+		return true
+	}
+	
+	// 检查常见的计算字段模式
+	computedFields := []string{"_distance", "_score", "_rank"}
+	for _, computedField := range computedFields {
+		if fieldName == computedField {
+			return true
+		}
+	}
+	
+	return false
+}
+
 func validateIndexName(indexName string) error {
 	indexName = strings.TrimSpace(indexName)
 

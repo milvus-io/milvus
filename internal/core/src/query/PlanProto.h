@@ -19,6 +19,7 @@
 #include "common/Schema.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
+#include "expr/ITypeExpr.h"  // 距离表达式定义
 
 namespace milvus::query {
 
@@ -82,6 +83,9 @@ class ProtoParser {
 
     expr::TypedExprPtr
     ParseNullExprs(const proto::plan::NullExpr& expr_pb);
+
+    expr::TypedExprPtr
+    ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb);
 
     expr::TypedExprPtr
     ParseJsonContainsExprs(const proto::plan::JSONContainsExpr& expr_pb);
