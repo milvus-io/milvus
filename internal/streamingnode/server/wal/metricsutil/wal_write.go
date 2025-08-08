@@ -7,10 +7,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/status"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/wp"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"

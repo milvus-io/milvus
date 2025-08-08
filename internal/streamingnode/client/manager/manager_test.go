@@ -11,17 +11,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/resolver"
 
-	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
-	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/v2/mocks/proto/mock_streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/service/mock_lazygrpc"
+	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/service/mock_resolver"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/service/attributes"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/service/contextutil"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/service/discoverer"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 

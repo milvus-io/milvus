@@ -10,13 +10,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/initcore"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v2/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 )
 
 // Server is the streamingnode server.

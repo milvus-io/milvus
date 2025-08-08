@@ -108,7 +108,6 @@ go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/proxyutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/initcore/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/cgo/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -gcflags="all=-N -l" -race -cover -tags dynamic,test "${MILVUS_DIR}/util/streamingutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_pkg()

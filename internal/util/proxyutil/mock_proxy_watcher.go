@@ -5,7 +5,7 @@ package proxyutil
 import (
 	context "context"
 
-	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
+	sessionutil "github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -193,7 +193,8 @@ func (_c *MockProxyWatcher_WatchProxy_Call) RunAndReturn(run func(context.Contex
 func NewMockProxyWatcher(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockProxyWatcher {
+},
+) *MockProxyWatcher {
 	mock := &MockProxyWatcher{}
 	mock.Mock.Test(t)
 

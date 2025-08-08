@@ -26,7 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
-	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/json"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"

@@ -10,7 +10,7 @@ import (
 
 	proxypb "github.com/milvus-io/milvus/pkg/v2/proto/proxypb"
 
-	sessionutil "github.com/milvus-io/milvus/internal/util/sessionutil"
+	sessionutil "github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 
 	types "github.com/milvus-io/milvus/internal/types"
 
@@ -599,7 +599,8 @@ func (_c *MockProxyClientManager_UpdateCredentialCache_Call) RunAndReturn(run fu
 func NewMockProxyClientManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockProxyClientManager {
+},
+) *MockProxyClientManager {
 	mock := &MockProxyClientManager{}
 	mock.Mock.Test(t)
 

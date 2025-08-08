@@ -20,7 +20,7 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v2/json"
 )
 
 type SegmentStats struct {

@@ -24,8 +24,8 @@ import (
 	"github.com/blang/semver/v4"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/util/sessionutil"
 )
 
 type Manager interface {
