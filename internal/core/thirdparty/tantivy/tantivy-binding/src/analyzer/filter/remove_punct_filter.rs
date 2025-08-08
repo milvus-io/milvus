@@ -50,11 +50,11 @@ impl<T: TokenStream> TokenStream for RemovePunctFilterStream<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::analyzer::create_analyzer;
 
     #[test]
     #[cfg(feature = "lindera-ipadic")]
     fn test_remove_punct_filter() {
+        use crate::analyzer::analyzer::create_analyzer;
         let params = r#"{
             "tokenizer": {
                 "type": "lindera",

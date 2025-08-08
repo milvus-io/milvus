@@ -313,8 +313,15 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
     auto field_id = FieldId(column_info.field_id());
     auto data_type = schema[field_id].get_data_type();
     Assert(data_type == static_cast<DataType>(column_info.data_type()));
+    std::vector<::milvus::proto::plan::GenericValue> extra_values;
+    for (auto val : expr_pb.extra_values()) {
+        extra_values.emplace_back(val);
+    }
     return std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
-        expr::ColumnInfo(column_info), expr_pb.op(), expr_pb.value());
+        expr::ColumnInfo(column_info),
+        expr_pb.op(),
+        expr_pb.value(),
+        extra_values);
 }
 
 expr::TypedExprPtr

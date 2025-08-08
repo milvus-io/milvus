@@ -1,7 +1,5 @@
 use tantivy::tokenizer::{TextAnalyzer, TextAnalyzerBuilder};
-use lindera::segmenter::Segmenter;
 use tantivy::tokenizer::*;
-use lindera::mode::Mode;
 use serde_json as json;
 use log::warn;
 

@@ -108,6 +108,7 @@ message UnaryRangeExpr {
   OpType op = 2;
   GenericValue value = 3;
   string template_variable_name = 4;
+  repeated GenericValue extra_values = 5;
 }
 
 message BinaryRangeExpr {
