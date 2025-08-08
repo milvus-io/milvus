@@ -679,7 +679,7 @@ TEST_P(TaskTest, Test_reorder) {
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
             DEAFULT_QUERY_ID, segment_.get(), 100000, MAX_TIMESTAMP);
         ExecContext context(query_context.get());
-        OPTIMIZE_EXPR_ENABLED = false;
+        OPTIMIZE_EXPR_ENABLED.store(false);
         auto exprs =
             milvus::exec::CompileExpressions({expr3}, &context, {}, false);
         EXPECT_EQ(exprs.size(), 1);
@@ -690,7 +690,7 @@ TEST_P(TaskTest, Test_reorder) {
         std::cout << phy_expr->ToString() << std::endl;
         auto reorder = phy_expr->GetReorder();
         EXPECT_EQ(reorder.size(), 0);
-        OPTIMIZE_EXPR_ENABLED = true;
+        OPTIMIZE_EXPR_ENABLED.store(true, std::memory_order_release);
     }
 }
 

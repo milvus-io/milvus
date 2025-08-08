@@ -128,7 +128,8 @@ DiskFileManagerImpl::AddFileInternal(
             local_file_offsets.clear();
         }
 
-        auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
+        auto batch_size =
+            std::min(FILE_SLICE_SIZE.load(), int64_t(fileSize) - offset);
         batch_remote_files.emplace_back(get_remote_path(fileName, slice_num));
         remote_file_sizes.emplace_back(batch_size);
         local_file_offsets.emplace_back(offset);
@@ -258,7 +259,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         batch_remote_files.reserve(slices.second.size());
 
         uint64_t max_parallel_degree =
-            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
 
         {
             auto file_writer = storage::FileWriter(local_index_file_name);
