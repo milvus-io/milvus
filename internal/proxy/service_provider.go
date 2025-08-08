@@ -127,12 +127,6 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		request.CollectionName = collName
 	}
 
-	// validate collection name, ref describeCollectionTask.PreExecute
-	if err = validateCollectionName(request.CollectionName); err != nil {
-		resp.Status = wrapErrorStatus(err)
-		return resp, nil
-	}
-
 	request.CollectionID, err = globalMetaCache.GetCollectionID(ctx, request.DbName, request.CollectionName)
 	if err != nil {
 		resp.Status = wrapErrorStatus(err)

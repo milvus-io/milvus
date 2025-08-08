@@ -778,8 +778,9 @@ func (t *describeCollectionTask) PreExecute(ctx context.Context) error {
 	if t.CollectionID != 0 && len(t.CollectionName) == 0 {
 		return nil
 	}
-
-	return validateCollectionName(t.CollectionName)
+	// collection name shall not validate here
+	// only validate shall be done in `CreateCollection`
+	return nil
 }
 
 func (t *describeCollectionTask) Execute(ctx context.Context) error {
