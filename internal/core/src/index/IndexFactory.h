@@ -56,6 +56,7 @@ class IndexFactory {
 
     LoadResourceRequest
     IndexLoadResource(DataType field_type,
+                      DataType element_type,
                       IndexVersion index_version,
                       float index_size,
                       const std::map<std::string, std::string>& index_params,
@@ -63,6 +64,7 @@ class IndexFactory {
 
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
+                         DataType element_type,
                          IndexVersion index_version,
                          float index_size,
                          const std::map<std::string, std::string>& index_params,

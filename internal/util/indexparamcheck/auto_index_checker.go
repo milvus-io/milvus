@@ -9,7 +9,7 @@ type AUTOINDEXChecker struct {
 	baseChecker
 }
 
-func (c *AUTOINDEXChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
+func (c *AUTOINDEXChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	return nil
 }
 

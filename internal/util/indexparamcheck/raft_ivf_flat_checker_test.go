@@ -93,7 +93,7 @@ func Test_raftIvfFlatChecker_CheckTrain(t *testing.T) {
 	}
 	for _, test := range cases {
 		test.params[common.IndexTypeKey] = "GPU_IVF_FLAT"
-		err := c.CheckTrain(schemapb.DataType_FloatVector, test.params)
+		err := c.CheckTrain(schemapb.DataType_FloatVector, schemapb.DataType_None, test.params)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

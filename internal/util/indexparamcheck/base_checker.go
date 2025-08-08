@@ -24,7 +24,7 @@ import (
 
 type baseChecker struct{}
 
-func (c baseChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
+func (c baseChecker) CheckTrain(_ schemapb.DataType, _ schemapb.DataType, _ map[string]string) error {
 	return nil
 }
 
@@ -35,7 +35,7 @@ func (c baseChecker) CheckValidDataType(indexType IndexType, field *schemapb.Fie
 
 func (c baseChecker) SetDefaultMetricTypeIfNotExist(dType schemapb.DataType, m map[string]string) {}
 
-func (c baseChecker) StaticCheck(dataType schemapb.DataType, params map[string]string) error {
+func (c baseChecker) StaticCheck(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	return errors.New("unsupported index type")
 }
 

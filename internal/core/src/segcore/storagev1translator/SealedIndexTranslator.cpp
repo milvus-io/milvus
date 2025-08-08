@@ -22,6 +22,7 @@ SealedIndexTranslator::SealedIndexTranslator(
       index_load_info_({load_index_info->enable_mmap,
                         load_index_info->mmap_dir_path,
                         load_index_info->field_type,
+                        load_index_info->element_type,
                         load_index_info->index_params,
                         load_index_info->index_size,
                         load_index_info->index_engine_version,
@@ -54,6 +55,7 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().IndexLoadResource(
             index_load_info_.field_type,
+            index_load_info_.element_type,
             index_load_info_.index_engine_version,
             index_load_info_.index_size,
             index_load_info_.index_params,

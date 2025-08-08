@@ -98,9 +98,9 @@ func Test_hnswChecker_CheckTrain(t *testing.T) {
 		test.params[common.IndexTypeKey] = "HNSW"
 		var err error
 		if CheckStrByValues(test.params, common.MetricTypeKey, BinaryVectorMetrics) {
-			err = c.CheckTrain(schemapb.DataType_BinaryVector, test.params)
+			err = c.CheckTrain(schemapb.DataType_BinaryVector, schemapb.DataType_None, test.params)
 		} else {
-			err = c.CheckTrain(schemapb.DataType_FloatVector, test.params)
+			err = c.CheckTrain(schemapb.DataType_FloatVector, schemapb.DataType_None, test.params)
 		}
 		if test.errIsNil {
 			assert.NoError(t, err)

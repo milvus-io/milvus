@@ -10,5 +10,5 @@ import (
 
 func TestCheckIndexValid(t *testing.T) {
 	scalarIndexChecker := &scalarIndexChecker{}
-	assert.NoError(t, scalarIndexChecker.CheckTrain(schemapb.DataType_Bool, map[string]string{}))
+	assert.NoError(t, scalarIndexChecker.CheckTrain(schemapb.DataType_Bool, schemapb.DataType_None, map[string]string{}))
 }

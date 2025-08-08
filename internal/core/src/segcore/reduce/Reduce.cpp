@@ -440,7 +440,10 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
                 ->set_element_type(
                     proto::schema::DataType(field_meta.get_element_type()));
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-            ThrowInfo(NotImplemented, "VECTOR_ARRAY is not implemented");
+            field_data->mutable_vectors()
+                ->mutable_vector_array()
+                ->set_element_type(
+                    proto::schema::DataType(field_meta.get_element_type()));
         }
         search_result_data->mutable_fields_data()->AddAllocated(
             field_data.release());

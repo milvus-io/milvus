@@ -71,6 +71,7 @@ void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const SearchInfo& info,
                 const void* query_data,
+                const size_t* query_lims,
                 int64_t num_queries,
                 Timestamp timestamp,
                 const BitsetView& bitset,
@@ -87,6 +88,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     CheckBruteForceSearchParam(field, info);
 
     auto data_type = field.get_data_type();
+    auto element_type = field.get_element_type();
     AssertInfo(IsVectorDataType(data_type),
                "[SearchOnGrowing]Data type isn't vector type");
 
@@ -96,6 +98,11 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
     // step 2: small indexing search
     if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
+        AssertInfo(
+            data_type != DataType::VECTOR_ARRAY,
+            "vector array(embedding list) is not supported for growing segment "
+            "indexing search");
+
         FloatSegmentIndexSearch(
             segment, info, query_data, num_queries, bitset, search_result);
     } else {
@@ -103,6 +110,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             segment.get_chunk_mutex());
         // check SyncDataWithIndex() again, in case the vector chunks has been removed.
         if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
+            AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                       "vector array(embedding list) is not supported for "
+                       "growing segment indexing search");
+
             return FloatSegmentIndexSearch(
                 segment, info, query_data, num_queries, bitset, search_result);
         }
@@ -111,8 +122,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_FLOAT
                        ? 0
                        : field.get_dim();
-        dataset::SearchDataset search_dataset{
-            metric_type, num_queries, topk, round_decimal, dim, query_data};
+        dataset::SearchDataset search_dataset{metric_type,
+                                              num_queries,
+                                              topk,
+                                              round_decimal,
+                                              dim,
+                                              query_data,
+                                              query_lims};
         int32_t current_chunk_id = 0;
 
         // get K1 and B from index for bm25 brute force
@@ -127,6 +143,10 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto vec_ptr = record.get_data_base(vecfield_id);
 
         if (info.iterator_v2_info_.has_value()) {
+            AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                       "vector array(embedding list) is not supported for "
+                       "vector iterator");
+
             CachedSearchIterator cached_iter(search_dataset,
                                              vec_ptr,
                                              active_count,
@@ -150,9 +170,54 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
             auto size_per_chunk = element_end - element_begin;
 
-            auto sub_data = query::dataset::RawDataset{
-                element_begin, dim, size_per_chunk, chunk_data};
+            query::dataset::RawDataset sub_data;
+            std::unique_ptr<uint8_t[]> buf = nullptr;
+            std::vector<size_t> offsets;
+            if (data_type != DataType::VECTOR_ARRAY) {
+                sub_data = query::dataset::RawDataset{
+                    element_begin, dim, size_per_chunk, chunk_data};
+            } else {
+                // TODO(SpadeA): For VectorArray(Embedding List), data is
+                // discreted stored in FixedVector which means we will copy the
+                // data to a contiguous memory buffer. This is inefficient and
+                // will be optimized in the future.
+                auto vec_ptr = reinterpret_cast<const VectorArray*>(chunk_data);
+                auto size = 0;
+                for (int i = 0; i < size_per_chunk; ++i) {
+                    size += vec_ptr[i].byte_size();
+                }
+
+                buf = std::make_unique<uint8_t[]>(size);
+                offsets.reserve(size_per_chunk + 1);
+                offsets.push_back(0);
+
+                auto offset = 0;
+                auto ptr = buf.get();
+                for (int i = 0; i < size_per_chunk; ++i) {
+                    memcpy(ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
+                    ptr += vec_ptr[i].byte_size();
+
+                    offset += vec_ptr[i].length();
+                    offsets.push_back(offset);
+                }
+                sub_data = query::dataset::RawDataset{element_begin,
+                                                      dim,
+                                                      size_per_chunk,
+                                                      buf.get(),
+                                                      offsets.data()};
+            }
+
+            if (data_type == DataType::VECTOR_ARRAY) {
+                AssertInfo(
+                    query_lims != nullptr,
+                    "query_lims is nullptr, but data_type is vector array");
+            }
+
             if (milvus::exec::UseVectorIterator(info)) {
+                AssertInfo(data_type != DataType::VECTOR_ARRAY,
+                           "vector array(embedding list) is not supported for "
+                           "vector iterator");
+
                 auto sub_qr =
                     PackBruteForceSearchIteratorsIntoSubResult(search_dataset,
                                                                sub_data,
@@ -167,7 +232,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                                info,
                                                index_info,
                                                bitset,
-                                               data_type);
+                                               data_type,
+                                               element_type);
                 final_qr.merge(sub_qr);
             }
         }

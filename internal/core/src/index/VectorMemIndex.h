@@ -35,6 +35,7 @@ template <typename T>
 class VectorMemIndex : public VectorIndex {
  public:
     explicit VectorMemIndex(
+        DataType elem_type /* used for embedding list only */,
         const IndexType& index_type,
         const MetricType& metric_type,
         const IndexVersion& version,
@@ -43,7 +44,8 @@ class VectorMemIndex : public VectorIndex {
             storage::FileManagerContext());
 
     // knowhere data view index special constucter for intermin index, no need to hold file_manager_ to upload or download files
-    VectorMemIndex(const IndexType& index_type,
+    VectorMemIndex(DataType elem_type /* used for embedding list only */,
+                   const IndexType& index_type,
                    const MetricType& metric_type,
                    const IndexVersion& version,
                    const knowhere::ViewDataOp view_data,
@@ -108,6 +110,8 @@ class VectorMemIndex : public VectorIndex {
     Config config_;
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    // used for embedding list only
+    DataType elem_type_;
 
     CreateIndexInfo create_index_info_;
     bool use_knowhere_build_pool_;

@@ -42,6 +42,8 @@ const (
 	SparseFloat32Flag uint64 = 1 << 4
 	Int8Flag          uint64 = 1 << 5
 
+	EmbeddingListFlag uint64 = 1 << 15
+
 	// NOTrainFlag This flag indicates that there is no need to create any index structure
 	NOTrainFlag uint64 = 1 << 16
 	// KNNFlag This flag indicates that the index defaults to KNN search, meaning the recall rate is 100%
@@ -63,13 +65,13 @@ type VecIndexMgr interface {
 
 	GetFeature(indexType IndexType) (uint64, bool)
 
-	IsBinaryVectorSupport(indexType IndexType) bool
-	IsFloat32VectorSupport(indexType IndexType) bool
-	IsFloat16VectorSupport(indexType IndexType) bool
-	IsBFloat16VectorSupport(indexType IndexType) bool
-	IsSparseFloat32VectorSupport(indexType IndexType) bool
-	IsInt8VectorSupport(indexType IndexType) bool
-	IsDataTypeSupport(indexType IndexType, dataType schemapb.DataType) bool
+	IsBinaryVectorSupport(indexType IndexType, isEmbeddingList bool) bool
+	IsFloat32VectorSupport(indexType IndexType, isEmbeddingList bool) bool
+	IsFloat16VectorSupport(indexType IndexType, isEmbeddingList bool) bool
+	IsBFloat16VectorSupport(indexType IndexType, isEmbeddingList bool) bool
+	IsSparseFloat32VectorSupport(indexType IndexType, isEmbeddingList bool) bool
+	IsInt8VectorSupport(indexType IndexType, isEmbeddingList bool) bool
+	IsDataTypeSupport(indexType IndexType, dataType schemapb.DataType, elementType schemapb.DataType) bool
 
 	IsFlatVecIndex(indexType IndexType) bool
 	IsNoTrainIndex(indexType IndexType) bool
@@ -126,67 +128,67 @@ func (mgr *vecIndexMgrImpl) init() {
 	log.Info("init vector indexes with features : " + featureLog.String())
 }
 
-func (mgr *vecIndexMgrImpl) IsBinaryVectorSupport(indexType IndexType) bool {
+func (mgr *vecIndexMgrImpl) isVectorTypeSupported(indexType IndexType, vectorFlag uint64, isEmbeddingList bool) bool {
 	feature, ok := mgr.GetFeature(indexType)
 	if !ok {
 		return false
 	}
-	return (feature & BinaryFlag) == BinaryFlag
-}
 
-func (mgr *vecIndexMgrImpl) IsFloat32VectorSupport(indexType IndexType) bool {
-	feature, ok := mgr.GetFeature(indexType)
-	if !ok {
+	// check if the vector type is supported
+	if (feature & vectorFlag) != vectorFlag {
 		return false
 	}
-	return (feature & Float32Flag) == Float32Flag
-}
 
-func (mgr *vecIndexMgrImpl) IsFloat16VectorSupport(indexType IndexType) bool {
-	feature, ok := mgr.GetFeature(indexType)
-	if !ok {
+	// if it is embedding list, also check EmbeddingListFlag
+	if isEmbeddingList && (feature&EmbeddingListFlag) != EmbeddingListFlag {
 		return false
 	}
-	return (feature & Float16Flag) == Float16Flag
+
+	return true
 }
 
-func (mgr *vecIndexMgrImpl) IsBFloat16VectorSupport(indexType IndexType) bool {
-	feature, ok := mgr.GetFeature(indexType)
-	if !ok {
-		return false
+func (mgr *vecIndexMgrImpl) IsBinaryVectorSupport(indexType IndexType, isEmbeddingList bool) bool {
+	return mgr.isVectorTypeSupported(indexType, BinaryFlag, isEmbeddingList)
+}
+
+func (mgr *vecIndexMgrImpl) IsFloat32VectorSupport(indexType IndexType, isEmbeddingList bool) bool {
+	return mgr.isVectorTypeSupported(indexType, Float32Flag, isEmbeddingList)
+}
+
+func (mgr *vecIndexMgrImpl) IsFloat16VectorSupport(indexType IndexType, isEmbeddingList bool) bool {
+	return mgr.isVectorTypeSupported(indexType, Float16Flag, isEmbeddingList)
+}
+
+func (mgr *vecIndexMgrImpl) IsBFloat16VectorSupport(indexType IndexType, isEmbeddingList bool) bool {
+	return mgr.isVectorTypeSupported(indexType, BFloat16Flag, isEmbeddingList)
+}
+
+func (mgr *vecIndexMgrImpl) IsSparseFloat32VectorSupport(indexType IndexType, isEmbeddingList bool) bool {
+	return mgr.isVectorTypeSupported(indexType, SparseFloat32Flag, isEmbeddingList)
+}
+
+func (mgr *vecIndexMgrImpl) IsInt8VectorSupport(indexType IndexType, isEmbeddingList bool) bool {
+	return mgr.isVectorTypeSupported(indexType, Int8Flag, isEmbeddingList)
+}
+
+func (mgr *vecIndexMgrImpl) IsDataTypeSupport(indexType IndexType, dataType schemapb.DataType, elementType schemapb.DataType) bool {
+	isEmbeddingList := dataType == schemapb.DataType_ArrayOfVector
+	if isEmbeddingList {
+		dataType = elementType
 	}
-	return (feature & BFloat16Flag) == BFloat16Flag
-}
 
-func (mgr *vecIndexMgrImpl) IsSparseFloat32VectorSupport(indexType IndexType) bool {
-	feature, ok := mgr.GetFeature(indexType)
-	if !ok {
-		return false
-	}
-	return (feature & SparseFloat32Flag) == SparseFloat32Flag
-}
-
-func (mgr *vecIndexMgrImpl) IsInt8VectorSupport(indexType IndexType) bool {
-	feature, ok := mgr.GetFeature(indexType)
-	if !ok {
-		return false
-	}
-	return (feature & Int8Flag) == Int8Flag
-}
-
-func (mgr *vecIndexMgrImpl) IsDataTypeSupport(indexType IndexType, dataType schemapb.DataType) bool {
 	if dataType == schemapb.DataType_BinaryVector {
-		return mgr.IsBinaryVectorSupport(indexType)
+		return mgr.IsBinaryVectorSupport(indexType, isEmbeddingList)
 	} else if dataType == schemapb.DataType_FloatVector {
-		return mgr.IsFloat32VectorSupport(indexType)
+		return mgr.IsFloat32VectorSupport(indexType, isEmbeddingList)
 	} else if dataType == schemapb.DataType_BFloat16Vector {
-		return mgr.IsBFloat16VectorSupport(indexType)
+		return mgr.IsBFloat16VectorSupport(indexType, isEmbeddingList)
 	} else if dataType == schemapb.DataType_Float16Vector {
-		return mgr.IsFloat16VectorSupport(indexType)
+		return mgr.IsFloat16VectorSupport(indexType, isEmbeddingList)
 	} else if dataType == schemapb.DataType_SparseFloatVector {
-		return mgr.IsSparseFloat32VectorSupport(indexType)
+		return mgr.IsSparseFloat32VectorSupport(indexType, isEmbeddingList)
 	} else if dataType == schemapb.DataType_Int8Vector {
-		return mgr.IsInt8VectorSupport(indexType)
+		return mgr.IsInt8VectorSupport(indexType, isEmbeddingList)
 	}
 	return false
 }

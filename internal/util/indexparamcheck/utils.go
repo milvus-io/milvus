@@ -84,7 +84,7 @@ func CheckAutoIndexHelper(key string, m map[string]string, dtype schemapb.DataTy
 		panic(fmt.Sprintf("%s invalid, unsupported index type: %s", key, indexType))
 	}
 
-	if err := checker.StaticCheck(dtype, m); err != nil {
+	if err := checker.StaticCheck(dtype, schemapb.DataType_None, m); err != nil {
 		panic(fmt.Sprintf("%s invalid, parameters invalid, error: %s", key, err.Error()))
 	}
 }

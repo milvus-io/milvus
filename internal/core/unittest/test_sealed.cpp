@@ -19,6 +19,7 @@
 #include "knowhere/version.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "common/VectorArray.h"
 
 #include "test_cachinglayer/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
@@ -2332,4 +2333,258 @@ TEST(Sealed, QueryVectorArrayAllFields) {
 
     EXPECT_EQ(int64_result->valid_data_size(), 0);
     EXPECT_EQ(array_float_vector_result->valid_data_size(), 0);
+}
+
+TEST(Sealed, SearchVectorArray) {
+    int64_t collection_id = 1;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t index_build_id = 4000;
+    int64_t index_version = 4000;
+    int64_t index_id = 5000;
+
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::L2;
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      array_vec.get(),
+                                                      DataType::VECTOR_ARRAY,
+                                                      DataType::VECTOR_FLOAT,
+                                                      false);
+    auto index_meta = gen_index_meta(
+        segment_id, array_vec.get(), index_build_id, index_version);
+
+    std::map<FieldId, FieldIndexMeta> filedMap{};
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
+
+    int64_t dataset_size = 1000;
+    int64_t dim = 128;
+    auto emb_list_len = 10;
+    auto dataset = DataGen(schema, dataset_size, 42, 0, 1, emb_list_len);
+
+    // create field data
+    std::string root_path = "/tmp/test-vector-array/";
+    auto storage_config = gen_local_storage_config(root_path);
+    auto cm = CreateChunkManager(storage_config);
+    auto vec_array_col = dataset.get_col<VectorFieldProto>(array_vec);
+    std::vector<milvus::VectorArray> vector_arrays;
+    for (auto& v : vec_array_col) {
+        vector_arrays.push_back(milvus::VectorArray(v));
+    }
+    auto field_data = storage::CreateFieldData(DataType::VECTOR_ARRAY, false);
+    field_data->FillFieldData(vector_arrays.data(), vector_arrays.size());
+
+    // create sealed segment
+    auto segment = CreateSealedSegment(schema);
+    auto field_data_info = PrepareSingleFieldInsertBinlog(collection_id,
+                                                          partition_id,
+                                                          segment_id,
+                                                          array_vec.get(),
+                                                          {field_data},
+                                                          cm);
+    segment->LoadFieldData(field_data_info);
+
+    // serialize bin logs
+    auto payload_reader =
+        std::make_shared<milvus::storage::PayloadReader>(field_data);
+    storage::InsertData insert_data(payload_reader);
+    insert_data.SetFieldDataMeta(field_meta);
+    insert_data.SetTimestamps(0, 100);
+
+    auto serialized_bytes = insert_data.Serialize(storage::Remote);
+
+    auto get_binlog_path = [=](int64_t log_id) {
+        return fmt::format("{}/{}/{}/{}/{}",
+                           collection_id,
+                           partition_id,
+                           segment_id,
+                           array_vec.get(),
+                           log_id);
+    };
+
+    auto log_path = get_binlog_path(0);
+
+    auto cm_w = ChunkManagerWrapper(cm);
+    cm_w.Write(log_path, serialized_bytes.data(), serialized_bytes.size());
+
+    storage::FileManagerContext ctx(field_meta, index_meta, cm);
+    std::vector<std::string> index_files;
+
+    // create index
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.field_type = DataType::VECTOR_ARRAY;
+    create_index_info.metric_type = knowhere::metric::MAX_SIM;
+    create_index_info.index_type = knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+
+    auto emb_list_hnsw_index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(
+            create_index_info,
+            storage::FileManagerContext(field_meta, index_meta, cm));
+
+    // build index
+    Config config;
+    config[milvus::index::INDEX_TYPE] =
+        knowhere::IndexEnum::INDEX_EMB_LIST_HNSW;
+    config[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    config[knowhere::meta::METRIC_TYPE] = create_index_info.metric_type;
+    config[knowhere::indexparam::M] = "16";
+    config[knowhere::indexparam::EF] = "10";
+    config[DIM_KEY] = dim;
+    emb_list_hnsw_index->Build(config);
+
+    auto vec_index =
+        dynamic_cast<milvus::index::VectorIndex*>(emb_list_hnsw_index.get());
+    EXPECT_EQ(vec_index->Count(), dataset_size * emb_list_len);
+    EXPECT_EQ(vec_index->GetDim(), dim);
+
+    // search
+    auto vec_num = 10;
+    std::vector<float> query_vec = generate_float_vector(vec_num, dim);
+    auto query_dataset = knowhere::GenDataSet(vec_num, dim, query_vec.data());
+    std::vector<size_t> query_vec_lims;
+    query_vec_lims.push_back(0);
+    query_vec_lims.push_back(3);
+    query_vec_lims.push_back(10);
+    query_dataset->SetLims(query_vec_lims.data());
+
+    auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
+    milvus::SearchInfo searchInfo;
+    searchInfo.topk_ = 5;
+    searchInfo.metric_type_ = knowhere::metric::L2;
+    searchInfo.search_params_ = search_conf;
+    SearchResult result;
+    vec_index->Query(query_dataset, searchInfo, nullptr, result);
+    auto ref_result = SearchResultToJson(result);
+    std::cout << ref_result.dump(1) << std::endl;
+    EXPECT_EQ(result.total_nq_, 2);
+    EXPECT_EQ(result.distances_.size(), 2 * searchInfo.topk_);
+
+    // create sealed segment
+    auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    // brute force search
+    {
+        const char* raw_plan = R"(vector_anns: <
+                                    field_id: 101
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "MAX_SIM"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+            vec_num, dim, query_vec.data(), query_vec_lims);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        Timestamp timestamp = 1000000;
+        std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+
+        auto sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+        auto sr_parsed = SearchResultToJson(*sr);
+        std::cout << sr_parsed.dump(1) << std::endl;
+    }
+
+    // // brute force search with iterative filter
+    // {
+    //     auto [min, max] =
+    //         std::minmax_element(int_values.begin(), int_values.end());
+    //     auto min_val = *min;
+    //     auto max_val = *max;
+
+    //     auto raw_plan = fmt::format(R"(vector_anns: <
+    //                                 field_id: 101
+    //                                 predicates: <
+    //                                   binary_range_expr: <
+    //                                     column_info: <
+    //                                       field_id: 100
+    //                                       data_type: Int64
+    //                                     >
+    //                                     lower_inclusive: true
+    //                                     upper_inclusive: true
+    //                                     lower_value: <
+    //                                       int64_val: {}
+    //                                     >
+    //                                     upper_value: <
+    //                                       int64_val: {}
+    //                                     >
+    //                                   >
+    //                                 >
+    //                                 query_info: <
+    //                                   topk: 5
+    //                                   round_decimal: 3
+    //                                   metric_type: "MAX_SIM"
+    //                                   hints: "iterative_filter"
+    //                                   search_params: "{{\"nprobe\": 10}}"
+    //                                 >
+    //                                 placeholder_tag: "$0"
+    //                               >)",
+    //                                 min_val,
+    //                                 max_val);
+    //     auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
+    //     auto plan =
+    //         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    //     auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+    //         vec_num, dim, query_vec.data(), query_vec_lims);
+    //     auto ph_group =
+    //         ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    //     Timestamp timestamp = 1000000;
+    //     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+
+    //     auto sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+    //     auto sr_parsed = SearchResultToJson(*sr);
+    //     std::cout << sr_parsed.dump(1) << std::endl;
+    // }
+
+    // search with index
+    {
+        LoadIndexInfo load_info;
+        load_info.field_id = array_vec.get();
+        load_info.field_type = DataType::VECTOR_ARRAY;
+        load_info.element_type = DataType::VECTOR_FLOAT;
+        load_info.index_params = GenIndexParams(emb_list_hnsw_index.get());
+        load_info.cache_index =
+            CreateTestCacheIndex("test", std::move(emb_list_hnsw_index));
+        load_info.index_params["metric_type"] = knowhere::metric::MAX_SIM;
+
+        sealed_segment->DropFieldData(array_vec);
+        sealed_segment->LoadIndex(load_info);
+
+        const char* raw_plan = R"(vector_anns: <
+                                    field_id: 101
+                                    query_info: <
+                                      topk: 5
+                                      round_decimal: 3
+                                      metric_type: "MAX_SIM"
+                                      search_params: "{\"nprobe\": 10}"
+                                    >
+                                    placeholder_tag: "$0"
+        >)";
+        auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+        auto plan =
+            CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+        auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+            vec_num, dim, query_vec.data(), query_vec_lims);
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        Timestamp timestamp = 1000000;
+        std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+
+        auto sr = sealed_segment->Search(plan.get(), ph_group.get(), timestamp);
+        auto sr_parsed = SearchResultToJson(*sr);
+        std::cout << sr_parsed.dump(1) << std::endl;
+    }
 }

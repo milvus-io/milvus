@@ -282,9 +282,9 @@ func ValueDeserializerWithSchema(r Record, v []*Value, schema *schemapb.Collecti
 	return valueDeserializer(r, v, allFields, shouldCopy)
 }
 
-func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema, shouldCopy bool) error {
+func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, shouldCopy bool) error {
 	pkField := func() *schemapb.FieldSchema {
-		for _, field := range fieldSchema {
+		for _, field := range fields {
 			if field.GetIsPrimaryKey() {
 				return field
 			}
@@ -299,12 +299,12 @@ func valueDeserializer(r Record, v []*Value, fieldSchema []*schemapb.FieldSchema
 		value := v[i]
 		if value == nil {
 			value = &Value{}
-			value.Value = make(map[FieldID]interface{}, len(fieldSchema))
+			value.Value = make(map[FieldID]interface{}, len(fields))
 			v[i] = value
 		}
 
 		m := value.Value.(map[FieldID]interface{})
-		for _, f := range fieldSchema {
+		for _, f := range fields {
 			j := f.FieldID
 			dt := f.DataType
 			if r.Column(j).IsNull(i) {

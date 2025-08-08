@@ -141,7 +141,8 @@ class TestFloatSearchBruteForce : public ::testing::Test {
                                        search_info,
                                        index_info,
                                        bitset_view,
-                                       DataType::VECTOR_FLOAT);
+                                       DataType::VECTOR_FLOAT,
+                                       DataType::NONE);
         for (int i = 0; i < nq; i++) {
             auto ref = Ref(base.data(),
                            query.data() + i * dim,

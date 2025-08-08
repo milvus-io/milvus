@@ -765,6 +765,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	t.fillResult()
 	t.result.Results.OutputFields = t.userOutputFields
+	reconstructStructFieldDataForSearch(t.result, t.schema.CollectionSchema)
 	t.result.CollectionName = t.request.GetCollectionName()
 
 	primaryFieldSchema, _ := t.schema.GetPkField()

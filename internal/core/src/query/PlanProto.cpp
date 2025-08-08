@@ -126,6 +126,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         } else if (anns_proto.vector_type() ==
                    milvus::proto::plan::VectorType::Int8Vector) {
             return std::make_unique<Int8VectorANNS>();
+        } else if (anns_proto.vector_type() ==
+                   milvus::proto::plan::VectorType::EmbListFloatVector) {
+            return std::make_unique<EmbListFloatVectorANNS>();
         } else {
             return std::make_unique<FloatVectorANNS>();
         }
