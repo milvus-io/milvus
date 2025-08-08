@@ -386,10 +386,10 @@ ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
     
     // 验证必要的字段
     if (!expr_pb.has_left_vector()) {
-        PanicInfo(ExprInvalid, "Distance expression missing left vector");
+        AssertInfo(false, "Distance expression missing left vector");
     }
     if (!expr_pb.has_right_vector()) {
-        PanicInfo(ExprInvalid, "Distance expression missing right vector");
+        AssertInfo(false, "Distance expression missing right vector");
     }
     
     // 解析左侧和右侧向量表达式
@@ -429,7 +429,7 @@ ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
             break;
         }
         default: {
-            PanicInfo(ExprInvalid, "Unknown metric type in distance expression");
+            AssertInfo(false, "Unknown metric type in distance expression");
         }
     }
     
@@ -663,10 +663,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
                 if (inner_expr.expr_case() != proto::plan::Expr::EXPR_NOT_SET) {
                     result = ParseExprs(inner_expr);
                 } else {
-                    PanicInfo(ExprInvalid, "AliasedExpr inner expression is not set");
+                    AssertInfo(false, "AliasedExpr inner expression is not set");
                 }
             } else {
-                PanicInfo(ExprInvalid, "AliasedExpr missing inner expression");
+                AssertInfo(false, "AliasedExpr missing inner expression");
             }
             break;
         }
