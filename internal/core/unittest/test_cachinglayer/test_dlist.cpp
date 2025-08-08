@@ -34,6 +34,7 @@ class DListTest : public ::testing::Test {
 
     void
     SetUp() override {
+        eviction_config_.use_physical_memory_to_check_watermark = false;
         dlist = std::make_unique<DList>(
             initial_limit, low_watermark, high_watermark, eviction_config_);
         managed_nodes.clear();
