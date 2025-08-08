@@ -22,7 +22,7 @@ import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 type Segment struct {
 	ID           int64
 	CollectionID int64
-	ParititionID int64
+	PartitionID  int64
 
 	NumRows int64
 	State   commonpb.SegmentState
