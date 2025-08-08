@@ -129,6 +129,54 @@ func EqualArrayColumn(t *testing.T, columnA column.Column, columnB column.Column
 	}
 }
 
+// CheckFieldsNullable check schema nullable fields
+func CheckFieldsNullable(t *testing.T, expNullableFields []string, actualSchema *entity.Schema) {
+	actualNullableFields := make([]string, 0)
+	for _, fieldName := range actualSchema.Fields {
+		if fieldName.Nullable {
+			actualNullableFields = append(actualNullableFields, fieldName.Name)
+		}
+	}
+	require.ElementsMatch(t, expNullableFields, actualNullableFields)
+}
+
+// CheckFieldsDefaultValue check schema nullable fields and default value fields
+func CheckFieldsDefaultValue(t *testing.T, expDefaultValueFields map[string]interface{}, actualSchema *entity.Schema) {
+	if len(expDefaultValueFields) == 0 {
+		log.Warn("expDefaultValueFields is empty")
+		return
+	}
+	log.Info("CheckFieldsDefaultValue", zap.Any("expDefaultValueFields", expDefaultValueFields), zap.Any("actualSchema", actualSchema))
+	actualDefaultValueFields := make([]string, 0)
+	// check expDefaultValueFields is in actualSchema.Fields and default value is equal to expDefaultValueFields
+	for _, field := range actualSchema.Fields {
+		if _, ok := expDefaultValueFields[field.Name]; ok {
+			actualDefaultValueFields = append(actualDefaultValueFields, field.Name)
+			switch field.DataType {
+			case entity.FieldTypeBool:
+				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetBoolData())
+			case entity.FieldTypeInt8, entity.FieldTypeInt16, entity.FieldTypeInt32:
+				require.EqualValues(t, expDefaultValueFields[field.Name], field.DefaultValue.GetIntData())
+			case entity.FieldTypeInt64:
+				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetLongData())
+			case entity.FieldTypeFloat:
+				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetFloatData())
+			case entity.FieldTypeDouble:
+				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetDoubleData())
+			case entity.FieldTypeVarChar:
+				require.Equal(t, expDefaultValueFields[field.Name], field.DefaultValue.GetStringData())
+			}
+		} else {
+			log.Warn("CheckFieldsDefaultValue: field skip check", zap.String("fieldName", field.Name))
+		}
+	}
+	actualDefaultValueFieldsKeys := make([]string, 0, len(expDefaultValueFields))
+	for key := range expDefaultValueFields {
+		actualDefaultValueFieldsKeys = append(actualDefaultValueFieldsKeys, key)
+	}
+	require.ElementsMatch(t, actualDefaultValueFieldsKeys, actualDefaultValueFields)
+}
+
 // CheckInsertResult check insert result, ids len (insert count), ids data (pks, but no auto ids)
 func CheckInsertResult(t *testing.T, expIDs column.Column, insertRes client.InsertResult) {
 	require.Equal(t, expIDs.Len(), insertRes.IDs.Len())

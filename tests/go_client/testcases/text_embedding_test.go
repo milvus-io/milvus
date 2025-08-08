@@ -16,13 +16,22 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
+// newTextEmbeddingFieldsOption creates fields option with text embedding settings
+func newTextEmbeddingFieldsOption(autoId bool) hp.FieldOptions {
+	fieldOpts := hp.TNewFieldOptions().
+		WithFieldOption("document", hp.TNewFieldsOption().TWithMaxLen(common.MaxLength)).
+		WithFieldOption("dense", hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim()))).
+		WithFieldOption(common.DefaultInt64FieldName, hp.TNewFieldsOption().TWithAutoID(autoId))
+	return fieldOpts
+}
+
 // TestCreateCollectionWithTextEmbedding tests basic collection creation with text embedding function
 func TestCreateCollectionWithTextEmbedding(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with TEI function
-	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), hp.TNewTextEmbeddingFieldsOption(), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), newTextEmbeddingFieldsOption(true), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
 
 	// verify collection creation
 	require.NotNil(t, prepare)
@@ -49,7 +58,7 @@ func TestCreateCollectionWithTextEmbeddingTwice(t *testing.T) {
 		"endpoint": hp.GetTEIEndpoint(),
 	})
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
+	fieldsOption := newTextEmbeddingFieldsOption(true)
 
 	collectionName := common.GenRandomString("text_embedding", 6)
 	createParams := hp.NewCreateCollectionParams(hp.TextEmbedding)
@@ -89,12 +98,15 @@ func TestCreateCollectionUnsupportedEndpoint(t *testing.T) {
 		"endpoint": "http://unsupported_endpoint",
 	})
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
 
 	// this should fail during collection creation
+	fieldOpts := hp.TNewFieldOptions().
+		WithFieldOption("document", hp.TNewFieldsOption().TWithMaxLen(common.MaxLength)).
+		WithFieldOption("dense", hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim()))).
+		WithFieldOption(common.DefaultInt64FieldName, hp.TNewFieldsOption().TWithAutoID(true))
 	err := mc.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(
 		common.GenRandomString("text_embedding", 6),
-		hp.GenSchema(schemaOption.TWithFields(hp.FieldsFact.GenFieldsForCollection(hp.TextEmbedding, fieldsOption))),
+		hp.GenSchema(schemaOption.TWithFields(hp.FieldsFact.GenFieldsForCollection(hp.TextEmbedding, fieldOpts))),
 	))
 
 	// expect error due to unsupported endpoint
@@ -113,7 +125,10 @@ func TestCreateCollectionUnmatchedDim(t *testing.T) {
 		"endpoint": hp.GetTEIEndpoint(),
 	})
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(wrongDim).TWithAutoID(true).TWithMaxLen(65535)
+	fieldsOption := hp.TNewFieldOptions().
+		WithFieldOption("document", hp.TNewFieldsOption().TWithMaxLen(common.MaxLength)).
+		WithFieldOption("dense", hp.TNewFieldsOption().TWithDim(wrongDim)).
+		WithFieldOption(common.DefaultInt64FieldName, hp.TNewFieldsOption().TWithAutoID(true))
 
 	collectionName := common.GenRandomString("text_embedding", 6)
 
@@ -134,7 +149,7 @@ func TestInsertWithTextEmbedding(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with TEI function
-	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), hp.TNewTextEmbeddingFieldsOption(), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), newTextEmbeddingFieldsOption(true), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
 
 	// prepare test data - only provide text, embedding will be auto-generated
 	nb := 10
@@ -197,7 +212,7 @@ func TestInsertWithTruncateParams(t *testing.T) {
 			params["endpoint"] = hp.GetTEIEndpoint()
 			function := hp.TNewTextEmbeddingFunction("document", "dense", params)
 			schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-			fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
+			fieldsOption := newTextEmbeddingFieldsOption(true)
 
 			_, schema := hp.CollPrepare.CreateCollection(
 				ctx, t, mc,
@@ -311,7 +326,7 @@ func TestVerifyEmbeddingConsistency(t *testing.T) {
 		"endpoint": hp.GetTEIEndpoint(),
 	})
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(false).TWithMaxLen(65535)
+	fieldsOption := newTextEmbeddingFieldsOption(false)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(
 		ctx, t, mc,
@@ -405,7 +420,7 @@ func TestUpsertTextFieldUpdatesEmbedding(t *testing.T) {
 		"endpoint": hp.GetTEIEndpoint(),
 	})
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(false).TWithMaxLen(65535) // disable auto ID for upsert
+	fieldsOption := newTextEmbeddingFieldsOption(false)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(
 		ctx, t, mc,
@@ -502,7 +517,7 @@ func TestDeleteAndSearch(t *testing.T) {
 		"endpoint": hp.GetTEIEndpoint(),
 	})
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(false).TWithMaxLen(65535)
+	fieldsOption := newTextEmbeddingFieldsOption(false)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(
 		ctx, t, mc,
@@ -558,7 +573,7 @@ func TestSearchWithTextEmbedding(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create -> insert -> index -> load
-	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), hp.TNewTextEmbeddingFieldsOption(), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), newTextEmbeddingFieldsOption(true), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
 
 	// prepare test data
 	nb := 10
@@ -602,7 +617,7 @@ func TestSearchWithEmptyQuery(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with TEI function
-	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), hp.TNewTextEmbeddingFieldsOption(), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), newTextEmbeddingFieldsOption(true), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
 
 	// insert some test data
 	documents := []string{"test document"}
@@ -763,7 +778,7 @@ func TestInsertEmptyDocument(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with TEI function
-	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), hp.TNewTextEmbeddingFieldsOption(), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
+	_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), newTextEmbeddingFieldsOption(true), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
 
 	// try to insert empty document
 	documents := []string{"", "normal document"}
@@ -787,7 +802,7 @@ func TestInsertLongDocument(t *testing.T) {
 	}
 	function := hp.TNewTextEmbeddingFunction("document", "dense", params)
 	schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-	fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
+	fieldsOption := newTextEmbeddingFieldsOption(true)
 
 	_, schema := hp.CollPrepare.CreateCollection(
 		ctx, t, mc,
@@ -831,13 +846,16 @@ func TestInvalidEndpointHandling(t *testing.T) {
 				"endpoint": tc.endpoint,
 			})
 			schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-			fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
+			fieldOpts := hp.TNewFieldOptions().
+				WithFieldOption("document", hp.TNewFieldsOption().TWithMaxLen(common.MaxLength)).
+				WithFieldOption("dense", hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim()))).
+				WithFieldOption(common.DefaultInt64FieldName, hp.TNewFieldsOption().TWithAutoID(true))
 
 			// collection creation should fail for invalid endpoints
 			collectionName := common.GenRandomString("test_invalid", 6)
 			err := mc.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(
 				collectionName,
-				hp.GenSchema(schemaOption.TWithFields(hp.FieldsFact.GenFieldsForCollection(hp.TextEmbedding, fieldsOption))),
+				hp.GenSchema(schemaOption.TWithFields(hp.FieldsFact.GenFieldsForCollection(hp.TextEmbedding, fieldOpts))),
 			))
 
 			common.CheckErr(t, err, false, tc.errMsg)
@@ -875,7 +893,7 @@ func TestMissingRequiredParameters(t *testing.T) {
 			}
 
 			schemaOption := hp.TNewSchemaOption().TWithFunction(function)
-			fieldsOption := hp.TNewFieldsOption().TWithDim(int64(hp.GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
+			fieldsOption := newTextEmbeddingFieldsOption(true)
 
 			// collection creation should fail
 			err := mc.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(
@@ -895,7 +913,7 @@ func TestConcurrentOperations(t *testing.T) {
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	// create collection with TEI function
-	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), hp.TNewTextEmbeddingFieldsOption(), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.TextEmbedding), newTextEmbeddingFieldsOption(true), hp.TNewTextEmbeddingSchemaOption(), hp.TWithConsistencyLevel(entity.ClStrong))
 
 	// create index and load
 	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{"dense": index.NewAutoIndex(entity.COSINE)}))

@@ -21,6 +21,7 @@ type createCollectionOpt struct {
 	enabledDynamicSchema bool
 
 	consistencyLevel *entity.ConsistencyLevel
+	numPartitions    int64
 	properties       map[string]any
 }
 
@@ -39,5 +40,11 @@ func TWithProperties(properties map[string]any) CreateCollectionOpt {
 func TWithConsistencyLevel(consistencyLevel entity.ConsistencyLevel) CreateCollectionOpt {
 	return func(opt *createCollectionOpt) {
 		opt.consistencyLevel = &consistencyLevel
+	}
+}
+
+func TWithNullablePartitions(numPartitions int64) CreateCollectionOpt {
+	return func(opt *createCollectionOpt) {
+		opt.numPartitions = numPartitions
 	}
 }
