@@ -904,6 +904,20 @@ func (s *mockMixCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	panic("implement me")
 }
 
+// AddFileResource add file resource to datacoord
+func (s *mockMixCoord) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+// RemoveFileResource remove file resource from datacoord
+func (s *mockMixCoord) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 	meta *meta
 }

@@ -1627,6 +1627,21 @@ func (coord *MixCoordMock) FlushAll(ctx context.Context, in *datapb.FlushAllRequ
 	return &datapb.FlushAllResponse{}, nil
 }
 
+func (coord *MixCoordMock) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *MixCoordMock) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error) {
+	return &milvuspb.ListFileResourcesResponse{
+		Status:    merr.Success(),
+		Resources: []*milvuspb.FileResourceInfo{},
+	}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
 
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
