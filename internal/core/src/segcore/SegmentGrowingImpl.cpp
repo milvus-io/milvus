@@ -647,6 +647,15 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
                 result->mutable_scalars()->mutable_json_data()->mutable_data());
             break;
         }
+        case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(vec_ptr,
+                                                 seg_offsets,
+                                                 count,
+                                                 result->mutable_scalars()
+                                                     ->mutable_geometry_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             // element
             bulk_subscript_array_impl(*vec_ptr,
