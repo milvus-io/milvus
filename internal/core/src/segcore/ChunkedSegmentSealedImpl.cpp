@@ -52,7 +52,7 @@
 #include "milvus-storage/common/metadata.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
 #include "query/SearchOnSealed.h"

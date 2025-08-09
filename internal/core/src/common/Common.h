@@ -21,15 +21,11 @@
 #include <utility>
 #include <variant>
 #include "common/Consts.h"
+#include "storage/ThreadPool.h"
 
 namespace milvus {
 
-extern int CPU_NUM;
-
 extern std::atomic<int64_t> FILE_SLICE_SIZE;
-extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
-extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
-extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
 extern std::atomic<int64_t> JSON_KEY_STATS_COMMIT_INTERVAL;
 extern std::atomic<bool> OPTIMIZE_EXPR_ENABLED;
@@ -37,19 +33,7 @@ extern std::atomic<bool> GROWING_JSON_KEY_STATS_ENABLED;
 extern std::atomic<bool> CONFIG_PARAM_TYPE_CHECK_ENABLED;
 
 void
-InitCpuNum(const int core);
-
-void
 SetIndexSliceSize(const int64_t size);
-
-void
-SetHighPriorityThreadCoreCoefficient(const float coefficient);
-
-void
-SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
-
-void
-SetLowPriorityThreadCoreCoefficient(const float coefficient);
 
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);

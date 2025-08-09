@@ -2,7 +2,7 @@
 #include <string>
 #include <iostream>
 #include "log/Log.h"
-#include "prometheus_client.h"
+#include "Monitor.h"
 #include "scope_metric.h"
 
 namespace milvus::monitor {

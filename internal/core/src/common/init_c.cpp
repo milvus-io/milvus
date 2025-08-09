@@ -18,6 +18,8 @@
 #include "common/init_c.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
+#include "storage/ThreadPool.h"
+#include "log/Log.h"
 
 std::once_flag traceFlag;
 std::once_flag cpuNumFlag;

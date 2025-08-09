@@ -47,7 +47,7 @@
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 struct DeferRelease {
     using functype = std::function<void()>;
