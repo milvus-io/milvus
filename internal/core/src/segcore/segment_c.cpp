@@ -639,6 +639,12 @@ RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
     segment->RemoveFieldFile(milvus::FieldId(field_id));
 }
 
+void
+TestCgoUtil() {
+    int* p = nullptr;
+    *p = 42;
+}
+
 CStatus
 CreateTextIndex(CSegmentInterface c_segment, int64_t field_id) {
     try {
