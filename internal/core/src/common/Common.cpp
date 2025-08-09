@@ -19,8 +19,6 @@
 
 namespace milvus {
 
-int CPU_NUM = DEFAULT_CPU_NUM;
-
 std::atomic<int64_t> FILE_SLICE_SIZE(DEFAULT_INDEX_FILE_SLICE_SIZE);
 std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE(
     DEFAULT_EXEC_EVAL_EXPR_BATCH_SIZE);

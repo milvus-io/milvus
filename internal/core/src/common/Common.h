@@ -25,8 +25,6 @@
 
 namespace milvus {
 
-extern int CPU_NUM;
-
 extern std::atomic<int64_t> FILE_SLICE_SIZE;
 extern std::atomic<int64_t> EXEC_EVAL_EXPR_BATCH_SIZE;
 extern std::atomic<int64_t> JSON_KEY_STATS_COMMIT_INTERVAL;
