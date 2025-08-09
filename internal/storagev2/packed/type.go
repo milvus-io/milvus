@@ -20,21 +20,16 @@ package packed
 #include "arrow/c/helpers.h"
 #include "segcore/packed_reader_c.h"
 #include "segcore/packed_writer_c.h"
-#include "segcore/column_groups_c.h"
 */
 import "C"
 
 import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
-
-	"github.com/milvus-io/milvus/internal/storagecommon"
 )
 
 type PackedWriter struct {
 	cPackedWriter C.CPackedWriter
-	columnGroups  []storagecommon.ColumnGroup
-	cColumnGroups C.CColumnGroups
 }
 
 type PackedReader struct {

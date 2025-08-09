@@ -81,11 +81,9 @@ TEST(CPackedTest, PackedWriterAndReader) {
     struct ArrowSchema cschema;
     ASSERT_TRUE(arrow::ExportRecordBatch(*batch, &carray, &cschema).ok());
 
-    struct ArrowArray sub_arrays[] = {carray};
-    struct ArrowSchema sub_schemas[] = {cschema};
-    int64_t num_sub_arrays = 1;
+    struct ArrowArray arrays[] = {carray};
 
-    c_status = WriteRecordBatch(c_packed_writer, sub_arrays, sub_schemas, num_sub_arrays, cgs, &c_origin_schema);
+    c_status = WriteRecordBatch(c_packed_writer, arrays, &c_origin_schema);
     EXPECT_EQ(c_status.error_code, 0);
 
     c_status = CloseWriter(c_packed_writer);
