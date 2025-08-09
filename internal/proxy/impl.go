@@ -120,6 +120,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	log.Info("received request to invalidate collection meta cache")
 
+	dbName := request.DbName
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
@@ -192,9 +193,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
-		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), collectionName)
+		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
-			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), alias)
+			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, alias)
 		}
 		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
 	} else if msgType == commonpb.MsgType_DropDatabase {
@@ -2591,6 +2592,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.InsertLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
@@ -2696,7 +2698,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.
-		WithLabelValues(nodeID, metrics.InsertLabel, collectionName).
+		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return it.result, nil
 }
@@ -2719,6 +2721,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.DeleteLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -2797,7 +2800,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dr.result, nil
 }
 
@@ -2826,6 +2829,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.UpsertLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
@@ -2940,7 +2944,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	log.Debug("Finish processing upsert request in Proxy")
 	return it.result, nil
@@ -2978,6 +2982,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
+				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
 			// result size still insufficient
@@ -2985,6 +2990,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
 					metrics.SearchLabel,
+					request.GetDbName(),
 					request.GetCollectionName(),
 				).Inc()
 			}
@@ -2999,6 +3005,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
+				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
 			if merr.Ok(rspGT.GetStatus()) {
@@ -3023,11 +3030,13 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.SearchLabel,
+		request.GetDbName(),
 		request.GetCollectionName(),
 	).Add(float64(request.GetNq()))
 
@@ -3204,6 +3213,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	metrics.ProxyCollectionSQLatency.WithLabelValues(
 		nodeID,
 		metrics.SearchLabel,
+		dbName,
 		collectionName,
 	).Observe(float64(searchDur))
 
@@ -3243,6 +3253,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
+				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
 			// result size still insufficient
@@ -3250,6 +3261,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
 					metrics.HybridSearchLabel,
+					request.GetDbName(),
 					request.GetCollectionName(),
 				).Inc()
 			}
@@ -3284,6 +3296,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -3438,6 +3451,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	metrics.ProxyCollectionSQLatency.WithLabelValues(
 		nodeID,
 		metrics.HybridSearchLabel,
+		dbName,
 		collectionName,
 	).Observe(float64(searchDur))
 
@@ -3699,6 +3713,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		metrics.ProxyCollectionSQLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			metrics.QueryLabel,
+			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
@@ -3729,10 +3744,12 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.QueryLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.QueryLabel,
+		request.GetDbName(),
 		request.GetCollectionName(),
 	).Add(float64(1))
 
