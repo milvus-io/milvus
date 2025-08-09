@@ -1,7 +1,9 @@
 package common
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -179,6 +181,63 @@ func CheckQueryResult(t *testing.T, expColumns []column.Column, actualColumns []
 		if !exist {
 			log.Error("CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
 		}
+	}
+}
+
+type CheckIteratorOption func(opt *checkIteratorOpt)
+
+type checkIteratorOpt struct {
+	expBatchSize    []int
+	expOutputFields []string
+}
+
+func WithExpBatchSize(expBatchSize []int) CheckIteratorOption {
+	return func(opt *checkIteratorOpt) {
+		opt.expBatchSize = expBatchSize
+	}
+}
+
+func WithExpOutputFields(expOutputFields []string) CheckIteratorOption {
+	return func(opt *checkIteratorOpt) {
+		opt.expOutputFields = expOutputFields
+	}
+}
+
+// check queryIterator: result limit, each batch size, output fields
+func CheckSearchIteratorResult(ctx context.Context, t *testing.T, itr client.SearchIterator, expLimit int, opts ...CheckIteratorOption) {
+	opt := &checkIteratorOpt{}
+	for _, o := range opts {
+		o(opt)
+	}
+	actualLimit := 0
+	var actualBatchSize []int
+	for {
+		rs, err := itr.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				log.Error("SearchIterator next gets error", zap.Error(err))
+				break
+			}
+		}
+
+		if opt.expBatchSize != nil {
+			actualBatchSize = append(actualBatchSize, rs.ResultCount)
+		}
+		var actualOutputFields []string
+		if opt.expOutputFields != nil {
+			for _, column := range rs.Fields {
+				actualOutputFields = append(actualOutputFields, column.Name())
+			}
+			require.ElementsMatch(t, opt.expOutputFields, actualOutputFields)
+		}
+		actualLimit = actualLimit + rs.ResultCount
+	}
+	require.Equal(t, expLimit, actualLimit)
+	if opt.expBatchSize != nil {
+		log.Debug("SearchIterator result len", zap.Any("result len", actualBatchSize))
+		require.True(t, EqualIntSlice(opt.expBatchSize, actualBatchSize))
 	}
 }
 

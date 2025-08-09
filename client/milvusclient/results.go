@@ -21,6 +21,7 @@ import (
 	"runtime/debug"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -49,6 +50,31 @@ func (rs *ResultSet) GetColumn(fieldName string) column.Column {
 		}
 	}
 	return nil
+}
+
+func (rs ResultSet) Len() int {
+	return rs.ResultCount
+}
+
+func (rs ResultSet) Slice(start, end int) ResultSet {
+	result := ResultSet{
+		sch: rs.sch,
+		IDs: rs.IDs.Slice(start, end),
+		Fields: lo.Map(rs.Fields, func(column column.Column, _ int) column.Column {
+			return column.Slice(start, end)
+		}),
+		// Recall will not be sliced
+		Err: rs.Err,
+	}
+
+	if rs.GroupByValue != nil {
+		result.GroupByValue = rs.GroupByValue.Slice(start, end)
+	}
+
+	result.ResultCount = result.IDs.Len()
+	result.Scores = rs.Scores[start : start+result.ResultCount]
+
+	return result
 }
 
 // Unmarshal puts dataset into receiver in row based way.
