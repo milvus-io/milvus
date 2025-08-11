@@ -39,7 +39,7 @@
 #include "futures/Future.h"
 #include "futures/future_c.h"
 #include "test_utils/DataGen.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/PbHelper.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"

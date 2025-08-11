@@ -162,6 +162,65 @@ func (_c *MixCoord_AddCollectionField_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// AddFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) AddFileResource(_a0 context.Context, _a1 *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AddFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AddFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AddFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_AddFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddFileResource'
+type MixCoord_AddFileResource_Call struct {
+	*mock.Call
+}
+
+// AddFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AddFileResourceRequest
+func (_e *MixCoord_Expecter) AddFileResource(_a0 interface{}, _a1 interface{}) *MixCoord_AddFileResource_Call {
+	return &MixCoord_AddFileResource_Call{Call: _e.mock.On("AddFileResource", _a0, _a1)}
+}
+
+func (_c *MixCoord_AddFileResource_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AddFileResourceRequest)) *MixCoord_AddFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AddFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_AddFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AddFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_AddFileResource_Call) RunAndReturn(run func(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)) *MixCoord_AddFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AllocID provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) AllocID(_a0 context.Context, _a1 *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -5372,6 +5431,65 @@ func (_c *MixCoord_ListDatabases_Call) RunAndReturn(run func(context.Context, *m
 	return _c
 }
 
+// ListFileResources provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) ListFileResources(_a0 context.Context, _a1 *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFileResources")
+	}
+
+	var r0 *milvuspb.ListFileResourcesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListFileResourcesRequest) *milvuspb.ListFileResourcesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ListFileResourcesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListFileResourcesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_ListFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFileResources'
+type MixCoord_ListFileResources_Call struct {
+	*mock.Call
+}
+
+// ListFileResources is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.ListFileResourcesRequest
+func (_e *MixCoord_Expecter) ListFileResources(_a0 interface{}, _a1 interface{}) *MixCoord_ListFileResources_Call {
+	return &MixCoord_ListFileResources_Call{Call: _e.mock.On("ListFileResources", _a0, _a1)}
+}
+
+func (_c *MixCoord_ListFileResources_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListFileResourcesRequest)) *MixCoord_ListFileResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ListFileResourcesRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_ListFileResources_Call) Return(_a0 *milvuspb.ListFileResourcesResponse, _a1 error) *MixCoord_ListFileResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_ListFileResources_Call) RunAndReturn(run func(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)) *MixCoord_ListFileResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImports provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) ListImports(_a0 context.Context, _a1 *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6497,6 +6615,65 @@ func (_c *MixCoord_ReleasePartitions_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *MixCoord_ReleasePartitions_Call) RunAndReturn(run func(context.Context, *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)) *MixCoord_ReleasePartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveFileResource provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) RemoveFileResource(_a0 context.Context, _a1 *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveFileResource")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.RemoveFileResourceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.RemoveFileResourceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_RemoveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveFileResource'
+type MixCoord_RemoveFileResource_Call struct {
+	*mock.Call
+}
+
+// RemoveFileResource is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.RemoveFileResourceRequest
+func (_e *MixCoord_Expecter) RemoveFileResource(_a0 interface{}, _a1 interface{}) *MixCoord_RemoveFileResource_Call {
+	return &MixCoord_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", _a0, _a1)}
+}
+
+func (_c *MixCoord_RemoveFileResource_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.RemoveFileResourceRequest)) *MixCoord_RemoveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.RemoveFileResourceRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_RemoveFileResource_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_RemoveFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_RemoveFileResource_Call) RunAndReturn(run func(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)) *MixCoord_RemoveFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

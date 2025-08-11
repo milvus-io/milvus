@@ -180,6 +180,11 @@ type DataCoordCatalog interface {
 	ListStatsTasks(ctx context.Context) ([]*indexpb.StatsTask, error)
 	SaveStatsTask(ctx context.Context, task *indexpb.StatsTask) error
 	DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	// Analyzer Resource
+	SaveFileResource(ctx context.Context, resource *model.FileResource) error
+	RemoveFileResource(ctx context.Context, resourceID int64) error
+	ListFileResource(ctx context.Context) ([]*model.FileResource, error)
 }
 
 type QueryCoordCatalog interface {

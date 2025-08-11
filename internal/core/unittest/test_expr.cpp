@@ -55,7 +55,7 @@
 #include "exec/expression/function/FunctionFactory.h"
 #include "expr/ITypeExpr.h"
 #include "mmap/Types.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -4234,7 +4234,7 @@ TEST_P(ExprTest, TestMutiInConvert) {
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
     auto final1 = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
-    OPTIMIZE_EXPR_ENABLED = false;
+    OPTIMIZE_EXPR_ENABLED.store(false);
     auto final2 = ExecuteQueryExpr(plan, seg.get(), N, MAX_TIMESTAMP);
     EXPECT_EQ(final1.size(), final2.size());
     for (auto i = 0; i < final1.size(); i++) {
@@ -5071,7 +5071,7 @@ TEST_P(ExprTest, TestGrowingSegmentGetBatchSize) {
         8192, 10240, 20480, 30720, 40960, 102400, 204800, 307200};
 
     for (const auto& batch_size : test_batch_size) {
-        EXEC_EVAL_EXPR_BATCH_SIZE = batch_size;
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(batch_size);
         auto plan = plan::PlanFragment(plan_node);
         auto query_context = std::make_shared<milvus::exec::QueryContext>(
             "query id", seg.get(), N, MAX_TIMESTAMP);
