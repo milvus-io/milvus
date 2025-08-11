@@ -24,7 +24,11 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     int64_t& current_chunk_pos,
     const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
     const {
-    auto index = pinned_index[current_chunk_id].get();
+    const index::IndexBase* index = nullptr;
+    if (current_chunk_id < pinned_index.size()) {
+        index = pinned_index[current_chunk_id].get();
+    }
+
     if (index) {
         auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
         if (index_ptr->HasRawData()) {
@@ -79,13 +83,17 @@ SegmentChunkReader::GetMultipleChunkDataAccessor<std::string>(
     int64_t& current_chunk_pos,
     const std::vector<PinWrapper<const index::IndexBase*>>& pinned_index)
     const {
-    auto index = pinned_index[current_chunk_id].get();
+    const index::IndexBase* index = nullptr;
+    if (current_chunk_id < pinned_index.size()) {
+        index = pinned_index[current_chunk_id].get();
+    }
+
     if (index) {
         auto index_ptr =
             dynamic_cast<const index::ScalarIndex<std::string>*>(index);
         if (index_ptr->HasRawData()) {
             return [&, index_ptr = std::move(index_ptr)]() mutable
-                   -> const data_access_type {
+                       -> const data_access_type {
                 if (current_chunk_pos >= active_count_) {
                     return std::nullopt;
                 }
