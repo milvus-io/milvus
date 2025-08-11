@@ -43,7 +43,9 @@ class TestAliasParamsInvalid(TestcaseBase):
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
 
-
+##########################################################
+# class TestAliasOperation() has been migrated to milvus_client
+##########################################################
 class TestAliasOperation(TestcaseBase):
     """ Test cases of alias interface operations"""
 
@@ -100,9 +102,6 @@ class TestAliasOperation(TestcaseBase):
         res1 = collection_alias.query(expr="", output_fields=["count(*)"])[0]
         assert res1[0].get("count(*)") == nb2
 
-    #########################################################
-    # test_alias_create_operation_default() migrated to milvus_client
-    #########################################################
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_create_operation_default(self):
         """
