@@ -45,6 +45,7 @@
 #endif
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "common/Common.h"
 #include "storage/ThreadPools.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
