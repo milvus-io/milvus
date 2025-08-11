@@ -532,24 +532,24 @@ func (op *lambdaOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type filterFieldOperator struct {
 	outputFieldNames []string
-	schema           *schemaInfo
+	fieldSchemas     []*schemapb.FieldSchema
 }
 
 func newFilterFieldOperator(t *searchTask, _ map[string]any) (operator, error) {
 	return &filterFieldOperator{
 		outputFieldNames: t.translatedOutputFields,
-		schema:           t.schema,
+		fieldSchemas:     typeutil.GetAllFieldSchemas(t.schema.CollectionSchema),
 	}, nil
 }
 
 func (op *filterFieldOperator) run(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
 	result := inputs[0].(*milvuspb.SearchResults)
 	for _, retField := range result.Results.FieldsData {
-		for _, schemaField := range op.schema.Fields {
-			if retField != nil && retField.FieldId == schemaField.FieldID {
-				retField.FieldName = schemaField.Name
-				retField.Type = schemaField.DataType
-				retField.IsDynamic = schemaField.IsDynamic
+		for _, fieldSchema := range op.fieldSchemas {
+			if retField != nil && retField.FieldId == fieldSchema.FieldID {
+				retField.FieldName = fieldSchema.Name
+				retField.Type = fieldSchema.DataType
+				retField.IsDynamic = fieldSchema.IsDynamic
 			}
 		}
 	}

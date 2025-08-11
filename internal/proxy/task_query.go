@@ -650,7 +650,9 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	t.result.OutputFields = t.userOutputFields
-	reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
+	if !t.reQuery {
+		reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
+	}
 
 	primaryFieldSchema, err := t.schema.GetPkField()
 	if err != nil {

@@ -4573,3 +4573,110 @@ func genTestSearchResultData(nq int64, topk int64, dType schemapb.DataType, fiel
 	}
 	return result
 }
+
+func TestSearchTask_InitSearchRequestWithStructArrayFields(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "regular_vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+			{FieldID: 102, Name: "regular_scalar", DataType: schemapb.DataType_Int32},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "structArray",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 104, Name: "struct_vec_array", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}}},
+					{FieldID: 105, Name: "struct_scalar_array", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+				},
+			},
+		},
+	}
+
+	schemaInfo := newSchemaInfo(schema)
+
+	tests := []struct {
+		name            string
+		outputFields    []string
+		expectedRequery bool
+		description     string
+	}{
+		{
+			name:            "regular_vector_field",
+			outputFields:    []string{"pk", "regular_vec"},
+			expectedRequery: true,
+			description:     "Should require requery when regular vector field in output",
+		},
+		{
+			name:            "struct_array_vector_field",
+			outputFields:    []string{"pk", "struct_vec_array"},
+			expectedRequery: true,
+			description:     "Should require requery when struct array vector field in output (tests GetAllFieldSchemas)",
+		},
+		{
+			name:            "both_vector_fields",
+			outputFields:    []string{"pk", "regular_vec", "struct_vec_array"},
+			expectedRequery: true,
+			description:     "Should require requery when both regular and struct array vector fields in output",
+		},
+		{
+			name:            "struct_scalar_array_only",
+			outputFields:    []string{"pk", "struct_scalar_array"},
+			expectedRequery: false,
+			description:     "Should not require requery when only struct scalar array field in output",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &searchTask{
+				ctx:            ctx,
+				collectionName: "test_collection",
+				SearchRequest: &internalpb.SearchRequest{
+					CollectionID:     1,
+					PartitionIDs:     []int64{1},
+					Dsl:              "",
+					PlaceholderGroup: nil,
+					DslType:          commonpb.DslType_BoolExprV1,
+					OutputFieldsId:   []int64{},
+				},
+				request: &milvuspb.SearchRequest{
+					CollectionName: "test_collection",
+					OutputFields:   tt.outputFields,
+					Dsl:            "",
+					SearchParams: []*commonpb.KeyValuePair{
+						{Key: AnnsFieldKey, Value: "regular_vec"},
+						{Key: TopKKey, Value: "10"},
+						{Key: common.MetricTypeKey, Value: metric.L2},
+						{Key: ParamsKey, Value: `{"nprobe": 10}`},
+					},
+					PlaceholderGroup: nil,
+					ConsistencyLevel: commonpb.ConsistencyLevel_Session,
+				},
+				schema:                 schemaInfo,
+				translatedOutputFields: tt.outputFields,
+				tr:                     timerecord.NewTimeRecorder("test"),
+				queryInfos:             []*planpb.QueryInfo{{}},
+			}
+
+			// Set translated output field IDs based on the schema
+			outputFieldIDs := []int64{}
+			allFields := typeutil.GetAllFieldSchemas(schema)
+			for _, fieldName := range tt.outputFields {
+				for _, field := range allFields {
+					if field.Name == fieldName {
+						outputFieldIDs = append(outputFieldIDs, field.FieldID)
+						break
+					}
+				}
+			}
+			task.SearchRequest.OutputFieldsId = outputFieldIDs
+
+			err := task.initSearchRequest(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedRequery, task.needRequery, tt.description)
+		})
+	}
+}

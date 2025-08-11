@@ -544,7 +544,8 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	vectorOutputFields := lo.Filter(t.schema.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
+	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
 		return lo.Contains(t.translatedOutputFields, field.GetName()) && typeutil.IsVectorType(field.GetDataType())
 	})
 	t.needRequery = len(vectorOutputFields) > 0
