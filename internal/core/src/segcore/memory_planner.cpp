@@ -34,6 +34,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "log/Log.h"
 #include "storage/ThreadPools.h"
+#include "common/Common.h"
 
 namespace milvus::segcore {
 

@@ -16,7 +16,7 @@
 #include "Future.h"
 #include "Executor.h"
 #include "log/Log.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 
 extern "C" void
 future_cancel(CFuture* future) {
