@@ -10,6 +10,7 @@ use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
 use crate::index_reader_c::SetBitsetFn;
 use crate::log::init_log;
+use crate::milvus_id_collector::MilvusIdCollector;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
 
@@ -22,6 +23,7 @@ pub(crate) struct IndexReaderWrapper {
     pub(crate) index: Arc<Index>,
     pub(crate) id_field: Option<Field>,
     pub(crate) set_bitset: SetBitsetFn,
+    pub(crate) user_specified_doc_id: bool,
 }
 
 impl IndexReaderWrapper {
@@ -42,6 +44,8 @@ impl IndexReaderWrapper {
             Err(_) => None,
         };
 
+        assert!(!schema.user_specified_doc_id() || id_field.is_none());
+
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::OnCommit) // OnCommit serve for growing segment.
@@ -55,6 +59,7 @@ impl IndexReaderWrapper {
             index,
             id_field,
             set_bitset,
+            user_specified_doc_id: schema.user_specified_doc_id(),
         })
     }
 
@@ -67,7 +72,11 @@ impl IndexReaderWrapper {
         let metas = self.index.searchable_segment_metas()?;
         let mut sum: u32 = 0;
         for meta in metas {
-            sum += meta.max_doc();
+            if self.user_specified_doc_id {
+                sum = std::cmp::max(sum, meta.max_doc());
+            } else {
+                sum += meta.max_doc();
+            }
         }
         Ok(sum)
     }
@@ -87,15 +96,27 @@ impl IndexReaderWrapper {
                     .map_err(TantivyBindingError::TantivyError)
             }
             None => {
-                // older version without doc_id, only one segment.
-                searcher
-                    .search(
-                        q,
-                        &VecCollector {
-                            bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
-                        },
-                    )
-                    .map_err(TantivyBindingError::TantivyError)
+                if self.user_specified_doc_id {
+                    // newer version with user specified doc id.
+                    searcher
+                        .search(
+                            q,
+                            &MilvusIdCollector {
+                                bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
+                            },
+                        )
+                        .map_err(TantivyBindingError::TantivyError)
+                } else {
+                    // older version without doc_id, only one segment.
+                    searcher
+                        .search(
+                            q,
+                            &VecCollector {
+                                bitset_wrapper: BitsetWrapper::new(bitset, self.set_bitset),
+                            },
+                        )
+                        .map_err(TantivyBindingError::TantivyError)
+                }
             }
         }
     }
@@ -347,7 +368,7 @@ mod test {
 
     use tantivy::{
         doc,
-        schema::{Schema, STORED, STRING},
+        schema::{Schema, STORED, STRING, TEXT_WITH_DOC_ID},
         Index,
     };
 
@@ -383,5 +404,42 @@ mod test {
             .prefix_query_keyword("$", &mut res as *mut _ as *mut c_void)
             .unwrap();
         assert_eq!(res.len(), 1);
+    }
+
+    #[test]
+    fn test_count() {
+        let mut schema_builder = Schema::builder();
+        schema_builder.add_text_field("title", TEXT_WITH_DOC_ID);
+        schema_builder.enable_user_specified_doc_id();
+        let schema = schema_builder.build();
+        let title = schema.get_field("title").unwrap();
+
+        let index = Index::create_in_ram(schema.clone());
+        let mut index_writer = index.writer(50000000).unwrap();
+
+        for i in 0..10_000 {
+            index_writer
+                .add_document_with_doc_id(i, doc!(title => format!("abc{}", i)))
+                .unwrap();
+        }
+        index_writer.commit().unwrap();
+
+        let index_shared = Arc::new(index);
+        let index_reader_wrapper =
+            IndexReaderWrapper::from_index(index_shared, set_bitset).unwrap();
+        let count = index_reader_wrapper.count().unwrap();
+        assert_eq!(count, 10000);
+
+        let batch: Vec<_> = (0..10_000)
+            .into_iter()
+            .map(|i| doc!(title => format!("hello{}", i)))
+            .collect();
+        index_writer
+            .add_documents_with_doc_id(10_000, batch)
+            .unwrap();
+        index_writer.commit().unwrap();
+        index_reader_wrapper.reload().unwrap();
+        let count = index_reader_wrapper.count().unwrap();
+        assert_eq!(count, 20000);
     }
 }

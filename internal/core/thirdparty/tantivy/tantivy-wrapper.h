@@ -142,6 +142,27 @@ struct TantivyIndexWrapper {
         writer_ = res.result_->value.ptr._0;
         path_ = std::string(path);
     }
+
+    // create index writer for json key stats
+    TantivyIndexWrapper(const char* field_name,
+                        const char* path,
+                        bool in_ram = false,
+                        uintptr_t num_threads = DEFAULT_NUM_THREADS,
+                        uintptr_t overall_memory_budget_in_bytes =
+                            DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES) {
+        auto res = RustResultWrapper(
+            tantivy_create_json_key_stats_writer(field_name,
+                                                 path,
+                                                 num_threads,
+                                                 overall_memory_budget_in_bytes,
+                                                 in_ram));
+        AssertInfo(res.result_->success,
+                   "failed to create text writer: {}",
+                   res.result_->error);
+        writer_ = res.result_->value.ptr._0;
+        path_ = std::string(path);
+    }
+
     // create reader.
     void
     create_reader(SetBitsetFn set_bitset) {

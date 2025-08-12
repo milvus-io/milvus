@@ -7,7 +7,8 @@ use futures::executor::block_on;
 use libc::c_char;
 use log::info;
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, FAST, INDEXED,
+    Field, IndexRecordOption, NumericOptions, Schema, SchemaBuilder, TextFieldIndexing,
+    TextOptions, FAST, INDEXED,
 };
 use tantivy::{doc, Document, Index, IndexWriter, SingleSegmentIndexWriter, UserOperation};
 
@@ -24,23 +25,30 @@ const BATCH_SIZE: usize = 4096;
 pub(crate) struct IndexWriterWrapper {
     pub(crate) field: Field,
     pub(crate) index_writer: Either<IndexWriter, SingleSegmentIndexWriter>,
-    pub(crate) id_field: Option<Field>,
     pub(crate) index: Arc<Index>,
+    pub(crate) single_segment_writer: bool,
 }
 
 #[inline]
-fn schema_builder_add_field(
+pub(crate) fn schema_builder_add_field(
     schema_builder: &mut SchemaBuilder,
     field_name: &str,
     data_type: TantivyDataType,
 ) -> Field {
     match data_type {
-        TantivyDataType::I64 => schema_builder.add_i64_field(field_name, INDEXED),
-        TantivyDataType::F64 => schema_builder.add_f64_field(field_name, INDEXED),
-        TantivyDataType::Bool => schema_builder.add_bool_field(field_name, INDEXED),
+        TantivyDataType::I64 => {
+            schema_builder.add_i64_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::F64 => {
+            schema_builder.add_f64_field(field_name, NumericOptions::default().set_indexed())
+        }
+        TantivyDataType::Bool => {
+            schema_builder.add_bool_field(field_name, NumericOptions::default().set_indexed())
+        }
         TantivyDataType::Keyword => {
             let text_field_indexing = TextFieldIndexing::default()
                 .set_tokenizer("raw")
+                .set_fieldnorms(false)
                 .set_index_option(IndexRecordOption::Basic);
             let text_options = TextOptions::default().set_indexing_options(text_field_indexing);
             schema_builder.add_text_field(&field_name, text_options)
@@ -67,8 +75,7 @@ impl IndexWriterWrapper {
         );
         let mut schema_builder = Schema::builder();
         let field = schema_builder_add_field(&mut schema_builder, &field_name, data_type);
-        // We cannot build direct connection from rows in multi-segments to milvus row data. So we have this doc_id field.
-        let id_field = schema_builder.add_i64_field("doc_id", FAST);
+        schema_builder.enable_user_specified_doc_id();
         let schema = schema_builder.build();
         let index = if in_ram {
             Index::create_in_ram(schema)
@@ -80,8 +87,8 @@ impl IndexWriterWrapper {
         Ok(IndexWriterWrapper {
             field,
             index_writer: Either::Left(index_writer),
-            id_field: Some(id_field),
             index: Arc::new(index),
+            single_segment_writer: false,
         })
     }
 
@@ -103,8 +110,8 @@ impl IndexWriterWrapper {
         Ok(IndexWriterWrapper {
             field,
             index_writer: Either::Right(index_writer),
-            id_field: None,
             index: Arc::new(index),
+            single_segment_writer: true,
         })
     }
 
@@ -112,10 +119,10 @@ impl IndexWriterWrapper {
         IndexReaderWrapper::from_index(self.index.clone(), set_bitset)
     }
 
-    fn index_writer_add_document(&self, document: Document) -> Result<()> {
+    fn index_writer_add_document(&self, offset: u32, document: Document) -> Result<()> {
         match self.index_writer {
             Either::Left(ref writer) => {
-                let _ = writer.add_document(document)?;
+                let _ = writer.add_document_with_doc_id(offset, document)?;
             }
             Either::Right(_) => {
                 panic!("unexpected writer");
@@ -136,48 +143,44 @@ impl IndexWriterWrapper {
         Ok(())
     }
 
+    #[inline]
     pub fn add_i8(&mut self, data: i8, offset: i64) -> Result<()> {
         self.add_i64(data.into(), offset)
     }
 
+    #[inline]
     pub fn add_i16(&mut self, data: i16, offset: i64) -> Result<()> {
         self.add_i64(data.into(), offset)
     }
 
+    #[inline]
     pub fn add_i32(&mut self, data: i32, offset: i64) -> Result<()> {
         self.add_i64(data.into(), offset)
     }
 
+    #[inline]
     pub fn add_i64(&mut self, data: i64, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+        self.index_writer_add_document(offset as u32, doc!(self.field => data))
     }
 
+    #[inline]
     pub fn add_f32(&mut self, data: f32, offset: i64) -> Result<()> {
         self.add_f64(data.into(), offset)
     }
 
+    #[inline]
     pub fn add_f64(&mut self, data: f64, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+        self.index_writer_add_document(offset as u32, doc!(self.field => data))
     }
 
+    #[inline]
     pub fn add_bool(&mut self, data: bool, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+        self.index_writer_add_document(offset as u32, doc!(self.field => data))
     }
 
+    #[inline]
     pub fn add_string(&mut self, data: &str, offset: i64) -> Result<()> {
-        self.index_writer_add_document(doc!(
-            self.field => data,
-            self.id_field.unwrap() => offset,
-        ))
+        self.index_writer_add_document(offset as u32, doc!(self.field => data))
     }
 
     // add in batch within BATCH_SIZE
@@ -188,7 +191,7 @@ impl IndexWriterWrapper {
         json_offsets_len: &[usize],
     ) -> Result<()> {
         let writer = self.index_writer.as_ref().left().unwrap();
-        let id_field = self.id_field.unwrap();
+        let id_field = writer.index().schema().get_field("doc_id").unwrap();
         let mut batch = Vec::with_capacity(BATCH_SIZE);
         keys.iter()
             .zip(json_offsets.iter())
@@ -229,8 +232,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data as i64);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_i16s(&mut self, datas: &[i16], offset: i64) -> Result<()> {
@@ -238,8 +240,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data as i64);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_i32s(&mut self, datas: &[i32], offset: i64) -> Result<()> {
@@ -247,8 +248,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data as i64);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_i64s(&mut self, datas: &[i64], offset: i64) -> Result<()> {
@@ -256,8 +256,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_f32s(&mut self, datas: &[f32], offset: i64) -> Result<()> {
@@ -265,8 +264,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data as f64);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_f64s(&mut self, datas: &[f64], offset: i64) -> Result<()> {
@@ -274,8 +272,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_bools(&mut self, datas: &[bool], offset: i64) -> Result<()> {
@@ -283,8 +280,7 @@ impl IndexWriterWrapper {
         for data in datas {
             document.add_field_value(self.field, *data);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_multi_keywords(&mut self, datas: &[*const c_char], offset: i64) -> Result<()> {
@@ -293,8 +289,7 @@ impl IndexWriterWrapper {
             let data = unsafe { CStr::from_ptr(*element) };
             document.add_field_value(self.field, data.to_str()?);
         }
-        document.add_i64(self.id_field.unwrap(), offset);
-        self.index_writer_add_document(document)
+        self.index_writer_add_document(offset as u32, document)
     }
 
     pub fn add_i8_by_single_segment_writer(&mut self, data: i8) -> Result<()> {
