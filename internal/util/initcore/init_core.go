@@ -351,3 +351,46 @@ func serializeHeaders(headerstr string) string {
 	}
 	return string(decodeheaders)
 }
+
+func UpdateLogLevel(level string) error {
+	cvalue := C.CString(level)
+	C.SetLogLevel(cvalue)
+	C.free(unsafe.Pointer(cvalue))
+	return nil
+}
+
+func UpdateIndexSliceSize(size int) {
+	C.SetIndexSliceSize(C.int64_t(size))
+}
+
+func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
+	C.SetHighPriorityThreadCoreCoefficient(C.float(coefficient))
+}
+
+func UpdateMiddlePriorityThreadCoreCoefficient(coefficient float64) {
+	C.SetMiddlePriorityThreadCoreCoefficient(C.float(coefficient))
+}
+
+func UpdateLowPriorityThreadCoreCoefficient(coefficient float64) {
+	C.SetLowPriorityThreadCoreCoefficient(C.float(coefficient))
+}
+
+func UpdateDefaultExprEvalBatchSize(size int) {
+	C.SetDefaultExprEvalBatchSize(C.int64_t(size))
+}
+
+func UpdateDefaultOptimizeExprEnable(enable bool) {
+	C.SetDefaultOptimizeExprEnable(C.bool(enable))
+}
+
+func UpdateDefaultJSONKeyStatsCommitInterval(interval int) {
+	C.SetDefaultJSONKeyStatsCommitInterval(C.int64_t(interval))
+}
+
+func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
+	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
+}
+
+func UpdateDefaultConfigParamTypeCheck(enable bool) {
+	C.SetDefaultConfigParamTypeCheck(C.bool(enable))
+}

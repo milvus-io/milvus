@@ -16,56 +16,20 @@
 
 package paramtable
 
-/*
-#cgo pkg-config: milvus_core
+// This file defines hook functions that are set by the upper layer (root module)
+// to avoid importing root `internal` packages or CGO into the `pkg` submodule.
 
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include "common/init_c.h"
-*/
-import "C"
-import "unsafe"
+var (
+	UpdateIndexSliceSize                      = func(size int) {}
+	UpdateHighPriorityThreadCoreCoefficient   = func(coefficient float64) {}
+	UpdateMiddlePriorityThreadCoreCoefficient = func(coefficient float64) {}
+	UpdateLowPriorityThreadCoreCoefficient    = func(coefficient float64) {}
 
-func UpdateLogLevel(level string) error {
-	cvalue := C.CString(level)
-	C.SetLogLevel(cvalue)
-	C.free(unsafe.Pointer(cvalue))
-	return nil
-}
+	UpdateDefaultOptimizeExprEnable         = func(enable bool) {}
+	UpdateDefaultJSONKeyStatsCommitInterval = func(interval int) {}
+	UpdateDefaultGrowingJSONKeyStatsEnable  = func(enable bool) {}
+	UpdateDefaultConfigParamTypeCheck       = func(enable bool) {}
 
-func UpdateIndexSliceSize(size int) {
-	C.SetIndexSliceSize(C.int64_t(size))
-}
-
-func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
-	C.SetHighPriorityThreadCoreCoefficient(C.float(coefficient))
-}
-
-func UpdateMiddlePriorityThreadCoreCoefficient(coefficient float64) {
-	C.SetMiddlePriorityThreadCoreCoefficient(C.float(coefficient))
-}
-
-func UpdateLowPriorityThreadCoreCoefficient(coefficient float64) {
-	C.SetLowPriorityThreadCoreCoefficient(C.float(coefficient))
-}
-
-func UpdateDefaultExprEvalBatchSize(size int) {
-	C.SetDefaultExprEvalBatchSize(C.int64_t(size))
-}
-
-func UpdateDefaultOptimizeExprEnable(enable bool) {
-	C.SetDefaultOptimizeExprEnable(C.bool(enable))
-}
-
-func UpdateDefaultJSONKeyStatsCommitInterval(interval int) {
-	C.SetDefaultJSONKeyStatsCommitInterval(C.int64_t(interval))
-}
-
-func UpdateDefaultGrowingJSONKeyStatsEnable(enable bool) {
-	C.SetDefaultGrowingJSONKeyStatsEnable(C.bool(enable))
-}
-
-func UpdateDefaultConfigParamTypeCheck(enable bool) {
-	C.SetDefaultConfigParamTypeCheck(C.bool(enable))
-}
+	UpdateLogLevel                 = func(level string) error { return nil }
+	UpdateDefaultExprEvalBatchSize = func(size int) {}
+)
