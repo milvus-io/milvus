@@ -901,10 +901,11 @@ class SegmentExpr : public Expr {
                 if (field_type_ == DataType::JSON) {
                     auto pointer = milvus::Json::pointer(nested_path_);
 
+                    json_pw = pinned_index_[i];
                     // check if it is a json flat index, if so, create a json flat index query executor
                     auto json_flat_index =
                         dynamic_cast<const index::JsonFlatIndex*>(
-                            pinned_index_[i].get());
+                            json_pw.get());
 
                     if (json_flat_index) {
                         auto index_path = json_flat_index->GetNestedPath();
