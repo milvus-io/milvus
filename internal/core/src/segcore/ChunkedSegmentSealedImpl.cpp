@@ -43,6 +43,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
+#include "folly/Synchronized.h"
 #include "monitor/scope_metric.h"
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
@@ -198,10 +199,17 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     if (auto it = info.index_params.find(index::INDEX_TYPE);
         it != info.index_params.end() &&
         it->second == index::NGRAM_INDEX_TYPE) {
-        ngram_fields_.wlock()->insert(field_id);
+        auto [scalar_indexings, ngram_fields] =
+            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+        ngram_fields->insert(field_id);
+        scalar_indexings->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
+    } else {
+        scalar_indexings_.wlock()->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
     }
-    scalar_indexings_.wlock()->insert(
-        {field_id, std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -622,22 +630,27 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    return scalar_indexings_.withRLock([&](auto& mapping) {
-        auto iter = mapping.find(field_id);
-        if (iter == mapping.end()) {
-            return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-        }
-        auto slot = iter->second.get();
-        lck.unlock();
+    auto [scalar_indexings, ngram_fields] =
+        lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
 
-        auto ca = SemiInlineGet(slot->PinCells({0}));
-        auto index =
-            dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
-        AssertInfo(index != nullptr,
-                   "ngram index cache is corrupted, field_id: {}",
-                   field_id.get());
-        return PinWrapper<index::NgramInvertedIndex*>(ca, index);
-    });
+    auto has = ngram_fields->find(field_id);
+    if (has == ngram_fields->end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+
+    auto iter = scalar_indexings->find(field_id);
+    if (iter == scalar_indexings->end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+    auto slot = iter->second.get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache is corrupted, field_id: {}",
+               field_id.get());
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
 PinWrapper<index::NgramInvertedIndex*>
@@ -830,8 +843,10 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
 
     std::unique_lock lck(mutex_);
-    scalar_indexings_.wlock()->erase(field_id);
-    ngram_fields_.wlock()->erase(field_id);
+    auto [scalar_indexings, ngram_fields] =
+        lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+    scalar_indexings->erase(field_id);
+    ngram_fields->erase(field_id);
 
     set_bit(index_ready_bitset_, field_id, false);
 }

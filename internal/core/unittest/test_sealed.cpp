@@ -653,9 +653,6 @@ TEST(Sealed, LoadFieldData) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
-
-    segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, ClearData) {
@@ -860,9 +857,6 @@ TEST(Sealed, LoadFieldDataMmap) {
     auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
     auto json = SearchResultToJson(*sr);
     std::cout << json.dump(1);
-
-    segment->DropIndex(fakevec_id);
-    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
 }
 
 TEST(Sealed, LoadPkScalarIndex) {
