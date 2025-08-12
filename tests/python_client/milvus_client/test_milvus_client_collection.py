@@ -132,17 +132,88 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_string_auto_id(self):
         """
-        target: test fast create collection without max_length for string primary key
-        method: create collection name with invalid primary field
-        expected: raise exception
+        target: test creating a collection with string primary key and auto_id but without specifying max_length
+        method: attempt to create collection with string primary key and auto_id=True, omitting max_length
+        expected: raise exception due to missing max_length for string primary key
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
+        collection_name = cf.gen_collection_name_by_testcase_name()
         # 1. create collection
         error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for the field(id) "
                                                  f"of collection {collection_name}"}
         self.create_collection(client, collection_name, default_dim, id_type="string", auto_id=True,
                                check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("auto_id", [None, 1, "string"])
+    def test_collection_auto_id_invalid_types(self, auto_id):
+        """
+        target: test collection creation with invalid auto_id types
+        method: attempt to create a collection with auto_id set to non-bool values
+        expected: raise exception indicating auto_id must be bool
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Attempt to create a collection with invalid auto_id
+        error = {ct.err_code: 0, ct.err_msg: "Param auto_id must be bool type"}
+        self.create_collection(client, collection_name, default_dim, auto_id=auto_id,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_auto_id_none_in_field(self):
+        """
+        target: test collection with auto_id set to None in field definition
+        method: try to create a collection with a primary key field where auto_id=None
+        expected: raise exception indicating auto_id must be bool
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema and try to add field with auto_id=None - this should raise exception
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Test that adding a field with auto_id=None raises exception
+        try:
+            schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=None)
+            assert False
+        except Exception as e:
+            assert "Param auto_id must be bool type" in str(e)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_multi_fields_auto_id(self):
+        """
+        target: test collection auto_id with multi fields (non-primary field with auto_id)
+        method: specify auto_id=True for a non-primary int64 field
+        expected: raise exception indicating auto_id can only be specified on primary key field
+        """
+        client = self._client()        
+        # Create schema and try to add non-primary field with auto_id=True - this should raise exception
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Add primary key field
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, auto_id=True)
+        # Test that adding a non-primary field with auto_id=True raises exception
+        try:
+            schema.add_field("int_field", DataType.INT64, auto_id=True)
+            assert False
+        except Exception as e:
+            assert "auto_id can only be specified on the primary key field" in str(e)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_auto_id_non_primary_field(self):
+        """
+        target: test collection set auto_id in non-primary field
+        method: set auto_id=True in non-primary field directly
+        expected: raise exception indicating auto_id can only be specified on primary key field
+        """
+        client = self._client()
+        # Create schema and try to add non-primary field with auto_id=True - this should raise exception
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Test that creating a non-primary field with auto_id=True raises exception
+        try:
+            schema.add_field(ct.default_int64_field_name, DataType.INT64, auto_id=True)
+            assert False, "Expected exception was not raised"
+        except Exception as e:
+            assert "auto_id can only be specified on the primary key field" in str(e)
+
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_collection_dup_name_different_params(self):
@@ -242,6 +313,28 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                              check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_over_maximum_fields(self):
+        """
+        target: Test create collection with more than the maximum fields
+        method: create collection with more than the maximum field number
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with more than the maximum allowed fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        limit_num = ct.max_field_num - 2
+        for i in range(limit_num):
+            field_name = cf.gen_unique_str("field_name")
+            schema.add_field(field_name, DataType.INT64)
+        schema.add_field(cf.gen_unique_str("extra_field"), DataType.INT64)
+        # Try to create collection - should raise exception
+        error = {ct.err_code: 1, ct.err_msg: "maximum field's number should be limited to 64"}
+        self.create_collection(client, collection_name, default_dim, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
     
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_empty_fields(self):
@@ -258,6 +351,79 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_over_maximum_vector_fields(self):
+        """
+        target: Test create collection with more than the maximum vector fields (default is 4)
+        method: create collection with more than the maximum vector field number
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with more than the maximum allowed vector fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        for i in range(ct.max_vector_field_num + 1):
+            vector_field_name = cf.gen_unique_str("vector_field_name")
+            schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        error = {ct.err_code: 65535, ct.err_msg: "maximum vector field's number should be limited to 4"}
+        self.create_collection(client, collection_name, default_dim, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_multiple_vector_and_over_maximum_all_fields(self):
+        """
+        target: test create collection with multiple vector fields and over maximum fields
+        method: create collection with multiple vector fields and over maximum fields
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Prepare schema with multiple vector fields and over maximum fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        vector_limit_num = ct.max_vector_field_num - 2
+        limit_num = ct.max_field_num
+        # Add multiple vector fields
+        for i in range(vector_limit_num):
+            vector_field_name = cf.gen_unique_str("field_name")
+            schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add other scalar fields to reach maximum fields number
+        for i in range(limit_num):
+            int_field_name = cf.gen_unique_str("field_name")
+            schema.add_field(int_field_name, DataType.INT64)
+        # Add primary key field
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
+        self.create_collection(client, collection_name, default_dim, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_over_maximum_vector_and_over_all_fields(self):
+        """
+        target: test create collection with over maximum vector fields and over maximum fields
+        method: create collection with over maximum vector fields and over maximum fields
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Prepare schema with over maximum vector fields and maximum fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        vector_limit_num = ct.max_vector_field_num
+        limit_num = ct.max_field_num - 2
+        # Add maximum vector fields (one more than allowed)
+        for i in range(vector_limit_num + 1):
+            vector_field_name = cf.gen_unique_str("field_name")
+            schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add other scalar fields to reach maximum fields number
+        for i in range(limit_num - 4):
+            int_field_name = cf.gen_unique_str("field_name")
+            schema.add_field(int_field_name, DataType.INT64)
+        # Add one more vector and one primary key field
+        schema.add_field(cf.gen_unique_str("field_name"), DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        error = {ct.err_code: 65535, ct.err_msg: "maximum field's number should be limited to 64"}
+        self.create_collection(client, collection_name, default_dim, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_milvus_client_collection_without_vectors(self):
@@ -274,6 +440,25 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         error = {ct.err_code: 1100, ct.err_msg: "schema does not contain vector field: invalid parameter"}
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR])
+    def test_milvus_client_collection_vector_without_dim(self, vector_type):
+        """
+        target: test creating a collection with a vector field missing the dimension
+        method: define a vector field without specifying dim and attempt to create the collection
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with a vector field missing the dim parameter
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        # Add vector field without dim
+        schema.add_field("vector_field", vector_type)
+        error = {ct.err_code: 1, ct.err_msg: "dimension is not defined in field type params"}
+        self.create_collection(client, collection_name, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("vector_type", [DataType.FLOAT_VECTOR, DataType.INT8_VECTOR, DataType.BINARY_VECTOR])
@@ -562,6 +747,85 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         assert sorted(index) == sorted(['embeddings', 'embeddings_1', 'embeddings_2', 'embeddings_3'])
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_maximum_fields(self):
+        """
+        target: test create collection with maximum fields
+        method: create collection with maximum field number
+        expected: no exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with maximum number of fields
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Add primary key field first
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        # Add vector field
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add maximum number of scalar fields (max_field_num - 2 for primary and vector)
+        limit_num = ct.max_field_num - 2
+        for i in range(limit_num):
+            field_name = cf.gen_unique_str("field_name")
+            schema.add_field(field_name, DataType.INT64)
+        # Create collection - should succeed without exception
+        self.create_collection(client, collection_name, default_dim, schema=schema)
+        # Verify collection was created successfully
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        # Verify schema properties - focus on fields count which is the core of this test
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items={"collection_name": collection_name,
+                                             "fields_num": ct.max_field_num,
+                                             "enable_dynamic_field": False})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
+    def test_milvus_client_collection_maximum_vector_and_maximum_fields(self, primary_key_type):
+        """
+        target: test create collection with maximum vector fields and maximum total fields
+        method: create collection with maximum vector fields and fill to maximum field number
+        expected: no exception, collection created successfully
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Add primary key field
+        if primary_key_type == "int64":
+            schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        else:
+            schema.add_field("pk_string", DataType.VARCHAR, max_length=100, is_primary=True)
+        # Add multiple vector fields
+        vector_field_names = []
+        for i in range(ct.max_vector_field_num):
+            vector_field_name = cf.gen_unique_str("vector_field")
+            vector_field_names.append(vector_field_name)
+            schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Fill remaining slots with scalar fields to reach maximum field number
+        remaining_slots = ct.max_field_num - ct.max_vector_field_num - 1
+        for i in range(remaining_slots):
+            scalar_field_name = cf.gen_unique_str("scalar_field")
+            schema.add_field(scalar_field_name, DataType.INT64)
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, schema=schema)
+        # Verify collection was created successfully
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        # Verify schema properties using check_task and check_items
+        check_items = {
+            "collection_name": collection_name,
+            "dim": [default_dim] * ct.max_vector_field_num,
+            "enable_dynamic_field": False,
+            "id_name": ct.default_int64_field_name if primary_key_type == "int64" else "pk_string",
+            "vector_name": vector_field_names,
+            "fields_num": ct.max_field_num
+        }
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items=check_items)
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_collection_dup_name(self):
@@ -950,6 +1214,23 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
                                                 f"[collection={collection_name}]"}
         self.describe_collection(client1, collection_name, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_desc(self):
+        """
+        target: test collection with description
+        method: create with description
+        expected: assert default description
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection with description
+        self.create_collection(client, collection_name, default_dim, description=ct.collection_desc)
+        # Verify collection properties
+        collection_info = self.describe_collection(client, collection_name)[0]
+        assert collection_info["collection_name"] == collection_name
+        assert collection_info.get("description", "") == ct.collection_desc
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_long_desc(self):
         """
@@ -961,19 +1242,15 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create long description
         long_desc = "a".join("a" for _ in range(256))
-        
         # Create schema with long description
         schema = self.create_schema(client, enable_dynamic_field=False, description=long_desc)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
         schema.add_field("embeddings", DataType.FLOAT_VECTOR, dim=default_dim)
-        
         # Create collection with long description
         self.create_collection(client, collection_name, schema=schema)
-        
         collection_info = self.describe_collection(client, collection_name)[0]
         actual_desc = collection_info.get("description", "")
         assert actual_desc == long_desc
-        
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1117,6 +1394,54 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         stats = self.get_collection_stats(client, collection_name)[0]
         assert stats['row_count'] == 0
         self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_non_vector_field_dim(self):
+        """
+        target: test collection with dim for non-vector field
+        method: define int64 field with dim parameter
+        expected: no exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with non-vector field having dim parameter
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Add INT64 field with dim parameter
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True, dim=ct.default_dim)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, schema=schema)
+        # Verify collection was created successfully
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        # Verify schema properties
+        collection_desc = self.describe_collection(client, collection_name)[0]
+        assert collection_desc['collection_name'] == collection_name
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_multi_sparse_vectors(self):
+        """
+        target: Test multiple sparse vectors in a collection
+        method: create 2 sparse vectors in a collection 
+        expected: successful creation of a collection
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with multiple vector fields including sparse vector
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_float_field_name, DataType.FLOAT)
+        schema.add_field(ct.default_float_vec_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("vec_sparse", DataType.SPARSE_FLOAT_VECTOR)
+        # Create collection
+        self.create_collection(client, collection_name, default_dim, schema=schema)
+        # Verify collection was created successfully
+        collections = self.list_collections(client)[0]
+        assert collection_name in collections
+        self.drop_collection(client, collection_name)
+
+
 
 
 class TestMilvusClientDropCollectionInvalid(TestMilvusClientV2Base):
@@ -2877,13 +3202,8 @@ class TestMilvusClientCollectionCountIP(TestMilvusClientV2Base):
         self.release_collection(client, collection_name)
         self.drop_index(client, collection_name, default_vector_field_name)
         # Prepare and insert data
-        rng = np.random.default_rng(seed=19530)
-        rows = [{
-            default_primary_key_field_name: i,
-            default_vector_field_name: list(rng.random((1, default_dim))[0]),
-            default_float_field_name: i * 1.0,
-            default_string_field_name: str(i)
-        } for i in range(insert_count)]
+        schema_info = self.describe_collection(client, collection_name)[0]
+        rows = cf.gen_row_data_by_schema(nb=insert_count, schema=schema_info)
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
         # Create index
