@@ -739,6 +739,7 @@ func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSc
 		},
 		FieldId:   field.GetFieldId(),
 		IsDynamic: field.GetIsDynamic(),
+		ValidData: field.GetValidData(),
 	}
 	return nil
 }
