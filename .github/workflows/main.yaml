@@ -106,10 +106,7 @@ jobs:
           path: code.zip
       - name: Save Caches
         uses: ./.github/actions/cache-save
-        if: >-
-          github.event_name != 'pull_request' ||
-          (github.event_name == 'pull_request' && 
-          contains(github.event.pull_request.title, '[update cache]'))
+        if: always()
         with:
           os: 'ubuntu22.04'
           kind: 'cpp'
