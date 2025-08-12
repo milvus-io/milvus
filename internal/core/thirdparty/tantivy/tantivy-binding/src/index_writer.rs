@@ -405,23 +405,19 @@ impl IndexWriterWrapper {
         self.single_segment_index_writer_add_document(document)
     }
 
-    fn manual_merge(&mut self) -> Result<()> {
-        let index_writer = self.index_writer.as_mut().left().unwrap();
-        let metas = index_writer.index().searchable_segment_metas()?;
-        let policy = index_writer.get_merge_policy();
-        let candidates = policy.compute_merge_candidates(metas.as_slice());
-        for candidate in candidates {
-            index_writer.merge(candidate.0.as_slice()).wait()?;
-        }
-        Ok(())
-    }
-
     pub fn finish(self) -> Result<()> {
         match self.index_writer {
             Either::Left(mut index_writer) => {
                 index_writer.commit()?;
-                // self.manual_merge();
-                block_on(index_writer.garbage_collect_files())?;
+
+                // merge all segments
+                let segment_ids = index_writer.index().searchable_segment_ids()?;
+                if segment_ids.len() > 1 {
+                    let _ = index_writer.merge(&segment_ids).wait();
+                }
+
+                index_writer.garbage_collect_files().wait()?;
+
                 index_writer.wait_merging_threads()?;
             }
             Either::Right(single_segment_index_writer) => {
