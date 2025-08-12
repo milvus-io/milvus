@@ -1581,7 +1581,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 	case schemapb.DataType_Bool:
 		v, ok := value.(bool)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalid("bool", value, "Wrong defaultValue type")
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as bool default value`, value, value)
 		}
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_BoolData{
@@ -1594,7 +1594,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 		// all passed number is float64 type
 		v, ok := value.(float64)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use ""%v"(type: %T) as int default value`, value, value)
 		}
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_IntData{
@@ -1606,7 +1606,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 	case schemapb.DataType_Int64:
 		v, ok := value.(float64)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as long default value`, value, value)
 		}
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_LongData{
@@ -1618,7 +1618,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 	case schemapb.DataType_Float:
 		v, ok := value.(float64)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as float default value`, value, value)
 		}
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_FloatData{
@@ -1630,7 +1630,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 	case schemapb.DataType_Double:
 		v, ok := value.(float64)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalid("number", value, "Wrong defaultValue type")
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as float default value`, value, value)
 		}
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_DoubleData{
@@ -1642,7 +1642,7 @@ func convertDefaultValue(value interface{}, dataType schemapb.DataType) (*schema
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		v, ok := value.(string)
 		if !ok {
-			return nil, merr.WrapErrParameterInvalid("string", value, "Wrong defaultValue type")
+			return nil, merr.WrapErrParameterInvalidMsg(`cannot use "%v"(type: %T) as string default value`, value, value)
 		}
 		data := &schemapb.ValueField{
 			Data: &schemapb.ValueField_StringData{
