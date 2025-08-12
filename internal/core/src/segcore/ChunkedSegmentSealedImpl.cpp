@@ -43,6 +43,7 @@
 #include "common/Tracer.h"
 #include "common/Types.h"
 #include "common/resource_c.h"
+#include "folly/Synchronized.h"
 #include "monitor/scope_metric.h"
 #include "google/protobuf/message_lite.h"
 #include "index/Index.h"
@@ -115,7 +116,8 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         !get_bit(index_ready_bitset_, field_id),
         "vector index has been exist at " + std::to_string(field_id.get()));
     LOG_INFO(
-        "Before setting field_bit for field index, fieldID:{}. segmentID:{}, ",
+        "Before setting field_bit for field index, fieldID:{}. "
+        "segmentID:{}, ",
         info.field_id,
         id_);
     auto& field_meta = schema_->operator[](field_id);
@@ -157,7 +159,8 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // if segment is pk sorted, user created indexes bring no performance gain but extra memory usage
     if (is_pk && is_sorted_by_pk_) {
         LOG_INFO(
-            "segment pk sorted, skip user index loading for primary key field");
+            "segment pk sorted, skip user index loading for primary key "
+            "field");
         return;
     }
 
@@ -195,10 +198,17 @@ ChunkedSegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     if (auto it = info.index_params.find(index::INDEX_TYPE);
         it != info.index_params.end() &&
         it->second == index::NGRAM_INDEX_TYPE) {
-        ngram_fields_.wlock()->insert(field_id);
+        auto [scalar_indexings, ngram_fields] =
+            lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+        ngram_fields->insert(field_id);
+        scalar_indexings->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
+    } else {
+        scalar_indexings_.wlock()->insert(
+            {field_id,
+             std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
     }
-    scalar_indexings_.wlock()->insert(
-        {field_id, std::move(const_cast<LoadIndexInfo&>(info).cache_index)});
 
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().ScalarIndexLoadResource(
@@ -296,7 +306,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                                load_info.mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
-            "[StorageV2] segment {} loads column group {} with field ids {} "
+            "[StorageV2] segment {} loads column group {} with field ids "
+            "{} "
             "with "
             "num_rows "
             "{}",
@@ -611,30 +622,35 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
         auto& field_data = it->second;
         return field_data->ArrayViewsByOffsets(chunk_id, offsets);
     }
-    ThrowInfo(
-        ErrorCode::UnexpectedError,
-        "chunk_array_views_by_offsets only used for variable column field ");
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_views_by_offsets only used for variable column "
+              "field ");
 }
 
 PinWrapper<index::NgramInvertedIndex*>
 ChunkedSegmentSealedImpl::GetNgramIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    return scalar_indexings_.withRLock([&](auto& mapping) {
-        auto iter = mapping.find(field_id);
-        if (iter == mapping.end()) {
-            return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-        }
-        auto slot = iter->second.get();
-        lck.unlock();
+    auto [scalar_indexings, ngram_fields] =
+        lock(folly::rlock(scalar_indexings_), folly::rlock(ngram_fields_));
 
-        auto ca = SemiInlineGet(slot->PinCells({0}));
-        auto index =
-            dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
-        AssertInfo(index != nullptr,
-                   "ngram index cache is corrupted, field_id: {}",
-                   field_id.get());
-        return PinWrapper<index::NgramInvertedIndex*>(ca, index);
-    });
+    auto has = ngram_fields->find(field_id);
+    if (has == ngram_fields->end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+
+    auto iter = scalar_indexings->find(field_id);
+    if (iter == scalar_indexings->end()) {
+        return PinWrapper<index::NgramInvertedIndex*>(nullptr);
+    }
+    auto slot = iter->second.get();
+    lck.unlock();
+
+    auto ca = SemiInlineGet(slot->PinCells({0}));
+    auto index = dynamic_cast<index::NgramInvertedIndex*>(ca->get_cell_of(0));
+    AssertInfo(index != nullptr,
+               "ngram index cache is corrupted, field_id: {}",
+               field_id.get());
+    return PinWrapper<index::NgramInvertedIndex*>(ca, index);
 }
 
 PinWrapper<index::NgramInvertedIndex*>
@@ -831,8 +847,11 @@ ChunkedSegmentSealedImpl::DropIndex(const FieldId field_id) {
     AssertInfo(!field_meta.is_vector(), "vector field cannot drop index");
 
     std::unique_lock lck(mutex_);
-    scalar_indexings_.wlock()->erase(field_id);
-    ngram_fields_.wlock()->erase(field_id);
+    folly::SharedMutex::WriteHolder lck(&mutex_);
+    auto [scalar_indexings, ngram_fields] =
+        lock(folly::wlock(scalar_indexings_), folly::wlock(ngram_fields_));
+    scalar_indexings->erase(field_id);
+    ngram_fields->erase(field_id);
 
     set_bit(index_ready_bitset_, field_id, false);
 }
@@ -1371,9 +1390,9 @@ ChunkedSegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                id_);
     switch (system_type) {
         case SystemFieldType::Timestamp:
-            AssertInfo(
-                insert_record_.timestamps_.num_chunk() == 1,
-                "num chunk of timestamp not equal to 1 for sealed segment");
+            AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
+                       "num chunk of timestamp not equal to 1 for "
+                       "sealed segment");
             bulk_subscript_impl<Timestamp>(
                 this->insert_record_.timestamps_.get_chunk_data(0),
                 seg_offsets,
@@ -1546,10 +1565,10 @@ ChunkedSegmentSealedImpl::CreateTextIndex(FieldId field_id) {
             auto field_index_iter =
                 scalar_indexings_.withRLock([&](auto& mapping) {
                     auto iter = mapping.find(field_id);
-                    AssertInfo(
-                        iter != mapping.end(),
-                        "failed to create text index, neither raw data nor "
-                        "index are found");
+                    AssertInfo(iter != mapping.end(),
+                               "failed to create text index, neither "
+                               "raw data nor "
+                               "index are found");
                     return iter;
                 });
             auto accessor =
@@ -2228,7 +2247,8 @@ ChunkedSegmentSealedImpl::generate_interim_index(const FieldId field_id,
             }
 
             LOG_INFO(
-                "replace binlog with intermin index in segment {}, field {}.",
+                "replace binlog with intermin index in segment {}, "
+                "field {}.",
                 this->get_segment_id(),
                 field_id.get());
         }
@@ -2246,7 +2266,8 @@ void
 ChunkedSegmentSealedImpl::LazyCheckSchema(SchemaPtr sch) {
     if (sch->get_schema_version() > schema_->get_schema_version()) {
         LOG_INFO(
-            "lazy check schema segment {} found newer schema version, current "
+            "lazy check schema segment {} found newer schema version, "
+            "current "
             "schema version {}, new schema version {}",
             id_,
             schema_->get_schema_version(),
@@ -2390,10 +2411,12 @@ ChunkedSegmentSealedImpl::FinishLoad() {
 void
 ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
     auto field_id = field_meta.get_id();
-    LOG_INFO("start fill empty field {} (data type {}) for sealed segment {}",
-             field_meta.get_data_type(),
-             field_id.get(),
-             id_);
+    LOG_INFO(
+        "start fill empty field {} (data type {}) for sealed segment "
+        "{}",
+        field_meta.get_data_type(),
+        field_id.get(),
+        id_);
     int64_t size = num_rows_.value();
     AssertInfo(size > 0, "Chunked Sealed segment must have more than 0 row");
     auto field_data_info = FieldDataInfo(field_id.get(), size, "");
@@ -2433,10 +2456,12 @@ ChunkedSegmentSealedImpl::fill_empty_field(const FieldMeta& field_meta) {
 
     fields_.emplace(field_id, column);
     set_bit(field_data_ready_bitset_, field_id, true);
-    LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
-             field_meta.get_data_type(),
-             field_id.get(),
-             id_);
+    LOG_INFO(
+        "fill empty field {} (data type {}) for growing segment {} "
+        "done",
+        field_meta.get_data_type(),
+        field_id.get(),
+        id_);
 }
 
 }  // namespace milvus::segcore
