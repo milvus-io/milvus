@@ -227,7 +227,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                 return FillFieldData(
                     values.data(), array->null_bitmap_data(), element_count);
             }
-            return FillFieldData(values.data(), array_info.second);
+            return FillFieldData(values.data(), element_count);
         }
         case DataType::ARRAY: {
             auto array_array =
