@@ -498,6 +498,76 @@ class TestMilvusClientAliasValid(TestMilvusClientV2Base):
 class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
     """ This is a migration test case for alias operation """
 
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_alias_alter_operation_default(self):
+        """
+        target: test collection altering alias
+        method:
+                1. create collection_1, bind alias to collection_1 and insert 2000 entities
+                2. search on alias verify num_entities=2000
+                3. create collection_2 with 1500 entities
+                4. alter alias to collection_2 and search on alias
+                verify num_entities=1500
+        expected:
+                after step 2, collection_1 num_entities == alias num_entities == 2000
+                after step 3, collection_2 num_entities == alias num_entities == 1500
+        """
+        # step 1: create collection and create alias
+        client = self._client()
+        c_name1 = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, c_name1, default_dim, consistency_level="Strong")
+        
+        alias = cf.gen_unique_str("collection_alias")
+        # create a collection alias and bind to collection_1
+        self.create_alias(client, c_name1, alias)
+
+        # step 2: insert 2000 entities and search on alias
+        # default nb is 2000
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(np.random.rand(1, default_dim)[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        self.insert(client, c_name1, rows)
+
+        # pymilvus does not support num_entities yet, so we use query to check the number of entities
+        # assert self.num_entities(client, alias) == default_nb == self.num_entities(client, c_name1)
+        res1 = self.query(client, c_name1, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
+        res1_alias = self.query(client, alias, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
+        assert len(res1) == len(res1_alias) == default_nb
+
+        # step 3: create collection 2 with 1500 entities
+        nb2 = 1500
+        c_name2 = cf.gen_collection_name_by_testcase_name(module_index=2)
+        self.create_collection(client, c_name2, default_dim, consistency_level="Strong")
+        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(np.random.rand(1, default_dim)[0]),
+                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(nb2)]
+        self.insert(client, c_name2, rows)
+
+        # step 4: alter the collection alias to collection2
+        self.alter_alias(client, c_name2, alias)
+        #assert self.num_entities(client, alias) == nb2 == self.num_entities(client, c_name2)
+        res2 = self.query(client, c_name2, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
+        res2_alias = self.query(client, alias, filter=default_search_exp,
+                   check_task=CheckTasks.check_query_results,
+                   check_items={exp_res: rows,
+                                "with_vec": True,
+                                "pk_name": default_primary_key_field_name})[0]
+        assert len(res2) == len(res2_alias) == nb2
+
+        self.drop_alias(client, alias)
+        self.drop_collection(client, c_name1)
+        self.drop_collection(client, c_name2)
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_alias_create_operation_default(self):
         """
@@ -507,24 +577,157 @@ class TestMilvusClientAliasOperation(TestMilvusClientV2Base):
                 2.collection create an alias, then init a collection with this alias but not create partitions
         expected: collection is equal to alias
         """
+        # step 1: create partitions and check the partition exists
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-
-        # Create the collection before creating partitions
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
 
-        # method 1: create partitions and check the partition exists
         for _ in range(10):
             partition_name = cf.gen_unique_str("partition")
             # create partition with different names and check the partition exists
             self.create_partition(client, collection_name, partition_name)
 
-        # method 2: create alias from collection, then init a collection with this alias but not create partitions
-        alias = cf.gen_unique_str(prefix)
+        # step 2: create alias from collection, then init a collection with this alias but not create partitions
+        alias = cf.gen_unique_str("collection_alias")
         self.create_alias(client, collection_name, alias)
         # assert collection is equal to alias according to partitions
         partition_name_list = self.list_partitions(client, collection_name)[0]
         partition_name_list_alias = self.list_partitions(client, alias)[0]
         assert partition_name_list == partition_name_list_alias
+
+        self.drop_alias(client, alias)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_alias_drop_operation_default(self):
+        """
+        target: test collection dropping alias
+        method:
+                1.create a collection with 10 partitions
+                2.collection create an alias
+                3.collection drop the alias
+        expected: 
+                after step 2, collection is equal to alias
+                after step 3, collection with alias name is not exist
+        """
+        # step 1: create collection with 10 partitions
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+
+        for _ in range(10):
+            partition_name = cf.gen_unique_str("partition")
+            self.create_partition(client, collection_name, partition_name)
+            assert self.has_partition(client, collection_name, partition_name)[0]
+
+        # step 2: create alias and drop the alias
+        alias = cf.gen_unique_str("collection_alias")
+        self.create_alias(client, collection_name, alias)
+        collection_partitions = self.list_partitions(client, collection_name)[0]
+        alias_partitions = self.list_partitions(client, alias)[0]
+        assert collection_partitions == alias_partitions
+
+        # step 3: check the alias does not exist
+        self.drop_alias(client, alias)
+        error = {ct.err_code: 1600, ct.err_msg: f"alias not found[database=default][alias={alias}]"}
+        # check if error is raised, if raised, function is True and test passed, vise versa
+        self.describe_alias(client, alias, check_task=CheckTasks.err_res, check_items=error)
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_alias_called_by_utility_has_collection(self):
+        """
+        target: test utility has collection by alias
+        method:
+                1.create collection with alias
+                2.call has_collection function with alias as param
+        expected: result is True
+        """
+        # step 1: create collection with alias
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        alias = cf.gen_unique_str("collection_alias")
+        self.create_alias(client, collection_name, alias)
+
+        # step 2: call has_collection function with alias as param and assert True
+        exists, _ = self.has_collection(client, alias)
+        assert exists
+
+        self.drop_alias(client, alias)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_alias_called_by_utility_drop_collection(self):
+        """
+        target: test utility drop collection by alias
+        method:
+                1.create collection with alias
+                2.call drop_collection function with alias as param
+        expected: Got error: collection cannot be dropped via alias.
+        """
+        # step 1: create collection with alias
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        alias = cf.gen_unique_str("collection_alias")
+        self.create_alias(client, collection_name, alias)
+
+        # step 2: call drop_collection function with alias as param and assert error
+        error = {ct.err_code: 1600, ct.err_msg: f"cannot drop the collection via alias = {alias}"}
+        # check if error is raised, if raised, function is True and test passed, vise versa
+        self.drop_collection(client, alias, check_task=CheckTasks.err_res, check_items=error)
+
+        self.drop_alias(client, alias)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_alias_called_by_utility_has_partition(self):
+        """
+        target: test utility has partition by alias
+        method:
+                1.create collection with partition and alias
+                2.call has_partition function with alias as param
+        expected: result is True
+        """
+        # step 1: create collection with partition and alias
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        partition_name = cf.gen_unique_str("partition")
+        self.create_partition(client, collection_name, partition_name)
+        alias = cf.gen_unique_str("collection_alias")
+        self.create_alias(client, collection_name, alias)
+
+        # step 2: call has_partition function with alias as param and assert True
+        exists, _ = self.has_partition(client, alias, partition_name)
+        assert exists
+
+        self.drop_alias(client, alias)
+        self.drop_collection(client, collection_name)
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_alias_called_by_utility_enable_mmap_by_alias(self):
+        """
+        target: test utility enable mmap by alias
+        method:
+                1.create collection with alias
+                2.call enable_mmap function with alias as param
+        expected: result is True
+        """
+        # step 1: create collection with alias
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name(module_index=1)
+        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
+        alias = cf.gen_unique_str("collection_alias")
+        self.create_alias(client, collection_name, alias)
+
+        # step 2: enable mmap via alias and verify
+        self.release_collection(client, collection_name)
+        self.alter_collection_properties(client, alias, properties={"mmap.enabled": True})
+        res = self.describe_collection(client, collection_name)[0].get("properties")
+        assert res["mmap.enabled"] == 'True'
+
         self.drop_alias(client, alias)
         self.drop_collection(client, collection_name)
