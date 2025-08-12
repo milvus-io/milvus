@@ -16,3 +16,4 @@ ml-dtypes==0.2.0
 loguru==0.7.3
 bm25s==0.2.13
 jieba==0.42.1
+pyarrow==21.0.0

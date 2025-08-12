@@ -1,6 +1,8 @@
 package model
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -75,7 +77,7 @@ func (f *Field) Equal(other Field) bool {
 		f.IsPartitionKey == other.IsPartitionKey &&
 		f.IsDynamic == other.IsDynamic &&
 		f.IsClusteringKey == other.IsClusteringKey &&
-		f.DefaultValue == other.DefaultValue &&
+		proto.Equal(f.DefaultValue, other.DefaultValue) &&
 		f.ElementType == other.ElementType &&
 		f.IsFunctionOutput == other.IsFunctionOutput &&
 		f.Nullable == other.Nullable
