@@ -104,6 +104,14 @@ jobs:
         with:
           name: code
           path: code.zip
+      - name: Fix cache directory permissions
+        run: |
+          echo "fix permission..."
+          find .docker/amd64-ubuntu22.04-conan -type d -exec chmod 755 {} \;
+          find .docker/amd64-ubuntu22.04-conan -type f -exec chmod 644 {} \;
+          find .docker/amd64-ubuntu22.04-conan -name "*.sh" -exec chmod +x {} \;
+          find .docker/amd64-ubuntu22.04-conan -name "*.exe" -exec chmod +x {} \;
+          find .docker/amd64-ubuntu22.04-conan -name "install-sh" -exec chmod +x {} \;
       - name: Save Caches
         uses: ./.github/actions/cache-save
         if: always()
