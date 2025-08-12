@@ -90,7 +90,7 @@ jobs:
           echo "useasan=OFF" >> $GITHUB_ENV
           echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: Download Caches
-        uses: ./.github/actions/cache-restore
+        uses: ./.github/actions/cache
         with:
           os: 'ubuntu22.04'
           kind: 'cpp'
@@ -104,12 +104,6 @@ jobs:
         with:
           name: code
           path: code.zip
-      - name: Save Caches
-        uses: ./.github/actions/cache-save
-        if: always()
-        with:
-          os: 'ubuntu22.04'
-          kind: 'cpp'
 
   UT-Cpp:
     # skip the UT-Cpp job in github workflow, it run in jenkins now see: UT-CPP.groovy

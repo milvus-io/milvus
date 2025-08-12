@@ -21,28 +21,28 @@ runs:
     shell: bash
   - name: Cache CCache Volumes
     if: ${{ inputs.kind == 'all' || inputs.kind == 'cpp' }}
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     with:
       path: .docker/amd64-${{ inputs.os }}-ccache
       key: ${{ inputs.os }}-ccache-${{ env.corehash }}
       restore-keys: ${{ inputs.os }}-ccache-
   - name: Cache Conan Packages
     if: ${{ inputs.kind == 'all' || inputs.kind == 'cpp' }}
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     with:
       path: .docker/amd64-${{ inputs.os }}-conan
       key: ${{ inputs.os }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
       restore-keys: ${{ inputs.os }}-conan-
   - name: Cache Third Party
     if: ${{ inputs.kind == 'all' || inputs.kind == 'thirdparty' }}
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     with:
       path: .docker/thirdparty
       key: ${{ inputs.os }}-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
       restore-keys: ${{ inputs.os }}-thirdparty-
   - name: Cache Go Mod Volumes
     if: ${{ inputs.kind == 'all' || inputs.kind == 'go' }}
-    uses: actions/cache@v3
+    uses: actions/cache@v4
     with:
       path: .docker/amd64-${{ inputs.os }}-go-mod
       key: ${{ inputs.os }}-go-mod-${{ hashFiles('go.sum, */go.sum') }}
