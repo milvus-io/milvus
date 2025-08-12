@@ -3125,7 +3125,6 @@ class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
     #  The followings are valid cases
     ******************************************************************
     """
-    @pytest.mark.skip(reason="issue 43796")
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_collection_default_value_twice(self):
         """
