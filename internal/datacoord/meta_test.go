@@ -128,6 +128,8 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				},
 			},
 		}, nil)
+
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*model.FileResource{}, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -173,6 +175,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 			},
 		}, nil)
 
+		suite.catalog.EXPECT().ListFileResource(mock.Anything).Return([]*model.FileResource{}, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return([]*model.SegmentIndex{}, nil)
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -938,6 +941,117 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.Equal(t, updated.State, expected.State)
 		assert.Equal(t, updated.size.Load(), expected.size.Load())
 		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
+	})
+
+	t.Run("update binlogs from save binlog paths", func(t *testing.T) {
+		meta, err := newMemoryMeta(t)
+		assert.NoError(t, err)
+
+		segment1 := NewSegmentInfo(&datapb.SegmentInfo{
+			ID: 1, State: commonpb.SegmentState_Growing,
+			Binlogs:   []*datapb.FieldBinlog{},
+			Statslogs: []*datapb.FieldBinlog{},
+		})
+		err = meta.AddSegment(context.TODO(), segment1)
+		assert.NoError(t, err)
+		require.EqualValues(t, -1, segment1.deltaRowcount.Load())
+		assert.EqualValues(t, 0, segment1.getDeltaCount())
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1,
+				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 333)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 334)},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogID: 335}}}},
+			),
+			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100}}}, true),
+		)
+		assert.NoError(t, err)
+
+		updated := meta.GetHealthySegment(context.TODO(), 1)
+		assert.EqualValues(t, -1, updated.deltaRowcount.Load())
+		assert.EqualValues(t, 1, updated.getDeltaCount())
+
+		assert.Equal(t, updated.StartPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}})
+		assert.Equal(t, updated.DmlPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 100})
+		assert.Equal(t, len(updated.Binlogs[0].Binlogs), 1)
+		assert.Equal(t, len(updated.Statslogs[0].Binlogs), 1)
+		assert.Equal(t, len(updated.Deltalogs[0].Binlogs), 1)
+		assert.Equal(t, len(updated.Bm25Statslogs[0].Binlogs), 1)
+		assert.Equal(t, updated.State, commonpb.SegmentState_Growing)
+		assert.Equal(t, updated.NumOfRows, int64(10))
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1, nil, nil, nil, nil),
+			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 99}}}, true),
+		)
+		assert.True(t, errors.Is(err, ErrIgnoredSegmentMetaOperation))
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateStatusOperator(1, commonpb.SegmentState_Growing),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1,
+				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 335, 337)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 336)},
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{},
+			),
+			UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
+			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
+		)
+		assert.NoError(t, err)
+
+		updated = meta.GetHealthySegment(context.TODO(), 1)
+		assert.Equal(t, updated.NumOfRows, int64(20))
+		assert.Equal(t, updated.DmlPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101})
+		assert.Equal(t, len(updated.Binlogs[0].Binlogs), 2)
+		assert.Equal(t, len(updated.Statslogs[0].Binlogs), 1)
+		assert.Equal(t, len(updated.Deltalogs), 0)
+		assert.Equal(t, len(updated.Bm25Statslogs), 0)
+		assert.Equal(t, updated.State, commonpb.SegmentState_Flushed)
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateStatusOperator(1, commonpb.SegmentState_Flushed),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1,
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
+		)
+		assert.True(t, errors.Is(err, ErrIgnoredSegmentMetaOperation))
+
+		updated = meta.GetHealthySegment(context.TODO(), 1)
+		assert.Equal(t, updated.NumOfRows, int64(20))
+		assert.Equal(t, updated.DmlPosition, &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101})
+		assert.Equal(t, len(updated.Binlogs[0].Binlogs), 2)
+		assert.Equal(t, len(updated.Statslogs[0].Binlogs), 1)
+		assert.Equal(t, len(updated.Deltalogs), 0)
+		assert.Equal(t, len(updated.Bm25Statslogs), 0)
+		assert.Equal(t, updated.State, commonpb.SegmentState_Flushed)
+
+		err = meta.UpdateSegmentsInfo(
+			context.TODO(),
+			UpdateStatusOperator(1, commonpb.SegmentState_Dropped),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1,
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{},
+				[]*datapb.FieldBinlog{}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 12, Position: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}, Timestamp: 101}}}, true),
+		)
+		assert.NoError(t, err)
+
+		updated = meta.GetSegment(context.TODO(), 1)
+		assert.Equal(t, updated.State, commonpb.SegmentState_Dropped)
 	})
 
 	t.Run("update compacted segment", func(t *testing.T) {

@@ -357,6 +357,10 @@ test-streaming:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t streaming)
 
+test-mixcoord:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mixcoord)
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
@@ -412,7 +416,7 @@ milvus-tools: print-build-info
 	@echo "Building tools ..."
 	@. $(PWD)/scripts/setenv.sh && mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-pgo=$(PGO_PATH)/default.pgo -ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
-		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
+		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/binlog $(PWD)/cmd/tools/config $(PWD)/cmd/tools/datameta $(PWD)/cmd/tools/config-docs-generator $(PWD)/cmd/tools/migration 1>/dev/null
 
 rpm-setup:
 	@echo "Setuping rpm env ...;"

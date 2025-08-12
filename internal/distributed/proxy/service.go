@@ -449,7 +449,6 @@ func (s *Server) init() error {
 		return err
 	}
 	s.etcdCli = etcdCli
-	s.proxy.SetEtcdClient(s.etcdCli)
 	s.proxy.SetAddress(s.listenerManager.internalGrpcListener.Address())
 
 	errChan := make(chan error, 1)
@@ -1127,4 +1126,19 @@ func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.proxy.GetQuotaMetrics(ctx, req)
+}
+
+// AddFileResource add file resource
+func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.AddFileResource(ctx, req)
+}
+
+// RemoveFileResource remove file resource
+func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.RemoveFileResource(ctx, req)
+}
+
+// ListFileResources list file resources
+func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	return s.proxy.ListFileResources(ctx, req)
 }

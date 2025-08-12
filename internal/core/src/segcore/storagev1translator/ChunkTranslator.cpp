@@ -202,12 +202,6 @@ ChunkTranslator::get_cells(
             arrow::ArrayVector array_vec =
                 read_single_column_batches(r->reader);
             chunk = create_chunk(field_meta_, array_vec, filepath.string());
-            auto ok = unlink(filepath.c_str());
-            AssertInfo(
-                ok == 0,
-                fmt::format("failed to unlink mmap data file {}, err: {}",
-                            filepath.c_str(),
-                            strerror(errno)));
         }
         cells.emplace_back(cid, std::move(chunk));
     }

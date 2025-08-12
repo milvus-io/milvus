@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -46,6 +47,7 @@ import (
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	gin.SetMode(gin.TestMode)
+	streaming.SetupNoopWALForTest()
 	code := m.Run()
 	os.Exit(code)
 }
@@ -312,7 +314,7 @@ func Test_sparse_parseIndexParams(t *testing.T) {
 					Value: "IP",
 				},
 				{
-					Key:   common.IndexParamsKey,
+					Key:   common.ParamsKey,
 					Value: "{\"drop_ratio_build\": 0.3}",
 				},
 			},
@@ -382,7 +384,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "IP",
 				},
 				{
-					Key:   common.IndexParamsKey,
+					Key:   common.ParamsKey,
 					Value: "{\"M\": 48, \"efConstruction\": 64}",
 				},
 				{
@@ -467,7 +469,7 @@ func Test_parseIndexParams(t *testing.T) {
 					Value: "L2",
 				},
 				{
-					Key:   common.IndexParamsKey,
+					Key:   common.ParamsKey,
 					Value: "{\"nlist\": 100}",
 				},
 				{
@@ -564,7 +566,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "IP",
 					},
 					{
-						Key:   common.IndexParamsKey,
+						Key:   common.ParamsKey,
 						Value: "{\"M\": 48, \"efConstruction\": 64}",
 					},
 					{
@@ -803,7 +805,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "IP",
 					},
 					{
-						Key:   common.IndexParamsKey,
+						Key:   common.ParamsKey,
 						Value: "{\"M\": 48, \"efConstruction\": 64}",
 					},
 					{
@@ -848,7 +850,7 @@ func Test_parseIndexParams(t *testing.T) {
 						Value: "IP",
 					},
 					{
-						Key:   common.IndexParamsKey,
+						Key:   common.ParamsKey,
 						Value: "{\"M\": 48, \"efConstruction\": 64}",
 					},
 					{
@@ -1168,7 +1170,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
+					{Key: common.ParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1190,7 +1192,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
+					{Key: common.ParamsKey, Value: "{\"min_gram\": \"2\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1206,7 +1208,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"2\"}"},
+					{Key: common.ParamsKey, Value: "{\"min_gram\": \"2\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1222,7 +1224,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"a\", \"max_gram\": \"3\"}"},
+					{Key: common.ParamsKey, Value: "{\"min_gram\": \"a\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{
@@ -1238,7 +1240,7 @@ func Test_ngram_parseIndexParams(t *testing.T) {
 			req: &milvuspb.CreateIndexRequest{
 				ExtraParams: []*commonpb.KeyValuePair{
 					{Key: common.IndexTypeKey, Value: "NGRAM"},
-					{Key: common.IndexParamsKey, Value: "{\"min_gram\": \"5\", \"max_gram\": \"3\"}"},
+					{Key: common.ParamsKey, Value: "{\"min_gram\": \"5\", \"max_gram\": \"3\"}"},
 				},
 			},
 			fieldSchema: &schemapb.FieldSchema{

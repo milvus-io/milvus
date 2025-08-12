@@ -135,7 +135,7 @@ const (
 	CollectionKey   = "collection"
 	RecallEvalKey   = "recall_eval"
 
-	IndexParamsKey = "params"
+	ParamsKey      = "params"
 	IndexTypeKey   = "index_type"
 	MetricTypeKey  = "metric_type"
 	DimKey         = "dim"

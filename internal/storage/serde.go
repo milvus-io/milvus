@@ -886,7 +886,7 @@ var _ Record = (*simpleArrowRecord)(nil)
 func (sr *simpleArrowRecord) Column(i FieldID) arrow.Array {
 	colIdx, ok := sr.field2Col[i]
 	if !ok {
-		panic("no such field")
+		panic(fmt.Sprintf("no such field: %d, having %v", i, sr.field2Col))
 	}
 	return sr.r.Column(colIdx)
 }

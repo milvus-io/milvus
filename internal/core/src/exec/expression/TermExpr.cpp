@@ -191,8 +191,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
         }
     }
 
-    auto [uids, seg_offsets] =
-        segment_->search_ids(*id_array, query_timestamp_);
+    auto seg_offsets = segment_->search_ids(*id_array, query_timestamp_);
     cached_bits_.resize(active_count_, false);
     for (const auto& offset : seg_offsets) {
         auto _offset = (int64_t)offset.get();
@@ -207,27 +206,16 @@ PhyTermFilterExpr::ExecPkTermImpl() {
         InitPkCacheOffset();
     }
 
-    auto real_batch_size =
-        current_data_chunk_pos_ + batch_size_ >= active_count_
-            ? active_count_ - current_data_chunk_pos_
-            : batch_size_;
-
+    auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    auto res_vec =
-        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
-                                       TargetBitmap(real_batch_size, true));
-    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
-    TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
-
-    auto current_chunk_view =
-        cached_bits_.view(current_data_chunk_pos_, real_batch_size);
-    res |= current_chunk_view;
-    current_data_chunk_pos_ += real_batch_size;
-
-    return res_vec;
+    TargetBitmap result;
+    result.append(cached_bits_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename ValueType>
@@ -372,7 +360,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         index = std::stoi(expr_->column_.nested_path_[0]);
     }
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SortVectorElement<ValueType>>(expr_->vals_);
+        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         arg_inited_ = true;
     }
 
@@ -549,10 +537,9 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SortVectorElement<ValueType>>(expr_->vals_);
+        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_float_ =
-                std::make_shared<SortVectorElement<float>>(expr_->vals_);
+            arg_set_float_ = std::make_shared<SetElement<float>>(expr_->vals_);
         }
         arg_inited_ = true;
     }
@@ -751,7 +738,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        arg_set_ = std::make_shared<SortVectorElement<ValueType>>(expr_->vals_);
+        arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         arg_inited_ = true;
     }
 
@@ -941,7 +928,7 @@ PhyTermFilterExpr::ExecVisitorImplForData(EvalCtx& context) {
                 vals.emplace_back(converted_val);
             }
         }
-        arg_set_ = std::make_shared<SortVectorElement<T>>(vals);
+        arg_set_ = std::make_shared<SetElement<T>>(vals);
         arg_inited_ = true;
     }
 

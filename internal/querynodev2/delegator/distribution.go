@@ -17,7 +17,6 @@
 package delegator
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/samber/lo"
@@ -164,9 +163,23 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
-	if d.queryView.GetLoadedRatio() < requiredLoadRatio {
-		return nil, nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName,
-			fmt.Sprintf("channel distribution is not serviceable, required load ratio is %f, current load ratio is %f", requiredLoadRatio, d.queryView.GetLoadedRatio()))
+	requireFullResult := requiredLoadRatio >= 1.0
+	loadRatioSatisfy := d.queryView.GetLoadedRatio() >= requiredLoadRatio
+	var isServiceable bool
+	if requireFullResult {
+		isServiceable = d.queryView.Serviceable()
+	} else {
+		isServiceable = loadRatioSatisfy
+	}
+
+	if !isServiceable {
+		log.Warn("channel distribution is not serviceable",
+			zap.String("channel", d.channelName),
+			zap.Float64("requiredLoadRatio", requiredLoadRatio),
+			zap.Float64("currentLoadRatio", d.queryView.GetLoadedRatio()),
+			zap.Bool("serviceable", d.queryView.Serviceable()),
+		)
+		return nil, nil, nil, -1, merr.WrapErrChannelNotAvailable(d.channelName, "channel distribution is not serviceable")
 	}
 
 	current := d.current.Load()

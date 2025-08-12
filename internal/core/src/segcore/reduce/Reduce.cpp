@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
 #include "segcore/pkVisitor.h"

@@ -2588,3 +2588,58 @@ func Test_GetQuotaMetrics(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	assert.Equal(t, `{"proxy": {"tasks": 100}}`, resp.GetMetricsInfo())
 }
+
+func Test_FlushAll(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockmix := MixCoordClient{
+		DataCoordClient: mockDC,
+	}
+	mockGrpcClient := mocks.NewMockGrpcClient[MixCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().GetNodeID().Return(1)
+	mockGrpcClient.EXPECT().ReCall(mock1.Anything, mock1.Anything).RunAndReturn(func(ctx context.Context, f func(MixCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockmix)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().FlushAll(mock1.Anything, mock1.Anything).Return(&datapb.FlushAllResponse{
+		Status: merr.Success(),
+	}, nil)
+	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().FlushAll(mock1.Anything, mock1.Anything).Return(&datapb.FlushAllResponse{
+		Status: merr.Status(merr.ErrServiceNotReady),
+	}, nil)
+
+	rsp, err := client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetStatus().GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().FlushAll(mock1.Anything, mock1.Anything).Return(&datapb.FlushAllResponse{
+		Status: merr.Success(),
+	}, mockErr)
+
+	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.FlushAll(ctx, &datapb.FlushAllRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

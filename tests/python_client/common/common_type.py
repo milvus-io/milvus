@@ -53,6 +53,7 @@ default_bfloat16_vec_field_name = "bfloat16_vector"
 default_int8_vec_field_name = "int8_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
+default_sparse_vec_field_name = "sparse_vector"
 text_sparse_vector = "TEXT_SPARSE_VECTOR"
 default_reranker_field_name = "reranker_field"
 default_new_field_name = "field_new"
@@ -75,12 +76,41 @@ default_metric_for_vector_type = {
     DataType.BINARY_VECTOR: "HAMMING",
 }
 
+all_scalar_data_types = [
+    DataType.INT8,
+    DataType.INT16,
+    DataType.INT32,
+    DataType.INT64,
+    DataType.BOOL,
+    DataType.FLOAT,
+    DataType.DOUBLE,
+    DataType.VARCHAR,
+    DataType.ARRAY,
+    DataType.JSON
+    ]
+
+default_field_name_map = {
+            DataType.INT8: default_int8_field_name,
+            DataType.INT16: default_int16_field_name,
+            DataType.INT32: default_int32_field_name,
+            DataType.INT64: default_int64_field_name,
+            DataType.BOOL: default_bool_field_name,
+            DataType.FLOAT: default_float_field_name,
+            DataType.DOUBLE: default_double_field_name,
+            DataType.VARCHAR: default_string_field_name,
+            DataType.ARRAY: default_array_field_name,
+            DataType.JSON: default_json_field_name,
+            DataType.FLOAT_VECTOR: default_float_vec_field_name,
+            DataType.FLOAT16_VECTOR: default_float16_vec_field_name,
+            DataType.BFLOAT16_VECTOR: default_bfloat16_vec_field_name,
+            DataType.SPARSE_FLOAT_VECTOR: default_sparse_vec_field_name,
+            DataType.INT8_VECTOR: default_int8_vec_field_name,
+            DataType.BINARY_VECTOR: default_binary_vec_field_name,
+        }
 
 append_vector_type = [DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
 all_dense_vector_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.INT8_VECTOR]
 all_float_vector_dtypes = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
-all_vector_data_types = [DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR, DataType.SPARSE_FLOAT_VECTOR, DataType.INT8_VECTOR]
-default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
 default_resource_group_capacity = 1000000

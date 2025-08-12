@@ -69,6 +69,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     bool
     HasFieldData(FieldId field_id) const override;
 
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, bool>
+    GetFieldDataIfExist(FieldId field_id) const;
+
     bool
     Contain(const PkType& pk) const override {
         return insert_record_.contain(pk);
@@ -201,6 +204,14 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return true;
     }
 
+    void
+    search_batch_pks(
+        const std::vector<PkType>& pks,
+        const std::function<Timestamp(const size_t idx)>& get_timestamp,
+        bool include_same_ts,
+        const std::function<void(const SegOffset offset, const Timestamp ts)>&
+            callback) const;
+
  public:
     int64_t
     num_chunk_index(FieldId field_id) const override;
@@ -280,9 +291,16 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_view_by_offsets(FieldId field_id,
-                          int64_t chunk_id,
-                          const FixedVector<int32_t>& offsets) const override;
+    chunk_string_views_by_offsets(
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override;
+
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    chunk_array_views_by_offsets(
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override;
 
     PinWrapper<const index::IndexBase*>
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
@@ -392,7 +410,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return system_ready_count_ == 1;
     }
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     void

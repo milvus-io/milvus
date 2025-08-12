@@ -645,12 +645,22 @@ SegmentGrowingImpl::chunk_array_view_impl(
 }
 
 PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-SegmentGrowingImpl::chunk_view_by_offsets(
+SegmentGrowingImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk view by offsets not implemented for growing segment");
+}
+
+PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_array_views_by_offsets(
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    ThrowInfo(
+        ErrorCode::NotImplemented,
+        "chunk array views by offsets not implemented for growing segment");
 }
 
 int64_t
@@ -663,6 +673,23 @@ DataType
 SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
     return field_meta.get_data_type();
+}
+
+void
+SegmentGrowingImpl::search_batch_pks(
+    const std::vector<PkType>& pks,
+    const Timestamp* timestamps,
+    bool include_same_ts,
+    const std::function<void(const SegOffset offset, const Timestamp ts)>&
+        callback) const {
+    for (size_t i = 0; i < pks.size(); ++i) {
+        auto timestamp = timestamps[i];
+        auto offsets =
+            insert_record_.search_pk(pks[i], timestamp, include_same_ts);
+        for (auto offset : offsets) {
+            callback(offset, timestamp);
+        }
+    }
 }
 
 void
@@ -1079,7 +1106,7 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
     }
 }
 
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::vector<SegOffset>
 SegmentGrowingImpl::search_ids(const IdArray& id_array,
                                Timestamp timestamp) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
@@ -1090,32 +1117,15 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    auto res_id_arr = std::make_unique<IdArray>();
     std::vector<SegOffset> res_offsets;
     res_offsets.reserve(pks.size());
     for (auto& pk : pks) {
         auto segOffsets = insert_record_.search_pk(pk, timestamp);
         for (auto offset : segOffsets) {
-            switch (data_type) {
-                case DataType::INT64: {
-                    res_id_arr->mutable_int_id()->add_data(
-                        std::get<int64_t>(pk));
-                    break;
-                }
-                case DataType::VARCHAR: {
-                    res_id_arr->mutable_str_id()->add_data(
-                        std::get<std::string>(std::move(pk)));
-                    break;
-                }
-                default: {
-                    ThrowInfo(DataTypeInvalid,
-                              fmt::format("unsupported type {}", data_type));
-                }
-            }
             res_offsets.push_back(offset);
         }
     }
-    return {std::move(res_id_arr), std::move(res_offsets)};
+    return std::move(res_offsets);
 }
 
 std::string

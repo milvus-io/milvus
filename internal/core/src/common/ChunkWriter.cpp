@@ -89,7 +89,9 @@ StringChunkWriter::finish() {
     char padding[MMAP_STRING_PADDING];
     target_->write(padding, MMAP_STRING_PADDING);
     auto [data, size] = target_->get();
-    return std::make_unique<StringChunk>(row_nums_, data, size, nullable_);
+    auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
+    return std::make_unique<StringChunk>(
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 void
@@ -150,7 +152,9 @@ JSONChunkWriter::finish() {
     target_->write(padding, simdjson::SIMDJSON_PADDING);
 
     auto [data, size] = target_->get();
-    return std::make_unique<JSONChunk>(row_nums_, data, size, nullable_);
+    auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
+    return std::make_unique<JSONChunk>(
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 void
@@ -235,10 +239,14 @@ std::unique_ptr<Chunk>
 ArrayChunkWriter::finish() {
     char padding[MMAP_ARRAY_PADDING];
     target_->write(padding, MMAP_ARRAY_PADDING);
-
     auto [data, size] = target_->get();
-    return std::make_unique<ArrayChunk>(
-        row_nums_, data, size, element_type_, nullable_);
+    auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
+    return std::make_unique<ArrayChunk>(row_nums_,
+                                        data,
+                                        size,
+                                        element_type_,
+                                        nullable_,
+                                        std::move(mmap_file_raii));
 }
 
 // 1. Deserialize VectorFieldProto (proto::schema::VectorField) from arrow::ArrayVector
@@ -309,8 +317,9 @@ VectorArrayChunkWriter::finish() {
     target_->write(padding, MMAP_ARRAY_PADDING);
 
     auto [data, size] = target_->get();
+    auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
     return std::make_unique<VectorArrayChunk>(
-        dim_, row_nums_, data, size, element_type_);
+        dim_, row_nums_, data, size, element_type_, std::move(mmap_file_raii));
 }
 
 void
@@ -370,8 +379,9 @@ SparseFloatVectorChunkWriter::write(const arrow::ArrayVector& array_vec) {
 std::unique_ptr<Chunk>
 SparseFloatVectorChunkWriter::finish() {
     auto [data, size] = target_->get();
+    auto mmap_file_raii = std::make_unique<MmapFileRAII>(file_path_);
     return std::make_unique<SparseFloatVectorChunk>(
-        row_nums_, data, size, nullable_);
+        row_nums_, data, size, nullable_, std::move(mmap_file_raii));
 }
 
 template <typename... Args>

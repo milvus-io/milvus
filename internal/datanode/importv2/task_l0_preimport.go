@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -128,7 +129,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	log.Info("start to preimport l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Int64("taskSlot", t.GetSlots()),
-		zap.Any("files", t.GetFileStats()),
+		zap.Any("files", t.req.GetImportFiles()),
 		zap.Any("schema", t.GetSchema()),
 	)...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
@@ -152,7 +153,14 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			return
 		}
-		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize)
+
+		// Parse ts parameters from options
+		tsStart, tsEnd, err := importutilv2.ParseTimeRange(t.req.GetOptions())
+		if err != nil {
+			return
+		}
+
+		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, file, bufferSize, tsStart, tsEnd)
 		if err != nil {
 			return
 		}

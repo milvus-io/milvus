@@ -51,7 +51,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 
 #include "storage/FileWriter.h"
 
@@ -656,11 +656,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
-    auto ok = unlink(local_filepath.value().c_str());
-    AssertInfo(ok == 0,
-               "failed to unlink mmap index file {}: {}",
-               local_filepath.value(),
-               strerror(errno));
+    this->mmap_file_raii_ =
+        std::make_unique<MmapFileRAII>(local_filepath.value());
     LOG_INFO(
         "load vector index done, mmap_file_path:{}, download_duration:{}, "
         "write_files_duration:{}, deserialize_duration:{}",

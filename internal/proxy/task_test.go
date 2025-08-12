@@ -490,7 +490,7 @@ func constructSearchRequest(
 				Value: metric.L2,
 			},
 			{
-				Key:   SearchParamsKey,
+				Key:   ParamsKey,
 				Value: string(b),
 			},
 			{
@@ -2161,12 +2161,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	factory := newSimpleMockMsgStreamFactory()
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
-	defer chMgr.removeAllDMLStream()
-
-	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
-	assert.NoError(t, err)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
 
@@ -2181,11 +2176,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
-
-	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
-	assert.NoError(t, err)
-	_ = segAllocator.Start()
-	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
@@ -2221,13 +2211,11 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				UpsertCnt:    0,
 				Timestamp:    0,
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
-			vChannels:     nil,
-			pChannels:     nil,
-			schema:        nil,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			vChannels:   nil,
+			pChannels:   nil,
+			schema:      nil,
 		}
 
 		for fieldName, dataType := range fieldName2Types {
@@ -2403,12 +2391,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, mixc)
-	factory := newSimpleMockMsgStreamFactory()
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
-	defer chMgr.removeAllDMLStream()
-
-	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
-	assert.NoError(t, err)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
 
@@ -2423,12 +2406,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
-
-	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
-	assert.NoError(t, err)
-	segAllocator.Init()
-	_ = segAllocator.Start()
-	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
 		hash := testutils.GenerateHashKeys(nb)
@@ -2464,13 +2441,11 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				UpsertCnt:    0,
 				Timestamp:    0,
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
-			vChannels:     nil,
-			pChannels:     nil,
-			schema:        nil,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			vChannels:   nil,
+			pChannels:   nil,
+			schema:      nil,
 		}
 
 		fieldID := common.StartOfUserFieldID
@@ -2549,13 +2524,12 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				UpsertCnt:    0,
 				Timestamp:    0,
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
-			vChannels:     nil,
-			pChannels:     nil,
-			schema:        nil,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			chTicker:    ticker,
+			vChannels:   nil,
+			pChannels:   nil,
+			schema:      nil,
 		}
 
 		fieldID := common.StartOfUserFieldID
@@ -3817,12 +3791,7 @@ func TestPartitionKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	factory := newSimpleMockMsgStreamFactory()
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
-	defer chMgr.removeAllDMLStream()
-
-	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
-	assert.NoError(t, err)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
 
@@ -3837,12 +3806,6 @@ func TestPartitionKey(t *testing.T) {
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
-
-	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
-	assert.NoError(t, err)
-	segAllocator.Init()
-	_ = segAllocator.Start()
-	defer segAllocator.Close()
 
 	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", collectionName)
 	assert.NoError(t, err)
@@ -3888,13 +3851,11 @@ func TestPartitionKey(t *testing.T) {
 				UpsertCnt:    0,
 				Timestamp:    0,
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
-			vChannels:     nil,
-			pChannels:     nil,
-			schema:        nil,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			vChannels:   nil,
+			pChannels:   nil,
+			schema:      nil,
 		}
 
 		// don't support specify partition name if use partition key
@@ -3932,10 +3893,9 @@ func TestPartitionKey(t *testing.T) {
 					IdField: nil,
 				},
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			chTicker:    ticker,
 		}
 
 		// don't support specify partition name if use partition key
@@ -4060,12 +4020,8 @@ func TestDefaultPartition(t *testing.T) {
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, qc)
-	factory := newSimpleMockMsgStreamFactory()
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, factory)
-	defer chMgr.removeAllDMLStream()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil)
 
-	_, err = chMgr.getOrCreateDmlStream(ctx, collectionID)
-	assert.NoError(t, err)
 	pchans, err := chMgr.getChannels(collectionID)
 	assert.NoError(t, err)
 
@@ -4080,12 +4036,6 @@ func TestDefaultPartition(t *testing.T) {
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
-
-	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
-	assert.NoError(t, err)
-	segAllocator.Init()
-	_ = segAllocator.Start()
-	defer segAllocator.Close()
 
 	nb := 10
 	fieldID := common.StartOfUserFieldID
@@ -4127,13 +4077,11 @@ func TestDefaultPartition(t *testing.T) {
 				UpsertCnt:    0,
 				Timestamp:    0,
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
-			vChannels:     nil,
-			pChannels:     nil,
-			schema:        nil,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			vChannels:   nil,
+			pChannels:   nil,
+			schema:      nil,
 		}
 
 		it.insertMsg.PartitionName = ""
@@ -4167,10 +4115,9 @@ func TestDefaultPartition(t *testing.T) {
 					IdField: nil,
 				},
 			},
-			idAllocator:   idAllocator,
-			segIDAssigner: segAllocator,
-			chMgr:         chMgr,
-			chTicker:      ticker,
+			idAllocator: idAllocator,
+			chMgr:       chMgr,
+			chTicker:    ticker,
 		}
 
 		ut.req.PartitionName = ""

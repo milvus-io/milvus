@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 )
 
 type SegmentFilterSuite struct {
@@ -95,11 +96,40 @@ func (s *SegmentActionSuite) TestActions() {
 	s.Equal(numOfRows, info.NumOfRows())
 
 	info = &SegmentInfo{}
-	actions := SegmentActions(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows))
+	actions := SegmentActions(UpdateState(state), UpdateCheckpoint(cp), UpdateNumOfRows(numOfRows),
+		UpdateBinlogs([]*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		}),
+		UpdateStatslogs([]*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		}),
+		UpdateDeltalogs([]*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		}),
+		UpdateBm25logs([]*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "test"}},
+			},
+		}),
+	)
 	actions(info)
 	s.Equal(state, info.State())
 	s.Equal(cp, info.Checkpoint())
 	s.Equal(numOfRows, info.NumOfRows())
+	s.Equal(1, len(info.Binlogs()))
+	s.Equal(1, len(info.Statslogs()))
+	s.Equal(1, len(info.Deltalogs()))
+	s.Equal(1, len(info.Bm25logs()))
 }
 
 func (s *SegmentActionSuite) TestMergeActions() {

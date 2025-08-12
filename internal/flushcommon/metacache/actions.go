@@ -137,6 +137,30 @@ func SegmentActions(actions ...SegmentAction) SegmentAction {
 	}
 }
 
+func UpdateBinlogs(binlogs []*datapb.FieldBinlog) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.binlogs = binlogs
+	}
+}
+
+func UpdateStatslogs(statslogs []*datapb.FieldBinlog) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.statslogs = statslogs
+	}
+}
+
+func UpdateDeltalogs(deltalogs []*datapb.FieldBinlog) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.deltalogs = deltalogs
+	}
+}
+
+func UpdateBm25logs(bm25logs []*datapb.FieldBinlog) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.bm25logs = bm25logs
+	}
+}
+
 func UpdateState(state commonpb.SegmentState) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.state = state

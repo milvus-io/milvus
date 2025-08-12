@@ -2,9 +2,11 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -27,12 +30,14 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -373,6 +378,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 		0: 0,
 		1: 0,
 		2: 0,
+		3: 0,
 	}
 	for segID, collID := range segments {
 		info := &datapb.SegmentInfo{
@@ -475,6 +481,194 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	segment = s.testServer.meta.GetSegment(context.TODO(), 2)
 	s.NotNil(segment)
 	s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    3,
+		CollectionID: 0,
+		Channel:      "ch1",
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		Field2StatslogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(2, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:    3,
+		CollectionID: 0,
+		Channel:      "ch1",
+		Field2BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test/0/1/1/1/3",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		Field2StatslogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/1",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/2",
+						EntriesNum: 5,
+					},
+					{
+						LogPath:    "/by-dev/test_stats/0/1/1/1/3",
+						EntriesNum: 5,
+					},
+				},
+			},
+		},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   1,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(3, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[2].GetLogPath())
+	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
+
+	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{
+			Timestamp: uint64(time.Now().Unix()),
+		},
+		SegmentID:           3,
+		CollectionID:        0,
+		Channel:             "ch1",
+		Field2BinlogPaths:   []*datapb.FieldBinlog{},
+		Field2StatslogPaths: []*datapb.FieldBinlog{},
+		CheckPoints: []*datapb.CheckPoint{
+			{
+				SegmentID: 3,
+				Position: &msgpb.MsgPosition{
+					ChannelName: "ch1",
+					MsgID:       []byte{1, 2, 3},
+					MsgGroup:    "",
+					Timestamp:   0,
+				},
+				NumOfRows: 12,
+			},
+		},
+		Flushed:         false,
+		WithFullBinlogs: true,
+	})
+	s.NoError(err)
+	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
+
+	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(segment)
+	binlogs = segment.GetBinlogs()
+	s.EqualValues(1, len(binlogs))
+	fieldBinlogs = binlogs[0]
+	s.NotNil(fieldBinlogs)
+	s.EqualValues(3, len(fieldBinlogs.GetBinlogs()))
+	s.EqualValues(1, fieldBinlogs.GetFieldID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+	s.EqualValues(int64(1), fieldBinlogs.GetBinlogs()[0].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
+	s.EqualValues("", fieldBinlogs.GetBinlogs()[2].GetLogPath())
+	s.EqualValues(int64(3), fieldBinlogs.GetBinlogs()[2].GetLogID())
 }
 
 func (s *ServerSuite) TestFlush_NormalCase() {
@@ -1647,4 +1841,473 @@ func (s *GcControlServiceSuite) TestTimeoutCtx() {
 
 func TestGcControlService(t *testing.T) {
 	suite.Run(t, new(GcControlServiceSuite))
+}
+
+func TestFlushAll(t *testing.T) {
+	ctx := context.Background()
+	dbName := "test_db"
+	req := &datapb.FlushAllRequest{
+		DbName: dbName,
+	}
+
+	// Test normal case
+	mockey.PatchConvey("normal case", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		// Mock GetStateCode
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		// Mock AllocTimestamp
+		expectedTs := uint64(12345)
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(expectedTs, nil).Build()
+
+		// Mock broker.ShowCollectionIDs
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1, 2, 3},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		// Mock flushCollection
+		flushResult := &datapb.FlushResult{
+			CollectionID:    1,
+			SegmentIDs:      []int64{10, 11},
+			TimeOfSeal:      123456789,
+			FlushSegmentIDs: []int64{20, 21},
+			FlushTs:         expectedTs,
+			ChannelCps:      make(map[string]*msgpb.MsgPosition),
+		}
+		mockey.Mock((*Server).flushCollection).Return(flushResult, nil).Build()
+
+		// Execute test
+		resp, err := testServer.FlushAll(ctx, req)
+
+		// Verify results
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, int64(expectedTs), int64(resp.GetFlushTs()))
+	})
+
+	// Test server unhealthy case
+	mockey.PatchConvey("server unhealthy", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Abnormal).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test ShowCollectionIDs failed case
+	mockey.PatchConvey("ShowCollectionIDs failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		expectedErr := errors.New("mock ShowCollectionIDs error")
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(nil, expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	// Test AllocTimestamp failed case
+	mockey.PatchConvey("AllocTimestamp failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		expectedErr := errors.New("mock AllocTimestamp error")
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(uint64(0), expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.Error(t, err)
+		assert.Nil(t, resp)
+	})
+
+	// Test flushCollection failed case
+	mockey.PatchConvey("flushCollection failed", t, func() {
+		testServer := &Server{
+			allocator: allocator.NewRootCoordAllocator(nil),
+			broker:    broker.NewCoordinatorBroker(nil),
+		}
+		mockey.Mock(mockey.GetMethod(testServer, "GetStateCode")).
+			Return(commonpb.StateCode_Healthy).Build()
+
+		mockDbCollections := []*rootcoordpb.DBCollections{
+			{
+				DbName:        dbName,
+				CollectionIDs: []int64{1},
+			},
+		}
+		showCollectionResp := &rootcoordpb.ShowCollectionIDsResponse{
+			Status:        merr.Success(),
+			DbCollections: mockDbCollections,
+		}
+		mockey.Mock(mockey.GetMethod(testServer.broker, "ShowCollectionIDs")).
+			Return(showCollectionResp, nil).Build()
+
+		expectedTs := uint64(12345)
+		mockey.Mock(mockey.GetMethod(testServer.allocator, "AllocTimestamp")).
+			Return(expectedTs, nil).Build()
+
+		expectedErr := errors.New("mock flushCollection error")
+		mockey.Mock((*Server).flushCollection).Return(nil, expectedErr).Build()
+
+		resp, err := testServer.FlushAll(ctx, req)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestServer_AddFileResource(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.MatchedBy(func(resource *model.FileResource) bool {
+			return resource.Name == "test_resource" && resource.Path == "/path/to/resource"
+		})).Return(nil)
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("allocator error", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 0, fmt.Errorf("mock error") }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("catalog save error", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything).Return(errors.New("catalog error"))
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("resource already exists", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		existingResource := &model.FileResource{
+			ID:   1,
+			Name: "test_resource",
+			Path: "/existing/path",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"test_resource": existingResource,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.Contains(t, resp.GetReason(), "resource name exist")
+	})
+}
+
+func TestServer_RemoveFileResource(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		existingResource := &model.FileResource{
+			ID:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"test_resource": existingResource,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+		}
+
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1)).Return(nil)
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("resource not found", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "non_existent_resource",
+		}
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp)) // Should succeed even if resource doesn't exist
+	})
+
+	t.Run("catalog remove error", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		existingResource := &model.FileResource{
+			ID:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"test_resource": existingResource,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
+
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1)).Return(errors.New("catalog error"))
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+}
+
+func TestServer_ListFileResources(t *testing.T) {
+	t.Run("success with empty list", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.ListFileResourcesRequest{
+			Base: &commonpb.MsgBase{},
+		}
+
+		resp, err := server.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetResources())
+		assert.Equal(t, 0, len(resp.GetResources()))
+	})
+
+	t.Run("success with resources", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		resource1 := &model.FileResource{
+			ID:   1,
+			Name: "resource1",
+			Path: "/path/to/resource1",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+		resource2 := &model.FileResource{
+			ID:   2,
+			Name: "resource2",
+			Path: "/path/to/resource2",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"resource1": resource1,
+					"resource2": resource2,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.ListFileResourcesRequest{}
+
+		resp, err := server.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetResources())
+		assert.Equal(t, 2, len(resp.GetResources()))
+
+		// Check that both resources are returned
+		resourceNames := make(map[string]bool)
+		for _, resource := range resp.GetResources() {
+			resourceNames[resource.GetName()] = true
+		}
+		assert.True(t, resourceNames["resource1"])
+		assert.True(t, resourceNames["resource2"])
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ListFileResourcesRequest{}
+
+		resp, err := server.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
 }

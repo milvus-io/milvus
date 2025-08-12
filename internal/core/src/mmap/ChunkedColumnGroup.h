@@ -77,6 +77,19 @@ class ChunkedColumnGroup {
         return SemiInlineGet(slot_->PinCells(chunk_ids));
     }
 
+    // std::shared_ptr<CellAccessor<GroupChunk>>
+    std::vector<PinWrapper<GroupChunk*>>
+    GetAllGroupChunks() {
+        auto ca = SemiInlineGet(slot_->PinAllCells());
+        std::vector<PinWrapper<GroupChunk*>> ret;
+        ret.reserve(num_chunks_);
+        for (size_t i = 0; i < num_chunks_; i++) {
+            auto chunk = ca->get_cell_of(i);
+            ret.emplace_back(ca, chunk);
+        }
+        return ret;
+    }
+
     int64_t
     NumRows() const {
         return num_rows_;
@@ -307,8 +320,8 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     }
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    ViewsByOffsets(int64_t chunk_id,
-                   const FixedVector<int32_t>& offsets) const override {
+    StringViewsByOffsets(int64_t chunk_id,
+                         const FixedVector<int32_t>& offsets) const override {
         if (!IsChunkedVariableColumnDataType(data_type_)) {
             ThrowInfo(ErrorCode::Unsupported,
                       "[StorageV2] ViewsByOffsets only supported for "
@@ -320,6 +333,16 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
             chunk_wrapper,
             static_cast<StringChunk*>(chunk.get())->ViewsByOffsets(offsets));
+    }
+
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    ArrayViewsByOffsets(int64_t chunk_id,
+                        const FixedVector<int32_t>& offsets) const override {
+        auto chunk_wrapper = group_->GetGroupChunk(chunk_id);
+        auto chunk = chunk_wrapper.get()->GetChunk(field_id_);
+        return PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>(
+            chunk_wrapper,
+            static_cast<ArrayChunk*>(chunk.get())->ViewsByOffsets(offsets));
     }
 
     std::pair<size_t, size_t>
@@ -337,6 +360,19 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         auto group_chunk = group_->GetGroupChunk(chunk_id);
         auto chunk = group_chunk.get()->GetChunk(field_id_);
         return PinWrapper<Chunk*>(group_chunk, chunk.get());
+    }
+
+    std::vector<PinWrapper<Chunk*>>
+    GetAllChunks() const override {
+        std::vector<PinWrapper<Chunk*>> ret;
+        auto group_chunks = group_->GetAllGroupChunks();
+        ret.reserve(group_chunks.size());
+
+        for (auto& group_chunk : group_chunks) {
+            auto chunk = group_chunk.get()->GetChunk(field_id_);
+            ret.emplace_back(group_chunk, chunk.get());
+        }
+        return ret;
     }
 
     int64_t

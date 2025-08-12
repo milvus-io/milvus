@@ -187,6 +187,7 @@ func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) (err 
 		metricsGuard.Finish(err)
 	}()
 
+	pb := msg.IntoMessageProto()
 	// Send Consumed message to client and do metrics.
 	if err := c.consumeServer.SendConsumeMessage(&streamingpb.ConsumeMessageReponse{
 		ConsumerId: c.consumerID,
@@ -194,8 +195,8 @@ func (c *ConsumeServer) sendImmutableMessage(msg message.ImmutableMessage) (err 
 			Id: &messagespb.MessageID{
 				Id: msg.MessageID().Marshal(),
 			},
-			Payload:    msg.Payload(),
-			Properties: msg.Properties().ToRawMap(),
+			Payload:    pb.Payload,
+			Properties: pb.Properties,
 		},
 	}); err != nil {
 		return status.NewInner("send consume message failed: %s", err.Error())

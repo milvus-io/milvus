@@ -88,6 +88,7 @@ func (suite *RetrieveSuite) SetupTest() {
 
 	suite.sealed, err = NewSegment(ctx,
 		suite.collection,
+		suite.manager.Segment,
 		SegmentTypeSealed,
 		0,
 		&querypb.SegmentLoadInfo{
@@ -117,6 +118,7 @@ func (suite *RetrieveSuite) SetupTest() {
 
 	suite.growing, err = NewSegment(ctx,
 		suite.collection,
+		suite.manager.Segment,
 		SegmentTypeGrowing,
 		0,
 		&querypb.SegmentLoadInfo{

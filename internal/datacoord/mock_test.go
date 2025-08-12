@@ -207,6 +207,10 @@ func (m *mockMixCoord) ListLoadedSegments(ctx context.Context, req *querypb.List
 	}, nil
 }
 
+func (m *mockMixCoord) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*datapb.FlushAllResponse, error) {
+	panic("implement me")
+}
+
 func newMockMixCoord() *mockMixCoord {
 	return &mockMixCoord{state: commonpb.StateCode_Healthy}
 }
@@ -897,6 +901,20 @@ func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, 
 
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.
 func (s *mockMixCoord) RegisterStreamingCoordGRPCService(server *grpc.Server) {
+	panic("implement me")
+}
+
+// AddFileResource add file resource to datacoord
+func (s *mockMixCoord) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+// RemoveFileResource remove file resource from datacoord
+func (s *mockMixCoord) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (s *mockMixCoord) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
 	panic("implement me")
 }
 

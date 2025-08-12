@@ -206,12 +206,11 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         collection_w.create_index(ct.default_bool_field_name, scalar_index_params)
         collection_w.load()
         # 5. search
-        search_params = cf.gen_search_param(index, "COSINE")
-        limit = search_params[0]["params"]["ef"]
-        log.info("Searching with search params: {}".format(search_params[0]))
+        search_params = {}
+        limit = ct.default_limit
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            search_param, limit, default_search_exp, _async=_async,
+                            search_params, limit, default_search_exp, _async=_async,
                             output_fields=[ct.default_string_field_name, ct.default_float_field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -317,16 +316,15 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         collection_w.create_index(ct.default_float_field_name, scalar_index_params)
         collection_w.load()
         # 5. search
-        search_params = cf.gen_search_param(index, "L2")
-        limit = search_params[0]["params"]["ef"]
-        log.info("Searching with search params: {}".format(search_params[0]))
+        search_params = {}
+        limit = ct.default_limit
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         output_fields = [ct.default_int64_field_name, ct.default_int32_field_name,
                          ct.default_int16_field_name, ct.default_int8_field_name,
                          ct.default_bool_field_name, ct.default_float_field_name,
                          ct.default_double_field_name, ct.default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            search_param, limit, default_search_exp, _async=_async,
+                            search_params, limit, default_search_exp, _async=_async,
                             output_fields=output_fields,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -436,12 +434,11 @@ class TestCollectionSearchNoneAndDefaultData(TestcaseBase):
         collection_w.create_index(ct.default_float_field_name, scalar_index_params)
         collection_w.load()
         # 5. search
-        search_params = cf.gen_search_param(index, "COSINE")
-        limit = search_params[0]["params"]["ef"]
-        log.info("Searching with search params: {}".format(search_params[0]))
+        limit = ct.default_limit
+        search_params = {}
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            search_param, limit, default_search_exp, _async=_async,
+                            search_params, limit, default_search_exp, _async=_async,
                             output_fields=[ct.default_string_field_name, ct.default_float_field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,

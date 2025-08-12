@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	DataCoord_Flush_FullMethodName                       = "/milvus.proto.data.DataCoord/Flush"
+	DataCoord_FlushAll_FullMethodName                    = "/milvus.proto.data.DataCoord/FlushAll"
 	DataCoord_AllocSegment_FullMethodName                = "/milvus.proto.data.DataCoord/AllocSegment"
 	DataCoord_AssignSegmentID_FullMethodName             = "/milvus.proto.data.DataCoord/AssignSegmentID"
 	DataCoord_GetSegmentInfo_FullMethodName              = "/milvus.proto.data.DataCoord/GetSegmentInfo"
@@ -69,6 +70,9 @@ const (
 	DataCoord_ImportV2_FullMethodName                    = "/milvus.proto.data.DataCoord/ImportV2"
 	DataCoord_GetImportProgress_FullMethodName           = "/milvus.proto.data.DataCoord/GetImportProgress"
 	DataCoord_ListImports_FullMethodName                 = "/milvus.proto.data.DataCoord/ListImports"
+	DataCoord_AddFileResource_FullMethodName             = "/milvus.proto.data.DataCoord/AddFileResource"
+	DataCoord_RemoveFileResource_FullMethodName          = "/milvus.proto.data.DataCoord/RemoveFileResource"
+	DataCoord_ListFileResources_FullMethodName           = "/milvus.proto.data.DataCoord/ListFileResources"
 )
 
 // DataCoordClient is the client API for DataCoord service.
@@ -76,6 +80,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataCoordClient interface {
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
+	FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(ctx context.Context, in *AllocSegmentRequest, opts ...grpc.CallOption) (*AllocSegmentResponse, error)
 	// Deprecated: Do not use.
@@ -128,6 +133,10 @@ type DataCoordClient interface {
 	ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error)
 	GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error)
 	ListImports(ctx context.Context, in *internalpb.ListImportsRequestInternal, opts ...grpc.CallOption) (*internalpb.ListImportsResponse, error)
+	// File Resource Management
+	AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error)
 }
 
 type dataCoordClient struct {
@@ -141,6 +150,15 @@ func NewDataCoordClient(cc grpc.ClientConnInterface) DataCoordClient {
 func (c *dataCoordClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
 	out := new(FlushResponse)
 	err := c.cc.Invoke(ctx, DataCoord_Flush_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error) {
+	out := new(FlushAllResponse)
+	err := c.cc.Invoke(ctx, DataCoord_FlushAll_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -553,11 +571,39 @@ func (c *dataCoordClient) ListImports(ctx context.Context, in *internalpb.ListIm
 	return out, nil
 }
 
+func (c *dataCoordClient) AddFileResource(ctx context.Context, in *milvuspb.AddFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_AddFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) RemoveFileResource(ctx context.Context, in *milvuspb.RemoveFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, DataCoord_RemoveFileResource_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *dataCoordClient) ListFileResources(ctx context.Context, in *milvuspb.ListFileResourcesRequest, opts ...grpc.CallOption) (*milvuspb.ListFileResourcesResponse, error) {
+	out := new(milvuspb.ListFileResourcesResponse)
+	err := c.cc.Invoke(ctx, DataCoord_ListFileResources_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DataCoordServer is the server API for DataCoord service.
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
 type DataCoordServer interface {
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
+	FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error)
 	// AllocSegment alloc a new growing segment, add it into segment meta.
 	AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error)
 	// Deprecated: Do not use.
@@ -610,6 +656,10 @@ type DataCoordServer interface {
 	ImportV2(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)
 	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
 	ListImports(context.Context, *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error)
+	// File Resource Management
+	AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error)
+	RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error)
+	ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error)
 }
 
 // UnimplementedDataCoordServer should be embedded to have forward compatible implementations.
@@ -618,6 +668,9 @@ type UnimplementedDataCoordServer struct {
 
 func (UnimplementedDataCoordServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
+}
+func (UnimplementedDataCoordServer) FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FlushAll not implemented")
 }
 func (UnimplementedDataCoordServer) AllocSegment(context.Context, *AllocSegmentRequest) (*AllocSegmentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AllocSegment not implemented")
@@ -754,6 +807,15 @@ func (UnimplementedDataCoordServer) GetImportProgress(context.Context, *internal
 func (UnimplementedDataCoordServer) ListImports(context.Context, *internalpb.ListImportsRequestInternal) (*internalpb.ListImportsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListImports not implemented")
 }
+func (UnimplementedDataCoordServer) AddFileResource(context.Context, *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddFileResource not implemented")
+}
+func (UnimplementedDataCoordServer) RemoveFileResource(context.Context, *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveFileResource not implemented")
+}
+func (UnimplementedDataCoordServer) ListFileResources(context.Context, *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListFileResources not implemented")
+}
 
 // UnsafeDataCoordServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to DataCoordServer will
@@ -780,6 +842,24 @@ func _DataCoord_Flush_Handler(srv interface{}, ctx context.Context, dec func(int
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DataCoordServer).Flush(ctx, req.(*FlushRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_FlushAll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FlushAllRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).FlushAll(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_FlushAll_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).FlushAll(ctx, req.(*FlushAllRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1594,6 +1674,60 @@ func _DataCoord_ListImports_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_AddFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.AddFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).AddFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_AddFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).AddFileResource(ctx, req.(*milvuspb.AddFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_RemoveFileResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.RemoveFileResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).RemoveFileResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_RemoveFileResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).RemoveFileResource(ctx, req.(*milvuspb.RemoveFileResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DataCoord_ListFileResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.ListFileResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).ListFileResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_ListFileResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).ListFileResources(ctx, req.(*milvuspb.ListFileResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DataCoord_ServiceDesc is the grpc.ServiceDesc for DataCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1604,6 +1738,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Flush",
 			Handler:    _DataCoord_Flush_Handler,
+		},
+		{
+			MethodName: "FlushAll",
+			Handler:    _DataCoord_FlushAll_Handler,
 		},
 		{
 			MethodName: "AllocSegment",
@@ -1784,6 +1922,18 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListImports",
 			Handler:    _DataCoord_ListImports_Handler,
+		},
+		{
+			MethodName: "AddFileResource",
+			Handler:    _DataCoord_AddFileResource_Handler,
+		},
+		{
+			MethodName: "RemoveFileResource",
+			Handler:    _DataCoord_RemoveFileResource_Handler,
+		},
+		{
+			MethodName: "ListFileResources",
+			Handler:    _DataCoord_ListFileResources_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

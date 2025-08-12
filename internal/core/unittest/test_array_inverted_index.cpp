@@ -17,7 +17,7 @@
 #include "index/InvertedIndexTantivy.h"
 #include "common/Schema.h"
 
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "query/PlanProto.h"
@@ -169,7 +169,7 @@ TYPED_TEST_P(ArrayInvertedIndexTest, ArrayContainsAny) {
         std::unordered_set<TypeParam> row(this->vec_of_array_[offset].begin(),
                                           this->vec_of_array_[offset].end());
         if (elems.empty()) {
-            return true;
+            return false;
         }
 
         for (const auto& elem : elems) {

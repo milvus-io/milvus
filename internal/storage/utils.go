@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -1567,4 +1568,17 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 		}
 	}
 	return nil
+}
+
+// sort by field binlogs key
+func SortFieldBinlogs(fieldBinlogs map[int64]*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	fieldIDs := lo.Keys(fieldBinlogs)
+	sort.Slice(fieldIDs, func(i, j int) bool {
+		return fieldIDs[i] < fieldIDs[j]
+	})
+	binlogs := make([]*datapb.FieldBinlog, 0, len(fieldIDs))
+	for _, fieldID := range fieldIDs {
+		binlogs = append(binlogs, fieldBinlogs[fieldID])
+	}
+	return binlogs
 }

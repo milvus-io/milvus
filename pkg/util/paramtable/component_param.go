@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -530,6 +531,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
+	p.IndexSliceSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		size, err := strconv.Atoi(newValue)
+		if err != nil {
+			return err
+		}
+		UpdateIndexSliceSize(size)
+		return nil
+	})
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
@@ -631,6 +640,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.HighPriorityThreadCoreCoefficient.Init(base.mgr)
+	p.HighPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		coefficient, err := strconv.ParseFloat(newValue, 64)
+		if err != nil {
+			return err
+		}
+		UpdateHighPriorityThreadCoreCoefficient(coefficient)
+		return nil
+	})
 
 	p.MiddlePriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.middlePriority",
@@ -641,6 +658,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
+	p.MiddlePriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		coefficient, err := strconv.ParseFloat(newValue, 64)
+		if err != nil {
+			return err
+		}
+		UpdateMiddlePriorityThreadCoreCoefficient(coefficient)
+		return nil
+	})
 
 	p.LowPriorityThreadCoreCoefficient = ParamItem{
 		Key:          "common.threadCoreCoefficient.lowPriority",
@@ -651,6 +676,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: true,
 	}
 	p.LowPriorityThreadCoreCoefficient.Init(base.mgr)
+	p.LowPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		coefficient, err := strconv.ParseFloat(newValue, 64)
+		if err != nil {
+			return err
+		}
+		UpdateLowPriorityThreadCoreCoefficient(coefficient)
+		return nil
+	})
 
 	p.DiskWriteMode = ParamItem{
 		Key:          "common.diskWriteMode",
@@ -844,7 +877,7 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 	p.EnableStorageV2 = ParamItem{
 		Key:          "common.storage.enablev2",
 		Version:      "2.3.1",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
@@ -1064,6 +1097,15 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+	p.EnabledOptimizeExpr.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		enable, err := strconv.ParseBool(newValue)
+		if err != nil {
+			return err
+		}
+		UpdateDefaultOptimizeExprEnable(enable)
+		return nil
+	})
+
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
@@ -1081,6 +1123,14 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledGrowingSegmentJSONKeyStats.Init(base.mgr)
+	p.EnabledGrowingSegmentJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		enable, err := strconv.ParseBool(newValue)
+		if err != nil {
+			return err
+		}
+		UpdateDefaultGrowingJSONKeyStatsEnable(enable)
+		return nil
+	})
 
 	p.EnableConfigParamTypeCheck = ParamItem{
 		Key:          "common.enableConfigParamTypeCheck",
@@ -1090,6 +1140,14 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnableConfigParamTypeCheck.Init(base.mgr)
+	p.EnableConfigParamTypeCheck.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		enable, err := strconv.ParseBool(newValue)
+		if err != nil {
+			return err
+		}
+		UpdateDefaultConfigParamTypeCheck(enable)
+		return nil
+	})
 }
 
 type gpuConfig struct {
@@ -1330,6 +1388,9 @@ It is recommended to use debug level under test and development environments, an
 		Export: true,
 	}
 	l.Level.Init(base.mgr)
+	l.Level.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		return UpdateLogLevel(newValue)
+	})
 
 	l.RootPath = ParamItem{
 		Key:     "log.file.rootPath",
@@ -2830,18 +2891,21 @@ type queryNodeConfig struct {
 	MultipleChunkedEnable         ParamItem `refreshable:"false"` // Deprecated
 
 	// TODO(tiered storage 2) this should be refreshable?
-	TieredWarmupScalarField        ParamItem `refreshable:"false"`
-	TieredWarmupScalarIndex        ParamItem `refreshable:"false"`
-	TieredWarmupVectorField        ParamItem `refreshable:"false"`
-	TieredWarmupVectorIndex        ParamItem `refreshable:"false"`
-	TieredMemoryLowWatermarkRatio  ParamItem `refreshable:"false"`
-	TieredMemoryHighWatermarkRatio ParamItem `refreshable:"false"`
-	TieredDiskLowWatermarkRatio    ParamItem `refreshable:"false"`
-	TieredDiskHighWatermarkRatio   ParamItem `refreshable:"false"`
-	TieredEvictionEnabled          ParamItem `refreshable:"false"`
-	TieredCacheTouchWindowMs       ParamItem `refreshable:"false"`
-	TieredEvictionIntervalMs       ParamItem `refreshable:"false"`
-	TieredLoadingMemoryFactor      ParamItem `refreshable:"false"`
+	TieredWarmupScalarField         ParamItem `refreshable:"false"`
+	TieredWarmupScalarIndex         ParamItem `refreshable:"false"`
+	TieredWarmupVectorField         ParamItem `refreshable:"false"`
+	TieredWarmupVectorIndex         ParamItem `refreshable:"false"`
+	TieredMemoryLowWatermarkRatio   ParamItem `refreshable:"false"`
+	TieredMemoryHighWatermarkRatio  ParamItem `refreshable:"false"`
+	TieredDiskLowWatermarkRatio     ParamItem `refreshable:"false"`
+	TieredDiskHighWatermarkRatio    ParamItem `refreshable:"false"`
+	TieredEvictionEnabled           ParamItem `refreshable:"false"`
+	TieredEvictableMemoryCacheRatio ParamItem `refreshable:"false"`
+	TieredEvictableDiskCacheRatio   ParamItem `refreshable:"false"`
+	TieredCacheTouchWindowMs        ParamItem `refreshable:"false"`
+	TieredEvictionIntervalMs        ParamItem `refreshable:"false"`
+	TieredLoadingMemoryFactor       ParamItem `refreshable:"false"`
+	CacheCellUnaccessedSurvivalTime ParamItem `refreshable:"false"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
@@ -3047,6 +3111,48 @@ Note that if eviction is enabled, cache data loaded during sync warmup is also s
 	}
 	p.TieredEvictionEnabled.Init(base.mgr)
 
+	p.TieredEvictableMemoryCacheRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictableMemoryCacheRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.3",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "1.0"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc: `This ratio estimates how much evictable memory can be cached.
+The higher the ratio, the more physical memory is reserved for evictable memory,
+resulting in fewer evictions but fewer segments can be loaded.
+Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
+This parameter is only valid when eviction is enabled.
+It defaults to 0.3 (meaning about 30% of evictable in-memory data can be cached), with a valid range of [0.0, 1.0].`,
+		Export: true,
+	}
+	p.TieredEvictableMemoryCacheRatio.Init(base.mgr)
+
+	p.TieredEvictableDiskCacheRatio = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.evictableDiskCacheRatio",
+		Version:      "2.6.0",
+		DefaultValue: "0.3",
+		Formatter: func(v string) string {
+			ratio := getAsFloat(v)
+			if ratio < 0 || ratio > 1 {
+				return "1.0"
+			}
+			return fmt.Sprintf("%f", ratio)
+		},
+		Doc: `This ratio estimates how much evictable disk space can be cached.
+The higher the ratio, the more physical disk space is reserved for evictable disk usage,
+resulting in fewer evictions but fewer segments can be loaded.
+Conversely, a lower ratio results in more evictions but allows more segments to be loaded.
+This parameter is only valid when eviction is enabled.
+It defaults to 0.3 (meaning about 30% of evictable on-disk data can be cached), with a valid range of [0.0, 1.0].`,
+		Export: true,
+	}
+	p.TieredEvictableDiskCacheRatio.Init(base.mgr)
+
 	p.TieredMemoryLowWatermarkRatio = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.memoryLowWatermarkRatio",
 		Version:      "2.6.0",
@@ -3159,6 +3265,33 @@ eviction is necessary and the amount of data to evict from memory/disk.
 		Export: false,
 	}
 	p.TieredLoadingMemoryFactor.Init(base.mgr)
+
+	p.CacheCellUnaccessedSurvivalTime = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.cacheTtl",
+		Version:      "2.6.0",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			timeout := getAsInt64(v)
+			if timeout <= 0 {
+				return "0"
+			}
+			return fmt.Sprintf("%d", timeout)
+		},
+		Doc: `Time in seconds after which an unaccessed cache cell will be evicted. 
+If a cached data hasn't been accessed again after this time since its last access, it will be evicted.
+If set to 0, time based eviction is disabled.`,
+		Export: true,
+	}
+	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
+
+	p.EnableDisk = ParamItem{
+		Key:          "queryNode.enableDisk",
+		Version:      "2.2.0",
+		DefaultValue: "false",
+		Doc:          "enable querynode load disk index, and search on disk index",
+		Export:       true,
+	}
+	p.EnableDisk.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
@@ -3608,15 +3741,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.CPURatio.Init(base.mgr)
 
-	p.EnableDisk = ParamItem{
-		Key:          "queryNode.enableDisk",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Doc:          "enable querynode load disk index, and search on disk index",
-		Export:       true,
-	}
-	p.EnableDisk.Init(base.mgr)
-
 	p.IndexOffsetCacheEnabled = ParamItem{
 		Key:          "queryNode.indexOffsetCacheEnabled",
 		Version:      "2.5.0",
@@ -3819,6 +3943,14 @@ user-task-polling:
 		Doc:          "expr eval batch size for getnext interface",
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
+	p.ExprEvalBatchSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		size, err := strconv.Atoi(newValue)
+		if err != nil {
+			return err
+		}
+		UpdateDefaultExprEvalBatchSize(size)
+		return nil
+	})
 
 	p.JSONKeyStatsCommitInterval = ParamItem{
 		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
@@ -3828,6 +3960,14 @@ user-task-polling:
 		Export:       true,
 	}
 	p.JSONKeyStatsCommitInterval.Init(base.mgr)
+	p.JSONKeyStatsCommitInterval.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+		interval, err := strconv.Atoi(newValue)
+		if err != nil {
+			return err
+		}
+		UpdateDefaultJSONKeyStatsCommitInterval(interval)
+		return nil
+	})
 
 	p.CleanExcludeSegInterval = ParamItem{
 		Key:          "queryCoord.cleanExcludeSegmentInterval",
@@ -4300,7 +4440,7 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
 		Version:      "2.5.8",
-		DefaultValue: "100",
+		DefaultValue: "10000",
 		Doc:          `The expansion factor for pre-allocating IDs during compaction.`,
 	}
 	p.CompactionPreAllocateIDExpansionFactor.Init(base.mgr)
@@ -5013,7 +5153,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.clusteringCompactionUsage",
 		Version:      "2.4.6",
 		Doc:          "slot usage of clustering compaction task, setting it to 65536 means it takes up a whole worker.",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
@@ -5077,7 +5217,7 @@ if param targetVecIndexVersion is not set, the default value is -1, which means 
 		Key:          "dataCoord.slot.analyzeTaskSlotUsage",
 		Version:      "2.5.8",
 		Doc:          "slot usage of analyze task",
-		DefaultValue: "65536",
+		DefaultValue: "65535",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(value string) string {
@@ -5555,14 +5695,14 @@ if this parameter <= 0, will set it as 10`,
 		Key:          "dataNode.import.memoryLimitPercentage",
 		Version:      "2.5.15",
 		Doc:          "The percentage of memory limit for import/pre-import tasks.",
-		DefaultValue: "20",
+		DefaultValue: "10",
 		PanicIfEmpty: false,
 		Export:       true,
 		Formatter: func(v string) string {
 			percentage := getAsFloat(v)
 			if percentage <= 0 || percentage > 100 {
-				log.Warn("invalid import memory limit percentage, using default 20%")
-				return "20"
+				log.Warn("invalid import memory limit percentage, using default 10%")
+				return "10"
 			}
 			return fmt.Sprintf("%f", percentage)
 		},

@@ -206,7 +206,7 @@ func (s *HelloMilvusSuite) TestHybridSearch() {
 	s.NoError(err)
 	hSearchReq.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: "rrf"},
-		{Key: proxy.RankParamsKey, Value: string(b)},
+		{Key: proxy.ParamsKey, Value: string(b)},
 		{Key: proxy.LimitKey, Value: strconv.Itoa(topk)},
 		{Key: proxy.RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 	}
@@ -232,7 +232,7 @@ func (s *HelloMilvusSuite) TestHybridSearch() {
 	}
 	hSearchReq.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: "weighted"},
-		{Key: proxy.RankParamsKey, Value: string(b)},
+		{Key: proxy.ParamsKey, Value: string(b)},
 		{Key: proxy.LimitKey, Value: strconv.Itoa(topk)},
 	}
 
@@ -371,7 +371,7 @@ func (s *HelloMilvusSuite) TestHybridSearchSingleSubReq() {
 	s.NoError(err)
 	hSearchReq.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: "rrf"},
-		{Key: proxy.RankParamsKey, Value: string(b)},
+		{Key: proxy.ParamsKey, Value: string(b)},
 		{Key: proxy.LimitKey, Value: strconv.Itoa(topk)},
 		{Key: proxy.RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 	}
@@ -397,7 +397,7 @@ func (s *HelloMilvusSuite) TestHybridSearchSingleSubReq() {
 	}
 	hSearchReq.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: "weighted"},
-		{Key: proxy.RankParamsKey, Value: string(b)},
+		{Key: proxy.ParamsKey, Value: string(b)},
 		{Key: proxy.LimitKey, Value: strconv.Itoa(topk)},
 	}
 

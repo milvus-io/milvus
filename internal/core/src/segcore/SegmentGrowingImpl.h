@@ -175,6 +175,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     try_remove_chunks(FieldId fieldId);
 
+    void
+    search_batch_pks(
+        const std::vector<PkType>& pks,
+        const Timestamp* timestamps,
+        bool include_same_ts,
+        const std::function<void(const SegOffset offset, const Timestamp ts)>&
+            callback) const;
+
  public:
     size_t
     GetMemoryUsageInBytes() const override {
@@ -291,8 +299,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
           id_(segment_id),
           deleted_record_(
               &insert_record_,
-              [this](const PkType& pk, Timestamp timestamp) {
-                  return this->search_pk(pk, timestamp);
+              [this](const std::vector<PkType>& pks,
+                     const Timestamp* timestamps,
+                     std::function<void(const SegOffset offset,
+                                        const Timestamp ts)> callback) {
+                  this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {
         this->CreateTextIndexes();
@@ -329,7 +340,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     bool
@@ -418,9 +429,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
         std::optional<std::pair<int64_t, int64_t>> offset_len) const override;
 
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
-    chunk_view_by_offsets(FieldId field_id,
-                          int64_t chunk_id,
-                          const FixedVector<int32_t>& offsets) const override;
+    chunk_string_views_by_offsets(
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override;
+
+    PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
+    chunk_array_views_by_offsets(
+        FieldId field_id,
+        int64_t chunk_id,
+        const FixedVector<int32_t>& offsets) const override;
 
     void
     check_search(const query::Plan* plan) const override {

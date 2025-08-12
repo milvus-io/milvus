@@ -2302,55 +2302,6 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 	})
 }
 
-func TestSendReplicateMessagePack(t *testing.T) {
-	ctx := context.Background()
-	mockStream := msgstream.NewMockMsgStream(t)
-
-	t.Run("empty case", func(t *testing.T) {
-		SendReplicateMessagePack(ctx, nil, nil)
-	})
-
-	t.Run("produce fail", func(t *testing.T) {
-		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(errors.New("produce error")).Once()
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{
-			Base: &commonpb.MsgBase{ReplicateInfo: &commonpb.ReplicateInfo{
-				IsReplicate:  true,
-				MsgTimestamp: 100,
-			}},
-		})
-	})
-
-	t.Run("unknown request", func(t *testing.T) {
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ListDatabasesRequest{})
-	})
-
-	t.Run("normal case", func(t *testing.T) {
-		mockStream.EXPECT().Produce(mock.Anything, mock.Anything).Return(nil)
-
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.AlterCollectionRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.AlterCollectionFieldRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.RenameCollectionRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateDatabaseRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropDatabaseRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.FlushRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.LoadCollectionRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleaseCollectionRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateIndexRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropIndexRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.LoadPartitionsRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleasePartitionsRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateCredentialRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DeleteCredentialRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateRoleRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropRoleRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.OperateUserRoleRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.OperatePrivilegeRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.CreateAliasRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.DropAliasRequest{})
-		SendReplicateMessagePack(ctx, mockStream, &milvuspb.AlterAliasRequest{})
-	})
-}
-
 func TestAppendUserInfoForRPC(t *testing.T) {
 	ctx := GetContext(context.Background(), "root:123456")
 	ctx = AppendUserInfoForRPC(ctx)
