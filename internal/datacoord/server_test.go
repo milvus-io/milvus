@@ -2369,6 +2369,8 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 		opt(svr)
 	}
 
+	svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
+
 	err = svr.Init()
 	assert.NoError(t, err)
 
