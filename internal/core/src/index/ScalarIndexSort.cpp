@@ -30,6 +30,8 @@
 #include "common/Types.h"
 #include "index/Utils.h"
 #include "index/ScalarIndexSort.h"
+#include "pb/common.pb.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -213,7 +215,10 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         auto aligned_size =
             ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
         {
-            auto file_writer = storage::FileWriter(mmap_filepath_);
+            auto file_writer =
+                storage::FileWriter(mmap_filepath_,
+                                    storage::io::GetPriorityFromLoadPriority(
+                                        config[milvus::LOAD_PRIORITY]));
             file_writer.Write(index_data->data.get(), (size_t)index_data->size);
 
             if (aligned_size > index_data->size) {

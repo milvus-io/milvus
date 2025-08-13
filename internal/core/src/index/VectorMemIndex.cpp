@@ -589,7 +589,10 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     std::filesystem::create_directories(
         std::filesystem::path(local_filepath.value()).parent_path());
 
-    auto file_writer = storage::FileWriter(local_filepath.value());
+    auto file_writer =
+        storage::FileWriter(local_filepath.value(),
+                            storage::io::GetPriorityFromLoadPriority(
+                                config[milvus::LOAD_PRIORITY]));
 
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");

@@ -312,7 +312,9 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
             uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
 
         {
-            auto file_writer = storage::FileWriter(local_index_file_name);
+            auto file_writer = storage::FileWriter(
+                local_index_file_name,
+                storage::io::GetPriorityFromLoadPriority(priority));
             auto appendIndexFiles = [&]() {
                 auto index_chunks_futures =
                     GetObjectData(rcm_.get(),

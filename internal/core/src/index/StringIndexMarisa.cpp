@@ -37,6 +37,7 @@
 #include "index/Utils.h"
 #include "index/Index.h"
 #include "marisa/base.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "storage/FileWriter.h"
 
@@ -191,7 +192,10 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto len = index->size;
 
     {
-        auto file_writer = storage::FileWriter(file_name);
+        auto file_writer =
+            storage::FileWriter(file_name,
+                                storage::io::GetPriorityFromLoadPriority(
+                                    config[milvus::LOAD_PRIORITY]));
         file_writer.Write(index->data.get(), len);
         file_writer.Finish();
     }

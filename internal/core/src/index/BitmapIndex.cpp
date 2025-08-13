@@ -30,6 +30,8 @@
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "index/Utils.h"
+#include "pb/common.pb.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "query/Utils.h"
 
@@ -455,14 +457,16 @@ void
 BitmapIndex<T>::MMapIndexData(const std::string& file_name,
                               const uint8_t* data_ptr,
                               size_t data_size,
-                              size_t index_length) {
+                              size_t index_length,
+                              milvus::proto::common::LoadPriority priority) {
     std::filesystem::create_directories(
         std::filesystem::path(file_name).parent_path());
 
     auto file_offset = 0;
     std::map<T, std::pair<int32_t, int32_t>> bitmaps;
     {
-        auto file_writer = storage::FileWriter(file_name);
+        auto file_writer = storage::FileWriter(
+            file_name, storage::io::GetPriorityFromLoadPriority(priority));
         for (size_t i = 0; i < index_length; ++i) {
             T key = ParseKey(&data_ptr);
 
@@ -534,12 +538,14 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         build_mode_ == BitmapIndexBuildMode::ROARING) {
         auto mmap_filepath =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
+        auto priority = config[milvus::LOAD_PRIORITY];
         AssertInfo(mmap_filepath.has_value(),
                    "mmap filepath is empty when load index");
         MMapIndexData(mmap_filepath.value(),
                       index_data_buffer->data.get(),
                       index_data_buffer->size,
-                      index_length);
+                      index_length,
+                      priority);
     } else {
         DeserializeIndexData(index_data_buffer->data.get(), index_length);
     }
