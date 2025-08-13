@@ -96,7 +96,7 @@ jobs:
           kind: 'cpp'
       - name: Build
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp && chmod -R a+rwx /home/milvus/.conan"
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code
@@ -108,11 +108,6 @@ jobs:
         run: |
           echo "fix permission..."
           du .docker/amd64-ubuntu22.04-conan -sh
-          find .docker/amd64-ubuntu22.04-conan -type d -exec chmod 755 {} \;
-          find .docker/amd64-ubuntu22.04-conan -type f -exec chmod 644 {} \;
-          find .docker/amd64-ubuntu22.04-conan -name "*.sh" -exec chmod +x {} \;
-          find .docker/amd64-ubuntu22.04-conan -name "*.exe" -exec chmod +x {} \;
-          find .docker/amd64-ubuntu22.04-conan -name "install-sh" -exec chmod +x {} \;
       - name: Save Caches
         uses: ./.github/actions/cache-save
         if: always()
