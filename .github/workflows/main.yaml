@@ -97,6 +97,13 @@ jobs:
       - name: Build
         run: |
           ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} build-cpp"
+          echo "try fix conan permission..."
+          du .docker/amd64-ubuntu22.04-conan -sh
+          find .docker/amd64-ubuntu22.04-conan -type d -exec chmod 755 {} \
+          find .docker/amd64-ubuntu22.04-conan -type f -exec chmod 644 {} \
+          find .docker/amd64-ubuntu22.04-conan -name "*.sh" -exec chmod +x {} \
+          find .docker/amd64-ubuntu22.04-conan -name "*.exe" -exec chmod +x {} \
+          find .docker/amd64-ubuntu22.04-conan -name "install-sh" -exec chmod +x {} \
       - run: |
           zip -r code.zip . -x "./.docker/*" -x "./cmake_build/thirdparty/**" -x ".git/**"
       - name: Archive code
