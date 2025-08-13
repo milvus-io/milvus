@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package paramtable
+package initcore
 
 /*
 #cgo pkg-config: milvus_core
@@ -25,9 +25,15 @@ package paramtable
 #include "common/init_c.h"
 */
 import "C"
-import "unsafe"
+
+import (
+	"strings"
+	"unsafe"
+)
 
 func UpdateLogLevel(level string) error {
+	// always use lower case
+	level = strings.ToLower(level)
 	cvalue := C.CString(level)
 	C.SetLogLevel(cvalue)
 	C.free(unsafe.Pointer(cvalue))
