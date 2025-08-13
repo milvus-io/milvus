@@ -1027,27 +1027,11 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetDbName(), dit.CollectionName)
-	if err != nil {
-		return err
-	}
-	field := typeutil.GetFieldByName(schema.CollectionSchema, fieldName)
-	if field == nil {
-		return merr.WrapErrFieldNotFound(fieldName)
-	}
-
 	collID, err := globalMetaCache.GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
 	if err != nil {
 		return err
 	}
 	dit.collectionID = collID
-	loaded, err := isCollectionLoaded(ctx, dit.mixCoord, collID)
-	if err != nil {
-		return err
-	}
-	if loaded && typeutil.IsVectorType(field.GetDataType()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %s is a vector field, cannot drop index", fieldName))
-	}
 
 	return nil
 }
