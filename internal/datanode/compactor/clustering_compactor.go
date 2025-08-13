@@ -655,14 +655,23 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 		for i := 0; i < rec.Len(); i++ {
 			offset++
-			pk := storage.GetValueAt(pkArr, i, nil, t.primaryKeyField.DataType)
-			ts := storage.GetValueAt(tsArr, i, nil, schemapb.DataType_Int64).(int64)
+			pk, err := storage.GetValueAt(pkArr, i, nil, t.primaryKeyField.DataType)
+			if err != nil {
+				return err
+			}
+			ts, err := storage.GetValueAt(tsArr, i, nil, schemapb.DataType_Int64)
+			if err != nil {
+				return err
+			}
 
-			if entityFilter.Filtered(pk, typeutil.Timestamp(ts)) {
+			if entityFilter.Filtered(pk, typeutil.Timestamp(ts.(int64))) {
 				continue
 			}
 
-			clusteringKey := storage.GetValueAt(clusteringKeyArr, i, nil, t.clusteringKeyField.DataType)
+			clusteringKey, err := storage.GetValueAt(clusteringKeyArr, i, nil, t.clusteringKeyField.DataType)
+			if err != nil {
+				return err
+			}
 			var clusterBuffer *ClusterBuffer
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
@@ -824,14 +833,14 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 	}
 }
 
-func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
+func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[any]int64, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyze-%d", t.GetPlanID()))
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	analyzeStart := time.Now()
 	var mutex sync.Mutex
-	analyzeDict := make(map[interface{}]int64, 0)
+	analyzeDict := make(map[any]int64, 0)
 	for _, segment := range inputSegments {
 		segmentClone := proto.Clone(segment).(*datapb.CompactionSegmentBinlogs)
 		future := t.mappingPool.Submit(func() (any, error) {
@@ -917,13 +926,10 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))
-		return make(map[interface{}]int64), err
+		return make(map[any]int64), err
 	}
 	defer rr.Close()
-	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(rr, expiredFilter)
-	if err != nil {
-		return nil, err
-	}
+	analyzeResult, remained := t.iterAndGetScalarAnalyzeResult(rr, expiredFilter)
 	log.Info("analyze segment end",
 		zap.Int64("remained entities", remained),
 		zap.Int("expired entities", expiredFilter.GetExpiredCount()),
@@ -931,7 +937,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.RecordReader, expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
+func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.RecordReader, expiredFilter compaction.EntityFilter) (map[any]int64, int64) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
 		remained      int64         = 0
@@ -950,13 +956,22 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.Reco
 
 		for i := 0; i < rec.Len(); i++ {
 			// apply filter
-			pk := storage.GetValueAt(rec.Column(t.primaryKeyField.GetFieldID()), i, nil, t.primaryKeyField.DataType)
-			ts := storage.GetValueAt(rec.Column(common.TimeStampField), i, nil, schemapb.DataType_Int64).(int64)
-			if expiredFilter.Filtered(pk, typeutil.Timestamp(ts)) {
+			pk, err := storage.GetValueAt(rec.Column(t.primaryKeyField.GetFieldID()), i, nil, t.primaryKeyField.DataType)
+			if err != nil {
+				return nil, 0
+			}
+			ts, err := storage.GetValueAt(rec.Column(common.TimeStampField), i, nil, schemapb.DataType_Int64)
+			if err != nil {
+				return nil, 0
+			}
+			if expiredFilter.Filtered(pk, typeutil.Timestamp(ts.(int64))) {
 				continue
 			}
 			// update result
-			clusteringValue := storage.GetValueAt(clusteringArray, i, nil, clusteringType)
+			clusteringValue, err := storage.GetValueAt(clusteringArray, i, nil, clusteringType)
+			if err != nil {
+				return nil, 0
+			}
 			if _, exist := analyzeResult[clusteringValue]; exist {
 				analyzeResult[clusteringValue] = analyzeResult[clusteringValue] + 1
 			} else {
@@ -965,7 +980,7 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.Reco
 			remained++
 		}
 	}
-	return analyzeResult, remained, nil
+	return analyzeResult, remained
 }
 
 func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {

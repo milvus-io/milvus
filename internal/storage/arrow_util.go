@@ -29,20 +29,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-func GetValueAt(a arrow.Array, idx int, defaultValue *schemapb.ValueField, dataType schemapb.DataType) any {
+func GetValueAt(a arrow.Array, idx int, defaultValue *schemapb.ValueField, dataType schemapb.DataType) (any, error) {
 	serdeEntry, ok := serdeMap[dataType]
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("unsupported data type: %s", dataType)
 	}
 	value, ok := serdeEntry.deserialize(a, idx, true)
 	if !ok {
-		// FIXME: should throw error.
-		return defaultValue
+		return nil, fmt.Errorf("deserialize value failed, data type: %s", dataType)
 	}
-	if value == nil {
-		return defaultValue
-	}
-	return value
+	return value, nil
 }
 
 func appendValueAt(builder array.Builder, a arrow.Array, idx int, defaultValue *schemapb.ValueField) (uint64, error) {

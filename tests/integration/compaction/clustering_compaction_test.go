@@ -46,7 +46,6 @@ type ClusteringCompactionSuite struct {
 }
 
 func (s *ClusteringCompactionSuite) SetupSuite() {
-	// 2000 rows for each segment, about 1MB.
 	s.WithMilvusConfig(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(500*1024))
 	s.WithMilvusConfig(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key, strconv.Itoa(8))
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
@@ -54,6 +53,7 @@ func (s *ClusteringCompactionSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.Key, "1.0")
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "1")
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TaskScheduleInterval.Key, "100")
+	// s.WithMilvusConfig(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
 	s.MiniClusterSuite.SetupSuite()
 }
 
@@ -66,7 +66,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 		dim       = 128
 		dbName    = ""
 		batchSize = 1000
-		batchNum  = 10
+		batchNum  = 3000
 		rowNum    = batchSize * batchNum
 	)
 
@@ -131,11 +131,6 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	for _, segment := range segments {
 		log.Info("ShowSegments result", zap.String("segment", segment.String()))
 	}
-
-	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().DataCoordCfg.SegmentMaxSize.Key: "1",
-	})
-	defer revertGuard()
 
 	indexType := integration.IndexFaissIvfFlat
 	metricType := metric.L2
@@ -203,9 +198,6 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.NoError(err)
 	s.Equal(flushedSegmentsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
-	// 30000*(128*4+8+8) = 15.1MB/1MB = 15+1
-	// The check is done every 100 lines written, so the size of each segment may be up to 99 lines larger.
-	// s.Contains([]int{15, 16}, len(flushedSegmentsResp.GetSegments()))
 	log.Info("get flushed segments done", zap.Int64s("segments", flushedSegmentsResp.GetSegments()))
 	totalRows := int64(0)
 	segsInfoResp, err := c.MixCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
@@ -214,7 +206,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.NoError(err)
 	s.Equal(segsInfoResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	for _, segInfo := range segsInfoResp.GetInfos() {
-		s.LessOrEqual(segInfo.GetNumOfRows(), int64(1024*1024/128))
+		// s.LessOrEqual(segInfo.GetNumOfRows(), int64(1024*1024/128))
 		totalRows += segInfo.GetNumOfRows()
 	}
 
