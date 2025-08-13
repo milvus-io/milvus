@@ -32,9 +32,11 @@ if "%1"=="restart" (
     call :stop
 ) else if "%1"=="delete" (
     call :delete
+) else if "%1"=="upgrade" (
+    call :upgrade
 ) else (
     echo Unknown command.
-    echo Please use standalone_embed.bat restart^|start^|stop^|delete
+    echo Please use standalone_embed.bat restart^|start^|stop^|upgrade^|delete
     exit /b 1
 )
 goto :eof
@@ -80,7 +82,7 @@ docker run -d ^
     --health-start-period=90s ^
     --health-timeout=20s ^
     --health-retries=3 ^
-    milvusdb/milvus:v2.6.0 ^
+    milvusdb/milvus:v2.6.0^
     milvus run standalone >nul
 if %errorlevel% neq 0 (
     echo Failed to start Milvus container.
@@ -158,6 +160,31 @@ if /i "%check%"=="y" (
 )
 goto :eof
 
-
+:upgrade
+set /p check="Please confirm if you'd like to proceed with the upgrade. The default will be to the latest version. Confirm with 'y' for yes or 'n' for no. > "
+if /i "%check%"=="y" (
+    for /f "tokens=*" %%A in ('docker ps -a ^| findstr "milvus-standalone"') do set container_exists=1
+    if defined container_exists (
+        call :stop
+        call :delete_container
+    )
+    
+    powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/milvus-io/milvus/master/scripts/standalone_embed.bat' -OutFile 'standalone_embed_latest.bat'" >nul
+    if %errorlevel% neq 0 (
+        echo Failed to download latest script.
+        exit /b 1
+    )
+    
+    call standalone_embed_latest.bat start >nul
+    if %errorlevel% neq 0 (
+        echo Upgrade failed.
+        exit /b 1
+    )
+    echo Upgrade successfully.
+) else (
+    echo Exit upgrade
+    exit /b 0
+)
+goto :eof
 
 :EOF
