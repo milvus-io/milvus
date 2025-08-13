@@ -191,8 +191,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
         }
     }
 
-    auto [uids, seg_offsets] =
-        segment_->search_ids(*id_array, query_timestamp_);
+    auto seg_offsets = segment_->search_ids(*id_array, query_timestamp_);
     cached_bits_.resize(active_count_, false);
     for (const auto& offset : seg_offsets) {
         auto _offset = (int64_t)offset.get();
@@ -540,8 +539,7 @@ PhyTermFilterExpr::ExecJsonInVariableByKeyIndex() {
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<ValueType>>(expr_->vals_);
         if constexpr (std::is_same_v<GetType, double>) {
-            arg_set_float_ =
-                std::make_shared<SetElement<float>>(expr_->vals_);
+            arg_set_float_ = std::make_shared<SetElement<float>>(expr_->vals_);
         }
         arg_inited_ = true;
     }

@@ -961,3 +961,49 @@ func (kc *Catalog) DropStatsTask(ctx context.Context, taskID typeutil.UniqueID) 
 	key := buildStatsTaskKey(taskID)
 	return kc.MetaKv.Remove(ctx, key)
 }
+
+func (kc *Catalog) SaveFileResource(ctx context.Context, resource *model.FileResource) error {
+	k := BuildFileResourceKey(resource.ID)
+	v, err := proto.Marshal(resource.Marshal())
+	if err != nil {
+		log.Ctx(ctx).Error("failed to marshal resource info", zap.Error(err))
+		return err
+	}
+	if err = kc.MetaKv.Save(ctx, k, string(v)); err != nil {
+		log.Ctx(ctx).Warn("fail to save resource info", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) RemoveFileResource(ctx context.Context, resourceID int64) error {
+	k := BuildFileResourceKey(resourceID)
+	if err := kc.MetaKv.Remove(ctx, k); err != nil {
+		log.Ctx(ctx).Warn("fail to remove resource info", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListFileResource(ctx context.Context) ([]*model.FileResource, error) {
+	_, values, err := kc.MetaKv.LoadWithPrefix(ctx, FileResourceMetaPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	infos := make([]*model.FileResource, 0, len(values))
+	for _, v := range values {
+		info := &datapb.FileResourceInfo{}
+		err := proto.Unmarshal([]byte(v), info)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, model.UnmarshalFileResourceInfo(info))
+	}
+
+	return infos, nil
+}
+
+func BuildFileResourceKey(resourceID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", FileResourceMetaPrefix, resourceID)
+}

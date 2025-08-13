@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
-const fileReaderBufferSize = int64(32 * 1024 * 1024)
+const totalReadBufferSize = int64(64 * 1024 * 1024)
 
 type reader struct {
 	ctx    context.Context
@@ -58,8 +58,14 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	if err != nil {
 		return nil, err
 	}
+
+	// Each ColumnReader consumes ReaderProperties.BufferSize memory independently.
+	// Therefore, the bufferSize should be divided by the number of columns
+	// to ensure total memory usage stays within the intended limit.
+	columnReaderBufferSize := totalReadBufferSize / int64(len(schema.GetFields()))
+
 	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
-		BufferSize:            fileReaderBufferSize,
+		BufferSize:            columnReaderBufferSize,
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {

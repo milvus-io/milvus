@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -24,10 +25,14 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
+
+type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue string) error
 
 type ParamItem struct {
 	Key          string // which should be named as "A.B.C"
@@ -45,6 +50,9 @@ type ParamItem struct {
 
 	// for unittest.
 	tempValue atomic.Pointer[string]
+
+	callback  ParamChangeCallback
+	lastValue atomic.Pointer[string]
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
@@ -52,6 +60,58 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
 	}
+
+	currentValue := pi.GetValue()
+	pi.lastValue.Store(&currentValue)
+
+	if manager != nil && manager.Dispatcher != nil {
+		handler := config.NewHandler(pi.Key, func(event *config.Event) {
+			if event.Key == strings.ToLower(pi.Key) && event.EventType == config.UpdateType {
+				pi.handleConfigChange(event)
+			}
+		})
+		manager.Dispatcher.Register(pi.Key, handler)
+	}
+}
+
+func (pi *ParamItem) RegisterCallback(callback ParamChangeCallback) {
+	pi.callback = callback
+}
+
+func (pi *ParamItem) UnregisterCallback() {
+	pi.callback = nil
+}
+
+func (pi *ParamItem) handleConfigChange(event *config.Event) {
+	if pi.callback == nil {
+		return
+	}
+
+	oldValue := ""
+	if lastVal := pi.lastValue.Load(); lastVal != nil {
+		oldValue = *lastVal
+	}
+
+	newValue := event.Value
+
+	if oldValue == newValue {
+		return
+	}
+
+	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
+		log.Error("param change callback failed",
+			zap.String("key", pi.Key),
+			zap.String("oldValue", oldValue),
+			zap.String("newValue", newValue),
+			zap.Error(err))
+	} else {
+		log.Info("param value changed",
+			zap.String("key", pi.Key),
+			zap.String("oldValue", oldValue),
+			zap.String("newValue", newValue))
+	}
+
+	pi.lastValue.Store(&newValue)
 }
 
 // Get original value with error

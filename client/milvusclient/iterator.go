@@ -196,6 +196,10 @@ func newSearchIteratorV1(_ *Client) (*searchIteratorV1, error) {
 //
 // If the server supports search iterator V2, it creates a search iterator V2.
 func (c *Client) SearchIterator(ctx context.Context, option SearchIteratorOption, callOptions ...grpc.CallOption) (SearchIterator, error) {
+	if err := option.ValidateParams(); err != nil {
+		return nil, err
+	}
+
 	iter, err := newSearchIteratorV2(ctx, c, option)
 	if err == nil {
 		return iter, nil
