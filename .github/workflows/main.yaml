@@ -107,6 +107,7 @@ jobs:
       - name: Fix cache directory permissions
         run: |
           echo "fix permission..."
+          du .docker/amd64-ubuntu22.04-conan -sh
           find .docker/amd64-ubuntu22.04-conan -type d -exec chmod 755 {} \;
           find .docker/amd64-ubuntu22.04-conan -type f -exec chmod 644 {} \;
           find .docker/amd64-ubuntu22.04-conan -name "*.sh" -exec chmod +x {} \;
