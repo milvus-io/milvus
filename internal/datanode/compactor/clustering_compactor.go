@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -110,30 +109,47 @@ type ClusterBuffer struct {
 	writer                  *MultiSegmentWriter
 	clusteringKeyFieldStats *storage.FieldStats
 
-	lock sync.RWMutex
+	builder *storage.RecordBuilder
+	lock    sync.RWMutex
 }
 
-func (b *ClusterBuffer) Write(v *storage.Value) error {
-	b.lock.Lock()
-	defer b.lock.Unlock()
-	return b.writer.WriteValue(v)
+func (b *ClusterBuffer) flush() error {
+	if b.builder.GetRowNum() > 0 {
+		rec := b.builder.Build()
+		defer rec.Release()
+		return b.writer.Write(rec)
+	}
+	return nil
 }
 
-func (b *ClusterBuffer) Flush() error {
+func (b *ClusterBuffer) Write(a storage.Record, pos int) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
-	return b.writer.Flush()
+	err := b.builder.Append(a, pos, pos+1)
+	if err != nil {
+		return err
+	}
+	if b.builder.GetRowNum() >= b.writer.batchSize {
+		return b.flush()
+	}
+	return nil
 }
 
 func (b *ClusterBuffer) FlushChunk() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if err := b.flush(); err != nil {
+		return err
+	}
 	return b.writer.FlushChunk()
 }
 
 func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if err := b.flush(); err != nil {
+		return err
+	}
 	return b.writer.Close()
 }
 
@@ -153,6 +169,7 @@ func newClusterBuffer(id int, writer *MultiSegmentWriter, clusteringKeyFieldStat
 	return &ClusterBuffer{
 		id:                      id,
 		writer:                  writer,
+		builder:                 storage.NewRecordBuilder(writer.schema),
 		clusteringKeyFieldStats: clusteringKeyFieldStats,
 		lock:                    sync.RWMutex{},
 	}
@@ -329,7 +346,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		return err
 	}
 	buckets, containsNull := t.splitClusterByScalarValue(analyzeDict)
-	scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
+	scalarToClusterBufferMap := make(map[any]*ClusterBuffer, 0)
 	for id, bucket := range buckets {
 		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
 		if err != nil {
@@ -623,7 +640,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 
 	offset := int64(-1)
 	for {
-		r, err := rr.Next()
+		rec, err := rr.Next()
 		if err != nil {
 			if err == sio.EOF {
 				break
@@ -632,54 +649,43 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		vs := make([]*storage.Value, r.Len())
-		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, false); err != nil {
-			log.Warn("compact wrong, failed to deserialize data", zap.Error(err))
-			return err
-		}
+		pkArr := rec.Column(t.primaryKeyField.FieldID)
+		tsArr := rec.Column(common.TimeStampField)
+		clusteringKeyArr := rec.Column(t.clusteringKeyField.FieldID)
 
-		for _, v := range vs {
+		for i := 0; i < rec.Len(); i++ {
 			offset++
+			pk := storage.GetValueAt(pkArr, i, nil, t.primaryKeyField.DataType)
+			ts := storage.GetValueAt(tsArr, i, nil, schemapb.DataType_Int64).(int64)
 
-			if entityFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
+			if entityFilter.Filtered(pk, typeutil.Timestamp(ts)) {
 				continue
 			}
 
-			row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
-			if !ok {
-				log.Warn("convert interface to map wrong")
-				return errors.New("unexpected error")
-			}
-
-			clusteringKey := row[t.clusteringKeyField.FieldID]
+			clusteringKey := storage.GetValueAt(clusteringKeyArr, i, nil, t.clusteringKeyField.DataType)
 			var clusterBuffer *ClusterBuffer
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
 			} else {
 				clusterBuffer = t.keyToBufferFunc(clusteringKey)
 			}
-			if err := clusterBuffer.Write(v); err != nil {
+			if err := clusterBuffer.Write(rec, i); err != nil {
 				return err
 			}
 			t.writtenRowNum.Inc()
 			remained++
-
-			if (remained+1)%100 == 0 {
-				currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
-				if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() {
-					// reach flushBinlog trigger threshold
-					log.Debug("largest buffer need to flush",
-						zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
-					if err := t.flushLargestBuffers(ctx); err != nil {
-						return err
-					}
-				}
-			}
 		}
 
-		// all cluster buffers are flushed for a certain record, since the values read from the same record are references instead of copies
-		for _, buffer := range t.clusterBuffers {
-			buffer.Flush()
+		if (remained+1)%100 == 0 {
+			currentBufferTotalMemorySize := t.getBufferTotalUsedMemorySize()
+			if currentBufferTotalMemorySize > t.getMemoryBufferHighWatermark() {
+				// reach flushBinlog trigger threshold
+				log.Debug("largest buffer need to flush",
+					zap.Int64("currentBufferTotalMemorySize", currentBufferTotalMemorySize))
+				if err := t.flushLargestBuffers(ctx); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -858,7 +864,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
-) (map[interface{}]int64, error) {
+) (map[any]int64, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.GetPlanID()), zap.Int64("segmentID", segment.GetSegmentID()))
@@ -884,9 +890,6 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 
 	requiredFields := typeutil.NewSet[int64]()
 	requiredFields.Insert(0, 1, t.primaryKeyField.GetFieldID(), t.clusteringKeyField.GetFieldID())
-	selectedFields := lo.Filter(t.plan.GetSchema().GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
-		return requiredFields.Contain(field.GetFieldID())
-	})
 
 	switch segment.GetStorageVersion() {
 	case storage.StorageV1:
@@ -916,12 +919,8 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		log.Warn("new binlog record reader wrong", zap.Error(err))
 		return make(map[interface{}]int64), err
 	}
-
-	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializerWithSelectedFields(r, v, selectedFields, true)
-	})
-	defer pkIter.Close()
-	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(pkIter, expiredFilter)
+	defer rr.Close()
+	analyzeResult, remained, err := t.iterAndGetScalarAnalyzeResult(rr, expiredFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -932,41 +931,39 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
+func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(rr storage.RecordReader, expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
-		remained      int64                 = 0
-		analyzeResult map[interface{}]int64 = make(map[interface{}]int64, 0)
+		remained      int64         = 0
+		analyzeResult map[any]int64 = make(map[any]int64, 0)
 	)
+
 	for {
-		v, err := pkIter.NextValue()
+		rec, err := rr.Next()
 		if err != nil {
 			if err == sio.EOF {
-				pkIter.Close()
 				break
-			} else {
-				log.Warn("compact wrong, failed to iter through data", zap.Error(err))
-				return nil, 0, err
 			}
 		}
+		clusteringArray := rec.Column(t.clusteringKeyField.GetFieldID())
+		clusteringType := t.clusteringKeyField.DataType
 
-		// Filtering expired entity
-		if expiredFilter.Filtered((*v).PK.GetValue(), uint64((*v).Timestamp)) {
-			continue
+		for i := 0; i < rec.Len(); i++ {
+			// apply filter
+			pk := storage.GetValueAt(rec.Column(t.primaryKeyField.GetFieldID()), i, nil, t.primaryKeyField.DataType)
+			ts := storage.GetValueAt(rec.Column(common.TimeStampField), i, nil, schemapb.DataType_Int64).(int64)
+			if expiredFilter.Filtered(pk, typeutil.Timestamp(ts)) {
+				continue
+			}
+			// update result
+			clusteringValue := storage.GetValueAt(clusteringArray, i, nil, clusteringType)
+			if _, exist := analyzeResult[clusteringValue]; exist {
+				analyzeResult[clusteringValue] = analyzeResult[clusteringValue] + 1
+			} else {
+				analyzeResult[clusteringValue] = 1
+			}
+			remained++
 		}
-
-		// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
-		row, ok := (*v).Value.(map[typeutil.UniqueID]interface{})
-		if !ok {
-			return nil, 0, errors.New("unexpected error")
-		}
-		key := row[t.clusteringKeyField.GetFieldID()]
-		if _, exist := analyzeResult[key]; exist {
-			analyzeResult[key] = analyzeResult[key] + 1
-		} else {
-			analyzeResult[key] = 1
-		}
-		remained++
 	}
 	return analyzeResult, remained, nil
 }

@@ -63,9 +63,11 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	c := s.Cluster
 
 	const (
-		dim    = 128
-		dbName = ""
-		rowNum = 30000
+		dim       = 128
+		dbName    = ""
+		batchSize = 1000
+		batchNum  = 10
+		rowNum    = batchSize * batchNum
 	)
 
 	collectionName := "TestClusteringCompaction" + funcutil.GenRandomStr()
@@ -94,18 +96,20 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
-	clusteringColumn := integration.NewInt64SameFieldData("clustering", rowNum, 100)
-	hashKeys := integration.GenerateHashKeys(rowNum)
-	insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{clusteringColumn, fVecColumn},
-		HashKeys:       hashKeys,
-		NumRows:        uint32(rowNum),
-	})
-	s.NoError(err)
-	s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	for range batchNum {
+		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, batchSize, dim)
+		clusteringColumn := integration.NewInt64SameFieldData("clustering", batchSize, 100)
+		hashKeys := integration.GenerateHashKeys(batchSize)
+		insertResult, err := c.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
+			DbName:         dbName,
+			CollectionName: collectionName,
+			FieldsData:     []*schemapb.FieldData{clusteringColumn, fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(batchSize),
+		})
+		s.NoError(err)
+		s.Equal(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
+	}
 
 	// flush
 	flushResp, err := c.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
@@ -140,7 +144,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	// create index
 	createIndexStatus, err := c.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      fVecColumn.FieldName,
+		FieldName:      integration.FloatVecField,
 		IndexName:      "_default",
 		ExtraParams:    integration.ConstructIndexParam(dim, indexType, metricType),
 	})
@@ -150,7 +154,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
+	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// load
 	loadStatus, err := c.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -226,7 +230,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 
 	params := integration.GetSearchParams(indexType, metricType)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		fVecColumn.FieldName, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
+		integration.FloatVecField, vecType, nil, metricType, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.MilvusClient.Search(ctx, searchReq)
 	err = merr.CheckRPCCall(searchResult, err)
