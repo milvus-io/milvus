@@ -43,13 +43,39 @@ func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
 	}
 
 	leading := pattern[0] == '%'
-	trailing := pattern[len(pattern)-1] == '%'
+	// trailing percent must not be escaped: number of consecutive '\\' before it must be even
+	isUnescapedTrailingPercent := func(s string) bool {
+		if s[len(s)-1] != '%' {
+			return false
+		}
+		cnt := 0
+		for i := len(s) - 2; i >= 0 && s[i] == '\\'; i-- {
+			cnt++
+		}
+		return cnt%2 == 0
+	}
+	trailing := isUnescapedTrailingPercent(pattern)
+
+	trimRight := func(s string) string {
+		if s[len(s)-1] != '%' {
+			return s
+		}
+		for i := len(s) - 2; i >= 0; i-- {
+			if s[i] != '%' {
+				if isUnescapedTrailingPercent(s[:i+2]) {
+					return s[:i+1]
+				}
+				return s[:i+2]
+			}
+		}
+		return ""
+	}
 
 	switch {
 	case leading && trailing:
 		inner := pattern[1 : len(pattern)-1]
 		trimmed := strings.TrimLeft(inner, "%")
-		trimmed = strings.TrimRight(trimmed, "%")
+		trimmed = trimRight(trimmed)
 		if subStr, valid := process(trimmed); valid {
 			// if subStr is empty, it means the pattern is all %,
 			// return prefix match and empty operand, means all match
@@ -64,7 +90,7 @@ func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
 			return planpb.OpType_PostfixMatch, subStr, true
 		}
 	case trailing:
-		trimmed := strings.TrimRight(pattern[:len(pattern)-1], "%")
+		trimmed := trimRight(pattern[:len(pattern)-1])
 		if subStr, valid := process(trimmed); valid {
 			return planpb.OpType_PrefixMatch, subStr, true
 		}
