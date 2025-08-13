@@ -1,3 +1,7 @@
+##################################################################
+# All test cases in this file have been migrated to milvus_client#
+##################################################################
+'''
 import pytest
 import random
 
@@ -43,9 +47,6 @@ class TestAliasParamsInvalid(TestcaseBase):
                                        check_task=CheckTasks.err_res,
                                        check_items=error)
 
-##########################################################
-# class TestAliasOperation() has been migrated to milvus_client
-##########################################################
 class TestAliasOperation(TestcaseBase):
     """ Test cases of alias interface operations"""
 
@@ -279,7 +280,9 @@ class TestAliasOperation(TestcaseBase):
         pro = collection_alias.describe().get("properties")
         assert pro["mmap.enabled"] == 'False'
 
-
+##########################################################
+# class TestAliasOperationInvalid() has been migrated to milvus_client
+##########################################################
 class TestAliasOperationInvalid(TestcaseBase):
     """ Negative test cases of alias interface operations"""
 
@@ -483,3 +486,4 @@ class TestAliasOperationInvalid(TestcaseBase):
                  ct.err_msg: f"cannot rename collection to an existing alias: {alias_name}"}
         self.utility_wrap.rename_collection(collection_w.name, alias_name,
                                             check_task=CheckTasks.err_res, check_items=error)
+'''
