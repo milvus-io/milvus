@@ -1047,15 +1047,19 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	if field == nil {
 		return merr.WrapErrFieldNotFound(fieldName)
 	}
-	if typeutil.IsVectorType(field.GetDataType()) {
-		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %s is a vector field, cannot drop index", fieldName))
-	}
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, dit.GetDbName(), dit.CollectionName)
 	if err != nil {
 		return err
 	}
 	dit.collectionID = collID
+	loaded, err := isCollectionLoaded(ctx, dit.mixCoord, collID)
+	if err != nil {
+		return err
+	}
+	if loaded && typeutil.IsVectorType(field.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("field %s is a vector field, cannot drop index", fieldName))
+	}
 
 	return nil
 }
