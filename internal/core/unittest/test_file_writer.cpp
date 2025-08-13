@@ -13,7 +13,9 @@
 #include <gmock/gmock.h>
 #include <filesystem>
 #include <fstream>
-#include <random>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <thread>
 
 #include "storage/FileWriter.h"
@@ -32,6 +34,14 @@ class FileWriterTest : public testing::Test {
     void
     TearDown() override {
         std::filesystem::remove_all(test_dir_);
+        // Reset rate limiter to disabled ratios to avoid test interference
+        auto& limiter = milvus::storage::io::WriteRateLimiter::GetInstance();
+        limiter.Configure(/*refill_period_us*/ 100000,
+                          /*avg_bps*/ 8192 * 10,
+                          /*max_burst_bps*/ 8192 * 40,
+                          /*high*/ -1,
+                          /*middle*/ -1,
+                          /*low*/ -1);
     }
 
     std::filesystem::path test_dir_;
@@ -250,11 +260,9 @@ TEST_F(FileWriterTest, MemoryAddressAlignedDataWriteWithDirectIO) {
     std::string filename = (test_dir_ / "aligned_write.txt").string();
     FileWriter writer(filename);
 
-    // Create 4KB aligned data using posix_memalign
-    void* aligned_data = nullptr;
-    if (posix_memalign(&aligned_data, 4096, kBufferSize) != 0) {
-        throw std::runtime_error("Failed to allocate aligned memory");
-    }
+    // Create 4KB aligned data using aligned_alloc
+    void* aligned_data = std::aligned_alloc(4096, kBufferSize);
+    ASSERT_NE(aligned_data, nullptr);
     std::generate(static_cast<char*>(aligned_data),
                   static_cast<char*>(aligned_data) + kBufferSize,
                   std::rand);
@@ -367,6 +375,98 @@ TEST_F(FileWriterTest, ExistingFileWithDirectIO) {
     EXPECT_EQ(content, new_data);
 }
 
+// Test rate limiter basic behavior: alignment and refill period
+TEST_F(FileWriterTest, RateLimiterAlignmentAndPeriods) {
+    using milvus::storage::io::WriteRateLimiter;
+    using milvus::storage::io::Priority;
+
+    // Configure: 100ms period, 8KB per period avg, 32KB burst, ratios enabled
+    auto& limiter = WriteRateLimiter::GetInstance();
+    limiter.Configure(/*refill_period_us*/ 100000,
+                      /*avg_bps*/ 8192 * 10,  // 8KB per 100ms
+                      /*max_burst_bps*/ 8192 * 40,  // 32KB burst
+                      /*high*/ 1,
+                      /*middle*/ 1,
+                      /*low*/ 1);
+
+    // Wait one period to accumulate credits
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+
+    // Request 8KB with 4KB alignment → expect a multiple of 4KB, <= 8KB
+    size_t allowed = limiter.Acquire(/*bytes*/ 8192,
+                                     /*alignment*/ 4096,
+                                     /*priority*/ Priority::MIDDLE);
+    EXPECT_GT(allowed, 0u);
+    EXPECT_LE(allowed, static_cast<size_t>(8192));
+    EXPECT_EQ(allowed % 4096, 0u);
+}
+
+// Test that buffered IO path writes correct data under throttling (no overlap)
+TEST_F(FileWriterTest, FileWriterBufferedRateLimitedWriteCorrectness) {
+    using milvus::storage::io::WriteRateLimiter;
+    using milvus::storage::io::Priority;
+
+    FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
+
+    // Configure limiter to force multiple internal chunks
+    auto& limiter = WriteRateLimiter::GetInstance();
+    limiter.Configure(/*refill_period_us*/ 50000,    // 50ms
+                      /*avg_bps*/ 4096 * 20,        // 4KB per 50ms
+                      /*max_burst_bps*/ 4096 * 80,  // 16KB burst
+                      /*high*/ 1,
+                      /*middle*/ 1,
+                      /*low*/ 1);
+
+    // Prepare data larger than a few chunks
+    const size_t total_size = 12 * 4096;
+    std::vector<char> data(total_size);
+    std::generate(data.begin(), data.end(), std::rand);
+
+    std::string filename = (test_dir_ / "buffered_rate_limited.txt").string();
+    {
+        FileWriter writer(filename, Priority::MIDDLE);
+        writer.Write(data.data(), data.size());
+        writer.Finish();
+    }
+
+    // Verify file contents match exactly
+    std::ifstream file(filename, std::ios::binary);
+    std::vector<char> read_data((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+    EXPECT_EQ(read_data.size(), data.size());
+    EXPECT_EQ(read_data, data);
+}
+
+// Test that priority ratio impacts allowance (HIGH > MIDDLE)
+TEST_F(FileWriterTest, RateLimiterPriorityRatioEffect) {
+    using milvus::storage::io::WriteRateLimiter;
+    using milvus::storage::io::Priority;
+
+    auto& limiter = WriteRateLimiter::GetInstance();
+    // 100ms period, 8KB per period, 32KB burst
+    limiter.Configure(/*refill_period_us*/ 100000,
+                      /*avg_bps*/ 8192 * 10,
+                      /*max_burst_bps*/ 8192 * 40,
+                      /*high*/ 2,
+                      /*middle*/ 1,
+                      /*low*/ 1);
+
+    // Accumulate two periods of credits
+    std::this_thread::sleep_for(std::chrono::milliseconds(220));
+
+    // Request with same bytes and alignment; HIGH should allow more than MIDDLE
+    size_t req = 8 * 4096;  // divisible by 4KB
+    size_t mid = limiter.Acquire(req, 4096, Priority::MIDDLE);
+
+    // Reset time/credits by waiting again for comparable conditions
+    std::this_thread::sleep_for(std::chrono::milliseconds(220));
+    size_t hig = limiter.Acquire(req, 4096, Priority::HIGH);
+
+    EXPECT_GT(hig, mid);
+    EXPECT_EQ(mid % 4096, 0u);
+    EXPECT_EQ(hig % 4096, 0u);
+}
+
 // Test config FileWriterConfig with very small buffer size
 TEST_F(FileWriterTest, SmallBufferSizeWriteWithDirectIO) {
     const size_t small_buffer_size = 64;  // 64 bytes
@@ -428,11 +528,9 @@ TEST_F(FileWriterTest, HalfAlignedDataWriteWithDirectIO) {
     std::string filename = (test_dir_ / "half_aligned_buffer.txt").string();
     FileWriter writer(filename);
 
-    char* aligned_buffer = nullptr;
-    int ret = posix_memalign(reinterpret_cast<void**>(&aligned_buffer),
-                             kBufferSize,
-                             aligned_buffer_size);
-    ASSERT_EQ(ret, 0);
+    char* aligned_buffer =
+        static_cast<char*>(std::aligned_alloc(kBufferSize, aligned_buffer_size));
+    ASSERT_NE(aligned_buffer, nullptr);
 
     const size_t first_half_size = kBufferSize / 2;
     const size_t rest_size = aligned_buffer_size - first_half_size;
@@ -485,8 +583,9 @@ TEST_F(FileWriterTest, VeryLargeFileWriteWithDirectIO) {
 
     const size_t large_size = 100 * 1024 * 1024;  // 100MB
     const size_t alignment = 4096;                // 4KB alignment
-    char* aligned_data = nullptr;
-    ASSERT_EQ(posix_memalign((void**)&aligned_data, alignment, large_size), 0);
+    char* aligned_data =
+        static_cast<char*>(std::aligned_alloc(alignment, large_size));
+    ASSERT_NE(aligned_data, nullptr);
     std::generate(aligned_data, aligned_data + large_size, std::rand);
 
     writer.Write(aligned_data, large_size);

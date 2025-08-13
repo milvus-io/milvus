@@ -196,7 +196,8 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto len = index->size;
 
     {
-        auto file_writer = storage::FileWriter(file_name);
+        auto file_writer =
+            storage::FileWriter(file_name);
         file_writer.Write(index->data.get(), len);
         file_writer.Finish();
     }
