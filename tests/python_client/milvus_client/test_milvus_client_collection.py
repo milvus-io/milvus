@@ -95,24 +95,55 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("dim", [ct.min_dim - 1, ct.max_dim + 1])
-    def test_milvus_client_collection_invalid_dim(self, dim):
+    @pytest.mark.parametrize("invalid_dim", ct.invalid_dims)
+    def test_milvus_client_collection_vector_invalid_dim_default_schema(self, invalid_dim):
         """
-        target: test fast create collection name with invalid dim
-        method: create collection name with invalid dim
-        expected: raise exception
+        target: Test collection with invalid vector dimension
+        method: Create collection with vector field having invalid dimension
+        expected: Raise exception with appropriate error message
         """
         client = self._client()
-        collection_name = cf.gen_unique_str(prefix)
-        # 1. create collection
-        error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim} of field {default_vector_field_name}. "
-                                                 f"float vector dimension should be in range 2 ~ 32768"}
-        if dim < ct.min_dim:
-            error = {ct.err_code: 65535, ct.err_msg: f"invalid dimension: {dim}. "
-                                                     f"should be in range 2 ~ 32768"}
-        self.create_collection(client, collection_name, dim,
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Determine expected error based on invalid dimension type
+        if isinstance(invalid_dim, int) and (invalid_dim > 32768):
+            expected_msg = f"invalid dimension: {invalid_dim} of field {default_vector_field_name}. float vector dimension should be in range 2 ~ 32768"
+        elif isinstance(invalid_dim, int) and (invalid_dim < 2):  # range errors: 1, -32
+            expected_msg = f"invalid dimension: {invalid_dim}. should be in range 2 ~ 32768"
+        elif isinstance(invalid_dim, str):  # type conversion errors: "vii", "十六"
+            expected_msg = f"wrong type of argument [dimension], expected type: [int], got type: [str]"
+        elif isinstance(invalid_dim, float):  # type conversion errors: 32.1
+            expected_msg = f"wrong type of argument [dimension], expected type: [int], got type: [float]"
+        # Try to create collection and expect error
+        error = {ct.err_code: 65535, ct.err_msg: expected_msg}
+        self.create_collection(client, collection_name, invalid_dim,
                                check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_dim", ct.invalid_dims)
+    def test_milvus_client_collection_vector_invalid_dim_fields(self, invalid_dim):
+        """
+        target: Test collection with invalid vector dimension
+        method: Create collection with vector field having invalid dimension
+        expected: Raise exception with appropriate error message
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with invalid vector dimension
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        # Determine expected error based on invalid dimension type
+        if isinstance(invalid_dim, int) and (invalid_dim > 32768):
+            expected_msg = f"invalid dimension: {invalid_dim} of field vector. float vector dimension should be in range 2 ~ 32768"
+        elif isinstance(invalid_dim, int) and (invalid_dim < 2):  # range errors: 1, -32
+            expected_msg = f"invalid dimension: {invalid_dim}. should be in range 2 ~ 32768"
+        elif isinstance(invalid_dim, (float, str)):  # type conversion errors: 32.1, "vii", "十六"
+            expected_msg = f'strconv.ParseInt: parsing "{invalid_dim}": invalid syntax'
+        # Add vector field with invalid dimension
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=invalid_dim)
+        # Try to create collection and expect error
+        error = {ct.err_code: 65535, ct.err_msg: expected_msg}
+        self.create_collection(client, collection_name, schema=schema,
+                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="pymilvus issue 1554")
@@ -167,7 +198,6 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         expected: raise exception indicating auto_id must be bool
         """
         client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema and try to add field with auto_id=None - this should raise exception
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         error = {ct.err_code: 0, ct.err_msg: "Param auto_id must be bool type"}
@@ -277,6 +307,57 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "metric type not found or not supported, supported: [L2 IP COSINE HAMMING JACCARD]"}
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dtype", [6, [[]], "int64", 5.1, (), "", "a", DataType.UNKNOWN])
+    def test_milvus_client_collection_invalid_field_type(self, dtype):
+        """
+        target: test collection with invalid field type
+        method: try to add a field with an invalid DataType to schema
+        expected: raise exception
+        """
+        client = self._client()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Try to add a field with invalid dtype
+        error = {ct.err_code: 999, ct.err_msg: "Field dtype must be of DataType"}
+        # The add_field method should raise an error for invalid dtype
+        self.add_field(schema, field_name="test", datatype=dtype,
+                       check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("unsupported_field_type", [
+        DataType.NONE, DataType.BOOL, DataType.INT8, DataType.INT16, DataType.INT32, 
+        DataType.FLOAT, DataType.DOUBLE, DataType.STRING, DataType.JSON,
+        DataType.ARRAY, DataType.GEOMETRY,
+        DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, DataType.SPARSE_FLOAT_VECTOR,
+        DataType.INT8_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR
+    ])
+    def test_milvus_client_collection_unsupported_primary_field(self, unsupported_field_type):
+        """
+        target: test collection with unsupported primary field type
+        method: create collection with unsupported primary field type
+        expected: raise exception when creating collection
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with unsupported primary field type
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        if unsupported_field_type in [DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR, 
+                                     DataType.INT8_VECTOR, DataType.FLOAT16_VECTOR, 
+                                     DataType.BFLOAT16_VECTOR]:
+            schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True, dim=default_dim)
+        elif unsupported_field_type == DataType.SPARSE_FLOAT_VECTOR:
+            schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True)
+        elif unsupported_field_type == DataType.ARRAY:
+            schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True, 
+                           element_type=DataType.INT64, max_capacity=100)
+        else:
+            schema.add_field("unsupported_primary", unsupported_field_type, is_primary=True)
+        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Try to create collection - should fail here
+        error = {ct.err_code: 1100, ct.err_msg: "Primary key type must be DataType.INT64 or DataType.VARCHAR"}
+        self.create_collection(client, collection_name, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("keyword", [
@@ -432,6 +513,38 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema2,
                                check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_field", [[], 1, [1, "2", 3], (1,), {1: 1}])
+    def test_milvus_client_collection_non_string_primary_field(self, primary_field):
+        """
+        target: test collection with non-string primary_field
+        method: pass a non-string/non-int value as primary_field to schema creation
+        expected: raise exception
+        """
+        client = self._client()
+        # Test at schema creation level - create schema with invalid primary_field parameter
+        error = {ct.err_code: 999, ct.err_msg: "Param primary_field must be int or str type"}
+        # This should fail when creating schema with invalid primary_field type
+        self.create_schema(client, enable_dynamic_field=False, primary_field=primary_field,
+                          check_task=CheckTasks.err_res, check_items=error)
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("is_primary", [None, 2, "string"])
+    def test_milvus_client_collection_invalid_is_primary(self, is_primary):
+        """
+        target: test collection with invalid is_primary value
+        method: define a field with is_primary set to a non-bool value and attempt to create a collection
+        expected: raise exception indicating is_primary must be bool type
+        """
+        client = self._client()
+        # Create schema and attempt to add a field with invalid is_primary value
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        error = {ct.err_code: 999, ct.err_msg: "Param is_primary must be bool type"}
+        # Attempt to add a field with invalid is_primary value, expect error
+        self.add_field(schema, "id", DataType.INT64, is_primary=is_primary,
+                       check_task=CheckTasks.err_res, check_items=error)
+
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_dup_field(self):
@@ -502,13 +615,22 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with multiple primary key fields
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
-        schema.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
-        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
+        schema_1 = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema_1.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
+        schema_1.add_field("field2", DataType.INT64, is_primary=True, auto_id=False)  # Second primary key
+        schema_1.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
         # Try to create collection with multiple primary keys
         error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
-        self.create_collection(client, collection_name, schema=schema,
+        self.create_collection(client, collection_name, schema=schema_1,
+                               check_task=CheckTasks.err_res, check_items=error)
+
+        schema_2 = self.create_schema(client, enable_dynamic_field=False, primary_field="field2")[0]
+        schema_2.add_field("field1", DataType.INT64, is_primary=True, auto_id=False)
+        schema_2.add_field("field2", DataType.INT64)  # Second primary key
+        schema_2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=32)
+        # Try to create collection with multiple primary keys
+        error = {ct.err_code: 999, ct.err_msg: "Expected only one primary key field"}
+        self.create_collection(client, collection_name, schema=schema_2,
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -656,6 +778,40 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_collection_all_datatype_fields(self):
+        """
+        target: Test create collection with all supported dataType fields
+        method: Create collection with schema containing all supported dataTypes
+        expected: Collection created successfully with all field types
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add all supported scalar data types (excluding vectors and unsupported types)
+        supported_types = []
+        for k, v in DataType.__members__.items():
+            if (v and v != DataType.UNKNOWN and v != DataType.STRING 
+                and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR 
+                and v != DataType.BINARY_VECTOR and v != DataType.ARRAY 
+                and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR 
+                and v != DataType.INT8_VECTOR):
+                supported_types.append((k.lower(), v))
+        for field_name, data_type in supported_types:
+            if data_type != DataType.INT64:  # Skip INT64 as it's already added as primary key
+                schema.add_field(field_name, data_type)
+        
+        self.create_collection(client, collection_name, schema=schema)
+        expected_field_count = len([name for name in supported_types]) + 2
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "enable_dynamic_field": False,
+                                              "fields_num": expected_field_count})
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_self_creation_multiple_vectors(self):
         """
@@ -759,6 +915,157 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
             }
         )
         self.drop_collection(client, collection_name_b)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_collection_primary_in_schema(self):
+        """
+        target: test collection with primary field
+        method: specify primary field in CollectionSchema
+        expected: collection.primary_field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with primary field specified in CollectionSchema
+        schema = self.create_schema(client, enable_dynamic_field=False, primary_field=ct.default_int64_field_name)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        self.describe_collection(client, collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name,
+                         "id_name": ct.default_int64_field_name,
+                         "enable_dynamic_field": False}
+                         )
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_collection_primary_in_field(self):
+        """
+        target: test collection with primary field
+        method: specify primary field in FieldSchema
+        expected: collection.primary_field
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema and specify primary field in FieldSchema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field("float_field", DataType.FLOAT)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        self.describe_collection(client, collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name,
+                         "id_name": ct.default_int64_field_name,
+                         "enable_dynamic_field": False})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_milvus_client_collection_primary_field_consistency(self):
+        """
+        target: Test collection with both CollectionSchema and FieldSchema primary field specification
+        method: Specify primary field in CollectionSchema and also set is_primary=True in FieldSchema
+        expected: The collection's primary field is set correctly and matches the expected field name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with primary field specified in CollectionSchema
+        schema = self.create_schema(client, enable_dynamic_field=False, primary_field="primary_field")[0]
+        schema.add_field("primary_field", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        self.create_collection(client, collection_name, schema=schema)
+        self.describe_collection(client, collection_name,
+            check_task=CheckTasks.check_describe_collection_property,
+            check_items={"collection_name": collection_name,
+                         "id_name": "primary_field",
+                         "enable_dynamic_field": False}
+                         )
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("set_in", ["field", "schema", "both"])
+    def test_milvus_client_collection_auto_id(self, auto_id, set_in):
+        """
+        target: Test auto_id setting in field schema, collection schema, and both
+        method: Set auto_id in different ways and verify the behavior
+        expected: auto_id is correctly applied and collection behavior matches expectation
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        if set_in == "field":
+            # Test setting auto_id in field schema only
+            schema = self.create_schema(client, enable_dynamic_field=False)[0]
+            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        elif set_in == "schema":
+            # Test setting auto_id in collection schema only
+            schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
+            schema.add_field("id", DataType.INT64, is_primary=True)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        else:  # both
+            # Test setting auto_id in both field schema and collection schema (should be consistent)
+            schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
+            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection properties
+        res = self.describe_collection(client, collection_name,
+                                     check_task=CheckTasks.check_describe_collection_property,
+                                     check_items={"collection_name": collection_name,
+                                                  "auto_id": auto_id,
+                                                  "enable_dynamic_field": False})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_auto_id_false_non_primary_field(self):
+        """
+        target: Test collection with auto_id set on non-primary field
+        method: Set auto_id=False on non-primary field and verify schema auto_id is False
+        expected: Collection schema auto_id should be False when only non-primary fields have auto_id setting
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with primary field (no auto_id) and non-primary field with auto_id=False
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("field2", DataType.INT64, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection properties
+        res = self.describe_collection(client, collection_name,
+                                     check_task=CheckTasks.check_describe_collection_property,
+                                     check_items={"collection_name": collection_name,
+                                                  "auto_id": False,
+                                                  "enable_dynamic_field": False})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="pymilvus issue, should use fieldschema as top priority")
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_collection_auto_id_inconsistent(self, auto_id):
+        """
+        target: Test collection auto_id with inconsistent settings between field schema and collection schema
+        method: Set auto_id in field schema and opposite value in collection schema
+        expected: Field schema setting should take priority (currently expected to fail)
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with inconsistent auto_id settings
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=not auto_id)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify that field schema setting takes priority
+        res = self.describe_collection(client, collection_name,
+                                     check_task=CheckTasks.check_describe_collection_property,
+                                     check_items={"collection_name": collection_name,
+                                                  "auto_id": auto_id,
+                                                  "enable_dynamic_field": False})
+        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_create_collection_dup_name(self):
@@ -1818,7 +2125,22 @@ class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
                            check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
-    
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_create_collection_without_connection(self):
+        """
+        target: test create collection without connection
+        method: 1. create collection after connection removed
+        expected: raise exception
+        """
+        client_temp = self._client(alias="client_temp")
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Remove connection
+        self.close(client_temp)
+        error = {ct.err_code: 1, ct.err_msg: 'should create connection first'}
+        self.create_collection(client_temp, collection_name, default_dim,
+                              check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_load_collection_after_disconnect(self):
         """
@@ -3049,6 +3371,31 @@ class TestMilvusClientCollectionDefaultValueInvalid(TestMilvusClientV2Base):
                  ct.err_msg: "type (Int8) of field (int8_field) is not equal to the type(DataType_Double) of default_value"}
         self.create_collection(client, collection_name, schema=schema,
                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("nullable", [True, False])
+    def test_milvus_client_create_collection_default_value_none(self, nullable):
+        """
+        target: test create field with None as default value when nullable is False or True
+        method: create collection with default_value=None on one field
+        expected: 1. raise exception when nullable=False and default_value=None
+                  2. create field successfully when nullable=True and default_value=None
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
+        
+        if nullable:
+            schema.add_field("int8_field", DataType.INT8, nullable=nullable, default_value=None)
+            self.create_collection(client, collection_name, schema=schema)
+        else:
+            error = {ct.err_code: 1,
+                     ct.err_msg: "Default value cannot be None for a field that is defined as nullable == false"}
+            self.add_field(schema, "int8_field", DataType.INT8, nullable=nullable, default_value=None,
+                           check_task=CheckTasks.err_res, check_items=error)
+        self.drop_collection(client, collection_name)
 
 class TestMilvusClientCollectionDefaultValueValid(TestMilvusClientV2Base):
     """ Test case of collection interface """
