@@ -847,17 +847,19 @@ class SegmentExpr : public Expr {
                                                                      i);
                     index_ptr = const_cast<Index*>(&index);
                 }
-                cached_index_chunk_res_ = std::move(func(index_ptr, values...));
+                cached_index_chunk_res_ = std::make_shared<TargetBitmap>(
+                    std::move(func(index_ptr, values...)));
                 auto valid_result = index_ptr->IsNotNull();
-                cached_index_chunk_valid_res_ = std::move(valid_result);
+                cached_index_chunk_valid_res_ =
+                    std::make_shared<TargetBitmap>(std::move(valid_result));
                 cached_index_chunk_id_ = i;
             }
 
             auto size = ProcessIndexOneChunk(result,
                                              valid_result,
                                              i,
-                                             cached_index_chunk_res_,
-                                             cached_index_chunk_valid_res_,
+                                             *cached_index_chunk_res_,
+                                             *cached_index_chunk_valid_res_,
                                              processed_rows);
 
             if (processed_rows + size >= batch_size_) {
@@ -1113,12 +1115,16 @@ class SegmentExpr : public Expr {
                     TargetBitmap res = index_ptr->IsNotNull();
                     return res;
                 };
-                cached_index_chunk_valid_res_ = execute_sub_batch(index_ptr);
+                cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
+                    std::move(execute_sub_batch(index_ptr)));
                 cached_index_chunk_id_ = i;
             }
 
-            auto size = ProcessIndexOneChunkForValid(
-                valid_result, i, cached_index_chunk_valid_res_, processed_rows);
+            auto size =
+                ProcessIndexOneChunkForValid(valid_result,
+                                             i,
+                                             *cached_index_chunk_valid_res_,
+                                             processed_rows);
 
             if (processed_rows + size >= batch_size_) {
                 current_index_chunk_ = i;
@@ -1244,9 +1250,9 @@ class SegmentExpr : public Expr {
 
     // Cache for index scan to avoid search index every batch
     int64_t cached_index_chunk_id_{-1};
-    TargetBitmap cached_index_chunk_res_{};
+    std::shared_ptr<TargetBitmap> cached_index_chunk_res_{nullptr};
     // Cache for chunk valid res.
-    TargetBitmap cached_index_chunk_valid_res_{};
+    std::shared_ptr<TargetBitmap> cached_index_chunk_valid_res_{nullptr};
 
     // Cache for text match.
     std::shared_ptr<TargetBitmap> cached_match_res_{nullptr};

@@ -18,9 +18,10 @@
 #include "common/init_c.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
+#include "exec/expression/ExprCache.h"
 
 std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
-    flag10, flag11;
+    flag10, flag11, flag12, flag13;
 std::once_flag traceFlag;
 
 void
@@ -109,6 +110,25 @@ InitDefaultConfigParamTypeCheck(bool val) {
         flag11,
         [](bool val) { milvus::SetDefaultConfigParamTypeCheck(val); },
         val);
+}
+
+void
+InitExprResCacheEnable(bool val) {
+    std::call_once(
+        flag12,
+        [](bool v) { milvus::exec::ExprResCacheManager::SetEnabled(v); },
+        val);
+}
+
+void
+InitExprResCacheCapacityBytes(int64_t bytes) {
+    std::call_once(
+        flag13,
+        [](int64_t b) {
+            milvus::exec::ExprResCacheManager::Instance().SetCapacityBytes(
+                static_cast<size_t>(b));
+        },
+        bytes);
 }
 
 void
