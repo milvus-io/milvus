@@ -274,7 +274,7 @@ InvertedIndexTantivy<T>::IsNull() {
 }
 
 template <typename T>
-const TargetBitmap
+TargetBitmap
 InvertedIndexTantivy<T>::IsNotNull() {
     int64_t count = Count();
     TargetBitmap bitset(count, true);

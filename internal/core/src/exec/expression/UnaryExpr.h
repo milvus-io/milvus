@@ -423,6 +423,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return fmt::format("{}", expr_->ToString());
     }
 
+    std::string
+    GetExprSignature() {
+        if (expr_signature_.empty()) {
+            expr_signature_ = fmt::format("{}", expr_->ToString());
+        }
+        return expr_signature_;
+    }
+
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return expr_->column_;
@@ -513,6 +521,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
+
+    std::string expr_signature_{""};
 };
 }  // namespace exec
 }  // namespace milvus

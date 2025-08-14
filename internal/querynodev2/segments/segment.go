@@ -1397,6 +1397,11 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
+	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// erase expr-cache for this segment before deleting C segment
+		C.ExprResCacheEraseSegment(C.int64_t(s.ID()))
+	}
+
 	GetDynamicPool().Submit(func() (any, error) {
 		C.DeleteSegment(ptr)
 		return nil, nil

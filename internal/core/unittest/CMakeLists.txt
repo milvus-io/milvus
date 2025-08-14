@@ -94,6 +94,7 @@ set(MILVUS_TEST_FILES
         test_build_inverted_index_with_single_segment.cpp
         test_json_index.cpp
         test_json_key_stats_index.cpp
+        test_expr_cache.cpp
         test_thread_pool.cpp
         )
 

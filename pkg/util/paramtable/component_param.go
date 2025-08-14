@@ -2732,6 +2732,9 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
+	// expr cache
+	ExprResCacheEnabled       ParamItem `refreshable:"false"`
+	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -3502,6 +3505,27 @@ user-task-polling:
 		Doc:          "expr eval batch size for getnext interface",
 	}
 	p.ExprEvalBatchSize.Init(base.mgr)
+
+	// expr cache
+	p.ExprResCacheEnabled = ParamItem{
+		Key:          "queryNode.exprCache.enabled",
+		FallbackKeys: []string{"enable_expr_cache"},
+		Version:      "2.5.17",
+		DefaultValue: "false",
+		Doc:          "enable expression result cache",
+		Export:       true,
+	}
+	p.ExprResCacheEnabled.Init(base.mgr)
+
+	p.ExprResCacheCapacityBytes = ParamItem{
+		Key:          "queryNode.exprCache.capacityBytes",
+		FallbackKeys: []string{"max_expr_cache_size"},
+		Version:      "2.5.17",
+		DefaultValue: "268435456", // 256MB
+		Doc:          "max capacity in bytes for expression result cache",
+		Export:       true,
+	}
+	p.ExprResCacheCapacityBytes.Init(base.mgr)
 
 	p.JSONKeyStatsCommitInterval = ParamItem{
 		Key:          "queryNode.segcore.jsonKeyStatsCommitInterval",
