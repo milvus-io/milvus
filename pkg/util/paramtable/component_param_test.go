@@ -598,9 +598,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 128, Params.MaxChannelCheckpointsPerRPC.GetAsInt())
 		assert.Equal(t, 10*time.Second, Params.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
 
-		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
-		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
-		assert.Equal(t, 16, maxConcurrentImportTaskNum)
+		assert.Equal(t, 4, Params.ImportConcurrencyPerCPUCore.GetAsInt())
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 64*1024*1024, Params.ImportInsertBufferSize.GetAsInt())
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())

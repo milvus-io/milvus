@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -93,7 +94,8 @@ func (s *scheduler) Slots() int64 {
 	used := lo.SumBy(tasks, func(t Task) int64 {
 		return t.GetSlots()
 	})
-	total := paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64()
+	cpuNum := hardware.GetCPUNum()
+	total := int64(cpuNum) * paramtable.Get().DataNodeCfg.ImportConcurrencyPerCPUCore.GetAsInt64()
 	free := total - used
 	if free >= 0 {
 		return free

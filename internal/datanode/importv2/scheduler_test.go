@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -134,7 +135,9 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 	s.manager.Add(preimportTask)
 
 	slots := s.scheduler.Slots()
-	s.Equal(paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64()-1, slots)
+	cpuNum := hardware.GetCPUNum()
+	total := int64(cpuNum) * paramtable.Get().DataNodeCfg.ImportConcurrencyPerCPUCore.GetAsInt64()
+	s.Equal(total-1, slots)
 }
 
 func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
