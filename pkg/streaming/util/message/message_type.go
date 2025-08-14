@@ -8,49 +8,9 @@ import (
 
 type MessageType messagespb.MessageType
 
-const (
-	MessageTypeUnknown          MessageType = MessageType(messagespb.MessageType_Unknown)
-	MessageTypeTimeTick         MessageType = MessageType(messagespb.MessageType_TimeTick)
-	MessageTypeInsert           MessageType = MessageType(messagespb.MessageType_Insert)
-	MessageTypeDelete           MessageType = MessageType(messagespb.MessageType_Delete)
-	MessageTypeCreateSegment    MessageType = MessageType(messagespb.MessageType_CreateSegment)
-	MessageTypeFlush            MessageType = MessageType(messagespb.MessageType_Flush)
-	MessageTypeManualFlush      MessageType = MessageType(messagespb.MessageType_ManualFlush)
-	MessageTypeCreateCollection MessageType = MessageType(messagespb.MessageType_CreateCollection)
-	MessageTypeDropCollection   MessageType = MessageType(messagespb.MessageType_DropCollection)
-	MessageTypeCreatePartition  MessageType = MessageType(messagespb.MessageType_CreatePartition)
-	MessageTypeDropPartition    MessageType = MessageType(messagespb.MessageType_DropPartition)
-	MessageTypeTxn              MessageType = MessageType(messagespb.MessageType_Txn)
-	MessageTypeBeginTxn         MessageType = MessageType(messagespb.MessageType_BeginTxn)
-	MessageTypeCommitTxn        MessageType = MessageType(messagespb.MessageType_CommitTxn)
-	MessageTypeRollbackTxn      MessageType = MessageType(messagespb.MessageType_RollbackTxn)
-	MessageTypeImport           MessageType = MessageType(messagespb.MessageType_Import)
-	MessageTypeSchemaChange     MessageType = MessageType(messagespb.MessageType_SchemaChange)
-)
-
-var messageTypeName = map[MessageType]string{
-	MessageTypeUnknown:          "UNKNOWN",
-	MessageTypeTimeTick:         "TIME_TICK",
-	MessageTypeInsert:           "INSERT",
-	MessageTypeDelete:           "DELETE",
-	MessageTypeFlush:            "FLUSH",
-	MessageTypeCreateSegment:    "CREATE_SEGMENT",
-	MessageTypeManualFlush:      "MANUAL_FLUSH",
-	MessageTypeCreateCollection: "CREATE_COLLECTION",
-	MessageTypeDropCollection:   "DROP_COLLECTION",
-	MessageTypeCreatePartition:  "CREATE_PARTITION",
-	MessageTypeDropPartition:    "DROP_PARTITION",
-	MessageTypeTxn:              "TXN",
-	MessageTypeBeginTxn:         "BEGIN_TXN",
-	MessageTypeCommitTxn:        "COMMIT_TXN",
-	MessageTypeRollbackTxn:      "ROLLBACK_TXN",
-	MessageTypeImport:           "IMPORT",
-	MessageTypeSchemaChange:     "SCHEMA_CHANGE",
-}
-
 // String implements fmt.Stringer interface.
 func (t MessageType) String() string {
-	return messageTypeName[t]
+	return messagespb.MessageType_name[int32(t)]
 }
 
 // marshal marshal MessageType to string.
@@ -60,7 +20,8 @@ func (t MessageType) marshal() string {
 
 // Valid checks if the MessageType is valid.
 func (t MessageType) Valid() bool {
-	_, ok := messageTypeName[t]
+	typ := int32(t)
+	_, ok := messagespb.MessageType_name[typ]
 	return t != MessageTypeUnknown && ok
 }
 

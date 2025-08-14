@@ -7,7 +7,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -36,6 +35,20 @@ func NewBroadcastMutableMessageBeforeAppend(payload []byte, properties map[strin
 	return m
 }
 
+// NewImmutableMessageFromProto creates a new immutable message from the proto message.
+// !!! Only used at server side for streaming internal service, don't use it at client side.
+func NewImmutableMessageFromProto(walName string, msg *messagespb.ImmutableMessage) ImmutableMessage {
+	id, err := UnmarshalMessageID(walName, msg.Id.Id)
+	if err != nil {
+		panic(err)
+	}
+	return NewImmutableMesasge(
+		id,
+		msg.Payload,
+		msg.Properties,
+	)
+}
+
 // NewImmutableMessage creates a new immutable message.
 // !!! Only used at server side for streaming internal service, don't use it at client side.
 func NewImmutableMesasge(
@@ -52,48 +65,13 @@ func NewImmutableMesasge(
 	}
 }
 
-// List all type-safe mutable message builders here.
-var (
-	NewTimeTickMessageBuilderV1         = createNewMessageBuilderV1[*TimeTickMessageHeader, *msgpb.TimeTickMsg]()
-	NewInsertMessageBuilderV1           = createNewMessageBuilderV1[*InsertMessageHeader, *msgpb.InsertRequest]()
-	NewDeleteMessageBuilderV1           = createNewMessageBuilderV1[*DeleteMessageHeader, *msgpb.DeleteRequest]()
-	NewCreateCollectionMessageBuilderV1 = createNewMessageBuilderV1[*CreateCollectionMessageHeader, *msgpb.CreateCollectionRequest]()
-	NewDropCollectionMessageBuilderV1   = createNewMessageBuilderV1[*DropCollectionMessageHeader, *msgpb.DropCollectionRequest]()
-	NewCreatePartitionMessageBuilderV1  = createNewMessageBuilderV1[*CreatePartitionMessageHeader, *msgpb.CreatePartitionRequest]()
-	NewDropPartitionMessageBuilderV1    = createNewMessageBuilderV1[*DropPartitionMessageHeader, *msgpb.DropPartitionRequest]()
-	NewImportMessageBuilderV1           = createNewMessageBuilderV1[*ImportMessageHeader, *msgpb.ImportMsg]()
-	NewCreateSegmentMessageBuilderV2    = createNewMessageBuilderV2[*CreateSegmentMessageHeader, *CreateSegmentMessageBody]()
-	NewFlushMessageBuilderV2            = createNewMessageBuilderV2[*FlushMessageHeader, *FlushMessageBody]()
-	NewManualFlushMessageBuilderV2      = createNewMessageBuilderV2[*ManualFlushMessageHeader, *ManualFlushMessageBody]()
-	NewBeginTxnMessageBuilderV2         = createNewMessageBuilderV2[*BeginTxnMessageHeader, *BeginTxnMessageBody]()
-	NewCommitTxnMessageBuilderV2        = createNewMessageBuilderV2[*CommitTxnMessageHeader, *CommitTxnMessageBody]()
-	NewRollbackTxnMessageBuilderV2      = createNewMessageBuilderV2[*RollbackTxnMessageHeader, *RollbackTxnMessageBody]()
-	NewSchemaChangeMessageBuilderV2     = createNewMessageBuilderV2[*SchemaChangeMessageHeader, *SchemaChangeMessageBody]()
-	newTxnMessageBuilderV2              = createNewMessageBuilderV2[*TxnMessageHeader, *TxnMessageBody]()
-)
-
-// createNewMessageBuilderV1 creates a new message builder with v1 marker.
-func createNewMessageBuilderV1[H proto.Message, B proto.Message]() func() *mutableMesasgeBuilder[H, B] {
-	return func() *mutableMesasgeBuilder[H, B] {
-		return newMutableMessageBuilder[H, B](VersionV1)
-	}
-}
-
-// List all type-safe mutable message builders here.
-func createNewMessageBuilderV2[H proto.Message, B proto.Message]() func() *mutableMesasgeBuilder[H, B] {
-	return func() *mutableMesasgeBuilder[H, B] {
-		return newMutableMessageBuilder[H, B](VersionV2)
-	}
-}
-
 // newMutableMessageBuilder creates a new builder.
 // Should only used at client side.
-func newMutableMessageBuilder[H proto.Message, B proto.Message](v Version) *mutableMesasgeBuilder[H, B] {
-	var h H
-	messageType := mustGetMessageTypeFromHeader(h)
+func newMutableMessageBuilder[H proto.Message, B proto.Message]() *mutableMesasgeBuilder[H, B] {
+	messageType := MustGetMessageTypeWithVersion[H, B]()
 	properties := make(propertiesImpl)
-	properties.Set(messageTypeKey, messageType.marshal())
-	properties.Set(messageVersion, v.String())
+	properties.Set(messageTypeKey, messageType.MessageType.marshal())
+	properties.Set(messageVersion, messageType.Version.String())
 	return &mutableMesasgeBuilder[H, B]{
 		properties: properties,
 	}
@@ -116,8 +94,8 @@ func (b *mutableMesasgeBuilder[H, B]) WithHeader(h H) *mutableMesasgeBuilder[H, 
 
 // WithNotPersist creates a new builder with not persisted property.
 func (b *mutableMesasgeBuilder[H, B]) WithNotPersisted() *mutableMesasgeBuilder[H, B] {
-	messageType := mustGetMessageTypeFromHeader(b.header)
-	if messageType != MessageTypeTimeTick {
+	messageType := MustGetMessageTypeWithVersion[H, B]()
+	if messageType.MessageType != MessageTypeTimeTick {
 		panic("only time tick message can be not persisted")
 	}
 	b.WithProperty(messageNotPersisteted, "")
@@ -266,8 +244,8 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 		return nil, errors.Wrap(err, "failed to marshal body")
 	}
 	if b.cipherConfig != nil {
-		messageType := mustGetMessageTypeFromHeader(b.header)
-		if !messageType.CanEnableCipher() {
+		messageType := MustGetMessageTypeWithVersion[H, B]()
+		if !messageType.MessageType.CanEnableCipher() {
 			panic(fmt.Sprintf("the message type cannot enable cipher, %s", messageType))
 		}
 
@@ -356,7 +334,7 @@ func newImmutableTxnMesasgeFromWAL(
 	commit ImmutableCommitTxnMessageV2,
 ) (ImmutableTxnMessage, error) {
 	// combine begin and commit messages into one.
-	msg, err := newTxnMessageBuilderV2().
+	msg, err := newMutableMessageBuilder[*TxnMessageHeader, *TxnMessageBody]().
 		WithHeader(&TxnMessageHeader{}).
 		WithBody(&TxnMessageBody{}).
 		WithVChannel(begin.VChannel()).

@@ -542,6 +542,10 @@ generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
 	@$(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
 
+generate-message-codegen: getdeps
+	@echo "Generating message codegen ..."
+	@(cd pkg/streaming/util/message/codegen && PATH=$(PWD)/bin:$(PATH) go generate .)
+
 MMAP_MIGRATION_PATH = $(PWD)/cmd/tools/migration/mmap/tool
 mmap-migration:
 	@echo "Building migration tool ..."

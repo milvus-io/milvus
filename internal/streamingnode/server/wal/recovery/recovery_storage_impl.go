@@ -280,7 +280,7 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 		immutableMsg := message.MustAsImmutableImportMessageV1(msg)
 		r.handleImport(immutableMsg)
 	case message.MessageTypeSchemaChange:
-		immutableMsg := message.MustAsImmutableCollectionSchemaChangeV2(msg)
+		immutableMsg := message.MustAsImmutableSchemaChangeMessageV2(msg)
 		r.handleSchemaChange(immutableMsg)
 	case message.MessageTypeTimeTick:
 		// nothing, the time tick message make no recovery operation.
