@@ -690,7 +690,7 @@ BitmapIndex<T>::IsNull() {
 }
 
 template <typename T>
-const TargetBitmap
+TargetBitmap
 BitmapIndex<T>::IsNotNull() {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap res(total_num_rows_, true);
