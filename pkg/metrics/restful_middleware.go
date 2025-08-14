@@ -35,7 +35,7 @@ func RecordRestfulMetrics(ctx context.Context, outputLength int64, observeOutbou
 		if mstats.inboundPayloadSize > 0 {
 			ProxyReceiveBytes.WithLabelValues(
 				nodeIDValue,
-				mstats.inboundLabel, mstats.collectionName).Add(float64(mstats.inboundPayloadSize))
+				mstats.inboundLabel, mstats.databaseName, mstats.collectionName).Add(float64(mstats.inboundPayloadSize))
 		}
 		// set outbound payload size metrics
 		if outputLength > 0 && observeOutbound {
