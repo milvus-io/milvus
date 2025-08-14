@@ -212,6 +212,8 @@ std::map<std::string, std::string> optimizeExprLatencyLabels{
     {"type", "optimize_expr_latency"}};
 std::map<std::string, std::string> filterRatioLabels{
     {"type", "expr_filter_ratio"}};
+std::map<std::string, std::string> mvccDeleteLatencyLabels{
+    {"type", "mvcc_delete_latency"}};
 
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_search_latency,
                                    "[cpp]latency(us) of search on segment")
@@ -244,6 +246,9 @@ DEFINE_PROMETHEUS_HISTOGRAM(internal_core_search_get_target_entry_latency,
 DEFINE_PROMETHEUS_HISTOGRAM(internal_core_optimize_expr_latency,
                             internal_core_search_latency,
                             optimizeExprLatencyLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_mvcc_delete_latency,
+                            internal_core_search_latency,
+                            mvccDeleteLatencyLabels)
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_expr_filter_ratio,
                                          internal_core_search_latency,
                                          filterRatioLabels,
