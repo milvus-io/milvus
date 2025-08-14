@@ -166,6 +166,8 @@ func (m *indexMeta) reloadFromKV() error {
 		}
 		m.updateSegmentIndex(segIdx)
 		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
+		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+			fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
 	}
 	log.Info("indexMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -903,6 +905,10 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()),
 		zap.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()),
 	)
+
+	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+		fmt.Sprintf("%d", segIdx.CollectionID)).Add(float64(segIdx.IndexSerializedSize))
+
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 	return nil
 }
@@ -967,25 +973,6 @@ func (m *indexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	return segIndexes
 }
 
-// SetStoredIndexFileSizeMetric returns the total index files size of all segment for each collection.
-func (m *indexMeta) SetStoredIndexFileSizeMetric(collections *typeutil.ConcurrentMap[UniqueID, *collectionInfo]) uint64 {
-	m.fieldIndexLock.Lock()
-	defer m.fieldIndexLock.Unlock()
-
-	var total uint64
-	metrics.DataCoordStoredIndexFilesSize.Reset()
-
-	for _, segmentIdx := range m.segmentBuildInfo.List() {
-		coll, ok := collections.Get(segmentIdx.CollectionID)
-		if ok {
-			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName, coll.Schema.GetName(),
-				fmt.Sprint(segmentIdx.CollectionID)).Add(float64(segmentIdx.IndexSerializedSize))
-			total += segmentIdx.IndexSerializedSize
-		}
-	}
-	return total
-}
-
 func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) error {
 	m.keyLock.Lock(buildID)
 	defer m.keyLock.Unlock(buildID)
@@ -1011,6 +998,10 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 	}
 
 	m.segmentBuildInfo.Remove(buildID)
+
+	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+		fmt.Sprintf("%d", segIdx.CollectionID)).Sub(float64(segIdx.IndexSerializedSize))
+
 	return nil
 }
 
