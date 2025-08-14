@@ -31,6 +31,9 @@ const (
 	// JACCARD represents jaccard distance
 	JACCARD MetricType = "JACCARD"
 
+	// MHJACCARD represents jaccard distance of minhash vector
+	MHJACCARD MetricType = "MHJACCARD"
+
 	// SUBSTRUCTURE represents substructure distance
 	SUBSTRUCTURE MetricType = "SUBSTRUCTURE"
 
