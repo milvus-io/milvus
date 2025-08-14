@@ -67,7 +67,7 @@ PhyRescoresNode::GetOutput() {
     for (size_t i =0; i < search_result.seg_offsets_.size(); i++) {
         // remain offset will be -1 if result count not enough (less than topk)
         // skip placeholder offset
-        if (search_result.seg_offsets_[i] >0){
+        if (search_result.seg_offsets_[i] >= 0){
             offsets.push_back(static_cast<int32_t>(search_result.seg_offsets_[i]));
             offset_idx.push_back(i);
         }
@@ -99,19 +99,11 @@ PhyRescoresNode::GetOutput() {
             auto col_vec_size = col_vec->size();
             TargetBitmapView bitsetview(col_vec->GetRawData(), col_vec_size);
             Assert(bitsetview.size() == offsets.size());
-            for (auto i = 0; i < offsets.size(); ++i) {
-                LOG_INFO("offset: {} filter: {} score: {}\n",
-                         offsets[i],
-                         bitsetview[i] > 0,
-                         search_result.distances_[offset_idx[i]]);
+            for (auto i = 0; i < offsets.size(); i++) {
                 if (bitsetview[i] > 0) {
                     search_result.distances_[offset_idx[i]] =
                         scorer->rescore(search_result.distances_[offset_idx[i]]);
                 }
-                LOG_INFO("offset: {} filter: {} score: {}\n",
-                         offsets[i],
-                         bitsetview[i] > 0,
-                         search_result.distances_[offset_idx[i]]);
             }
         } else {
             // query all segment if expr not native
@@ -123,19 +115,11 @@ PhyRescoresNode::GetOutput() {
             auto col_vec_size = col_vec->size();
             TargetBitmapView view(col_vec->GetRawData(), col_vec_size);
             bitset.append(view);
-            for (auto i = 0; i < offsets.size(); ++i) {
-                LOG_INFO("offset: {} filter: {} score: {}\n",
-                         offsets[i],
-                         bitset[offsets[i]] > 0,
-                         search_result.distances_[offset_idx[i]]);
+            for (auto i = 0; i < offsets.size(); i++) {
                 if (bitset[offsets[i]] > 0) {
                     search_result.distances_[offset_idx[i]] =
                         scorer->rescore(search_result.distances_[offset_idx[i]]);
                 }
-                LOG_INFO("offset: {} weight: {} score: {}\n",
-                         offsets[i],
-                         bitset[offsets[i]] > 0,
-                         search_result.distances_[offset_idx[i]]);
             }
         }
     }

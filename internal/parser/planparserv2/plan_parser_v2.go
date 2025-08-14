@@ -207,6 +207,11 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	if err != nil {
 		return nil, err
 	}
+
+	if len(scorers) != 0 && (queryInfo.GroupByFieldId != -1 || queryInfo.SearchIteratorV2Info != nil) {
+		return nil, fmt.Errorf("don't support use segment scorer with group_by or search_iterator")
+	}
+
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{
 			VectorAnns: &planpb.VectorANNS{
@@ -225,7 +230,7 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.FunctionSchema, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.ScoreFunction, error) {
 	rerankerName := rerank.GetRerankName(function)
 	switch rerankerName {
-	case rerank.WeightedName:
+	case rerank.BoostName:
 		scorer := &planpb.ScoreFunction{}
 		filter, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(rerank.FilterKey, function.GetParams())
 		if ok {
@@ -248,34 +253,24 @@ func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.Functi
 		scorer.Weight = float32(weight)
 		return scorer, nil
 	default:
-		return nil, fmt.Errorf("Unsupported segment scorer function: [%s] , list of supported [%s]", rerankerName, rerank.WeightedName)
+		// if not boost scorer, regard as normal function scorer
+		// will be checked at ranker
+		// return nil here
+		return nil, nil
 	}
 }
 
 func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, error) {
 	scorers := []*planpb.ScoreFunction{}
 	for _, function := range functionScore.GetFunctions() {
-		// make sure function is segment scorer not reranker
-		isSegmentScorerStr, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(rerank.SegmentScorerParamsKey, function.GetParams())
-		if !ok {
-			continue
-		}
-
-		isSegmentScorer, err := strconv.ParseBool(isSegmentScorerStr)
-		if err != nil {
-			return nil, fmt.Errorf("parase segment_scorer option as bool failed with error: {%v}", err)
-		}
-
-		if !isSegmentScorer {
-			continue
-		}
-
 		// create scorer for search plan
 		scorer, err := CreateSearchScorer(schema, function, exprTemplateValues)
 		if err != nil {
 			return nil, err
 		}
-		scorers = append(scorers, scorer)
+		if scorer != nil {
+			scorers = append(scorers, scorer)
+		}
 	}
 	if len(scorers) == 0 {
 		return nil, nil

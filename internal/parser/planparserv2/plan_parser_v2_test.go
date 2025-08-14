@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -1578,6 +1579,106 @@ func TestRandomSampleWithFilter(t *testing.T) {
 	for _, exprStr := range exprStrsInvalid {
 		assertInvalidExpr(t, helper, exprStr)
 	}
+}
+
+func Test_SegmentScorers(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// helper to build a boost segment scorer function
+	makeBoostRanker := func(filter string, weight string) *schemapb.FunctionSchema {
+		params := []*commonpb.KeyValuePair{
+			{Key: rerank.WeightKey, Value: weight},
+			{Key: "reranker", Value: rerank.BoostName},
+		}
+		if filter != "" {
+			params = append(params, &commonpb.KeyValuePair{Key: rerank.FilterKey, Value: filter})
+		}
+		return &schemapb.FunctionSchema{
+			Params: params,
+		}
+	}
+
+	t.Run("ok - single boost scorer", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("Int64Field > 0", "1.5"),
+			},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan)
+		assert.Equal(t, 1, len(plan.Scorers))
+		// filter should be parsed into Expr when provided
+		assert.NotNil(t, plan.Scorers[0])
+	})
+
+	t.Run("ok - multiple boost scorers", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("Int64Field > 0", "1.0"),
+				makeBoostRanker("", "2.0"),
+			},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan)
+		assert.Equal(t, 2, len(plan.Scorers))
+	})
+
+	t.Run("error - not segment scorer flag", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: rerank.WeightedName}}}},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		// not segment scorer means ignored
+		assert.NotNil(t, plan)
+		assert.Equal(t, 0, len(plan.Scorers))
+	})
+
+	t.Run("error - missing weight", func(t *testing.T) {
+		// missing weight should cause CreateSearchScorer to fail
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				{Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: rerank.BoostName},
+					// no weight
+				}},
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - invalid weight format", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("", "invalid_float"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - scorer with group_by", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("", "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: 100}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - scorer with search_iterator_v2", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("", "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{SearchIteratorV2Info: &planpb.SearchIteratorV2Info{}}, nil, fs)
+		assert.Error(t, err)
+	})
 }
 
 func TestConcurrency(t *testing.T) {

@@ -36,9 +36,9 @@ import (
 )
 
 const (
-	decayFunctionName string = "decay"
-	modelFunctionName string = "model"
-	rrfName           string = "rrf"
+	DecayFunctionName string = "decay"
+	ModelFunctionName string = "model"
+	RRFName           string = "rrf"
 	WeightedName      string = "weighted"
 )
 
@@ -65,9 +65,9 @@ const (
 
 // segment scorer configs
 const (
-	SegmentScorerParamsKey = "is_segment_scorer"
-	FilterKey              = "filter"
-	WeightKey              = "weight"
+	BoostName = "boost"
+	FilterKey = "filter"
+	WeightKey = "weight"
 )
 
 var rankTypeMap = map[string]rankType{
@@ -139,16 +139,18 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 	var rerankFunc Reranker
 	var newRerankErr error
 	switch rerankerName {
-	case decayFunctionName:
+	case DecayFunctionName:
 		rerankFunc, newRerankErr = newDecayFunction(collSchema, funcSchema)
-	case modelFunctionName:
+	case ModelFunctionName:
 		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema)
-	case rrfName:
+	case RRFName:
 		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
 	case WeightedName:
 		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema)
+	case BoostName:
+		return nil, nil
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, decayFunctionName, modelFunctionName, rrfName, WeightedName)
+		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, DecayFunctionName, ModelFunctionName, RRFName, WeightedName)
 	}
 
 	if newRerankErr != nil {
@@ -161,17 +163,6 @@ func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *sc
 	funcScore := &FunctionScore{}
 
 	for _, function := range funcScoreSchema.Functions {
-		isSegmentScorerStr, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(SegmentScorerParamsKey, function.GetParams())
-		if ok {
-			isSegmentScorer, err := strconv.ParseBool(isSegmentScorerStr)
-			if err != nil {
-				return nil, fmt.Errorf("parase segment_scorer option as bool failed with error: {%v}", err)
-			}
-			if isSegmentScorer {
-				continue
-			}
-		}
-
 		reranker, err := createFunction(collSchema, function)
 		if err != nil {
 			return nil, err
@@ -222,7 +213,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 	}
 	switch rankTypeMap[rankTypeStr] {
 	case rrfRankType:
-		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: reranker, Value: rrfName})
+		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: reranker, Value: RRFName})
 		if v, ok := params[RRFParamsKey]; ok {
 			if reflect.ValueOf(params[RRFParamsKey]).CanFloat() {
 				k := reflect.ValueOf(v).Float()
