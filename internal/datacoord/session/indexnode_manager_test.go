@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
@@ -113,4 +114,119 @@ func TestNodeManager_StoppingNode(t *testing.T) {
 	nm.RemoveNode(1)
 	assert.Equal(t, 0, len(nm.GetAllClients()))
 	assert.Equal(t, 0, len(nm.stoppingNodes))
+}
+
+func TestNodeManager_Startup_NewNodes(t *testing.T) {
+	nodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
+		return indexnodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
+	}
+
+	ctx := context.Background()
+	nm := NewNodeManager(ctx, nodeCreator)
+
+	// Define test nodes
+	nodes := []*NodeInfo{
+		{NodeID: 1, Address: "localhost:8080"},
+		{NodeID: 2, Address: "localhost:8081"},
+	}
+
+	err := nm.Startup(nodes)
+	assert.NoError(t, err)
+
+	// Verify nodes were added
+	ids := nm.GetAllClients()
+	assert.Len(t, ids, 2)
+	assert.Contains(t, ids, int64(1))
+	assert.Contains(t, ids, int64(2))
+
+	// Verify clients are accessible
+	_, ok := nm.GetClientByID(1)
+	assert.True(t, ok)
+
+	_, ok = nm.GetClientByID(2)
+	assert.True(t, ok)
+}
+
+func TestNodeManager_Startup_RemoveOldNodes(t *testing.T) {
+	nodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
+		return indexnodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
+	}
+
+	ctx := context.Background()
+	nm := NewNodeManager(ctx, nodeCreator)
+
+	// Add initial nodes
+	err := nm.AddNode(1, "localhost:8080")
+	assert.NoError(t, err)
+	err = nm.AddNode(2, "localhost:8081")
+	assert.NoError(t, err)
+
+	// Startup with new set of nodes (removes node 1, keeps node 2, adds node 3)
+	newNodes := []*NodeInfo{
+		{NodeID: 2, Address: "localhost:8081"}, // existing node
+		{NodeID: 3, Address: "localhost:8082"}, // new node
+	}
+
+	err = nm.Startup(newNodes)
+	assert.NoError(t, err)
+
+	// Verify final state
+	ids := nm.GetAllClients()
+	assert.Len(t, ids, 2)
+	assert.Contains(t, ids, int64(2))
+	assert.Contains(t, ids, int64(3))
+	assert.NotContains(t, ids, int64(1))
+
+	// Verify node 1 is removed
+	_, ok := nm.GetClientByID(1)
+	assert.False(t, ok)
+
+	// Verify nodes 2 and 3 are accessible
+	_, ok = nm.GetClientByID(2)
+	assert.True(t, ok)
+
+	_, ok = nm.GetClientByID(3)
+	assert.True(t, ok)
+}
+
+func TestNodeManager_Startup_EmptyNodes(t *testing.T) {
+	nodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
+		return indexnodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
+	}
+
+	ctx := context.Background()
+	nm := NewNodeManager(ctx, nodeCreator)
+
+	// Add initial node
+	err := nm.AddNode(1, "localhost:8080")
+	assert.NoError(t, err)
+
+	// Startup with empty nodes (should remove all existing nodes)
+	err = nm.Startup(nil)
+	assert.NoError(t, err)
+
+	// Verify all nodes are removed
+	ids := nm.GetAllClients()
+	assert.Empty(t, ids)
+}
+
+func TestNodeManager_Startup_AddNodeError(t *testing.T) {
+	nodeCreator := func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
+		if nodeID == 1 {
+			return nil, assert.AnError
+		}
+		return indexnodeclient.NewClient(ctx, addr, nodeID, paramtable.Get().DataCoordCfg.WithCredential.GetAsBool())
+	}
+
+	ctx := context.Background()
+	nm := NewNodeManager(ctx, nodeCreator)
+
+	nodes := []*NodeInfo{
+		{NodeID: 1, Address: "localhost:8080"}, // This will fail
+		{NodeID: 2, Address: "localhost:8081"},
+	}
+
+	err := nm.Startup(nodes)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "assert.AnError")
 }
