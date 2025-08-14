@@ -157,6 +157,14 @@ var (
 			Name:      "replica_ro_node_total",
 			Help:      "total read only node number of replica",
 		})
+
+	QueryCoordLastHeartbeatTimeStamp = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "last_heartbeat_timestamp",
+			Help:      "heartbeat timestamp of query node",
+		}, []string{nodeIDLabelName})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -174,6 +182,7 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordResourceGroupInfo)
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 	registry.MustRegister(QueryCoordReplicaRONodeTotal)
+	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {

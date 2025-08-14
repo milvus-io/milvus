@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/lock"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	typeutil "github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/samber/lo"
 )
 
 func defaultIndexNodeCreatorFunc(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
@@ -46,6 +47,8 @@ type WorkerManager interface {
 	QuerySlots() map[typeutil.UniqueID]*WorkerSlots
 	GetAllClients() map[typeutil.UniqueID]types.IndexNodeClient
 	GetClientByID(nodeID typeutil.UniqueID) (types.IndexNodeClient, bool)
+
+	Startup(nodes []*NodeInfo) error
 }
 
 type WorkerSlots struct {
@@ -264,4 +267,26 @@ func (nm *IndexNodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMet
 		})
 	}
 	return ret
+}
+
+func (nm *IndexNodeManager) Startup(nodes []*NodeInfo) error {
+	// remove node which not exist in sessions
+	sessionMap := lo.SliceToMap(nodes, func(node *NodeInfo) (int64, *NodeInfo) {
+		return node.NodeID, node
+	})
+
+	// remove old nodes
+	for nodeID := range nm.nodeClients {
+		if _, ok := sessionMap[nodeID]; !ok {
+			nm.RemoveNode(nodeID)
+		}
+	}
+
+	// add new nodes
+	for _, node := range nodes {
+		if err := nm.AddNode(node.NodeID, node.Address); err != nil {
+			return err
+		}
+	}
+	return nil
 }
