@@ -1346,7 +1346,7 @@ func TestCreateCollection(t *testing.T) {
 	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
 	        ]
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
-		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=bool][actual=10]",
+		errMsg:  "convert defaultValue fail, err:cannot use \"10\"(type: float64) as bool default value: invalid parameter",
 		errCode: 1100,
 	})
 
@@ -1360,7 +1360,7 @@ func TestCreateCollection(t *testing.T) {
 	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
 	        ]
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
-		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=string][actual=true]",
+		errMsg:  "convert defaultValue fail, err:cannot use \"true\"(type: bool) as string default value: invalid parameter",
 		errCode: 1100,
 	})
 
@@ -1374,7 +1374,7 @@ func TestCreateCollection(t *testing.T) {
 	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
 	        ]
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
-		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errMsg:  "convert defaultValue fail, err:cannot use \"\"10\"(type: string) as int default value: invalid parameter",
 		errCode: 1100,
 	})
 
@@ -1388,7 +1388,7 @@ func TestCreateCollection(t *testing.T) {
 	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
 	        ]
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
-		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errMsg:  "convert defaultValue fail, err:cannot use \"10\"(type: string) as long default value: invalid parameter",
 		errCode: 1100,
 	})
 
@@ -1402,7 +1402,7 @@ func TestCreateCollection(t *testing.T) {
 	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
 	        ]
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
-		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errMsg:  "convert defaultValue fail, err:cannot use \"10\"(type: string) as float default value: invalid parameter",
 		errCode: 1100,
 	})
 
@@ -1416,7 +1416,7 @@ func TestCreateCollection(t *testing.T) {
 	            {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
 	        ]
 	    }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
-		errMsg:  "convert defaultValue fail, err:Wrong defaultValue type: invalid parameter[expected=number][actual=10]",
+		errMsg:  "convert defaultValue fail, err:cannot use \"10\"(type: string) as float default value: invalid parameter",
 		errCode: 1100,
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
