@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/consts"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -53,7 +54,7 @@ func (suite *ClusterTestSuite) SetupSuite() {
 }
 
 func (suite *ClusterTestSuite) TearDownSuite() {
-	paramtable.Get().Save("grpc.client.maxMaxAttempts", strconv.FormatInt(paramtable.DefaultMaxAttempts, 10))
+	paramtable.Get().Save("grpc.client.maxMaxAttempts", strconv.FormatInt(consts.DefaultMaxAttempts, 10))
 	for _, svr := range suite.svrs {
 		svr.GracefulStop()
 	}

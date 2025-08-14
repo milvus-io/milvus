@@ -30,36 +30,11 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/util/consts"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 )
 
 const (
-	// DefaultServerMaxSendSize defines the maximum size of data per grpc request can send by server side.
-	DefaultServerMaxSendSize = 512 * 1024 * 1024
-
-	// DefaultServerMaxRecvSize defines the maximum size of data per grpc request can receive by server side.
-	DefaultServerMaxRecvSize = 256 * 1024 * 1024
-
-	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
-	DefaultClientMaxSendSize = 256 * 1024 * 1024
-
-	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
-	DefaultClientMaxRecvSize = 512 * 1024 * 1024
-
-	// DefaultLogLevel defines the log level of grpc
-	DefaultLogLevel = "WARNING"
-
-	// Grpc Timeout related configs
-	DefaultDialTimeout      = 200
-	DefaultKeepAliveTime    = 10000
-	DefaultKeepAliveTimeout = 20000
-
-	// Grpc retry policy
-	DefaultMaxAttempts                = 10
-	DefaultInitialBackoff     float64 = 0.2
-	DefaultMaxBackoff         float64 = 10
-	DefaultCompressionEnabled bool    = false
-
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
 )
@@ -157,7 +132,7 @@ type GrpcServerConfig struct {
 func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 	p.grpcConfig.init(domain, base)
 
-	maxSendSize := strconv.FormatInt(DefaultServerMaxSendSize, 10)
+	maxSendSize := strconv.FormatInt(consts.DefaultServerMaxSendSize, 10)
 	p.ServerMaxSendSize = ParamItem{
 		Key:          p.Domain + ".grpc.serverMaxSendSize",
 		DefaultValue: maxSendSize,
@@ -180,7 +155,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 	}
 	p.ServerMaxSendSize.Init(base.mgr)
 
-	maxRecvSize := strconv.FormatInt(DefaultServerMaxRecvSize, 10)
+	maxRecvSize := strconv.FormatInt(consts.DefaultServerMaxRecvSize, 10)
 	p.ServerMaxRecvSize = ParamItem{
 		Key:          p.Domain + ".grpc.serverMaxRecvSize",
 		DefaultValue: maxRecvSize,
@@ -238,7 +213,7 @@ type GrpcClientConfig struct {
 func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	p.grpcConfig.init(domain, base)
 
-	maxSendSize := strconv.FormatInt(DefaultClientMaxSendSize, 10)
+	maxSendSize := strconv.FormatInt(consts.DefaultClientMaxSendSize, 10)
 	p.ClientMaxSendSize = ParamItem{
 		Key:          p.Domain + ".grpc.clientMaxSendSize",
 		DefaultValue: maxSendSize,
@@ -261,7 +236,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.ClientMaxSendSize.Init(base.mgr)
 
-	maxRecvSize := strconv.FormatInt(DefaultClientMaxRecvSize, 10)
+	maxRecvSize := strconv.FormatInt(consts.DefaultClientMaxRecvSize, 10)
 	p.ClientMaxRecvSize = ParamItem{
 		Key:          p.Domain + ".grpc.clientMaxRecvSize",
 		DefaultValue: maxRecvSize,
@@ -284,7 +259,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.ClientMaxRecvSize.Init(base.mgr)
 
-	dialTimeout := strconv.FormatInt(DefaultDialTimeout, 10)
+	dialTimeout := strconv.FormatInt(consts.DefaultDialTimeout.Milliseconds(), 10)
 	p.DialTimeout = ParamItem{
 		Key:     "grpc.client.dialTimeout",
 		Version: "2.0.0",
@@ -305,7 +280,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.DialTimeout.Init(base.mgr)
 
-	keepAliveTimeout := strconv.FormatInt(DefaultKeepAliveTimeout, 10)
+	keepAliveTimeout := strconv.FormatInt(consts.DefaultKeepAliveTimeout.Milliseconds(), 10)
 	p.KeepAliveTimeout = ParamItem{
 		Key:     "grpc.client.keepAliveTimeout",
 		Version: "2.0.0",
@@ -326,7 +301,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.KeepAliveTimeout.Init(base.mgr)
 
-	keepAliveTime := strconv.FormatInt(DefaultKeepAliveTime, 10)
+	keepAliveTime := strconv.FormatInt(consts.DefaultKeepAliveTime.Milliseconds(), 10)
 	p.KeepAliveTime = ParamItem{
 		Key:     "grpc.client.keepAliveTime",
 		Version: "2.0.0",
@@ -347,7 +322,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.KeepAliveTime.Init(base.mgr)
 
-	maxAttempts := strconv.FormatInt(DefaultMaxAttempts, 10)
+	maxAttempts := strconv.FormatInt(consts.DefaultMaxAttempts, 10)
 	p.MaxAttempts = ParamItem{
 		Key:     "grpc.client.maxMaxAttempts",
 		Version: "2.0.0",
@@ -368,7 +343,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.MaxAttempts.Init(base.mgr)
 
-	initialBackoff := fmt.Sprintf("%f", DefaultInitialBackoff)
+	initialBackoff := fmt.Sprintf("%f", consts.DefaultInitialBackoff)
 	p.InitialBackoff = ParamItem{
 		Key:     "grpc.client.initialBackoff",
 		Version: "2.0.0",
@@ -389,7 +364,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.InitialBackoff.Init(base.mgr)
 
-	maxBackoff := fmt.Sprintf("%f", DefaultMaxBackoff)
+	maxBackoff := fmt.Sprintf("%f", consts.DefaultMaxBackoff)
 	p.MaxBackoff = ParamItem{
 		Key:     "grpc.client.maxBackoff",
 		Version: "2.0.0",
@@ -418,7 +393,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 	}
 	p.BackoffMultiplier.Init(base.mgr)
 
-	compressionEnabled := fmt.Sprintf("%t", DefaultCompressionEnabled)
+	compressionEnabled := fmt.Sprintf("%t", consts.DefaultCompressionEnabled)
 	p.CompressionEnabled = ParamItem{
 		Key:     "grpc.client.compressionEnabled",
 		Version: "2.0.0",

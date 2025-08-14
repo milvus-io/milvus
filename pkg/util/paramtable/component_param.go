@@ -26,14 +26,12 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/disk"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 const (
@@ -6085,15 +6083,6 @@ because the wal truncate operation is implemented by pulsar consumer.`,
 		Export:       true,
 	}
 	p.WALTruncateRetentionInterval.Init(base.mgr)
-}
-
-// runtimeConfig is just a private environment value table.
-type runtimeConfig struct {
-	createTime atomic.Time
-	updateTime atomic.Time
-	role       atomic.String
-	nodeID     atomic.Int64
-	components typeutil.ConcurrentSet[string]
 }
 
 type integrationTestConfig struct {

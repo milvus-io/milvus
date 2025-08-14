@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/pkg/v2/util/consts"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -47,25 +48,25 @@ func TestGrpcServerParams(t *testing.T) {
 	t.Logf("ServerMaxRecvSize = %d", serverConfig.ServerMaxRecvSize.GetAsInt())
 
 	base.Remove(role + ".grpc.serverMaxRecvSize")
-	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
+	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), consts.DefaultServerMaxRecvSize)
 
 	base.Remove("grpc.serverMaxRecvSize")
-	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
+	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), consts.DefaultServerMaxRecvSize)
 
 	base.Save("grpc.serverMaxRecvSize", "a")
-	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), DefaultServerMaxRecvSize)
+	assert.Equal(t, serverConfig.ServerMaxRecvSize.GetAsInt(), consts.DefaultServerMaxRecvSize)
 
 	assert.NotZero(t, serverConfig.ServerMaxSendSize.GetAsInt())
 	t.Logf("ServerMaxSendSize = %d", serverConfig.ServerMaxSendSize.GetAsInt())
 
 	base.Remove(role + ".grpc.serverMaxSendSize")
-	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), DefaultServerMaxSendSize)
+	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), consts.DefaultServerMaxSendSize)
 
 	base.Remove("grpc.serverMaxSendSize")
-	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), DefaultServerMaxSendSize)
+	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), consts.DefaultServerMaxSendSize)
 
 	base.Save("grpc.serverMaxSendSize", "a")
-	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), DefaultServerMaxSendSize)
+	assert.Equal(t, serverConfig.ServerMaxSendSize.GetAsInt(), consts.DefaultServerMaxSendSize)
 
 	assert.Equal(t, serverConfig.GracefulStopTimeout.GetAsInt(), 3)
 }
@@ -96,7 +97,7 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.ClientMaxRecvSize.GetAsInt(), 1000)
 
 	base.Remove(role + ".grpc.clientMaxRecvSize")
-	assert.Equal(t, clientConfig.ClientMaxRecvSize.GetAsInt(), DefaultClientMaxRecvSize)
+	assert.Equal(t, clientConfig.ClientMaxRecvSize.GetAsInt(), consts.DefaultClientMaxRecvSize)
 
 	assert.NotZero(t, clientConfig.ClientMaxSendSize.GetAsInt())
 	t.Logf("ClientMaxSendSize = %d", clientConfig.ClientMaxSendSize.GetAsInt())
@@ -106,47 +107,47 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.ClientMaxSendSize.GetAsInt(), 2000)
 
 	base.Remove(role + ".grpc.clientMaxSendSize")
-	assert.Equal(t, clientConfig.ClientMaxSendSize.GetAsInt(), DefaultClientMaxSendSize)
+	assert.Equal(t, clientConfig.ClientMaxSendSize.GetAsInt(), consts.DefaultClientMaxSendSize)
 
-	assert.Equal(t, clientConfig.DialTimeout.GetAsInt(), DefaultDialTimeout)
+	assert.Equal(t, clientConfig.DialTimeout.GetAsInt64(), consts.DefaultDialTimeout.Milliseconds())
 	base.Save("grpc.client.dialTimeout", "aaa")
-	assert.Equal(t, clientConfig.DialTimeout.GetAsInt(), DefaultDialTimeout)
+	assert.Equal(t, clientConfig.DialTimeout.GetAsInt64(), consts.DefaultDialTimeout.Milliseconds())
 	base.Save("grpc.client.dialTimeout", "100")
 	assert.Equal(t, clientConfig.DialTimeout.GetAsDuration(time.Millisecond), 100*time.Millisecond)
 
-	assert.Equal(t, clientConfig.KeepAliveTime.GetAsInt(), DefaultKeepAliveTime)
+	assert.Equal(t, clientConfig.KeepAliveTime.GetAsInt64(), consts.DefaultKeepAliveTime.Milliseconds())
 	base.Save("grpc.client.keepAliveTime", "a")
-	assert.Equal(t, clientConfig.KeepAliveTime.GetAsInt(), DefaultKeepAliveTime)
+	assert.Equal(t, clientConfig.KeepAliveTime.GetAsInt64(), consts.DefaultKeepAliveTime.Milliseconds())
 	base.Save("grpc.client.keepAliveTime", "200")
 	assert.Equal(t, clientConfig.KeepAliveTime.GetAsDuration(time.Millisecond), 200*time.Millisecond)
 
-	assert.Equal(t, clientConfig.KeepAliveTimeout.GetAsInt(), DefaultKeepAliveTimeout)
+	assert.Equal(t, clientConfig.KeepAliveTimeout.GetAsInt64(), consts.DefaultKeepAliveTimeout.Milliseconds())
 	base.Save("grpc.client.keepAliveTimeout", "a")
-	assert.Equal(t, clientConfig.KeepAliveTimeout.GetAsInt(), DefaultKeepAliveTimeout)
+	assert.Equal(t, clientConfig.KeepAliveTimeout.GetAsInt64(), consts.DefaultKeepAliveTimeout.Milliseconds())
 	base.Save("grpc.client.keepAliveTimeout", "500")
 	assert.Equal(t, clientConfig.KeepAliveTimeout.GetAsDuration(time.Millisecond), 500*time.Millisecond)
 
-	assert.Equal(t, clientConfig.MaxAttempts.GetAsInt(), DefaultMaxAttempts)
+	assert.Equal(t, clientConfig.MaxAttempts.GetAsInt(), consts.DefaultMaxAttempts)
 	base.Save("grpc.client.maxMaxAttempts", "a")
-	assert.Equal(t, clientConfig.MaxAttempts.GetAsInt(), DefaultMaxAttempts)
+	assert.Equal(t, clientConfig.MaxAttempts.GetAsInt(), consts.DefaultMaxAttempts)
 	base.Save("grpc.client.maxMaxAttempts", "4")
 	assert.Equal(t, clientConfig.MaxAttempts.GetAsInt(), 4)
 
-	assert.Equal(t, DefaultInitialBackoff, clientConfig.InitialBackoff.GetAsFloat())
+	assert.Equal(t, consts.DefaultInitialBackoff, clientConfig.InitialBackoff.GetAsFloat())
 	base.Save(clientConfig.InitialBackoff.Key, "a")
-	assert.Equal(t, DefaultInitialBackoff, clientConfig.InitialBackoff.GetAsFloat())
+	assert.Equal(t, consts.DefaultInitialBackoff, clientConfig.InitialBackoff.GetAsFloat())
 	base.Save(clientConfig.InitialBackoff.Key, "2.0")
 	assert.Equal(t, 2.0, clientConfig.InitialBackoff.GetAsFloat())
 
-	assert.Equal(t, clientConfig.MaxBackoff.GetAsFloat(), DefaultMaxBackoff)
+	assert.Equal(t, clientConfig.MaxBackoff.GetAsFloat(), consts.DefaultMaxBackoff)
 	base.Save(clientConfig.MaxBackoff.Key, "a")
-	assert.Equal(t, clientConfig.MaxBackoff.GetAsFloat(), DefaultMaxBackoff)
+	assert.Equal(t, clientConfig.MaxBackoff.GetAsFloat(), consts.DefaultMaxBackoff)
 	base.Save(clientConfig.MaxBackoff.Key, "50.0")
 	assert.Equal(t, 50.0, clientConfig.MaxBackoff.GetAsFloat())
 
-	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), DefaultCompressionEnabled)
+	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), consts.DefaultCompressionEnabled)
 	base.Save("grpc.client.CompressionEnabled", "a")
-	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), DefaultCompressionEnabled)
+	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), consts.DefaultCompressionEnabled)
 	base.Save(clientConfig.CompressionEnabled.Key, "true")
 	assert.Equal(t, true, clientConfig.CompressionEnabled.GetAsBool())
 
