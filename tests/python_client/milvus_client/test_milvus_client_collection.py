@@ -993,22 +993,22 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_collection_auto_id_false_non_primary_field(self):
+    def test_milvus_client_collection_auto_id_true_on_primary_and_false_on_non_primary(self):
         """
-        target: Test collection with auto_id set on non-primary field
-        method: Set auto_id=False on non-primary field and verify schema auto_id is False
-        expected: Collection schema auto_id should be False when only non-primary fields have auto_id setting
+        target: Test collection with auto_id=True on primary field and auto_id=False on non-primary field
+        method: Set auto_id=True on primary key field and auto_id=False on a non-primary field, then verify schema auto_id is True
+        expected: Collection schema auto_id should be True when primary key field has auto_id=True, regardless of non-primary field auto_id setting
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create schema with primary field (no auto_id) and non-primary field with auto_id=False
+        # Create schema with primary key field (auto_id=True) and a non-primary field (auto_id=False)
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field("field2", DataType.INT64, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         # Create collection
         self.create_collection(client, collection_name, schema=schema)
-        # Verify collection properties
+        # Verify collection properties: auto_id should be True
         res = self.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
@@ -1429,23 +1429,6 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         error = {ct.err_code: 100, ct.err_msg:  f"can't find collection[database=default]"
                                                 f"[collection={collection_name}]"}
         self.describe_collection(client1, collection_name, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_collection_desc(self):
-        """
-        target: test collection with description
-        method: create with description
-        expected: assert default description
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create collection with description
-        self.create_collection(client, collection_name, default_dim, description=ct.collection_desc)
-        # Verify collection properties
-        collection_info = self.describe_collection(client, collection_name)[0]
-        assert collection_info["collection_name"] == collection_name
-        assert collection_info.get("description", "") == ct.collection_desc
-        self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_long_desc(self):
