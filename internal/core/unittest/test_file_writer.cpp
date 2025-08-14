@@ -377,13 +377,13 @@ TEST_F(FileWriterTest, ExistingFileWithDirectIO) {
 
 // Test rate limiter basic behavior: alignment and refill period
 TEST_F(FileWriterTest, RateLimiterAlignmentAndPeriods) {
-    using milvus::storage::io::WriteRateLimiter;
     using milvus::storage::io::Priority;
+    using milvus::storage::io::WriteRateLimiter;
 
     // Configure: 100ms period, 8KB per period avg, 32KB burst, ratios enabled
     auto& limiter = WriteRateLimiter::GetInstance();
     limiter.Configure(/*refill_period_us*/ 100000,
-                      /*avg_bps*/ 8192 * 10,  // 8KB per 100ms
+                      /*avg_bps*/ 8192 * 10,        // 8KB per 100ms
                       /*max_burst_bps*/ 8192 * 40,  // 32KB burst
                       /*high*/ 1,
                       /*middle*/ 1,
@@ -403,14 +403,14 @@ TEST_F(FileWriterTest, RateLimiterAlignmentAndPeriods) {
 
 // Test that buffered IO path writes correct data under throttling (no overlap)
 TEST_F(FileWriterTest, FileWriterBufferedRateLimitedWriteCorrectness) {
-    using milvus::storage::io::WriteRateLimiter;
     using milvus::storage::io::Priority;
+    using milvus::storage::io::WriteRateLimiter;
 
     FileWriter::SetMode(FileWriter::WriteMode::BUFFERED);
 
     // Configure limiter to force multiple internal chunks
     auto& limiter = WriteRateLimiter::GetInstance();
-    limiter.Configure(/*refill_period_us*/ 50000,    // 50ms
+    limiter.Configure(/*refill_period_us*/ 50000,   // 50ms
                       /*avg_bps*/ 4096 * 20,        // 4KB per 50ms
                       /*max_burst_bps*/ 4096 * 80,  // 16KB burst
                       /*high*/ 1,
@@ -439,8 +439,8 @@ TEST_F(FileWriterTest, FileWriterBufferedRateLimitedWriteCorrectness) {
 
 // Test that priority ratio impacts allowance (HIGH > MIDDLE)
 TEST_F(FileWriterTest, RateLimiterPriorityRatioEffect) {
-    using milvus::storage::io::WriteRateLimiter;
     using milvus::storage::io::Priority;
+    using milvus::storage::io::WriteRateLimiter;
 
     auto& limiter = WriteRateLimiter::GetInstance();
     // 100ms period, 8KB per period, 32KB burst
@@ -528,8 +528,8 @@ TEST_F(FileWriterTest, HalfAlignedDataWriteWithDirectIO) {
     std::string filename = (test_dir_ / "half_aligned_buffer.txt").string();
     FileWriter writer(filename);
 
-    char* aligned_buffer =
-        static_cast<char*>(std::aligned_alloc(kBufferSize, aligned_buffer_size));
+    char* aligned_buffer = static_cast<char*>(
+        std::aligned_alloc(kBufferSize, aligned_buffer_size));
     ASSERT_NE(aligned_buffer, nullptr);
 
     const size_t first_half_size = kBufferSize / 2;
