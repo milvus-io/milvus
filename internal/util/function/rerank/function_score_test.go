@@ -61,12 +61,21 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 		Type:            schemapb.FunctionType_Rerank,
 		InputFieldNames: []string{"ts"},
 		Params: []*commonpb.KeyValuePair{
-			{Key: reranker, Value: decayFunctionName},
+			{Key: reranker, Value: DecayFunctionName},
 			{Key: originKey, Value: "4"},
 			{Key: scaleKey, Value: "4"},
 			{Key: offsetKey, Value: "4"},
 			{Key: decayKey, Value: "0.5"},
 			{Key: functionKey, Value: "gauss"},
+		},
+	}
+
+	segmentScorer := &schemapb.FunctionSchema{
+		Name: "test",
+		Type: schemapb.FunctionType_Rerank,
+		Params: []*commonpb.KeyValuePair{
+			{Key: reranker, Value: BoostName},
+			{Key: WeightKey, Value: "2"},
 		},
 	}
 	funcScores := &schemapb.FunctionScore{
@@ -80,6 +89,14 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 	s.Equal(true, f.IsSupportGroup())
 	s.Equal("decay", f.reranker.GetRankName())
 
+	// two ranker but one was boost scorer
+	{
+		funcScores.Functions = append(funcScores.Functions, segmentScorer)
+		_, err := NewFunctionScore(schema, funcScores)
+		s.NoError(err)
+		funcScores.Functions = funcScores.Functions[:1]
+	}
+
 	{
 		schema.Fields[3].Nullable = true
 		_, err := NewFunctionScore(schema, funcScores)
@@ -91,13 +108,13 @@ func (s *FunctionScoreSuite) TestNewFunctionScore() {
 		funcScores.Functions[0].Params[0].Value = "NotExist"
 		_, err := NewFunctionScore(schema, funcScores)
 		s.ErrorContains(err, "Unsupported rerank function")
-		funcScores.Functions[0].Params[0].Value = decayFunctionName
+		funcScores.Functions[0].Params[0].Value = DecayFunctionName
 	}
 
 	{
 		funcScores.Functions = append(funcScores.Functions, functionSchema)
 		_, err := NewFunctionScore(schema, funcScores)
-		s.ErrorContains(err, "Currently only supports one rerank, but got")
+		s.ErrorContains(err, "Currently only supports one rerank")
 		funcScores.Functions = funcScores.Functions[:1]
 	}
 
@@ -136,7 +153,7 @@ func (s *FunctionScoreSuite) TestFunctionScoreProcess() {
 		Type:            schemapb.FunctionType_Rerank,
 		InputFieldNames: []string{"ts"},
 		Params: []*commonpb.KeyValuePair{
-			{Key: reranker, Value: decayFunctionName},
+			{Key: reranker, Value: DecayFunctionName},
 			{Key: originKey, Value: "4"},
 			{Key: scaleKey, Value: "4"},
 			{Key: offsetKey, Value: "4"},
@@ -322,7 +339,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 		rankParams := []*commonpb.KeyValuePair{}
 		f, err := NewFunctionScoreWithlegacy(schema, rankParams)
 		s.NoError(err)
-		s.Equal(f.RerankName(), rrfName)
+		s.Equal(f.RerankName(), RRFName)
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{
@@ -363,7 +380,7 @@ func (s *FunctionScoreSuite) TestlegacyFunction() {
 		}
 		f, err := NewFunctionScoreWithlegacy(schema, rankParams)
 		s.NoError(err)
-		s.Equal(f.reranker.GetRankName(), weightedName)
+		s.Equal(f.reranker.GetRankName(), WeightedName)
 	}
 	{
 		rankParams := []*commonpb.KeyValuePair{

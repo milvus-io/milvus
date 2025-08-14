@@ -2,6 +2,7 @@ package planparserv2
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	planparserv2 "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -156,7 +159,7 @@ func CreateRetrievePlan(schema *typeutil.SchemaHelper, exprStr string, exprTempl
 	return planNode, nil
 }
 
-func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.PlanNode, error) {
+func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, exprTemplateValues map[string]*schemapb.TemplateValue, functionScorer *schemapb.FunctionScore) (*planpb.PlanNode, error) {
 	parse := func() (*planpb.Expr, error) {
 		if len(exprStr) <= 0 {
 			return nil, nil
@@ -199,6 +202,16 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 		log.Error("Invalid dataType", zap.Any("dataType", dataType))
 		return nil, err
 	}
+
+	scorers, err := CreateSearchScorers(schema, functionScorer, exprTemplateValues)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(scorers) != 0 && (queryInfo.GroupByFieldId != -1 || queryInfo.SearchIteratorV2Info != nil) {
+		return nil, fmt.Errorf("don't support use segment scorer with group_by or search_iterator")
+	}
+
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{
 			VectorAnns: &planpb.VectorANNS{
@@ -209,8 +222,60 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 				FieldId:        fieldID,
 			},
 		},
+		Scorers: scorers,
 	}
 	return planNode, nil
+}
+
+func CreateSearchScorer(schema *typeutil.SchemaHelper, function *schemapb.FunctionSchema, exprTemplateValues map[string]*schemapb.TemplateValue) (*planpb.ScoreFunction, error) {
+	rerankerName := rerank.GetRerankName(function)
+	switch rerankerName {
+	case rerank.BoostName:
+		scorer := &planpb.ScoreFunction{}
+		filter, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(rerank.FilterKey, function.GetParams())
+		if ok {
+			expr, err := ParseExpr(schema, filter, exprTemplateValues)
+			if err != nil {
+				return nil, fmt.Errorf("parse expr failed with error: {%v}", err)
+			}
+			scorer.Filter = expr
+		}
+
+		weightStr, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(rerank.WeightKey, function.GetParams())
+		if !ok {
+			return nil, fmt.Errorf("must set weight params for weight scorer")
+		}
+
+		weight, err := strconv.ParseFloat(weightStr, 32)
+		if err != nil {
+			return nil, fmt.Errorf("parse function scorer weight params failed with error: {%v}", err)
+		}
+		scorer.Weight = float32(weight)
+		return scorer, nil
+	default:
+		// if not boost scorer, regard as normal function scorer
+		// will be checked at ranker
+		// return nil here
+		return nil, nil
+	}
+}
+
+func CreateSearchScorers(schema *typeutil.SchemaHelper, functionScore *schemapb.FunctionScore, exprTemplateValues map[string]*schemapb.TemplateValue) ([]*planpb.ScoreFunction, error) {
+	scorers := []*planpb.ScoreFunction{}
+	for _, function := range functionScore.GetFunctions() {
+		// create scorer for search plan
+		scorer, err := CreateSearchScorer(schema, function, exprTemplateValues)
+		if err != nil {
+			return nil, err
+		}
+		if scorer != nil {
+			scorers = append(scorers, scorer)
+		}
+	}
+	if len(scorers) == 0 {
+		return nil, nil
+	}
+	return scorers, nil
 }
 
 func CreateRequeryPlan(pkField *schemapb.FieldSchema, ids *schemapb.IDs) *planpb.PlanNode {
