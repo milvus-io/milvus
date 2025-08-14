@@ -113,9 +113,17 @@ class WriteRateLimiter {
                        (bytes % alignment_bytes == 0),
                    "alignment_bytes must be positive and bytes must be "
                    "divisible by alignment_bytes");
+
+        std::unique_lock<std::mutex> lock(mutex_);
+        // recheck the amplification ratio after taking the lock
+        auto amplification_ratio = priority_ratio_[static_cast<int>(priority)];
+        if (amplification_ratio <= 0) {
+            return bytes;
+        }
+
+        // calculate the available bytes by delta periods
         std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
-        std::unique_lock<std::mutex> lock(mutex_);
         auto delta_periods = static_cast<int>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 now - last_refill_time_)
@@ -135,13 +143,15 @@ class WriteRateLimiter {
         available_bytes_ = std::min(
             available_bytes_,
             static_cast<size_t>(refill_bytes_per_period_ * expire_periods_));
-        auto ret = std::min(
-            bytes,
-            available_bytes_ * priority_ratio_[static_cast<int>(priority)]);
+
+        // calculate the allowed bytes with amplification ratio
+        auto ret = std::min(bytes, available_bytes_ * amplification_ratio);
+        // align the allowed bytes to the alignment bytes
         ret = (ret / alignment_bytes) * alignment_bytes;
-        // available_bytes_ will still be >= 0 after the subtraction
-        available_bytes_ -= ret / priority_ratio_[static_cast<int>(priority)];
+        // update available_bytes_ by removing the amplification ratio, the updated value is always >= 0
+        available_bytes_ -= ret / amplification_ratio;
         last_refill_time_ = now;
+
         return ret;
     }
 
@@ -166,9 +176,9 @@ class WriteRateLimiter {
  private:
     WriteRateLimiter() = default;
 
-    int64_t refill_period_us_ = 1000000;
-    int64_t refill_bytes_per_period_ = 1024;
-    int32_t expire_periods_ = 10;
+    int64_t refill_period_us_ = 100000;       // 100ms
+    int64_t refill_bytes_per_period_ = 1024;  // 1KB
+    int32_t expire_periods_ = 10;             // 10 periods
     std::chrono::steady_clock::time_point last_refill_time_ =
         std::chrono::steady_clock::now();
     size_t available_bytes_ = 0;
