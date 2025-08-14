@@ -326,14 +326,15 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
 
     auto expr_type = expr_->op_type_;
     size_t processed_cursor = 0;
-    auto execute_sub_batch =
-        [ expr_type, &bitmap_input, &
-          processed_cursor ]<FilterType filter_type = FilterType::sequential>(
-            const T* left,
-            const U* right,
-            const int32_t* offsets,
-            const int size,
-            TargetBitmapView res) {
+    auto execute_sub_batch = [expr_type,
+                              &bitmap_input,
+                              &processed_cursor]<FilterType filter_type =
+                                                     FilterType::sequential>(
+                                 const T* left,
+                                 const U* right,
+                                 const int32_t* offsets,
+                                 const int size,
+                                 TargetBitmapView res) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 CompareElementFunc<T, U, proto::plan::GreaterThan, filter_type>
