@@ -108,6 +108,7 @@ const (
 	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
 	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
 	FullTextSearch        CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
+	TextEmbedding         CollectionFieldsType = 10 // int64 + varchar + float_vector + text_embedding_function
 )
 
 type GenFieldsOption struct {
@@ -373,6 +374,23 @@ func (cf FieldsFullTextSearch) GenFields(option GenFieldsOption) []*entity.Field
 	return fields
 }
 
+type FieldsTextEmbedding struct{}
+
+func (cf FieldsTextEmbedding) GenFields(option GenFieldsOption) []*entity.Field {
+	pkField := entity.NewField().WithName(GetFieldNameByFieldType(entity.FieldTypeInt64)).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	textField := entity.NewField().WithName("document").WithDataType(entity.FieldTypeVarChar).WithMaxLength(option.MaxLength).WithIsPartitionKey(option.IsPartitionKey)
+	vecField := entity.NewField().WithName("dense").WithDataType(entity.FieldTypeFloatVector).WithDim(option.Dim)
+	if option.AutoID {
+		pkField.WithIsAutoID(option.AutoID)
+	}
+	fields := []*entity.Field{
+		pkField,
+		textField,
+		vecField,
+	}
+	return fields
+}
+
 func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFieldsType, option *GenFieldsOption) []*entity.Field {
 	log.Info("GenFieldsForCollection", zap.Any("GenFieldsOption", option))
 	switch collectionFieldsType {
@@ -394,7 +412,14 @@ func (ff FieldsFactory) GenFieldsForCollection(collectionFieldsType CollectionFi
 		return FieldsInt64VecAllScalar{}.GenFields(*option)
 	case FullTextSearch:
 		return FieldsFullTextSearch{}.GenFields(*option)
+	case TextEmbedding:
+		return FieldsTextEmbedding{}.GenFields(*option)
 	default:
 		return FieldsInt64Vec{}.GenFields(*option)
 	}
+}
+
+// TNewTextEmbeddingFieldsOption creates fields option with text embedding settings
+func TNewTextEmbeddingFieldsOption() *GenFieldsOption {
+	return TNewFieldsOption().TWithDim(int64(GetTEIModelDim())).TWithAutoID(true).TWithMaxLen(65535)
 }

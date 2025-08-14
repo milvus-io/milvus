@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"math/rand"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -539,6 +542,154 @@ func GetBm25FunctionsOutputFields(schema *entity.Schema) []string {
 	return outputFields
 }
 
+func GetTextEmbeddingFunctionsOutputFields(schema *entity.Schema) []string {
+	var outputFields []string
+	for _, fn := range schema.Functions {
+		if fn.Type == entity.FunctionTypeTextEmbedding {
+			outputFields = append(outputFields, fn.OutputFieldNames...)
+		}
+	}
+	return outputFields
+}
+
+func GetAllFunctionsOutputFields(schema *entity.Schema) []string {
+	var outputFields []string
+	for _, fn := range schema.Functions {
+		if fn.Type == entity.FunctionTypeBM25 || fn.Type == entity.FunctionTypeTextEmbedding {
+			outputFields = append(outputFields, fn.OutputFieldNames...)
+		}
+	}
+	return outputFields
+}
+
+// GenTextDocuments generates realistic text documents for embedding tests
+func GenTextDocuments(count int, lang string) []string {
+	documents := make([]string, count)
+	
+	var templates []string
+	switch lang {
+	case "english", "en":
+		templates = []string{
+			"This is a document about artificial intelligence and machine learning technologies in modern computing systems",
+			"Vector databases enable efficient similarity search for high-dimensional data in AI applications", 
+			"Text embeddings transform natural language into numerical representations for semantic understanding",
+			"Information retrieval systems help users find relevant documents from large collections of data",
+			"Natural language processing enables computers to understand and generate human language effectively",
+			"Database management systems provide structured storage and efficient querying of information",
+			"Search algorithms rank and retrieve the most relevant results for user queries",
+			"Machine learning models learn patterns from data to make predictions and classifications",
+			"Deep learning neural networks process complex patterns in images, text, and other data types",
+			"Data science combines statistics, programming, and domain knowledge to extract insights",
+		}
+	case "chinese", "zh":
+		templates = []string{
+			"这是关于人工智能和机器学习技术的文档，介绍现代计算系统中的应用",
+			"向量数据库为高维数据提供高效的相似性搜索功能，支持AI应用开发",
+			"文本嵌入技术将自然语言转换为数值表示，实现语义理解和分析",
+			"信息检索系统帮助用户从大规模数据集合中找到相关的文档内容",
+			"自然语言处理技术使计算机能够理解和生成人类语言",
+			"数据库管理系统提供结构化存储和高效的信息查询功能",
+			"搜索算法对用户查询结果进行排序和检索，返回最相关的内容",
+			"机器学习模型从数据中学习模式，进行预测和分类任务",
+			"深度学习神经网络处理图像、文本等复杂数据类型中的模式",
+			"数据科学结合统计学、编程和领域知识来提取有价值的洞察",
+		}
+	default:
+		// Default to English
+		templates = []string{
+			"Document about technology and innovation in the digital age",
+			"Analysis of modern computing systems and their applications",
+			"Research on data processing and information management",
+			"Study of algorithms and their implementation in software",
+			"Overview of database systems and their optimization techniques",
+		}
+	}
+	
+	for i := 0; i < count; i++ {
+		baseTemplate := templates[i%len(templates)]
+		documents[i] = fmt.Sprintf("%s. Document ID: %d", baseTemplate, i)
+	}
+	
+	return documents
+}
+
+// CosineSimilarity calculates cosine similarity between two float32 vectors
+func CosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	
+	var dotProduct, normA, normB float32
+	for i := 0; i < len(a); i++ {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	
+	// Use math.Sqrt for more accurate calculation  
+	return dotProduct / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
+}
+
+// GenLongText generates long text with specified word count
+func GenLongText(wordCount int, lang string) string {
+	var words []string
+	switch lang {
+	case "chinese", "zh":
+		words = []string{"人工智能", "机器学习", "深度学习", "神经网络", "数据挖掘", "自然语言", "处理技术", "计算机", "算法优化", "信息检索", "向量数据库", "语义搜索", "文本分析", "知识图谱", "智能系统"}
+	case "english", "en":
+		words = []string{"artificial", "intelligence", "machine", "learning", "deep", "neural", "network", "algorithm", "database", "search", "vector", "embedding", "semantic", "analysis", "information", "retrieval", "computing", "technology", "system", "data", "processing", "optimization", "performance", "scalability", "efficiency"}
+	default:
+		words = []string{"the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "and", "runs", "through", "forest", "with", "great", "speed", "while", "chasing", "rabbit", "under", "bright", "moonlight", "across", "green", "fields", "toward", "distant", "mountains"}
+	}
+	
+	result := make([]string, wordCount)
+	for i := 0; i < wordCount; i++ {
+		result[i] = words[i%len(words)]
+	}
+	
+	return strings.Join(result, " ")
+}
+
+// CallTEIDirectly calls TEI endpoint directly to get embeddings
+func CallTEIDirectly(endpoint string, texts []string) ([][]float32, error) {
+	// TEI API request structure
+	type TEIRequest struct {
+		Inputs []string `json:"inputs"`
+	}
+	
+	// Create request
+	reqBody := TEIRequest{Inputs: texts}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	
+	// Make HTTP request to TEI
+	resp, err := http.Post(endpoint+"/embed", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to call TEI endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	
+	// Parse response - TEI returns array of arrays
+	var embeddings [][]float32
+	if err := json.Unmarshal(body, &embeddings); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	
+	return embeddings, nil
+}
+
 func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]column.Column, []column.Column) {
 	if nil == schema || schema.CollectionName == "" {
 		log.Fatal("[GenColumnsBasedSchema] Nil Schema is not expected")
@@ -557,7 +708,7 @@ func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]colu
 		if option.fieldName == "" {
 			option.fieldName = field.Name
 		}
-		if slices.Contains(GetBm25FunctionsOutputFields(schema), field.Name) {
+		if slices.Contains(GetAllFunctionsOutputFields(schema), field.Name) {
 			continue
 		}
 		log.Info("GenColumnsBasedSchema", zap.Any("field", field))
