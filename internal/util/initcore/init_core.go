@@ -411,6 +411,9 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	refineRatio := C.float(params.QueryNodeCfg.InterimIndexRefineRatio.GetAsFloat())
 	C.SegcoreSetRefineRatio(refineRatio)
 
+	indexBuildRatio := C.float(params.QueryNodeCfg.InterimIndexBuildRatio.GetAsFloat())
+	C.SegcoreSetIndexBuildRatio(indexBuildRatio)
+
 	denseVecIndexType := C.CString(params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue())
 	defer C.free(unsafe.Pointer(denseVecIndexType))
 	status := C.SegcoreSetDenseVectorInterminIndexType(denseVecIndexType)
