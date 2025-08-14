@@ -19,6 +19,7 @@
 #include "index/Utils.h"
 #include "storage/Util.h"
 
+#include <algorithm>
 #include <boost/filesystem.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -26,8 +27,6 @@
 #include <type_traits>
 #include <vector>
 #include "InvertedIndexTantivy.h"
-
-const std::string INDEX_NULL_OFFSET_FILE_NAME = "index_null_offset";
 
 namespace milvus::index {
 constexpr const char* TMP_INVERTED_INDEX_PREFIX = "/tmp/milvus/inverted-index/";
@@ -174,54 +173,51 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index data");
-
-    auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     auto inverted_index_files = index_files.value();
 
-    // need erase the index type file that has been readed
-    auto GetFileName = [](const std::string& path) -> std::string {
-        auto pos = path.find_last_of('/');
-        return pos == std::string::npos ? path : path.substr(pos + 1);
-    };
-    inverted_index_files.erase(std::remove_if(inverted_index_files.begin(),
-                                              inverted_index_files.end(),
-                                              [&](const std::string& file) {
-                                                  return GetFileName(file) ==
-                                                         "index_type";
-                                              }),
-                               inverted_index_files.end());
+    LoadIndexMetas(inverted_index_files, config);
+    RetainTantivyIndexFiles(inverted_index_files);
+    disk_file_manager_->CacheIndexToDisk(inverted_index_files);
+    auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
+    path_ = prefix;
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        prefix.c_str(), milvus::index::SetBitsetSealed);
+}
 
-    std::vector<std::string> null_offset_files;
-
-    auto find_file = [&](const std::string& target) -> auto {
-        return std::find_if(inverted_index_files.begin(),
-                            inverted_index_files.end(),
-                            [&](const std::string& filename) {
-                                return GetFileName(filename) == target;
-                            });
-    };
-
+template <typename T>
+void
+InvertedIndexTantivy<T>::LoadIndexMetas(
+    const std::vector<std::string>& index_files, const Config& config) {
     auto fill_null_offsets = [&](const uint8_t* data, int64_t size) {
         folly::SharedMutex::WriteHolder lock(mutex_);
         null_offset_.resize((size_t)size / sizeof(size_t));
         memcpy(null_offset_.data(), data, (size_t)size);
     };
+    auto null_offset_file_itr = std::find_if(
+        index_files.begin(), index_files.end(), [&](const std::string& file) {
+            return boost::filesystem::path(file).filename().string() ==
+                   INDEX_NULL_OFFSET_FILE_NAME;
+        });
 
-    if (auto it = find_file(INDEX_FILE_SLICE_META);
-        it != inverted_index_files.end()) {
-        // SLICE_META only exist if null_offset_files are sliced
-        null_offset_files.push_back(*it);
-
-        // find all null_offset_files
-        for (auto& file : inverted_index_files) {
-            auto filename = file.substr(file.find_last_of('/') + 1);
-            if (filename.length() >= INDEX_NULL_OFFSET_FILE_NAME.length() &&
-                filename.substr(0, INDEX_NULL_OFFSET_FILE_NAME.length()) ==
-                    INDEX_NULL_OFFSET_FILE_NAME) {
-                null_offset_files.push_back(file);
-            }
+    if (null_offset_file_itr != index_files.end()) {
+        // null offset file is not sliced
+        auto index_datas =
+            mem_file_manager_->LoadIndexToMemory({*null_offset_file_itr});
+        auto null_offset_data =
+            std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
+        fill_null_offsets(null_offset_data->PayloadData(),
+                          null_offset_data->PayloadSize());
+        return;
+    }
+    std::vector<std::string> null_offset_files;
+    for (auto& file : index_files) {
+        auto file_name = boost::filesystem::path(file).filename().string();
+        if (file_name.find(INDEX_NULL_OFFSET_FILE_NAME) != std::string::npos) {
+            null_offset_files.push_back(file);
         }
-
+    }
+    if (null_offset_files.size() > 0) {
+        // null offset file is sliced
         auto index_datas =
             mem_file_manager_->LoadIndexToMemory(null_offset_files);
 
@@ -232,30 +228,25 @@ InvertedIndexTantivy<T>::Load(milvus::tracer::TraceContext ctx,
             fill_null_offsets(null_offsets_codec->PayloadData(),
                               null_offsets_codec->PayloadSize());
         }
-    } else if (auto it = find_file(INDEX_NULL_OFFSET_FILE_NAME);
-               it != inverted_index_files.end()) {
-        // null offset file is not sliced
-        null_offset_files.push_back(*it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory({*it});
-        auto null_offset_data =
-            std::move(index_datas.at(INDEX_NULL_OFFSET_FILE_NAME));
-        fill_null_offsets(null_offset_data->PayloadData(),
-                          null_offset_data->PayloadSize());
     }
-    // remove from inverted_index_files
-    inverted_index_files.erase(
-        std::remove_if(inverted_index_files.begin(),
-                       inverted_index_files.end(),
-                       [&](const std::string& file) {
-                           return std::find(null_offset_files.begin(),
-                                            null_offset_files.end(),
-                                            file) != null_offset_files.end();
-                       }),
-        inverted_index_files.end());
-    disk_file_manager_->CacheIndexToDisk(inverted_index_files);
-    path_ = prefix;
-    wrapper_ = std::make_shared<TantivyIndexWrapper>(
-        prefix.c_str(), milvus::index::SetBitsetSealed);
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::RetainTantivyIndexFiles(
+    std::vector<std::string>& index_files) {
+    index_files.erase(
+        std::remove_if(
+            index_files.begin(),
+            index_files.end(),
+            [&](const std::string& file) {
+                auto file_name =
+                    boost::filesystem::path(file).filename().string();
+                return file_name == "index_type" ||
+                       file_name.find(INDEX_NULL_OFFSET_FILE_NAME) !=
+                           std::string::npos;
+            }),
+        index_files.end());
 }
 
 template <typename T>

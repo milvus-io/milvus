@@ -61,21 +61,21 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
             case JsonCastType::DataType::DOUBLE: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<double>*>(index);
-                cached_index_chunk_res_ = json_index->IsNotNull().clone();
+                cached_index_chunk_res_ = json_index->Exists().clone();
                 break;
             }
 
             case JsonCastType::DataType::VARCHAR: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<std::string>*>(index);
-                cached_index_chunk_res_ = json_index->IsNotNull().clone();
+                cached_index_chunk_res_ = json_index->Exists().clone();
                 break;
             }
 
             case JsonCastType::DataType::BOOL: {
                 auto* json_index =
                     dynamic_cast<index::JsonInvertedIndex<bool>*>(index);
-                cached_index_chunk_res_ = json_index->IsNotNull().clone();
+                cached_index_chunk_res_ = json_index->Exists().clone();
                 break;
             }
 
