@@ -3607,7 +3607,7 @@ func TestTaskSearch_parseSearchInfo(t *testing.T) {
 				},
 				{
 					Key:   common.MetricTypeKey,
-					Value: metric.MAX_SIM,
+					Value: metric.MaxSim,
 				},
 				{
 					Key:   ParamsKey,

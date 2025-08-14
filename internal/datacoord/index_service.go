@@ -70,7 +70,7 @@ func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.Collect
 	return resp.GetSchema(), nil
 }
 
-func isFieldExist(schema *schemapb.CollectionSchema, fieldID int64) bool {
+func FieldExists(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	for _, f := range schema.Fields {
 		if f.FieldID == fieldID {
 			return true
@@ -171,7 +171,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(err), nil
 	}
 
-	if !isFieldExist(schema, req.GetFieldID()) {
+	if !FieldExists(schema, req.GetFieldID()) {
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 

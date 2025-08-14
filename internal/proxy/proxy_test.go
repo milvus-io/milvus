@@ -549,7 +549,7 @@ func constructTestCreateIndexRequest(dbName, collectionName string, dataType sch
 				},
 				{
 					Key:   common.MetricTypeKey,
-					Value: metric.MAX_SIM,
+					Value: metric.MaxSim,
 				},
 				{
 					Key:   common.IndexTypeKey,
@@ -713,7 +713,7 @@ func constructTestEmbeddingListSearchRequest(dbName, collectionName, structFVec,
 		panic(err)
 	}
 	searchParams := []*commonpb.KeyValuePair{
-		{Key: MetricTypeKey, Value: metric.MAX_SIM},
+		{Key: MetricTypeKey, Value: metric.MaxSim},
 		{Key: ParamsKey, Value: string(b)},
 		{Key: AnnsFieldKey, Value: structFVec},
 		{Key: TopKKey, Value: strconv.Itoa(topk)},

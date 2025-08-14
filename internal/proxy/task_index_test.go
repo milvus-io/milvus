@@ -1177,7 +1177,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 					},
 					{
 						Key:   common.MetricTypeKey,
-						Value: metric.MAX_SIM,
+						Value: metric.MaxSim,
 					},
 				},
 				IndexName: "",
@@ -1239,7 +1239,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 					},
 					{
 						Key:   common.MetricTypeKey,
-						Value: metric.MAX_SIM,
+						Value: metric.MaxSim,
 					},
 				},
 				IndexName: "",
@@ -1255,7 +1255,7 @@ func Test_checkEmbeddingListIndex(t *testing.T) {
 			},
 		}
 		err := cit.parseIndexParams(context.TODO())
-		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MAX_SIM"))
+		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MaxSim"))
 	})
 
 	t.Run("data type wrong", func(t *testing.T) {
