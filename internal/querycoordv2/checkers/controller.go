@@ -96,12 +96,13 @@ func (controller *CheckerController) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	controller.cancel = cancel
 
-	for checker := range controller.checkers {
+	for typ := range controller.checkers {
 		controller.wg.Add(1)
-		go func() {
+		t := typ
+		go func(checker utils.CheckerType) {
 			defer controller.wg.Done()
 			controller.startChecker(ctx, checker)
-		}()
+		}(t)
 	}
 }
 
@@ -136,11 +137,29 @@ func (controller *CheckerController) startChecker(ctx context.Context, checker u
 
 		case <-ticker.C:
 			controller.check(ctx, checker)
+			newInterval := getCheckerInterval(checker)
+			if newInterval != interval {
+				interval = newInterval
+				// drain once to avoid immediate tick after Reset
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(interval)
+			}
 
 		case <-controller.manualCheckChs[checker]:
-			ticker.Stop()
 			controller.check(ctx, checker)
-			ticker.Reset(interval)
+			newInterval := getCheckerInterval(checker)
+			if newInterval != interval {
+				interval = newInterval
+				// drain any residual tick before reset
+				select {
+				case <-ticker.C:
+				default:
+				}
+				ticker.Reset(interval)
+			}
 		}
 	}
 }
