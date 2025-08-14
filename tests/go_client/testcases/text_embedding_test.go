@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
-	"github.com/stretchr/testify/require"
 )
 
 // TestCreateCollectionWithTextEmbedding tests basic collection creation with text embedding function
@@ -597,7 +598,6 @@ func TestSearchWithTextEmbedding(t *testing.T) {
 
 // TestSearchWithEmptyQuery tests search with empty query (should fail)
 func TestSearchWithEmptyQuery(t *testing.T) {
-
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -759,7 +759,6 @@ func TestHybridSearchTextEmbeddingBM25(t *testing.T) {
 
 // TestInsertEmptyDocument tests insertion with empty document
 func TestInsertEmptyDocument(t *testing.T) {
-
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
@@ -777,7 +776,6 @@ func TestInsertEmptyDocument(t *testing.T) {
 
 // TestInsertLongDocument tests insertion with very long document
 func TestInsertLongDocument(t *testing.T) {
-
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
