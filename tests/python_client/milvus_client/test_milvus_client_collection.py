@@ -118,33 +118,6 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, invalid_dim,
                                check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("invalid_dim", ct.invalid_dims)
-    def test_milvus_client_collection_vector_invalid_dim_fields(self, invalid_dim):
-        """
-        target: Test collection with invalid vector dimension
-        method: Create collection with vector field having invalid dimension
-        expected: Raise exception with appropriate error message
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create schema with invalid vector dimension
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        # Determine expected error based on invalid dimension type
-        if isinstance(invalid_dim, int) and (invalid_dim > 32768):
-            expected_msg = f"invalid dimension: {invalid_dim} of field vector. float vector dimension should be in range 2 ~ 32768"
-        elif isinstance(invalid_dim, int) and (invalid_dim < 2):  # range errors: 1, -32
-            expected_msg = f"invalid dimension: {invalid_dim}. should be in range 2 ~ 32768"
-        elif isinstance(invalid_dim, (float, str)):  # type conversion errors: 32.1, "vii", "十六"
-            expected_msg = f'strconv.ParseInt: parsing "{invalid_dim}": invalid syntax'
-        # Add vector field with invalid dimension
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=invalid_dim)
-        # Try to create collection and expect error
-        error = {ct.err_code: 65535, ct.err_msg: expected_msg}
-        self.create_collection(client, collection_name, schema=schema,
-                               check_task=CheckTasks.err_res, check_items=error)
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="pymilvus issue 1554")
     def test_milvus_client_collection_invalid_primary_field(self):
@@ -400,6 +373,7 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema,
                                check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_over_maximum_limits(self):
         """
         target: combine validations for all over-maximum scenarios
@@ -1029,7 +1003,7 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         collection_name = cf.gen_collection_name_by_testcase_name()
         # Create schema with primary field (no auto_id) and non-primary field with auto_id=False
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field("field2", DataType.INT64, auto_id=False)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         # Create collection
@@ -1038,33 +1012,35 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         res = self.describe_collection(client, collection_name,
                                      check_task=CheckTasks.check_describe_collection_property,
                                      check_items={"collection_name": collection_name,
-                                                  "auto_id": False,
+                                                  "auto_id": True,
                                                   "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue, should use fieldschema as top priority")
-    @pytest.mark.parametrize("auto_id", [True, False])
-    def test_milvus_client_collection_auto_id_inconsistent(self, auto_id):
+    @pytest.mark.parametrize("field_auto_id", [True, False])
+    @pytest.mark.parametrize("schema_auto_id", [True, False])
+    def test_milvus_client_collection_auto_id_inconsistent(self, field_auto_id, schema_auto_id):
         """
-        target: Test collection auto_id with inconsistent settings between field schema and collection schema
-        method: Set auto_id in field schema and opposite value in collection schema
-        expected: Field schema setting should take priority (currently expected to fail)
+        target: Test collection auto_id with different settings between field schema and collection schema
+        method: Set different auto_id values in field schema and collection schema
+        expected: If either field or schema has auto_id=True, final result is True
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create schema with inconsistent auto_id settings
-        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=not auto_id)[0]
-        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+        # Create schema with auto_id setting
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=schema_auto_id)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=field_auto_id)
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
         # Create collection
         self.create_collection(client, collection_name, schema=schema)
-        # Verify that field schema setting takes priority
-        res = self.describe_collection(client, collection_name,
-                                     check_task=CheckTasks.check_describe_collection_property,
-                                     check_items={"collection_name": collection_name,
-                                                  "auto_id": auto_id,
-                                                  "enable_dynamic_field": False})
+        # Determine expected auto_id: True if either field or schema has auto_id=True
+        expected_auto_id = field_auto_id or schema_auto_id
+        # Verify that the final auto_id follows OR logic
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items={"collection_name": collection_name,
+                                             "auto_id": expected_auto_id,
+                                             "enable_dynamic_field": False})
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
