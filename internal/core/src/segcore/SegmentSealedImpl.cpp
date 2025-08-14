@@ -35,6 +35,7 @@
 #include "common/FieldMeta.h"
 #include "common/File.h"
 #include "common/Json.h"
+#include "common/Geometry.h"
 #include "common/LoadInfo.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
@@ -432,6 +433,20 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     column = std::move(var_column);
                     break;
                 }
+                case milvus::DataType::GEOMETRY: {
+                    auto var_column = std::make_shared<
+                        SingleChunkVariableColumn<std::string>>(
+                        num_rows, field_meta, get_block_size());
+                    FieldDataPtr field_data;
+                    while (data.channel->pop(field_data)) {
+                        var_column->Append(std::move(field_data));
+                    }
+                    var_column->Seal();
+                    stats_.mem_size += var_column->MemoryUsageBytes();
+                    field_data_size = var_column->DataByteSize();
+                    column = std::move(var_column);
+                    break;
+                }
                 case milvus::DataType::ARRAY: {
                     auto var_column = std::make_shared<SingleChunkArrayColumn>(
                         num_rows, field_meta);
@@ -585,6 +600,17 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<SingleChunkVariableColumn<milvus::Json>>(
+                        file,
+                        total_written,
+                        field_meta,
+                        DEFAULT_MMAP_VRCOL_BLOCK_SIZE);
+                var_column->Seal(std::move(indices));
+                column = std::move(var_column);
+                break;
+            }
+            case milvus::DataType::GEOMETRY: {
+                auto var_column =
+                    std::make_shared<SingleChunkVariableColumn<std::string>>(
                         file,
                         total_written,
                         field_meta,
@@ -1444,6 +1470,15 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
 
+        case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(column.get(),
+                                                 seg_offsets,
+                                                 count,
+                                                 ret->mutable_scalars()
+                                                     ->mutable_geometry_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             bulk_subscript_array_impl(
                 column.get(),

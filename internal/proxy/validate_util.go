@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
+	"github.com/twpayne/go-geom/encoding/wkb"
+	"github.com/twpayne/go-geom/encoding/wkt"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -51,6 +54,52 @@ func withMaxCapCheck() validateOption {
 	}
 }
 
+func validateGeometryFieldSearchResult(array *[]*schemapb.FieldData) error {
+	if array == nil {
+		log.Warn("geometry field search result is nil")
+		return nil
+	}
+
+	for idx, fieldData := range *array {
+		if fieldData.Type == schemapb.DataType_Geometry {
+			wkbArray := fieldData.GetScalars().GetGeometryData().Data
+			wktArray := make([][]byte, len(wkbArray))
+			for i, data := range wkbArray {
+				geomT, err := wkb.Unmarshal(data)
+				if err != nil {
+					log.Warn("translate the wkb format search result into geometry failed")
+					return err
+				}
+				// now remove MaxDecimalDigits limit
+				wktStr, err := wkt.Marshal(geomT)
+				if err != nil {
+					log.Warn("translate the geomery  into its wkt failed")
+					return err
+				}
+				wktArray[i] = []byte(wktStr)
+			}
+			// modify the field data
+			(*array)[idx] = &schemapb.FieldData{
+				Type:      fieldData.GetType(),
+				FieldName: fieldData.GetFieldName(),
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_GeometryData{
+							GeometryData: &schemapb.GeometryArray{
+								Data: wktArray,
+							},
+						},
+					},
+				},
+				FieldId:   fieldData.GetFieldId(),
+				IsDynamic: fieldData.GetIsDynamic(),
+			}
+		}
+	}
+
+	return nil
+}
+
 func (v *validateUtil) apply(opts ...validateOption) {
 	for _, opt := range opts {
 		opt(v)
@@ -90,6 +139,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, helper *typeutil.Sch
 			}
 		case schemapb.DataType_VarChar:
 			if err := v.checkVarCharFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Geometry:
+			if err := v.checkGeometryFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_JSON:
@@ -368,6 +421,13 @@ func (v *validateUtil) fillWithNullValue(field *schemapb.FieldData, fieldSchema 
 				}
 			}
 
+		case *schemapb.ScalarField_GeometryData:
+			if fieldSchema.GetNullable() {
+				sd.GeometryData.Data, err = fillWithNullValueImpl(sd.GeometryData.Data, field.GetValidData())
+				if err != nil {
+					return err
+				}
+			}
 		default:
 			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 		}
@@ -463,6 +523,17 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			}
 			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
 			sd.JsonData.Data, err = fillWithDefaultValueImpl(sd.JsonData.Data, defaultValue, field.GetValidData())
+			if err != nil {
+				return err
+			}
+
+		case *schemapb.ScalarField_GeometryData:
+			if len(field.GetValidData()) != numRows {
+				msg := fmt.Sprintf("the length of valid_data of field(%s) is wrong", field.GetFieldName())
+				return merr.WrapErrParameterInvalid(numRows, len(field.GetValidData()), msg)
+			}
+			defaultValue := fieldSchema.GetDefaultValue().GetBytesData()
+			sd.GeometryData.Data, err = fillWithDefaultValueImpl(sd.GeometryData.Data, defaultValue, field.GetValidData())
 			if err != nil {
 				return err
 			}
@@ -633,6 +704,43 @@ func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSch
 		return nil
 	}
 
+	return nil
+}
+
+func (v *validateUtil) checkGeometryFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	geometryArray := field.GetScalars().GetGeometryData().GetData()
+	if geometryArray == nil {
+		msg := fmt.Sprintf("geometry field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need geometry array", "got nil", msg)
+	}
+
+	for index, wktdata := range geometryArray {
+		// ignore parsed geom, the check is during insert task pre execute,so geo data became wkb
+		// fmt.Println(strings.Trim(string(wktdata), "\""))
+		geomT, err := wkt.Unmarshal(strings.Trim(string(wktdata), "\""))
+		if err != nil {
+			log.Warn("insert invalid Geometry data!! The wkt data has errors", zap.Error(err))
+			return merr.WrapErrIoFailedReason(err.Error())
+		}
+		geometryArray[index], err = wkb.Marshal(geomT, wkb.NDR)
+		if err != nil {
+			log.Warn("insert invalid Geometry data!! Transform to wkb failed, has errors", zap.Error(err))
+			return merr.WrapErrIoFailedReason(err.Error())
+		}
+	}
+	// replace the field data with wkb data array
+	field = &schemapb.FieldData{
+		Type:      field.GetType(),
+		FieldName: field.GetFieldName(),
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_GeometryData{GeometryData: &schemapb.GeometryArray{Data: geometryArray}},
+			},
+		},
+		FieldId:   field.GetFieldId(),
+		IsDynamic: field.GetIsDynamic(),
+		ValidData: field.GetValidData(),
+	}
 	return nil
 }
 
@@ -896,7 +1004,7 @@ func newValidateUtil(opts ...validateOption) *validateUtil {
 }
 
 func ValidateAutoIndexMmapConfig(isVectorField bool, indexParams map[string]string) error {
-	return common.ValidateAutoIndexMmapConfig(Params.AutoIndexConfig.Enable.GetAsBool(), isVectorField, indexParams)
+	return common.ValidateAutoIndexMmapConfig(paramtable.Get().AutoIndexConfig.Enable.GetAsBool(), isVectorField, indexParams)
 }
 
 func wasBm25FunctionInputField(coll *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {

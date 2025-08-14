@@ -33,6 +33,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
+#include "common/FieldDataInterface.h"
 #include "common/FieldMeta.h"
 #include "common/File.h"
 #include "common/Json.h"
@@ -369,6 +370,21 @@ ChunkedSegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     column = std::move(var_column);
                     break;
                 }
+                case milvus::DataType::GEOMETRY: {
+                    auto var_column =
+                        std::make_shared<ChunkedVariableColumn<std::string>>(
+                            field_meta);
+                    std::shared_ptr<milvus::ArrowDataWrapper> r;
+                    while (data.arrow_reader_channel->pop(r)) {
+                        auto chunk = create_chunk(field_meta, r->reader);
+                        var_column->AddChunk(chunk);
+                    }
+                    // var_column->Seal();
+                    stats_.mem_size += var_column->DataByteSize();
+                    field_data_size = var_column->DataByteSize();
+                    column = std::move(var_column);
+                    break;
+                }
                 case milvus::DataType::ARRAY: {
                     auto var_column =
                         std::make_shared<ChunkedArrayColumn>(field_meta);
@@ -526,6 +542,14 @@ ChunkedSegmentSealedImpl::MapFieldData(const FieldId field_id,
             case milvus::DataType::JSON: {
                 auto var_column =
                     std::make_shared<ChunkedVariableColumn<milvus::Json>>(
+                        field_meta, chunks);
+                // var_column->Seal(std::move(indices));
+                column = std::move(var_column);
+                break;
+            }
+            case milvus::DataType::GEOMETRY: {
+                auto var_column =
+                    std::make_shared<ChunkedVariableColumn<std::string>>(
                         field_meta, chunks);
                 // var_column->Seal(std::move(indices));
                 column = std::move(var_column);
@@ -1576,6 +1600,15 @@ ChunkedSegmentSealedImpl::get_raw_data(FieldId field_id,
             break;
         }
 
+        case DataType::GEOMETRY: {
+            bulk_subscript_ptr_impl<std::string>(column.get(),
+                                                 seg_offsets,
+                                                 count,
+                                                 ret->mutable_scalars()
+                                                     ->mutable_geometry_data()
+                                                     ->mutable_data());
+            break;
+        }
         case DataType::ARRAY: {
             bulk_subscript_array_impl(
                 column.get(),
