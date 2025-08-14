@@ -99,15 +99,15 @@ type CollectionFieldsType int32
 
 const (
 	// FieldTypeNone zero value place holder
-	Int64Vec              CollectionFieldsType = 1 // int64 + floatVec
-	VarcharBinary         CollectionFieldsType = 2 // varchar + binaryVec
-	Int64VecJSON          CollectionFieldsType = 3 // int64 + floatVec + json
-	Int64VecArray         CollectionFieldsType = 4 // int64 + floatVec + array
-	Int64VarcharSparseVec CollectionFieldsType = 5 // int64 + varchar + sparse vector
-	Int64MultiVec         CollectionFieldsType = 6 // int64 + floatVec + binaryVec + fp16Vec + bf16vec
-	AllFields             CollectionFieldsType = 7 // all fields excepted sparse
-	Int64VecAllScalar     CollectionFieldsType = 8 // int64 + floatVec + all scalar fields
-	FullTextSearch        CollectionFieldsType = 9 // int64 + varchar + sparse vector + analyzer + function
+	Int64Vec              CollectionFieldsType = 1  // int64 + floatVec
+	VarcharBinary         CollectionFieldsType = 2  // varchar + binaryVec
+	Int64VecJSON          CollectionFieldsType = 3  // int64 + floatVec + json
+	Int64VecArray         CollectionFieldsType = 4  // int64 + floatVec + array
+	Int64VarcharSparseVec CollectionFieldsType = 5  // int64 + varchar + sparse vector
+	Int64MultiVec         CollectionFieldsType = 6  // int64 + floatVec + binaryVec + fp16Vec + bf16vec
+	AllFields             CollectionFieldsType = 7  // all fields excepted sparse
+	Int64VecAllScalar     CollectionFieldsType = 8  // int64 + floatVec + all scalar fields
+	FullTextSearch        CollectionFieldsType = 9  // int64 + varchar + sparse vector + analyzer + function
 	TextEmbedding         CollectionFieldsType = 10 // int64 + varchar + float_vector + text_embedding_function
 )
 

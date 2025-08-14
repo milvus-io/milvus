@@ -565,13 +565,13 @@ func GetAllFunctionsOutputFields(schema *entity.Schema) []string {
 // GenTextDocuments generates realistic text documents for embedding tests
 func GenTextDocuments(count int, lang string) []string {
 	documents := make([]string, count)
-	
+
 	var templates []string
 	switch lang {
 	case "english", "en":
 		templates = []string{
 			"This is a document about artificial intelligence and machine learning technologies in modern computing systems",
-			"Vector databases enable efficient similarity search for high-dimensional data in AI applications", 
+			"Vector databases enable efficient similarity search for high-dimensional data in AI applications",
 			"Text embeddings transform natural language into numerical representations for semantic understanding",
 			"Information retrieval systems help users find relevant documents from large collections of data",
 			"Natural language processing enables computers to understand and generate human language effectively",
@@ -604,12 +604,12 @@ func GenTextDocuments(count int, lang string) []string {
 			"Overview of database systems and their optimization techniques",
 		}
 	}
-	
+
 	for i := 0; i < count; i++ {
 		baseTemplate := templates[i%len(templates)]
 		documents[i] = fmt.Sprintf("%s. Document ID: %d", baseTemplate, i)
 	}
-	
+
 	return documents
 }
 
@@ -618,19 +618,19 @@ func CosineSimilarity(a, b []float32) float32 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
-	
+
 	var dotProduct, normA, normB float32
 	for i := 0; i < len(a); i++ {
 		dotProduct += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
 	}
-	
+
 	if normA == 0 || normB == 0 {
 		return 0
 	}
-	
-	// Use math.Sqrt for more accurate calculation  
+
+	// Use math.Sqrt for more accurate calculation
 	return dotProduct / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }
 
@@ -645,12 +645,12 @@ func GenLongText(wordCount int, lang string) string {
 	default:
 		words = []string{"the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "and", "runs", "through", "forest", "with", "great", "speed", "while", "chasing", "rabbit", "under", "bright", "moonlight", "across", "green", "fields", "toward", "distant", "mountains"}
 	}
-	
+
 	result := make([]string, wordCount)
 	for i := 0; i < wordCount; i++ {
 		result[i] = words[i%len(words)]
 	}
-	
+
 	return strings.Join(result, " ")
 }
 
@@ -660,33 +660,33 @@ func CallTEIDirectly(endpoint string, texts []string) ([][]float32, error) {
 	type TEIRequest struct {
 		Inputs []string `json:"inputs"`
 	}
-	
+
 	// Create request
 	reqBody := TEIRequest{Inputs: texts}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	
+
 	// Make HTTP request to TEI
 	resp, err := http.Post(endpoint+"/embed", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to call TEI endpoint: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	// Read response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-	
+
 	// Parse response - TEI returns array of arrays
 	var embeddings [][]float32
 	if err := json.Unmarshal(body, &embeddings); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
-	
+
 	return embeddings, nil
 }
 

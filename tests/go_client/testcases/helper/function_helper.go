@@ -20,11 +20,11 @@ func TNewTextEmbeddingFunction(inputField, outputField string, params map[string
 		WithInputFields(inputField).
 		WithOutputFields(outputField).
 		WithType(entity.FunctionTypeTextEmbedding)
-	
+
 	// Add all parameters including provider
 	for key, value := range params {
 		function.WithParam(key, value)
 	}
-	
+
 	return function
 }
