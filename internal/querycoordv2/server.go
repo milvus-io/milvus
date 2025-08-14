@@ -785,7 +785,8 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second))
+		interval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -797,6 +798,16 @@ func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
 				success := s.updateBalanceConfig()
 				if success {
 					return
+				}
+				// apply dynamic update only when changed
+				newInterval := Params.QueryCoordCfg.CheckAutoBalanceConfigInterval.GetAsDuration(time.Second)
+				if newInterval != interval {
+					interval = newInterval
+					select {
+					case <-ticker.C:
+					default:
+					}
+					ticker.Reset(interval)
 				}
 			}
 		}
