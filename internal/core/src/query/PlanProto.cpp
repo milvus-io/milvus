@@ -24,6 +24,7 @@
 #include "query/Utils.h"
 #include "knowhere/comp/materialized_view.h"
 #include "plan/PlanNode.h"
+#include "rescores/Scorer.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -203,6 +204,18 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     if (plan_node->search_info_.group_by_field_id_ != std::nullopt) {
         plannode = std::make_shared<milvus::plan::GroupByNode>(
             milvus::plan::GetNextPlanNodeId(), sources);
+        sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+    }
+
+    // if has score function, run filter and scorer at last
+    if (plan_node_proto.scorers_size() > 0){
+        std::vector<std::shared_ptr<rescores::Scorer>> scorers;
+        for (const auto& function: plan_node_proto.scorers()){
+            scorers.push_back(ParseScorer(function));
+        }
+        
+        plannode = std::make_shared<milvus::plan::RescoresNode>(
+            milvus::plan::GetNextPlanNodeId(), std::move(scorers), sources);
         sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
     }
 
@@ -586,6 +599,11 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
     }
     ThrowInfo(
         ExprInvalid, "expr type check failed, actual type: {}", result->type());
+}
+
+std::shared_ptr<rescores::Scorer> ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function){
+    auto expr = ParseExprs(function.filter());
+    return std::make_shared<rescores::WeightScorer>(expr, function.weight());
 }
 
 }  // namespace milvus::query

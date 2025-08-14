@@ -26,6 +26,7 @@
 #include "common/EasyAssert.h"
 #include "segcore/SegmentInterface.h"
 #include "plan/PlanNodeIdGenerator.h"
+#include "rescores/Scorer.h"
 
 namespace milvus {
 namespace plan {
@@ -436,6 +437,46 @@ class CountNode : public PlanNode {
 
  private:
     const std::vector<PlanNodePtr> sources_;
+};
+
+class RescoresNode : public PlanNode {
+ public:
+    RescoresNode(
+        const PlanNodeId& id,
+        const std::vector<std::shared_ptr<rescores::Scorer>> scorers,
+        const std::vector<PlanNodePtr>& sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), scorers_(std::move(scorers)), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::INT64;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    const std::vector<std::shared_ptr<rescores::Scorer>>&
+    scorers() const {
+        return scorers_;
+    }
+
+    std::string_view
+    name() const override {
+        return "RescoresNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("RescoresNode:\n\t[source node:{}]",
+                           SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+    const std::vector<std::shared_ptr<rescores::Scorer>> scorers_;
 };
 
 enum class ExecutionStrategy {

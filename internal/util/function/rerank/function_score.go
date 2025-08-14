@@ -39,7 +39,7 @@ const (
 	decayFunctionName string = "decay"
 	modelFunctionName string = "model"
 	rrfName           string = "rrf"
-	weightedName      string = "weighted"
+	WeightedName      string = "weighted"
 )
 
 const (
@@ -61,6 +61,13 @@ const (
 	invalidRankType  rankType = iota // invalidRankType   = 0
 	rrfRankType                      // rrfRankType = 1
 	weightedRankType                 // weightedRankType = 2
+)
+
+// segment scorer configs
+const (
+	SegmentScorerParamsKey = "is_segment_scorer"
+	FilterKey              = "filter"
+	WeightKey              = "weight"
 )
 
 var rankTypeMap = map[string]rankType{
@@ -104,7 +111,7 @@ type Reranker interface {
 	GetRankName() string
 }
 
-func getRerankName(funcSchema *schemapb.FunctionSchema) string {
+func GetRerankName(funcSchema *schemapb.FunctionSchema) string {
 	for _, param := range funcSchema.Params {
 		switch strings.ToLower(param.Key) {
 		case reranker:
@@ -128,7 +135,7 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 		return nil, fmt.Errorf("Rerank function should not have output field, but now is %d", len(funcSchema.GetOutputFieldNames()))
 	}
 
-	rerankerName := getRerankName(funcSchema)
+	rerankerName := GetRerankName(funcSchema)
 	var rerankFunc Reranker
 	var newRerankErr error
 	switch rerankerName {
@@ -138,10 +145,10 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 		rerankFunc, newRerankErr = newModelFunction(collSchema, funcSchema)
 	case rrfName:
 		rerankFunc, newRerankErr = newRRFFunction(collSchema, funcSchema)
-	case weightedName:
+	case WeightedName:
 		rerankFunc, newRerankErr = newWeightedFunction(collSchema, funcSchema)
 	default:
-		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, decayFunctionName, modelFunctionName, rrfName, weightedName)
+		return nil, fmt.Errorf("Unsupported rerank function: [%s] , list of supported [%s,%s,%s,%s]", rerankerName, decayFunctionName, modelFunctionName, rrfName, WeightedName)
 	}
 
 	if newRerankErr != nil {
@@ -151,15 +158,41 @@ func createFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.
 }
 
 func NewFunctionScore(collSchema *schemapb.CollectionSchema, funcScoreSchema *schemapb.FunctionScore) (*FunctionScore, error) {
-	if len(funcScoreSchema.Functions) > 1 || len(funcScoreSchema.Functions) == 0 {
-		return nil, fmt.Errorf("Currently only supports one rerank, but got %d", len(funcScoreSchema.Functions))
-	}
 	funcScore := &FunctionScore{}
-	var err error
-	if funcScore.reranker, err = createFunction(collSchema, funcScoreSchema.Functions[0]); err != nil {
-		return nil, err
+
+	for _, function := range funcScoreSchema.Functions {
+		isSegmentScorerStr, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(SegmentScorerParamsKey, function.GetParams())
+		if ok {
+			isSegmentScorer, err := strconv.ParseBool(isSegmentScorerStr)
+			if err != nil {
+				return nil, fmt.Errorf("parase segment_scorer option as bool failed with error: {%v}", err)
+			}
+			if isSegmentScorer {
+				continue
+			}
+		}
+
+		reranker, err := createFunction(collSchema, function)
+		if err != nil {
+			return nil, err
+		}
+
+		if reranker != nil {
+			if funcScore.reranker == nil {
+				funcScore.reranker = reranker
+			} else {
+				// now only support only use one proxy rerank
+				// but filter scorer was work on segment search
+				// support multiple uses
+				return nil, fmt.Errorf("Currently only supports one rerank")
+			}
+		}
 	}
-	return funcScore, nil
+
+	if funcScore.reranker != nil {
+		return funcScore, nil
+	}
+	return nil, nil
 }
 
 func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParams []*commonpb.KeyValuePair) (*FunctionScore, error) {
@@ -199,7 +232,7 @@ func NewFunctionScoreWithlegacy(collSchema *schemapb.CollectionSchema, rankParam
 			}
 		}
 	case weightedRankType:
-		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: reranker, Value: weightedName})
+		fSchema.Params = append(fSchema.Params, &commonpb.KeyValuePair{Key: reranker, Value: WeightedName})
 		if v, ok := params[WeightsParamsKey]; ok {
 			if d, err := json.Marshal(v); err != nil {
 				return nil, fmt.Errorf("The weights param should be an array")
