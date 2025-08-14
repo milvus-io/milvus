@@ -3,6 +3,8 @@
 package session
 
 import (
+	context "context"
+
 	types "github.com/milvus-io/milvus/internal/types"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -205,12 +207,60 @@ func (_c *MockNodeManager_RemoveNode_Call) RunAndReturn(run func(int64)) *MockNo
 	return _c
 }
 
+// Startup provides a mock function with given fields: ctx, nodes
+func (_m *MockNodeManager) Startup(ctx context.Context, nodes []*NodeInfo) error {
+	ret := _m.Called(ctx, nodes)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Startup")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*NodeInfo) error); ok {
+		r0 = rf(ctx, nodes)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockNodeManager_Startup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Startup'
+type MockNodeManager_Startup_Call struct {
+	*mock.Call
+}
+
+// Startup is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodes []*NodeInfo
+func (_e *MockNodeManager_Expecter) Startup(ctx interface{}, nodes interface{}) *MockNodeManager_Startup_Call {
+	return &MockNodeManager_Startup_Call{Call: _e.mock.On("Startup", ctx, nodes)}
+}
+
+func (_c *MockNodeManager_Startup_Call) Run(run func(ctx context.Context, nodes []*NodeInfo)) *MockNodeManager_Startup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*NodeInfo))
+	})
+	return _c
+}
+
+func (_c *MockNodeManager_Startup_Call) Return(_a0 error) *MockNodeManager_Startup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockNodeManager_Startup_Call) RunAndReturn(run func(context.Context, []*NodeInfo) error) *MockNodeManager_Startup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockNodeManager creates a new instance of MockNodeManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockNodeManager(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockNodeManager {
+},
+) *MockNodeManager {
 	mock := &MockNodeManager{}
 	mock.Mock.Test(t)
 
