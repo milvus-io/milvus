@@ -44,5 +44,5 @@ const (
 
 	EMPTY MetricType = ""
 
-	MaxSim MetricType = "MaxSim"
+	MaxSim MetricType = "MAX_SIM"
 )
