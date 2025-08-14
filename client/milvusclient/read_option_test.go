@@ -52,7 +52,15 @@ func (s *SearchOptionSuite) TestBasic() {
 	topK := rand.Intn(100) + 1
 	opt := NewSearchOption(collName, topK, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})})
 
-	opt = opt.WithANNSField("test_field").WithOutputFields("ID", "Value").WithConsistencyLevel(entity.ClStrong).WithFilter("ID > 1000").WithGroupByField("group_field").WithGroupSize(10).WithStrictGroupSize(true)
+	rerankerFunction := entity.NewFunction().WithName("time_decay").WithInputFields("timestamp").WithType(entity.FunctionTypeRerank).
+		WithParam("reranker", "decay").
+		WithParam("function", "gauss").
+		WithParam("origin", 1754995249).
+		WithParam("scale", 7*24*60*60).
+		WithParam("offset", 24*60*60).
+		WithParam("decay", 0.5)
+
+	opt = opt.WithANNSField("test_field").WithOutputFields("ID", "Value").WithConsistencyLevel(entity.ClStrong).WithFilter("ID > 1000").WithGroupByField("group_field").WithGroupSize(10).WithStrictGroupSize(true).WithFunctionReranker(rerankerFunction)
 	req, err := opt.Request()
 	s.Require().NoError(err)
 
@@ -72,6 +80,9 @@ func (s *SearchOptionSuite) TestBasic() {
 	spStrictGroupSize, ok := searchParams[spStrictGroupSize]
 	s.Require().True(ok)
 	s.Equal("true", spStrictGroupSize)
+
+	functionScore := req.GetFunctionScore()
+	s.Len(functionScore.GetFunctions(), 1)
 
 	opt = NewSearchOption(collName, topK, []entity.Vector{nonSupportData{}})
 	_, err = opt.Request()

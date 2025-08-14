@@ -875,11 +875,8 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.skip("stats task will generate a new segment, "
-                      "using collectionID as prefix will import twice as much data")
     def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, bucket_name, root_path):
-        # todo: copy binlog file to backup bucket
+                                                      is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -981,15 +978,19 @@ class TestCreateImportJob(TestBase):
         c = Collection(name)
         res = c.describe()
         collection_id = res["collection_id"]
+        # get binlog files
+        binlog_files = self.storage_client.get_collection_binlog(collection_id)
+        files = []
+        for file in binlog_files:
+            files.append([file, ""])
 
         # create import job
         payload = {
             "collectionName": restore_collection_name,
-            "files": [[f"/{root_path}/insert_log/{collection_id}/",
-                       # f"{bucket_name}/{root_path}/delta_log/{collection_id}/"
-                       ]],
+            "files": files,
             "options": {
-                "backup": "true"
+                "backup": "true",
+                "storage_version": "2"
             }
 
         }
@@ -1018,7 +1019,9 @@ class TestCreateImportJob(TestBase):
                     assert False, "import job timeout"
         time.sleep(10)
         c_restore = Collection(restore_collection_name)
-        assert c.num_entities == c_restore.num_entities
+        # since we import both original and sorted segments, the number of entities should be 2x
+        logger.info(f"c.num_entities: {c.num_entities}, c_restore.num_entities: {c_restore.num_entities}")
+        assert c.num_entities*2 == c_restore.num_entities
 
     def test_import_json_with_nullable_fields(self):
         """Test JSON import with nullable and default_value fields - fields should be auto-filled"""

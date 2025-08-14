@@ -29,9 +29,12 @@ package initcore
 import "C"
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"path"
+	"strconv"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -279,6 +282,97 @@ func InitFileWriterConfig(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cMode))
 	status := C.InitFileWriterConfig(cMode, cBufferSize, cNumThreads)
 	return HandleCStatus(&status, "InitFileWriterConfig failed")
+}
+
+var coreParamCallbackInitOnce sync.Once
+
+func SetupCoreConfigChangelCallback() {
+	coreParamCallbackInitOnce.Do(func() {
+		paramtable.Get().CommonCfg.IndexSliceSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateIndexSliceSize(size)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.HighPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			coefficient, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateHighPriorityThreadCoreCoefficient(coefficient)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.MiddlePriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			coefficient, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateMiddlePriorityThreadCoreCoefficient(coefficient)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.LowPriorityThreadCoreCoefficient.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			coefficient, err := strconv.ParseFloat(newValue, 64)
+			if err != nil {
+				return err
+			}
+			UpdateLowPriorityThreadCoreCoefficient(coefficient)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnabledOptimizeExpr.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultOptimizeExprEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnabledGrowingSegmentJSONKeyStats.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultGrowingJSONKeyStatsEnable(enable)
+			return nil
+		})
+
+		paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			enable, err := strconv.ParseBool(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultConfigParamTypeCheck(enable)
+			return nil
+		})
+
+		paramtable.Get().LogCfg.Level.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			return UpdateLogLevel(newValue)
+		})
+
+		paramtable.Get().QueryNodeCfg.ExprEvalBatchSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			size, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultExprEvalBatchSize(size)
+			return nil
+		})
+
+		paramtable.Get().QueryNodeCfg.JSONKeyStatsCommitInterval.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
+			interval, err := strconv.Atoi(newValue)
+			if err != nil {
+				return err
+			}
+			UpdateDefaultJSONKeyStatsCommitInterval(interval)
+			return nil
+		})
+	})
 }
 
 func InitInterminIndexConfig(params *paramtable.ComponentParam) error {

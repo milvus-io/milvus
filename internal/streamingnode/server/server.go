@@ -47,6 +47,9 @@ func (s *Server) init() {
 	if err := initcore.InitStorageV2FileSystem(paramtable.Get()); err != nil {
 		panic(fmt.Sprintf("unrecoverable error happens at init storage v2 file system, %+v", err))
 	}
+
+	// init paramtable change callback for core related config
+	initcore.SetupCoreConfigChangelCallback()
 }
 
 // Stop stops the streamingnode server.

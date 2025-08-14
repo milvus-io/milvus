@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "common/Common.h"
+#include "gflags/gflags.h"
 #include "log/Log.h"
 
 namespace milvus {
@@ -76,11 +77,20 @@ void
 SetLogLevel(const char* level) {
     LOG_INFO("set log level: {}", level);
     if (strcmp(level, "debug") == 0) {
-        FLAGS_v = 5;
+        gflags::SetCommandLineOption("minloglevel", "0");
+        gflags::SetCommandLineOption("v", "5");
     } else if (strcmp(level, "trace") == 0) {
-        FLAGS_v = 6;
+        gflags::SetCommandLineOption("minloglevel", "0");
+        gflags::SetCommandLineOption("v", "6");
     } else {
-        FLAGS_v = 4;
+        gflags::SetCommandLineOption("v", "4");
+        if (strcmp(level, "info") == 0) {
+            gflags::SetCommandLineOption("minloglevel", "0");
+        } else if (strcmp(level, "warn") == 0) {
+            gflags::SetCommandLineOption("minloglevel", "1");
+        } else if (strcmp(level, "error") == 0) {
+            gflags::SetCommandLineOption("minloglevel", "2");
+        }
     }
 }
 

@@ -18,10 +18,14 @@ package dist
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -29,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -259,6 +264,82 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 
 	// Verify that the notification was called
 	suite.Require().Greater(notifyCounter.Load(), int32(0))
+}
+
+// TestHeartbeatMetricsRecording tests that heartbeat metrics are properly recorded
+func TestHeartbeatMetricsRecording(t *testing.T) {
+	// Arrange: Create test response with a unique nodeID to avoid test interference
+	nodeID := time.Now().UnixNano() % 1000000 // Use timestamp-based unique ID
+	resp := &querypb.GetDataDistributionResponse{
+		Status:       merr.Success(),
+		NodeID:       nodeID,
+		LastModifyTs: 1,
+	}
+
+	// Create mock node
+	nodeManager := session.NewNodeManager()
+	nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	})
+	nodeManager.Add(nodeInfo)
+
+	// Mock time.Now() to get predictable timestamp
+	expectedTimestamp := time.Unix(1640995200, 0) // 2022-01-01 00:00:00 UTC
+	mockTimeNow := mockey.Mock(time.Now).Return(expectedTimestamp).Build()
+	defer mockTimeNow.UnPatch()
+
+	// Record the initial state of the metric for our specific nodeID
+	initialMetricValue := getMetricValueForNode(fmt.Sprint(nodeID))
+
+	// Create dist handler
+	ctx := context.Background()
+	handler := &distHandler{
+		nodeID:      nodeID,
+		nodeManager: nodeManager,
+		dist:        meta.NewDistributionManager(),
+		target:      meta.NewTargetManager(nil, nil),
+		scheduler:   task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
+	}
+
+	// Act: Handle distribution response
+	handler.handleDistResp(ctx, resp, false)
+
+	// Assert: Verify our specific metric was recorded with the expected value
+	finalMetricValue := getMetricValueForNode(fmt.Sprint(nodeID))
+
+	// Check that the metric value changed and matches our expected timestamp
+	assert.NotEqual(t, initialMetricValue, finalMetricValue, "Metric value should have changed")
+	assert.Equal(t, float64(expectedTimestamp.UnixNano()), finalMetricValue, "Metric should record the expected timestamp")
+
+	// Clean up: Remove the test metric to avoid affecting other tests
+	metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+}
+
+// Helper function to get the current metric value for a specific nodeID
+func getMetricValueForNode(nodeID string) float64 {
+	// Create a temporary registry to capture the current state
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(metrics.QueryCoordLastHeartbeatTimeStamp)
+
+	metricFamilies, err := registry.Gather()
+	if err != nil {
+		return -1 // Return -1 if we can't gather metrics
+	}
+
+	for _, mf := range metricFamilies {
+		if mf.GetName() == "milvus_querycoord_last_heartbeat_timestamp" {
+			for _, metric := range mf.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "node_id" && label.GetValue() == nodeID {
+						return metric.GetGauge().GetValue()
+					}
+				}
+			}
+		}
+	}
+	return 0 // Return 0 if metric not found (default value)
 }
 
 func TestDistHandlerSuite(t *testing.T) {

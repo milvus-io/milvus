@@ -1169,8 +1169,8 @@ class StorageClient():
             prefix = f"{self.root_path}/{dir}/{collection_id}/"
             objects = self.client.list_objects(self.bucket_name, prefix=prefix)
             for obj in objects:
-                binlog_list.append(f"{self.bucket_name}/{obj.object_name}")
-        print(binlog_list)
+                binlog_list.append(f"{obj.object_name}")
+        logger.info(binlog_list)
         return binlog_list
 
 

@@ -24,12 +24,13 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -70,18 +71,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// init embed etcd
-	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
-	if err != nil {
-		log.Fatal("failed to start embed etcd server", zap.Error(err))
-	}
-	defer os.RemoveAll(tempDir)
-	defer embedetcdServer.Close()
-
-	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
-
 	paramtable.Init()
-	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
 
 	rand.Seed(time.Now().UnixNano())
 	parameters := []string{"tikv", "etcd"}
@@ -2379,6 +2369,8 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 		opt(svr)
 	}
 
+	svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
+
 	err = svr.Init()
 	assert.NoError(t, err)
 
@@ -2417,6 +2409,153 @@ func closeTestServer(t *testing.T, svr *Server) {
 	err = svr.CleanMeta()
 	assert.NoError(t, err)
 	paramtable.Get().Reset(Params.CommonCfg.DataCoordTimeTick.Key)
+}
+
+func TestServer_rewatchQueryNodes(t *testing.T) {
+	server := &Server{
+		indexEngineVersionManager: newIndexEngineVersionManager(),
+	}
+
+	// Test with empty sessions
+	err := server.rewatchQueryNodes(map[string]*sessionutil.Session{})
+	assert.NoError(t, err)
+
+	// Test with valid sessions
+	sessions := map[string]*sessionutil.Session{
+		"session1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 20, MinimalIndexVersion: 10},
+			},
+		},
+		"session2": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID:           2,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 15, MinimalIndexVersion: 5},
+			},
+		},
+	}
+
+	err = server.rewatchQueryNodes(sessions)
+	assert.NoError(t, err)
+
+	// Verify the IndexEngineVersionManager received the sessions
+	assert.Equal(t, int32(15), server.indexEngineVersionManager.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(10), server.indexEngineVersionManager.GetMinimalIndexEngineVersion())
+
+	// Test idempotent behavior - calling again with same sessions should not cause issues
+	err = server.rewatchQueryNodes(sessions)
+	assert.NoError(t, err)
+
+	// Verify values remain the same
+	assert.Equal(t, int32(15), server.indexEngineVersionManager.GetCurrentIndexEngineVersion())
+	assert.Equal(t, int32(10), server.indexEngineVersionManager.GetMinimalIndexEngineVersion())
+}
+
+func TestServer_rewatchDataNodes_Success(t *testing.T) {
+	// Mock semver.Parse to avoid dependency on paramtable
+	mockSemverParse := mockey.Mock(semver.Parse).Return(semver.Version{}, nil).Build()
+	defer mockSemverParse.UnPatch()
+
+	sessions := map[string]*sessionutil.Session{
+		"session1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+				Address:  "localhost:9001",
+				Version:  "2.3.0",
+			},
+		},
+		"session2": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 2,
+				Address:  "localhost:9002",
+				Version:  "2.2.0", // legacy version
+			},
+		},
+	}
+
+	server := &Server{
+		ctx: context.Background(),
+	}
+
+	// Create actual implementations
+	nodeManager := session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		return nil, nil
+	})
+	cluster := NewClusterImpl(nil, nil)
+
+	server.nodeManager = nodeManager
+	server.cluster = cluster
+
+	// Mock Cluster.Startup to succeed
+	mockClusterStartup := mockey.Mock((*ClusterImpl).Startup).Return(nil).Build()
+	defer mockClusterStartup.UnPatch()
+
+	err := server.rewatchDataNodes(sessions)
+	assert.NoError(t, err)
+}
+
+func TestServer_rewatchDataNodes_EmptySession(t *testing.T) {
+	// Mock semver.Parse to avoid dependency on paramtable
+	mockSemverParse := mockey.Mock(semver.Parse).Return(semver.Version{}, nil).Build()
+	defer mockSemverParse.UnPatch()
+
+	server := &Server{
+		ctx: context.Background(),
+	}
+
+	// Create actual implementations
+	nodeManager := session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		return nil, nil
+	})
+	cluster := NewClusterImpl(nil, nil)
+
+	server.nodeManager = nodeManager
+	server.cluster = cluster
+
+	// Mock Cluster.Startup for empty nodes
+	mockStartup := mockey.Mock((*ClusterImpl).Startup).Return(nil).Build()
+	defer mockStartup.UnPatch()
+
+	err := server.rewatchDataNodes(map[string]*sessionutil.Session{})
+	assert.NoError(t, err)
+}
+
+func TestServer_rewatchDataNodes_ClusterStartupFails(t *testing.T) {
+	// Mock semver.Parse to avoid dependency on paramtable
+	mockSemverParse := mockey.Mock(semver.Parse).Return(semver.Version{}, nil).Build()
+	defer mockSemverParse.UnPatch()
+
+	sessions := map[string]*sessionutil.Session{
+		"session1": {
+			SessionRaw: sessionutil.SessionRaw{
+				ServerID: 1,
+				Address:  "localhost:9001",
+				Version:  "2.3.0",
+			},
+		},
+	}
+
+	server := &Server{
+		ctx: context.Background(),
+	}
+
+	// Create actual implementations
+	nodeManager := session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
+		return nil, nil
+	})
+	cluster := NewClusterImpl(nil, nil)
+
+	server.nodeManager = nodeManager
+	server.cluster = cluster
+
+	// Mock Cluster.Startup to fail
+	mockStartup := mockey.Mock((*ClusterImpl).Startup).Return(errors.New("cluster startup failed")).Build()
+	defer mockStartup.UnPatch()
+
+	err := server.rewatchDataNodes(sessions)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cluster startup failed")
 }
 
 func Test_CheckHealth(t *testing.T) {

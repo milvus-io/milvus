@@ -231,6 +231,9 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
+	// update log level based on current setup
+	initcore.UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
+
 	// override segcore chunk size
 	cChunkRows := C.int64_t(paramtable.Get().QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
@@ -412,6 +415,9 @@ func (node *QueryNode) InitSegcore() error {
 
 	initcore.InitTraceConfig(paramtable.Get())
 	C.InitExecExpressionFunctionFactory()
+
+	// init paramtable change callback for core related config
+	initcore.SetupCoreConfigChangelCallback()
 	return nil
 }
 

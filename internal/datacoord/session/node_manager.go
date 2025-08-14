@@ -39,6 +39,9 @@ type NodeManager interface {
 	GetClient(nodeID int64) (types.DataNodeClient, error)
 	// GetClientIDs returns a list of all DataNode IDs in the cluster
 	GetClientIDs() []int64
+
+	// Startup initializes the node manager with the given nodes
+	Startup(ctx context.Context, nodes []*NodeInfo) error
 }
 
 var _ NodeManager = (*nodeManager)(nil)
@@ -108,4 +111,23 @@ func (m *nodeManager) GetClientIDs() []int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return lo.Keys(m.nodeClients)
+}
+
+func (m *nodeManager) Startup(ctx context.Context, nodes []*NodeInfo) error {
+	// clean old nodes
+	for _, node := range m.GetClientIDs() {
+		if !lo.ContainsBy(nodes, func(info *NodeInfo) bool {
+			return info.NodeID == node
+		}) {
+			m.RemoveNode(node)
+		}
+	}
+
+	// add new nodes
+	for _, node := range nodes {
+		if err := m.AddNode(node.NodeID, node.Address); err != nil {
+			return err
+		}
+	}
+	return nil
 }

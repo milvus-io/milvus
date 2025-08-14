@@ -43,6 +43,9 @@ func InitSegcore() {
 	C.IndexBuilderInit(cGlogConf)
 	C.free(unsafe.Pointer(cGlogConf))
 
+	// update log level based on current setup
+	initcore.UpdateLogLevel(paramtable.Get().LogCfg.Level.GetValue())
+
 	// override index builder SIMD type
 	cSimdType := C.CString(paramtable.Get().CommonCfg.SimdType.GetValue())
 	C.IndexBuilderSetSimdType(cSimdType)
@@ -78,6 +81,9 @@ func InitSegcore() {
 	cGpuMemoryPoolInitSize := C.uint32_t(paramtable.Get().GpuConfig.InitSize.GetAsUint32())
 	cGpuMemoryPoolMaxSize := C.uint32_t(paramtable.Get().GpuConfig.MaxSize.GetAsUint32())
 	C.SegcoreSetKnowhereGpuMemoryPoolSize(cGpuMemoryPoolInitSize, cGpuMemoryPoolMaxSize)
+
+	// init paramtable change callback for core related config
+	initcore.SetupCoreConfigChangelCallback()
 }
 
 func CloseSegcore() {
