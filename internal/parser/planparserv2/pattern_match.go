@@ -57,7 +57,7 @@ func optimizeLikePattern(pattern string) (planpb.OpType, string, bool) {
 	trailing := isUnescapedTrailingPercent(pattern)
 
 	trimRight := func(s string) string {
-		if s[len(s)-1] != '%' {
+		if s == "" || s[len(s)-1] != '%' {
 			return s
 		}
 		for i := len(s) - 2; i >= 0; i-- {
