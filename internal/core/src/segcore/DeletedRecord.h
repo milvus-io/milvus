@@ -191,7 +191,6 @@ class DeletedRecord {
             }
             it++;
         }
-
     }
 
     size_t
