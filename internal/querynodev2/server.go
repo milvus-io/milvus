@@ -301,6 +301,12 @@ func (node *QueryNode) InitSegcore() error {
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
 	C.InitDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
 
+	cExprResCacheEnabled := C.bool(paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool())
+	C.InitExprResCacheEnable(cExprResCacheEnabled)
+
+	cExprResCacheCapacityBytes := C.int64_t(paramtable.Get().QueryNodeCfg.ExprResCacheCapacityBytes.GetAsInt64())
+	C.InitExprResCacheCapacityBytes(cExprResCacheCapacityBytes)
+
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
 
