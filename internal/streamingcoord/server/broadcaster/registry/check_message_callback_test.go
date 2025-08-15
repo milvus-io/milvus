@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/pkg/v2/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -18,22 +17,24 @@ func TestCheckMessageCallbackRegistration(t *testing.T) {
 
 	// Test registering a callback
 	called := false
-	callback := func(ctx context.Context, msg message.BroadcastMutableMessage) error {
+	callback := func(ctx context.Context, msg message.BroadcastImportMessageV1) error {
 		called = true
 		return nil
 	}
 
 	// Register callback for DropPartition message type
-	RegisterMessageCheckCallback(message.MessageTypeImport, callback)
+	RegisterImportMessageV1CheckCallback(callback)
 
 	// Verify callback was registered
-	callbackFuture, ok := messageCheckCallbacks[message.MessageTypeImport]
+	callbackFuture, ok := messageCheckCallbacks[message.MessageTypeImportV1]
 	assert.True(t, ok)
 	assert.NotNil(t, callbackFuture)
 
 	// Create a mock message
-	msg := mock_message.NewMockBroadcastMutableMessage(t)
-	msg.EXPECT().MessageType().Return(message.MessageTypeImport)
+	msg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&message.ImportMsg{}).
+		WithBroadcast([]string{"v1"}).MustBuildBroadcast()
 
 	// Call the callback
 	err := CallMessageCheckCallback(context.Background(), msg)
