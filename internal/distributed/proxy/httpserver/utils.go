@@ -817,11 +817,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			IsDynamic: field.IsDynamic,
 		}
 	}
-	if len(nameDims) == 0 && len(sch.Functions) == 0 {
+	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
 		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
+	fieldLen := make(map[string]int)
 
 	for _, row := range rows {
 		// collection schema name need not be same, since receiver could have other names
@@ -851,13 +852,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				continue
 			}
 			if !ok {
-				// For partial update, skip missing fields instead of returning error
 				if partialUpdate {
-					delete(nameColumns, field.Name)
 					continue
 				}
 				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
 			}
+			fieldLen[field.Name] += 1
 			switch field.DataType {
 			case schemapb.DataType_Bool:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]bool), candi.v.Interface().(bool))
@@ -935,6 +935,22 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	}
 	columns := make([]*schemapb.FieldData, 0, len(nameColumns))
 	for name, column := range nameColumns {
+		if fieldLen[name] == 0 && partialUpdate {
+			// for partial update, skip update for nullable field
+			// cause we cannot distinguish between missing fields and fields explicitly set to null
+			log.Info("skip empty field for partial update",
+				zap.String("fieldName", name))
+			continue
+		}
+		if fieldLen[name] != rowsLen && partialUpdate {
+			// for partial update, if try to update different field in different rows, return error
+			log.Info("field len is not equal to rows len",
+				zap.String("fieldName", name),
+				zap.Int("fieldLen", fieldLen[name]),
+				zap.Int("rowsLen", rowsLen))
+			return nil, fmt.Errorf("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
+		}
+
 		colData := fieldData[name]
 		switch colData.Type {
 		case schemapb.DataType_Bool:

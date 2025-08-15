@@ -1074,6 +1074,11 @@ func UpdateFieldData(base, update []*schemapb.FieldData, idx int64) error {
 			if len(baseFieldData.GetValidData()) != 0 {
 				baseFieldData.ValidData[idx] = updateFieldData.ValidData[idx]
 			}
+
+			// update field data to null,only modify valid data
+			if !updateFieldData.ValidData[idx] {
+				continue
+			}
 		}
 
 		// Update field data based on type

@@ -192,7 +192,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, t.req.GetDbName(), t.req.GetCollectionName(), partName)
 		if err != nil {
-			log.Warn("Failed to get partition id", zap.String("collectionName", t.req.GetCollectionName()), zap.String("partitionName", partName), zap.Error(err))
+			log.Warn("Failed to get partition id", zap.String("partitionName", partName), zap.Error(err))
 			return nil, err
 		}
 		partitionIDs = []int64{partID}
@@ -281,7 +281,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 		log.Info("parse primary field data to ids failed", zap.Error(err))
 		return err
 	}
-	log.Debug("retrieveByPKs cost",
+	log.Info("retrieveByPKs cost",
 		zap.Int("resultNum", typeutil.GetSizeOfIDs(existIDs)),
 		zap.Int64("latency", tr.ElapseSpan().Milliseconds()))
 
@@ -355,6 +355,156 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) error {
 			// use field data from upsert request
 			typeutil.AppendFieldData(it.insertFieldData, upsertFieldData, int64(i))
 		}
+	}
+
+	for _, fieldData := range it.insertFieldData {
+		if fieldData.GetIsDynamic() {
+			continue
+		}
+		fieldSchema, err := it.schema.schemaHelper.GetFieldFromName(fieldData.GetFieldName())
+		if err != nil {
+			log.Info("get field schema failed", zap.Error(err))
+			return err
+		}
+
+		// Note: Since protobuf cannot correctly identify null values, zero values + valid data are used to identify null values,
+		// therefore for field data obtained from query results, if the field is nullable, it needs to be set to empty values
+		if fieldSchema.GetNullable() {
+			if getValidNumber(fieldData.GetValidData()) != len(fieldData.GetValidData()) {
+				err := ResetNullFieldData(fieldData, fieldSchema)
+				if err != nil {
+					log.Info("reset null field data failed", zap.Error(err))
+					return err
+				}
+			}
+		}
+
+		// Note: For fields containing default values, default values need to be set according to valid data during insertion,
+		// but query results fields do not set valid data when returning default value fields,
+		// therefore valid data needs to be manually set to true
+		if fieldSchema.GetDefaultValue() != nil {
+			fieldData.ValidData = make([]bool, oldIDSize)
+			for i := range fieldData.ValidData {
+				fieldData.ValidData[i] = true
+			}
+		}
+	}
+
+	return nil
+}
+
+func ResetNullFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if !fieldSchema.GetNullable() {
+		return nil
+	}
+
+	switch field.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		switch sd := field.GetScalars().GetData().(type) {
+		case *schemapb.ScalarField_BoolData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.BoolData.Data = make([]bool, 0)
+			} else {
+				ret := make([]bool, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.BoolData.Data[i])
+					}
+				}
+				sd.BoolData.Data = ret
+			}
+
+		case *schemapb.ScalarField_IntData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.IntData.Data = make([]int32, 0)
+			} else {
+				ret := make([]int32, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.IntData.Data[i])
+					}
+				}
+				sd.IntData.Data = ret
+			}
+
+		case *schemapb.ScalarField_LongData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.LongData.Data = make([]int64, 0)
+			} else {
+				ret := make([]int64, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.LongData.Data[i])
+					}
+				}
+				sd.LongData.Data = ret
+			}
+
+		case *schemapb.ScalarField_FloatData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.FloatData.Data = make([]float32, 0)
+			} else {
+				ret := make([]float32, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.FloatData.Data[i])
+					}
+				}
+				sd.FloatData.Data = ret
+			}
+
+		case *schemapb.ScalarField_DoubleData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.DoubleData.Data = make([]float64, 0)
+			} else {
+				ret := make([]float64, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.DoubleData.Data[i])
+					}
+				}
+				sd.DoubleData.Data = ret
+			}
+
+		case *schemapb.ScalarField_StringData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.StringData.Data = make([]string, 0)
+			} else {
+				ret := make([]string, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.StringData.Data[i])
+					}
+				}
+				sd.StringData.Data = ret
+			}
+
+		case *schemapb.ScalarField_JsonData:
+			validRowNum := getValidNumber(field.GetValidData())
+			if validRowNum == 0 {
+				sd.JsonData.Data = make([][]byte, 0)
+			} else {
+				ret := make([][]byte, validRowNum)
+				for i, valid := range field.GetValidData() {
+					if valid {
+						ret = append(ret, sd.JsonData.Data[i])
+					}
+				}
+				sd.JsonData.Data = ret
+			}
+
+		default:
+			return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
+		}
+
+	default:
+		return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("undefined data type:%s", field.Type.String()))
 	}
 
 	return nil

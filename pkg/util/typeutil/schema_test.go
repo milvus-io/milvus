@@ -3227,11 +3227,14 @@ func TestUpdateFieldData(t *testing.T) {
 		// Update index 1
 		err := UpdateFieldData(baseData, updateData, 1)
 		require.NoError(t, err)
+		err = UpdateFieldData(baseData, updateData, 2)
+		require.NoError(t, err)
 
 		// Check that ValidData was updated
 		assert.Equal(t, false, baseData[0].ValidData[1])
 		// Check that data was updated
-		assert.Equal(t, int64(20), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, int64(2), baseData[0].GetScalars().GetLongData().Data[1])
+		assert.Equal(t, int64(30), baseData[0].GetScalars().GetLongData().Data[2])
 	})
 
 	t.Run("update dynamic json field", func(t *testing.T) {

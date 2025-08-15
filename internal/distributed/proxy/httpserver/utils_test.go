@@ -728,6 +728,107 @@ func TestAnyToColumns(t *testing.T) {
 		assert.Equal(t, 3, len(fieldsData))
 		assert.Equal(t, false, fieldsData[len(fieldsData)-1].IsDynamic)
 	})
+
+	t.Run("partial update with inconsistent fields should fail", func(t *testing.T) {
+		// Create a simple schema with two fields: a and b
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       false,
+				},
+				{
+					FieldID:  101,
+					Name:     "a",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  102,
+					Name:     "b",
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+			EnableDynamicField: false,
+		}
+
+		// Create two rows: first row updates only field 'a', second row updates only field 'b'
+		rows := []map[string]interface{}{
+			{
+				"id": int64(1),
+				"a":  int64(100), // Only field 'a' is provided
+			},
+			{
+				"id": int64(2),
+				"b":  int64(200), // Only field 'b' is provided
+			},
+		}
+
+		// Test with partial update = true, this should fail
+		// because different rows are updating different fields
+		_, err := anyToColumns(rows, nil, schema, false, true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "has length 1, expected 2")
+	})
+
+	t.Run("partial update with consistent missing fields should succeed", func(t *testing.T) {
+		// Create a simple schema with two fields: a and b
+		schema := &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+					AutoID:       false,
+				},
+				{
+					FieldID:  101,
+					Name:     "a",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID:  102,
+					Name:     "b",
+					DataType: schemapb.DataType_Int64,
+					Nullable: true, // Make field 'b' nullable
+				},
+			},
+			EnableDynamicField: false,
+		}
+
+		// Create two rows: both rows update only field 'a', field 'b' is missing in both
+		rows := []map[string]interface{}{
+			{
+				"id": int64(1),
+				"a":  int64(100), // Only field 'a' is provided
+			},
+			{
+				"id": int64(2),
+				"a":  int64(200), // Only field 'a' is provided
+			},
+		}
+
+		// Test with partial update = true, this should succeed
+		// because the same fields are being updated in all rows
+		fieldsData, err := anyToColumns(rows, nil, schema, false, true)
+		assert.NoError(t, err)
+		assert.NotNil(t, fieldsData)
+
+		// Should have id and a fields, but not b (since it's not provided and nullable)
+		fieldNames := make(map[string]bool)
+		for _, fd := range fieldsData {
+			fieldNames[fd.FieldName] = true
+		}
+		assert.True(t, fieldNames["id"])
+		assert.True(t, fieldNames["a"])
+		// Field 'b' should not be present since it wasn't provided in any row
+		assert.False(t, fieldNames["b"])
+	})
 }
 
 func TestCheckAndSetData(t *testing.T) {
