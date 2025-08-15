@@ -73,10 +73,16 @@ class WriteRateLimiter {
               int32_t low_priority_ratio) {
         if (refill_period_us <= 0 || avg_bps <= 0 || max_burst_bps <= 0 ||
             avg_bps > max_burst_bps) {
-            throw std::invalid_argument("All parameters must be positive");
+            PanicInfo(ErrorCode::InvalidParameter,
+                      "All parameters must be positive, but got: "
+                      "refill_period_us: {}, "
+                      "avg_bps: {}, max_burst_bps: {}",
+                      refill_period_us,
+                      avg_bps,
+                      max_burst_bps);
         }
         std::unique_lock<std::mutex> lock(mutex_);
-        // avoid too small refill period
+        // avoid too small refill period, 10us is used as the minimum refill period
         refill_period_us_ = std::max<int64_t>(10, refill_period_us);
         refill_bytes_per_period_ = avg_bps * refill_period_us_ / 1000000;
         if (refill_bytes_per_period_ <= 0) {
@@ -84,6 +90,9 @@ class WriteRateLimiter {
         }
         expire_periods_ = max_burst_bps * refill_period_us_ / 1000000 /
                           refill_bytes_per_period_;
+        if (expire_periods_ <= 0) {
+            expire_periods_ = 1;
+        }
         available_bytes_ = 0;
         last_refill_time_ = std::chrono::steady_clock::now();
         priority_ratio_ = {
@@ -106,7 +115,7 @@ class WriteRateLimiter {
     size_t
     Acquire(size_t bytes,
             size_t alignment_bytes = 1,
-            Priority priority = Priority::HIGH) {
+            Priority priority = Priority::MIDDLE) {
         if (static_cast<int>(priority) >=
             static_cast<int>(Priority::NR_PRIORITY)) {
             PanicInfo(ErrorCode::InvalidParameter,
@@ -132,14 +141,15 @@ class WriteRateLimiter {
         // calculate the available bytes by delta periods
         std::chrono::steady_clock::time_point now =
             std::chrono::steady_clock::now();
+        // steady_clock is monotonic, so the time delta is always >= 0
         auto delta_periods = static_cast<int>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 now - last_refill_time_)
                 .count() /
             refill_period_us_);
-        delta_periods = std::max(0, delta_periods);
-        // early return if the time delta is less than the refill period
-        if (delta_periods == 0 && available_bytes_ == 0) {
+        // early return if the time delta is less than the refill period and
+        // the available bytes is less than the alignment bytes
+        if (delta_periods == 0 && available_bytes_ < alignment_bytes) {
             return 0;
         }
         if (delta_periods > expire_periods_) {
@@ -158,7 +168,11 @@ class WriteRateLimiter {
         ret = (ret / alignment_bytes) * alignment_bytes;
         // update available_bytes_ by removing the amplification ratio, the updated value is always >= 0
         available_bytes_ -= ret / amplification_ratio;
-        last_refill_time_ = now;
+
+        // update the last refill time only if delta_periods > 0
+        if (delta_periods > 0) {
+            last_refill_time_ = now;
+        }
 
         return ret;
     }
