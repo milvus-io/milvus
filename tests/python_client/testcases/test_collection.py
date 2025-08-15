@@ -426,68 +426,6 @@ class TestCollectionDataframe(TestcaseBase):
         assert collection_w.num_entities == self.collection_wrap.num_entities
 
 
-class TestCollectionCountBinary(TestcaseBase):
-    """
-    params means different nb, the nb value may trigger merge, or not
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            8,
-            1000,
-            2001
-        ],
-    )
-    def insert_count(self, request):
-        yield request.param
-
-    # TODO: need to update and enable
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_count_after_index_created_binary(self, insert_count):
-        """
-        target: test num_entities, after index have been created
-        method: add vectors in db, and create binary index, then calling num_entities with correct params
-        expected: num_entities equals entities count just inserted
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
-        df, _ = cf.gen_default_binary_dataframe_data(insert_count)
-        mutation_res, _ = collection_w.insert(data=df)
-        collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
-        assert collection_w.num_entities == insert_count
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("auto_id", [True, False])
-    def test_binary_collection_with_min_dim(self, auto_id):
-        """
-        target: test binary collection when dim=1
-        method: creat collection and set dim=1
-        expected: check error message successfully
-        """
-        self._connect()
-        dim = ct.min_dim
-        c_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
-        collection_w = self.init_collection_wrap(schema=c_schema,
-                                                 check_task=CheckTasks.err_res,
-                                                 check_items={"err_code": 1,
-                                                              "err_msg": f"invalid dimension: {dim} of field {ct.default_binary_vec_field_name}. binary vector dimension should be multiple of 8."})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_no_entities(self):
-        """
-        target: test collection num_entities is correct or not, if collection is empty
-        method: create collection and no vectors in it,
-                assert the value returned by num_entities method is equal to 0
-        expected: the count is equal to 0
-        """
-        self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
-        assert collection_w.num_entities == 0
-
-
 class TestCollectionMultiCollections(TestcaseBase):
     """
     params means different nb, the nb value may trigger merge, or not

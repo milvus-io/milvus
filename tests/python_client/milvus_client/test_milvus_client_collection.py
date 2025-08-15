@@ -3415,18 +3415,8 @@ class TestMilvusClientCollectionCountIP(TestMilvusClientV2Base):
     params means different nb, the nb value may trigger merge, or not
     """
 
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            1000,
-            2001
-        ],
-    )
-    def insert_count(self, request):
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("insert_count", [1, 1000, 2001])
     def test_milvus_client_collection_count_after_index_created(self, insert_count):
         """
         target: test count_entities, after index have been created
@@ -3451,5 +3441,83 @@ class TestMilvusClientCollectionCountIP(TestMilvusClientV2Base):
         # Verify entity count
         stats = self.get_collection_stats(client, collection_name)[0]
         assert stats['row_count'] == insert_count
+        self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientCollectionCountBinary(TestMilvusClientV2Base):
+    """
+    Test collection count functionality with binary vectors
+    Params means different nb, the nb value may trigger merge, or not
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("insert_count", [8, 1000, 2001])
+    def test_milvus_client_collection_count_after_index_created_binary(self, insert_count):
+        """
+        target: Test collection count after binary index is created
+        method: Create binary collection, insert data, create index, then verify count
+        expected: Collection count equals entities count just inserted
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create binary collection schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Generate and insert binary data
+        data = cf.gen_row_data_by_schema(nb=insert_count, schema=schema)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        # Create index
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name=ct.default_binary_vec_field_name, index_type="BIN_IVF_FLAT", metric_type="JACCARD")
+        self.create_index(client, collection_name, index_params)
+        # Verify entity count
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == insert_count
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    def test_milvus_client_binary_collection_with_min_dim(self, auto_id):
+        """
+        target: Test binary collection when dim=1 (invalid for binary vectors)
+        method: Create collection with binary vector field having dim=1
+        expected: Raise exception with appropriate error message
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with invalid binary vector dimension
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        # Try to add binary vector field with invalid dimension
+        error = {ct.err_code: 1, 
+                 ct.err_msg: f"invalid dimension: {ct.min_dim} of field {ct.default_binary_vec_field_name}. "
+                             f"binary vector dimension should be multiple of 8."}
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=ct.min_dim)
+        # Try to create collection
+        self.create_collection(client, collection_name, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_collection_count_no_entities(self):
+        """
+        target: Test collection count when collection is empty
+        method: Create binary collection with binary vector field but insert no data
+        expected: The count should be equal to 0
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create binary collection schema
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        # Create collection without inserting any data
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify entity count is 0
+        stats = self.get_collection_stats(client, collection_name)[0]
+        assert stats['row_count'] == 0
         self.drop_collection(client, collection_name)
 
