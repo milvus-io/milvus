@@ -36,7 +36,8 @@ struct ConstProxy {
         mask = (data_type(1) << _shift);
     }
 
-    inline operator bool() const {
+    inline
+    operator bool() const {
         return ((element & mask) != 0);
     }
     inline bool
@@ -58,7 +59,8 @@ struct Proxy {
         mask = (data_type(1) << _shift);
     }
 
-    inline operator bool() const {
+    inline
+    operator bool() const {
         return ((element & mask) != 0);
     }
     inline bool

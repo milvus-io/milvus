@@ -869,6 +869,16 @@ common:
   # The default value is 0, which means the caller will perform write operations directly without using an additional writer thread pool.
   # In this case, the maximum concurrency of disk write operations is determined by the caller's thread pool size.
   diskWriteNumThreads: 0
+  diskWriteRateLimiter:
+    refillPeriodUs: 100000 # refill period in microseconds if disk rate limiter is enabled, default is 100000us (100ms)
+    avgKBps: 262144 # average kilobytes per second if disk rate limiter is enabled, default is 262144KB/s (256MB/s)
+    maxBurstKBps: 524288 # max burst kilobytes per second if disk rate limiter is enabled, default is 524288KB/s (512MB/s)
+    # amplification ratio for high priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled.
+    # The ratio is the multiplication factor of the configured bandwidth.
+    # For example, if the rate limit is 100KB/s, and the high priority ratio is 2, then the high priority tasks will be limited to 200KB/s.
+    highPriorityRatio: -1
+    middlePriorityRatio: -1 # amplification ratio for middle priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
+    lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
     # The superusers will ignore some system check processes,

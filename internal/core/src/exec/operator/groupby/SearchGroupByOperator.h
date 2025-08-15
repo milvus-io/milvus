@@ -172,7 +172,7 @@ struct GroupByMap {
                bool strict_group_size = false)
         : group_capacity_(group_capacity),
           group_size_(group_size),
-          strict_group_size_(strict_group_size){};
+          strict_group_size_(strict_group_size) {};
     bool
     IsGroupResEnough() {
         bool enough = false;
