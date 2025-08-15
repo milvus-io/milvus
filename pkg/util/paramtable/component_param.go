@@ -2700,8 +2700,11 @@ type queryNodeConfig struct {
 	MaxGroupNQ            ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
-	MaxTimestampLag       ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
+
+	// tsafe
+	MaxTimestampLag ParamItem `refreshable:"true"`
+	DowngradeTsafe  ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -3353,6 +3356,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxTimestampLag.Init(base.mgr)
+
+	p.DowngradeTsafe = ParamItem{
+		Key:          "queryNode.downgradeTsafe",
+		Version:      "2.5.17",
+		Doc:          "ops maintenance switch for downgrade tsafe in case of mq failure",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.DowngradeTsafe.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",
