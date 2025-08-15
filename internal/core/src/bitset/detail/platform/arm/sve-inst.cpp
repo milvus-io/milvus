@@ -19,7 +19,7 @@
 #include "bitset/common.h"
 
 #ifndef BITSET_HEADER_ONLY
-#ifdef __ARM_FEATURE_SVE
+#if defined(__ARM_FEATURE_SVE) && defined(BITSET_ENABLE_SVE_SUPPORT)
 
 #include "sve-decl.h"
 #include "sve-impl.h"
