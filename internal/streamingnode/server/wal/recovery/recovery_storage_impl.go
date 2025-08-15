@@ -140,10 +140,7 @@ func (r *recoveryStorageImpl) GetSchema(ctx context.Context, vchannel string, ti
 // ObserveMessage is called when a new message is observed.
 func (r *recoveryStorageImpl) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) error {
 	if h := msg.BroadcastHeader(); h != nil {
-		if err := streaming.WAL().Broadcast().Ack(ctx, types.BroadcastAckRequest{
-			BroadcastID: h.BroadcastID,
-			VChannel:    msg.VChannel(),
-		}); err != nil {
+		if err := streaming.WAL().Broadcast().Ack(ctx, msg); err != nil {
 			r.Logger().Warn("failed to ack broadcast message", zap.Error(err))
 			return err
 		}

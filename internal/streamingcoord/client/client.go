@@ -47,7 +47,7 @@ type BroadcastService interface {
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
 	// Ack sends a broadcast ack to the streaming service.
-	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }
 
 // Client is the interface of log service client.
