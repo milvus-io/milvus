@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
 
@@ -19,12 +19,14 @@ type BroadcastService interface {
 func NewBroadcastService(bc *syncutil.Future[broadcaster.Broadcaster]) BroadcastService {
 	return &broadcastServceImpl{
 		broadcaster: bc,
+		walName:     util.MustSelectWALName(),
 	}
 }
 
 // broadcastServiceeeeImpl is the implementation of the broadcast service.
 type broadcastServceImpl struct {
 	broadcaster *syncutil.Future[broadcaster.Broadcaster]
+	walName     string
 }
 
 // Broadcast broadcasts the message to all channels.
@@ -53,10 +55,15 @@ func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.Broadcas
 	if err != nil {
 		return nil, err
 	}
-	if err := broadcaster.Ack(ctx, types.BroadcastAckRequest{
-		BroadcastID: req.BroadcastId,
-		VChannel:    req.Vchannel,
-	}); err != nil {
+	if req.Message == nil {
+		// before 2.6.1, the request don't have the message field, only have the broadcast id and vchannel.
+		// so we need to use the legacy ack interface.
+		if err := broadcaster.LegacyAck(ctx, req.BroadcastId, req.Vchannel); err != nil {
+			return nil, err
+		}
+		return &streamingpb.BroadcastAckResponse{}, nil
+	}
+	if err := broadcaster.Ack(ctx, message.NewImmutableMessageFromProto(s.walName, req.Message)); err != nil {
 		return nil, err
 	}
 	return &streamingpb.BroadcastAckResponse{}, nil

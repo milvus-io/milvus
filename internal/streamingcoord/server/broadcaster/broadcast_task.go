@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -116,35 +115,28 @@ func (b *broadcastTask) InitializeRecovery(ctx context.Context) error {
 	return nil
 }
 
-// getImmutableMessageFromVChannel gets the immutable message from the vchannel.
+// GetImmutableMessageFromVChannel gets the immutable message from the vchannel.
 // If the vchannel is already acked, it returns nil.
-func (b *broadcastTask) getImmutableMessageFromVChannel(vchannel string) message.MutableMessage {
-	msgs := b.PendingBroadcastMessages()
+func (b *broadcastTask) GetImmutableMessageFromVChannel(vchannel string) message.ImmutableMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
+	msgs := msg.SplitIntoMutableMessage()
 	for _, msg := range msgs {
 		if msg.VChannel() == vchannel {
-			return msg
+			// The legacy message don't have timetick, so we need to set it to 0.
+			return msg.WithTimeTick(0).IntoImmutableMessage(nil)
 		}
 	}
 	return nil
 }
 
 // Ack acknowledges the message at the specified vchannel.
-func (b *broadcastTask) Ack(ctx context.Context, vchannel string) error {
-	// TODO: after all status is recovered from wal, we need make a async framework to handle the callback asynchronously.
-	msg := b.getImmutableMessageFromVChannel(vchannel)
-	if msg == nil {
-		b.Logger().Warn("vchannel is already acked, ignore the ack request", zap.String("vchannel", vchannel))
-		return nil
-	}
-	if err := registry.CallMessageAckCallback(ctx, msg); err != nil {
-		b.Logger().Warn("message ack callback failed", log.FieldMessage(msg), zap.Error(err))
-		return err
-	}
-	b.Logger().Warn("message ack callback success", log.FieldMessage(msg))
-
+func (b *broadcastTask) Ack(ctx context.Context, msg message.ImmutableMessage) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	task, ok := b.copyAndSetVChannelAcked(vchannel)
+	task, ok := b.copyAndSetVChannelAcked(msg.VChannel())
 	if !ok {
 		return nil
 	}
@@ -152,7 +144,7 @@ func (b *broadcastTask) Ack(ctx context.Context, vchannel string) error {
 	// We should always save the task after acked.
 	// Even if the task mark as done in memory.
 	// Because the task is set as done in memory before save the recovery info.
-	if err := b.saveTask(ctx, task, b.Logger().With(zap.String("ackVChannel", vchannel))); err != nil {
+	if err := b.saveTask(ctx, task, b.Logger().With(zap.String("ackVChannel", msg.VChannel()))); err != nil {
 		return err
 	}
 	b.task = task
@@ -218,6 +210,8 @@ func (b *broadcastTask) BroadcastDone(ctx context.Context) error {
 }
 
 // copyAndMarkBroadcastDone copies the task and mark the broadcast task as done.
+// !!! The ack state of the task should not be removed, because the task is a lock-hint of resource key held by a broadcast operation.
+// It can be removed only after the broadcast message is acked by all the vchannels.
 func (b *broadcastTask) copyAndMarkBroadcastDone() *streamingpb.BroadcastTask {
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
 	if isAllDone(task) {

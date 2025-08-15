@@ -129,8 +129,9 @@ message BroadcastResponse {
 }
 
 message BroadcastAckRequest {
-    uint64 broadcast_id = 1;                  // broadcast id.
-    string vchannel = 2;                     // the vchannel that acked the message.
+    uint64 broadcast_id = 1 [deprecated = true]; // broadcast id.
+    string vchannel = 2 [deprecated = true];     // the vchannel that acked the message.
+    messages.ImmutableMessage message = 3;       // the message that to be acked.
 }
 
 message BroadcastAckResponse {
