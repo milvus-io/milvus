@@ -17,7 +17,9 @@
 package entity
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -74,7 +76,16 @@ func (f *Function) WithType(funcType FunctionType) *Function {
 }
 
 func (f *Function) WithParam(key string, value any) *Function {
-	f.Params[key] = fmt.Sprintf("%v", value)
+	// Handle slices by converting to JSON format
+	if reflect.TypeOf(value).Kind() == reflect.Slice {
+		if jsonBytes, err := json.Marshal(value); err == nil {
+			f.Params[key] = string(jsonBytes)
+		} else {
+			f.Params[key] = fmt.Sprintf("%v", value)
+		}
+	} else {
+		f.Params[key] = fmt.Sprintf("%v", value)
+	}
 	return f
 }
 
