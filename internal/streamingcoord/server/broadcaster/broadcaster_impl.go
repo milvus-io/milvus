@@ -102,14 +102,23 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 	return r, nil
 }
 
-// Ack acknowledges the message at the specified vchannel.
-func (b *broadcasterImpl) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
+func (b *broadcasterImpl) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer b.lifetime.Done()
 
-	return b.manager.Ack(ctx, req.BroadcastID, req.VChannel)
+	return b.manager.LegacyAck(ctx, broadcastID, vchannel)
+}
+
+// Ack acknowledges the message at the specified vchannel.
+func (b *broadcasterImpl) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+	if !b.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return status.NewOnShutdownError("broadcaster is closing")
+	}
+	defer b.lifetime.Done()
+
+	return b.manager.Ack(ctx, msg)
 }
 
 func (b *broadcasterImpl) Close() {

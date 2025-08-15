@@ -105,7 +105,7 @@ func (n *noopBroadcast) Append(ctx context.Context, msg message.BroadcastMutable
 	}, nil
 }
 
-func (n *noopBroadcast) Ack(ctx context.Context, req types.BroadcastAckRequest) error {
+func (n *noopBroadcast) Ack(ctx context.Context, msg message.ImmutableMessage) error {
 	return nil
 }
 

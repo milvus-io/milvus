@@ -11,8 +11,11 @@ type Broadcaster interface {
 	// Broadcast broadcasts the message to all channels.
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
+	// LegacyAck is the legacy ack interface for the 2.6.0 import message.
+	LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error
+
 	// Ack acknowledges the message at the specified vchannel.
-	Ack(ctx context.Context, req types.BroadcastAckRequest) error
+	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
 	// Close closes the broadcaster.
 	Close()
