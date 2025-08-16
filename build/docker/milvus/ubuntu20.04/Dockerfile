@@ -15,7 +15,7 @@ ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 libopenblas-dev && \
+    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 libopenblas-dev gcc g++ && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
