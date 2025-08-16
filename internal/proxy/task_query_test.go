@@ -18,6 +18,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -1291,6 +1293,556 @@ func TestQueryTask_CanSkipAllocTimestamp(t *testing.T) {
 		skip = qt2.CanSkipAllocTimestamp()
 		assert.True(t, skip)
 	})
+}
+
+func TestQueryTask_DistanceQuery(t *testing.T) {
+	ctx := context.Background()
+
+	schema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  102,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			},
+		},
+	}
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		panic(err)
+	}
+	schemaInfo := &schemaInfo{
+		CollectionSchema: schema,
+		schemaHelper:     schemaHelper,
+	}
+
+	tests := []struct {
+		name                  string
+		expr                  string
+		outputFields          []string
+		queryParams           []*commonpb.KeyValuePair
+		expectedDistanceQuery bool
+	}{
+		{
+			name:         "distance function in expr",
+			expr:         "distance(a.vector, b.vector, 'L2') as _distance",
+			outputFields: []string{"a.id as id1", "b.id as id2", "_distance"},
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key: "from",
+					Value: `[
+						{"alias": "a", "source": "collection", "filter": "id IN [1,2,3]"},
+						{"alias": "b", "source": "collection", "filter": "id IN [4,5,6]"}
+					]`,
+				},
+			},
+			expectedDistanceQuery: true,
+		},
+		{
+			name:         "distance function in output fields",
+			expr:         "",
+			outputFields: []string{"distance(a.vector, b.vector, 'L2') as _distance"},
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key: "from",
+					Value: `[
+						{"alias": "a", "source": "collection", "filter": "id IN [1,2,3]"},
+						{"alias": "b", "source": "collection", "filter": "id IN [4,5,6]"}
+					]`,
+				},
+			},
+			expectedDistanceQuery: true,
+		},
+		{
+			name:                  "regular query without distance",
+			expr:                  "id > 0",
+			outputFields:          []string{"id"},
+			queryParams:           []*commonpb.KeyValuePair{},
+			expectedDistanceQuery: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &queryTask{
+				ctx:    ctx,
+				schema: schemaInfo,
+				request: &milvuspb.QueryRequest{
+					CollectionName: "test_collection",
+					Expr:           tt.expr,
+					OutputFields:   tt.outputFields,
+					QueryParams:    tt.queryParams,
+				},
+				RetrieveRequest: &internalpb.RetrieveRequest{
+					CollectionID: 1,
+				},
+			}
+
+			err := task.processDistanceQuery(ctx)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedDistanceQuery, task.isDistanceQuery)
+		})
+	}
+}
+
+func TestQueryTask_containsDistanceFunction(t *testing.T) {
+	tests := []struct {
+		name         string
+		expr         string
+		outputFields []string
+		expected     bool
+	}{
+		{
+			name:     "distance in expr",
+			expr:     "distance(a.vector, b.vector, 'L2') > 0.5",
+			expected: true,
+		},
+		{
+			name:         "distance in output fields",
+			expr:         "",
+			outputFields: []string{"distance(a.vector, b.vector, 'L2') as _distance"},
+			expected:     true,
+		},
+		{
+			name:         "uppercase DISTANCE",
+			expr:         "",
+			outputFields: []string{"DISTANCE(a.vector, b.vector, 'L2') as _distance"},
+			expected:     true,
+		},
+		{
+			name:         "no distance function",
+			expr:         "id > 0",
+			outputFields: []string{"id", "vector"},
+			expected:     false,
+		},
+		{
+			name:         "distance in field name but not function",
+			expr:         "distance_field > 0",
+			outputFields: []string{"distance_field"},
+			expected:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &queryTask{
+				request: &milvuspb.QueryRequest{
+					Expr:         tt.expr,
+					OutputFields: tt.outputFields,
+				},
+			}
+
+			result := task.containsDistanceFunction()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestQueryTask_hasDistanceInString(t *testing.T) {
+	task := &queryTask{
+		ctx: context.Background(),
+	}
+
+	tests := []struct {
+		text     string
+		expected bool
+	}{
+		{"distance(a.vector, b.vector, 'L2')", true},
+		{"DISTANCE(a.vector, b.vector, 'L2')", true},
+		{"no distance function here", false},
+		{"distance_field", false},
+		{"", false},
+		{"some distance( function", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			result := task.hasDistanceInString(tt.text)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestQueryTask_parseFromSources(t *testing.T) {
+	tests := []struct {
+		name        string
+		queryParams []*commonpb.KeyValuePair
+		expectError bool
+		expectedLen int
+	}{
+		{
+			name:        "no query params",
+			queryParams: nil,
+			expectError: false,
+			expectedLen: 0,
+		},
+		{
+			name: "no from parameter",
+			queryParams: []*commonpb.KeyValuePair{
+				{Key: "limit", Value: "100"},
+			},
+			expectError: false,
+			expectedLen: 0,
+		},
+		{
+			name: "valid from parameter",
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key: "from",
+					Value: `[
+						{"alias": "a", "source": "collection", "filter": "id IN [1,2,3]"},
+						{"alias": "b", "source": "collection", "filter": "id IN [4,5,6]"}
+					]`,
+				},
+			},
+			expectError: false,
+			expectedLen: 2,
+		},
+		{
+			name: "invalid JSON in from parameter",
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "from",
+					Value: `[invalid json`,
+				},
+			},
+			expectError: true,
+			expectedLen: 0,
+		},
+		{
+			name: "empty from array",
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "from",
+					Value: `[]`,
+				},
+			},
+			expectError: true,
+			expectedLen: 0,
+		},
+		{
+			name: "missing alias",
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key: "from",
+					Value: `[
+						{"source": "collection", "filter": "id IN [1,2,3]"}
+					]`,
+				},
+			},
+			expectError: true,
+			expectedLen: 0,
+		},
+		{
+			name: "duplicate alias",
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key: "from",
+					Value: `[
+						{"alias": "a", "source": "collection", "filter": "id IN [1,2,3]"},
+						{"alias": "a", "source": "collection", "filter": "id IN [4,5,6]"}
+					]`,
+				},
+			},
+			expectError: true,
+			expectedLen: 0,
+		},
+		{
+			name: "external vector source",
+			queryParams: []*commonpb.KeyValuePair{
+				{
+					Key: "from",
+					Value: `[
+						{"alias": "a", "source": "collection", "filter": "id IN [1,2,3]"},
+						{"alias": "b", "source": "external", "vectors": [[1.0, 2.0], [3.0, 4.0]]}
+					]`,
+				},
+			},
+			expectError: false,
+			expectedLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &queryTask{
+				request: &milvuspb.QueryRequest{
+					QueryParams: tt.queryParams,
+				},
+				aliasMap:        make(map[string]*schemaInfo),
+				externalVectors: make(map[string]*planpb.ExternalVectorData),
+			}
+
+			err := task.parseFromSources()
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedLen, len(task.fromSources))
+			}
+		})
+	}
+}
+
+func TestIsAliasField(t *testing.T) {
+	tests := []struct {
+		fieldName string
+		expected  bool
+	}{
+		{"_distance", true},
+		{"distance(a.vector, b.vector, 'L2') as _distance", true},
+		{"a.id as id1", true},
+		{"b.vector as vec", true},
+		{"a.id", true},
+		{"b.vector", true},
+		{"_score", true},
+		{"_rank", true},
+		{"regular_field", false},
+		{"id", false},
+		{"vector", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.fieldName, func(t *testing.T) {
+			result := isAliasField(tt.fieldName)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestTranslateToOutputFieldIDsForDistanceQuery(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  102,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+			},
+		},
+	}
+
+	tests := []struct {
+		name            string
+		outputFields    []string
+		isDistanceQuery bool
+		expectError     bool
+		expectedLen     int
+	}{
+		{
+			name:            "regular query with existing fields",
+			outputFields:    []string{"id", "vector"},
+			isDistanceQuery: false,
+			expectError:     false,
+			expectedLen:     2, // Both fields + primary key already included
+		},
+		{
+			name:            "distance query with alias fields",
+			outputFields:    []string{"a.id as id1", "_distance"},
+			isDistanceQuery: true,
+			expectError:     false,
+			expectedLen:     2,
+		},
+		{
+			name:            "regular query with non-existent field",
+			outputFields:    []string{"non_existent_field"},
+			isDistanceQuery: false,
+			expectError:     true,
+			expectedLen:     0,
+		},
+		{
+			name:            "distance query with distance expression",
+			outputFields:    []string{"distance(a.vector, b.vector, 'L2') as _distance"},
+			isDistanceQuery: true,
+			expectError:     false,
+			expectedLen:     1,
+		},
+		{
+			name:            "empty output fields",
+			outputFields:    []string{},
+			isDistanceQuery: false,
+			expectError:     false,
+			expectedLen:     1, // Primary key only
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := translateToOutputFieldIDsForDistanceQuery(tt.outputFields, schema, tt.isDistanceQuery)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedLen, len(result))
+			}
+		})
+	}
+}
+
+func TestValidateFromSource(t *testing.T) {
+	task := &queryTask{}
+
+	tests := []struct {
+		name        string
+		source      FromSourceDefinition
+		expectError bool
+	}{
+		{
+			name: "valid collection source",
+			source: FromSourceDefinition{
+				Alias:  "a",
+				Source: "collection",
+				Filter: "id IN [1,2,3]",
+			},
+			expectError: false,
+		},
+		{
+			name: "valid external source",
+			source: FromSourceDefinition{
+				Alias:   "b",
+				Source:  "external",
+				Vectors: [][]float32{{1.0, 2.0}, {3.0, 4.0}},
+			},
+			expectError: false,
+		},
+		{
+			name: "missing alias",
+			source: FromSourceDefinition{
+				Source: "collection",
+				Filter: "id IN [1,2,3]",
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid alias format",
+			source: FromSourceDefinition{
+				Alias:  "123invalid",
+				Source: "collection",
+				Filter: "id IN [1,2,3]",
+			},
+			expectError: true,
+		},
+		{
+			name: "missing source type",
+			source: FromSourceDefinition{
+				Alias:  "a",
+				Filter: "id IN [1,2,3]",
+			},
+			expectError: true,
+		},
+		{
+			name: "unsupported source type",
+			source: FromSourceDefinition{
+				Alias:  "a",
+				Source: "unsupported",
+			},
+			expectError: true,
+		},
+		{
+			name: "collection source missing filter",
+			source: FromSourceDefinition{
+				Alias:  "a",
+				Source: "collection",
+			},
+			expectError: true,
+		},
+		{
+			name: "external source missing vectors",
+			source: FromSourceDefinition{
+				Alias:  "b",
+				Source: "external",
+			},
+			expectError: true,
+		},
+		{
+			name: "external source with inconsistent vector dimensions",
+			source: FromSourceDefinition{
+				Alias:   "b",
+				Source:  "external",
+				Vectors: [][]float32{{1.0, 2.0}, {3.0, 4.0, 5.0}},
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := task.validateFromSource(&tt.source, 0)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestIsValidAlias(t *testing.T) {
+	tests := []struct {
+		alias    string
+		expected bool
+	}{
+		{"a", true},
+		{"source_a", true},
+		{"Source1", true},
+		{"_alias", true},
+		{"123invalid", false},
+		{"invalid-alias", false},
+		{"", false},
+		{"very_long_alias_name_that_exceeds_the_maximum_allowed_length_limit", false},
+		{"valid_alias_123", true},
+		{"ALIAS", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.alias, func(t *testing.T) {
+			result := isValidAlias(tt.alias)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestIsValidFloat32(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    float32
+		expected bool
+	}{
+		{"normal value", 1.5, true},
+		{"zero", 0.0, true},
+		{"negative", -1.5, true},
+		{"NaN", float32(math.NaN()), false},
+		{"positive infinity", float32(math.Inf(1)), false},
+		{"negative infinity", float32(math.Inf(-1)), false},
+		{"very small value", 1e-10, true},
+		{"very large value", 1e10, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isValidFloat32(tt.value)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
 
 func Test_reconstructStructFieldData(t *testing.T) {

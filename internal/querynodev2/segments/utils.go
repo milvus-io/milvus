@@ -218,6 +218,9 @@ func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.C
 }
 
 func GetSegmentRelatedDataSize(segment Segment) int64 {
+	if segment == nil {
+		return 0
+	}
 	if segment.Type() == SegmentTypeSealed {
 		return calculateSegmentLogSize(segment.LoadInfo())
 	}

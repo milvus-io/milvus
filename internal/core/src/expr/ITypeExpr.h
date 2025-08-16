@@ -802,6 +802,110 @@ class JsonContainsExpr : public ITypeFilterExpr {
     bool same_type_;
     const std::vector<proto::plan::GenericValue> vals_;
 };
+
+/**
+ * @brief Distance expression for vector distance calculation
+ * Represents distance(left_vector, right_vector, metric) expressions
+ */
+class DistanceExpr : public ITypeExpr {
+ public:
+    DistanceExpr(const TypedExprPtr& left_vector,
+                 const TypedExprPtr& right_vector,
+                 const proto::plan::DistanceMetric& metric_enum)
+        : ITypeExpr(DataType::FLOAT, {left_vector, right_vector}),
+          left_vector_(left_vector),
+          right_vector_(right_vector),
+          metric_enum_(metric_enum),
+          metric_string_(""),
+          use_enum_metric_(true) {
+    }
+
+    DistanceExpr(const TypedExprPtr& left_vector,
+                 const TypedExprPtr& right_vector,
+                 const std::string& metric_string)
+        : ITypeExpr(DataType::FLOAT, {left_vector, right_vector}),
+          left_vector_(left_vector),
+          right_vector_(right_vector),
+          metric_enum_(proto::plan::DistanceMetric::DISTANCE_METRIC_UNSPECIFIED),
+          metric_string_(metric_string),
+          use_enum_metric_(false) {
+    }
+
+    std::string
+    ToString() const override {
+        std::string metric_str;
+        if (use_enum_metric_) {
+            metric_str = proto::plan::DistanceMetric_Name(metric_enum_);
+        } else {
+            metric_str = metric_string_;
+        }
+
+        return fmt::format(
+            "DistanceExpr:[Left: {}, Right: {}, Metric: {}]",
+            left_vector_->ToString(),
+            right_vector_->ToString(),
+            metric_str);
+    }
+
+    const TypedExprPtr&
+    GetLeftVector() const {
+        return left_vector_;
+    }
+
+    const TypedExprPtr&
+    GetRightVector() const {
+        return right_vector_;
+    }
+
+    proto::plan::DistanceMetric
+    GetMetricEnum() const {
+        return metric_enum_;
+    }
+
+    const std::string&
+    GetMetricString() const {
+        return metric_string_;
+    }
+
+    bool
+    UseEnumMetric() const {
+        return use_enum_metric_;
+    }
+
+    /**
+     * @brief Get the effective metric string for computation
+     * Converts enum to string if necessary
+     */
+    std::string
+    GetEffectiveMetricString() const {
+        if (use_enum_metric_) {
+            switch (metric_enum_) {
+                case proto::plan::DistanceMetric::DISTANCE_METRIC_L2:
+                    return "L2";
+                case proto::plan::DistanceMetric::DISTANCE_METRIC_IP:
+                    return "IP";
+                case proto::plan::DistanceMetric::DISTANCE_METRIC_COSINE:
+                    return "COSINE";
+                case proto::plan::DistanceMetric::DISTANCE_METRIC_HAMMING:
+                    return "HAMMING";
+                case proto::plan::DistanceMetric::DISTANCE_METRIC_JACCARD:
+                    return "JACCARD";
+                default:
+                    return "L2";  // Default fallback
+            }
+        }
+        return metric_string_;
+    }
+
+ private:
+    const TypedExprPtr left_vector_;
+    const TypedExprPtr right_vector_;
+    const proto::plan::DistanceMetric metric_enum_;
+    const std::string metric_string_;
+    const bool use_enum_metric_;
+};
+
+using DistanceExprPtr = std::shared_ptr<const DistanceExpr>;
 }  // namespace expr
 }  // namespace milvus
 
