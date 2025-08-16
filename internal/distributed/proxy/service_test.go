@@ -274,6 +274,12 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("BatchDescribeCollection", func(t *testing.T) {
+		mockProxy.EXPECT().BatchDescribeCollection(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.BatchDescribeCollection(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("GetCollectionStatistics", func(t *testing.T) {
 		mockProxy.EXPECT().GetCollectionStatistics(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.GetCollectionStatistics(ctx, nil)
