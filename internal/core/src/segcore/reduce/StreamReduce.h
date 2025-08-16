@@ -214,7 +214,7 @@ class StreamReducerHelper {
                         std::vector<std::shared_ptr<StreamSearchResultPair>>,
                         StreamSearchResultPairComparator>
         heap_;
-    std::unordered_set<milvus::PkType> pk_set_;
+    // std::unordered_set<milvus::PkType> pk_set_;  // Removed: No longer doing primary key deduplication
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
     int64_t total_nq_{0};
