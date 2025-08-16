@@ -96,7 +96,7 @@ class TestMilvusClientAliasInvalid(TestMilvusClientV2Base):
         client = self._client()
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "not_exist_collection_alias"
-        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=default][collection={collection_name}]"}
+        error = {ct.err_code: 100, ct.err_msg: f"collection not found[database=1][collection={collection_name}]"}
         self.create_alias(client, collection_name, alias,
                           check_task=CheckTasks.err_res, check_items=error)
 
