@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -230,7 +231,7 @@ func TestExpr_Like(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err, expr)
 	assert.NotNil(t, plan)
 	fmt.Println(plan)
@@ -243,7 +244,7 @@ func TestExpr_Like(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err, expr)
 	assert.NotNil(t, plan)
 	fmt.Println(plan)
@@ -256,7 +257,7 @@ func TestExpr_Like(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err, expr)
 	assert.NotNil(t, plan)
 	fmt.Println(plan)
@@ -653,7 +654,7 @@ func TestCreateSearchPlan(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err)
 }
 
@@ -664,7 +665,7 @@ func TestCreateFloat16SearchPlan(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err)
 }
 
@@ -675,7 +676,7 @@ func TestCreateBFloat16earchPlan(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err)
 }
 
@@ -686,7 +687,7 @@ func TestCreateSparseFloatVectorSearchPlan(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err)
 }
 
@@ -848,19 +849,19 @@ func TestCreateRetrievePlan_Invalid(t *testing.T) {
 func TestCreateSearchPlan_Invalid(t *testing.T) {
 	t.Run("invalid expr", func(t *testing.T) {
 		schema := newTestSchemaHelper(t)
-		_, err := CreateSearchPlan(schema, "invalid expression", "", nil, nil)
+		_, err := CreateSearchPlan(schema, "invalid expression", "", nil, nil, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("invalid vector field", func(t *testing.T) {
 		schema := newTestSchemaHelper(t)
-		_, err := CreateSearchPlan(schema, "Int64Field > 0", "not_exist", nil, nil)
+		_, err := CreateSearchPlan(schema, "Int64Field > 0", "not_exist", nil, nil, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("not vector type", func(t *testing.T) {
 		schema := newTestSchemaHelper(t)
-		_, err := CreateSearchPlan(schema, "Int64Field > 0", "VarCharField", nil, nil)
+		_, err := CreateSearchPlan(schema, "Int64Field > 0", "VarCharField", nil, nil, nil)
 		assert.Error(t, err)
 	})
 }
@@ -1006,7 +1007,7 @@ func Test_JSONExpr(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 	}
 }
@@ -1035,7 +1036,7 @@ func Test_InvalidExprOnJSONField(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
 }
@@ -1072,7 +1073,7 @@ func Test_InvalidExprWithoutJSONField(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 	}
 }
@@ -1109,7 +1110,7 @@ func Test_InvalidExprWithMultipleJSONField(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 	}
 }
@@ -1130,7 +1131,7 @@ func Test_exprWithSingleQuotes(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 	}
 
@@ -1145,7 +1146,7 @@ func Test_exprWithSingleQuotes(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 	}
 }
@@ -1180,7 +1181,7 @@ func Test_JSONContains(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 	}
 }
@@ -1211,7 +1212,7 @@ func Test_InvalidJSONContains(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 	}
 }
@@ -1274,7 +1275,7 @@ func Test_EscapeString(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 	}
 
@@ -1291,7 +1292,7 @@ c'`,
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 		fmt.Println(plan)
 	}
@@ -1319,7 +1320,7 @@ func Test_JSONContainsAll(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr())
 		assert.Equal(t, planpb.JSONContainsExpr_ContainsAll, plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr().GetOp())
@@ -1341,7 +1342,7 @@ func Test_JSONContainsAll(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 	}
 }
@@ -1364,7 +1365,7 @@ func Test_JSONContainsAny(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr())
 		assert.Equal(t, planpb.JSONContainsExpr_ContainsAny, plan.GetVectorAnns().GetPredicates().GetJsonContainsExpr().GetOp())
@@ -1386,7 +1387,7 @@ func Test_JSONContainsAny(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err)
 	}
 }
@@ -1434,7 +1435,7 @@ func Test_ArrayExpr(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err, expr)
 	}
 
@@ -1468,7 +1469,7 @@ func Test_ArrayExpr(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
 }
@@ -1496,7 +1497,7 @@ func Test_ArrayLength(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err, expr)
 	}
 
@@ -1522,7 +1523,7 @@ func Test_ArrayLength(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.Error(t, err, expr)
 	}
 }
@@ -1578,6 +1579,106 @@ func TestRandomSampleWithFilter(t *testing.T) {
 	for _, exprStr := range exprStrsInvalid {
 		assertInvalidExpr(t, helper, exprStr)
 	}
+}
+
+func Test_SegmentScorers(t *testing.T) {
+	schema := newTestSchemaHelper(t)
+
+	// helper to build a boost segment scorer function
+	makeBoostRanker := func(filter string, weight string) *schemapb.FunctionSchema {
+		params := []*commonpb.KeyValuePair{
+			{Key: rerank.WeightKey, Value: weight},
+			{Key: "reranker", Value: rerank.BoostName},
+		}
+		if filter != "" {
+			params = append(params, &commonpb.KeyValuePair{Key: rerank.FilterKey, Value: filter})
+		}
+		return &schemapb.FunctionSchema{
+			Params: params,
+		}
+	}
+
+	t.Run("ok - single boost scorer", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("Int64Field > 0", "1.5"),
+			},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan)
+		assert.Equal(t, 1, len(plan.Scorers))
+		// filter should be parsed into Expr when provided
+		assert.NotNil(t, plan.Scorers[0])
+	})
+
+	t.Run("ok - multiple boost scorers", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("Int64Field > 0", "1.0"),
+				makeBoostRanker("", "2.0"),
+			},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		assert.NotNil(t, plan)
+		assert.Equal(t, 2, len(plan.Scorers))
+	})
+
+	t.Run("error - not segment scorer flag", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: rerank.WeightedName}}}},
+		}
+		plan, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: -1}, nil, fs)
+		assert.NoError(t, err)
+		// not segment scorer means ignored
+		assert.NotNil(t, plan)
+		assert.Equal(t, 0, len(plan.Scorers))
+	})
+
+	t.Run("error - missing weight", func(t *testing.T) {
+		// missing weight should cause CreateSearchScorer to fail
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				{Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: rerank.BoostName},
+					// no weight
+				}},
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - invalid weight format", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("", "invalid_float"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - scorer with group_by", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("", "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{GroupByFieldId: 100}, nil, fs)
+		assert.Error(t, err)
+	})
+
+	t.Run("error - scorer with search_iterator_v2", func(t *testing.T) {
+		fs := &schemapb.FunctionScore{
+			Functions: []*schemapb.FunctionSchema{
+				makeBoostRanker("", "1.0"),
+			},
+		}
+		_, err := CreateSearchPlan(schema, "", "FloatVectorField", &planpb.QueryInfo{SearchIteratorV2Info: &planpb.SearchIteratorV2Info{}}, nil, fs)
+		assert.Error(t, err)
+	})
 }
 
 func TestConcurrency(t *testing.T) {
@@ -1653,7 +1754,7 @@ func BenchmarkWithString(b *testing.B) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(b, err)
 		assert.NotNil(b, plan)
 	}
@@ -1696,7 +1797,7 @@ func BenchmarkTemplateWithString(b *testing.B) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, mv)
+		}, mv, nil)
 		assert.NoError(b, err)
 		assert.NotNil(b, plan)
 	}
@@ -1711,7 +1812,7 @@ func TestNestedPathWithChinese(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err, expr)
 	paths := plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath()
 	assert.NotNil(t, paths)
@@ -1725,7 +1826,7 @@ func TestNestedPathWithChinese(t *testing.T) {
 		MetricType:   "",
 		SearchParams: "",
 		RoundDecimal: 0,
-	}, nil)
+	}, nil, nil)
 	assert.NoError(t, err, expr)
 	paths = plan.GetVectorAnns().GetPredicates().GetUnaryRangeExpr().GetColumnInfo().GetNestedPath()
 	assert.NotNil(t, paths)
@@ -1751,7 +1852,7 @@ func Test_JSONPathNullExpr(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, plan)
 
@@ -1760,7 +1861,7 @@ func Test_JSONPathNullExpr(t *testing.T) {
 			MetricType:   "",
 			SearchParams: "",
 			RoundDecimal: 0,
-		}, nil)
+		}, nil, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, plan2)
 

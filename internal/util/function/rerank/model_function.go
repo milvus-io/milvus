@@ -323,7 +323,7 @@ type ModelFunction[T PKType] struct {
 }
 
 func newModelFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, decayFunctionName, true)
+	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true)
 	if err != nil {
 		return nil, err
 	}

@@ -16,8 +16,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include "common/QueryInfo.h"
+#include "common/QueryResult.h"
 #include "knowhere/index/index_node.h"
+#include "log/Log.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/ConcurrentVector.h"
@@ -96,5 +99,41 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
     }
     return false;
 }
+
+inline void
+sort_search_result(milvus::SearchResult& result, bool large_is_better) {
+    auto nq = result.total_nq_;
+    auto topk = result.unity_topK_;
+    auto size = nq * topk;
+
+    std::vector<float> new_distances = std::vector<float>();
+    std::vector<int64_t> new_seg_offsets = std::vector<int64_t>();
+    new_distances.reserve(size);
+    new_seg_offsets.reserve(size);
+
+    std::vector<size_t> idx(topk);
+
+    for (size_t start = 0; start < size; start += topk) {
+        for (size_t i = 0; i < idx.size(); ++i) idx[i] = start + i;
+
+        if (large_is_better) {
+            std::sort(idx.begin(), idx.end(), [&](size_t i, size_t j) {
+                return result.distances_[i] > result.distances_[j] || (result.seg_offsets_[j] >=0 &&result.seg_offsets_[j] < 0);
+            });
+        } else {
+            std::sort(idx.begin(), idx.end(), [&](size_t i, size_t j) {
+                return result.distances_[i] < result.distances_[j] || (result.seg_offsets_[j] >=0 &&result.seg_offsets_[j] < 0);
+            });
+        }
+        for (auto i : idx) {
+            new_distances.push_back(result.distances_[i]);
+            new_seg_offsets.push_back(result.seg_offsets_[i]);
+        }
+    }
+
+    result.distances_ = new_distances;
+    result.seg_offsets_ = new_seg_offsets;
+}
+
 }  // namespace exec
 }  // namespace milvus
