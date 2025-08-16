@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"go.uber.org/zap"
-	
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -45,12 +45,12 @@ func (r *defaultLimitReducer) afterReduce(result *milvuspb.QueryResults) error {
 
 	for i := 0; i < len(result.GetFieldsData()); i++ {
 		fieldID := result.FieldsData[i].GetFieldId()
-		
+
 		// 关键修复：跳过负数字段ID（如距离字段 -100），这些是特殊字段不需要处理
 		if fieldID < 0 {
 			continue
 		}
-		
+
 		// 确保数组索引安全：如果超出outputFieldsID范围，跳过处理
 		if i >= len(outputFieldsID) {
 			log.Warn("Field index exceeds outputFieldsID length, skipping",
@@ -59,7 +59,7 @@ func (r *defaultLimitReducer) afterReduce(result *milvuspb.QueryResults) error {
 				zap.Int64("fieldID", fieldID))
 			continue
 		}
-		
+
 		// drop ts column
 		if outputFieldsID[i] == common.TimeStampField {
 			result.FieldsData = append(result.FieldsData[:i], result.FieldsData[(i+1):]...)

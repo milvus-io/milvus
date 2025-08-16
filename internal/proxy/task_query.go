@@ -178,7 +178,7 @@ func translateToOutputFieldIDsForDistanceQuery(outputFields []string, schema *sc
 
 	// special handling for distance queries
 	outputFieldIDs := make([]UniqueID, 0, len(outputFields)+1)
-	
+
 	if len(outputFields) == 0 {
 		// if no output fields specified, return primary key field
 		for _, field := range schema.Fields {
@@ -189,7 +189,7 @@ func translateToOutputFieldIDsForDistanceQuery(outputFields []string, schema *sc
 	} else {
 		for _, reqField := range outputFields {
 			var fieldFound bool
-			
+
 			// check if it's an alias field (e.g., "a.id as id1", "_distance")
 			if isAliasField(reqField) {
 				// for alias fields, skip validation temporarily and let backend handle
@@ -205,7 +205,7 @@ func translateToOutputFieldIDsForDistanceQuery(outputFields []string, schema *sc
 					}
 				}
 			}
-			
+
 			if !fieldFound {
 				return nil, fmt.Errorf("field %s not exist", reqField)
 			}
@@ -224,22 +224,22 @@ func isAliasField(fieldName string) bool {
 	if fieldName == "_distance" {
 		return true
 	}
-	
+
 	// check distance function expression: e.g., "distance(vector, vector, 'L2') as _distance"
 	if strings.HasPrefix(fieldName, "distance(") {
 		return true
 	}
-	
+
 	// check alias syntax: e.g., "a.id as id1", "b.vector as vec"
 	if strings.Contains(fieldName, " as ") {
 		return true
 	}
-	
+
 	// check simple alias reference: e.g., "a.id", "b.vector"
 	if strings.Contains(fieldName, ".") {
 		return true
 	}
-	
+
 	// check common computed field patterns
 	computedFields := []string{"_distance", "_score", "_rank"}
 	for _, computed := range computedFields {
@@ -247,7 +247,7 @@ func isAliasField(fieldName string) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -994,7 +994,7 @@ func (t *queryTask) processDistanceQuery(ctx context.Context) error {
 	t.isDistanceQuery = t.containsDistanceFunction()
 
 	// add debug log
-	log.Info("Distance query detection result", 
+	log.Info("Distance query detection result",
 		zap.String("expr", t.request.Expr),
 		zap.Bool("isDistanceQuery", t.isDistanceQuery))
 
@@ -1029,11 +1029,11 @@ func (t *queryTask) processDistanceQuery(ctx context.Context) error {
 func (t *queryTask) containsDistanceFunction() bool {
 	expr := t.request.Expr
 	log := log.Ctx(t.ctx).With(zap.String("method", "containsDistanceFunction"))
-	
+
 	log.Debug("Checking distance function",
 		zap.String("expr", expr),
 		zap.Strings("outputFields", t.request.OutputFields))
-	
+
 	// check distance function in WHERE clause
 	if expr != "" && t.hasDistanceInString(expr) {
 		log.Debug("Found distance function in expr")
@@ -1063,8 +1063,8 @@ func (t *queryTask) hasDistanceInString(text string) bool {
 
 	for _, keyword := range distanceKeywords {
 		if strings.Contains(text, keyword) {
-			log.Ctx(t.ctx).Debug("Found distance keyword", 
-				zap.String("text", text), 
+			log.Ctx(t.ctx).Debug("Found distance keyword",
+				zap.String("text", text),
 				zap.String("keyword", keyword))
 			return true
 		}
@@ -1076,12 +1076,12 @@ func (t *queryTask) hasDistanceInString(text string) bool {
 // parseFromSources 解析 from 参数
 func (t *queryTask) parseFromSources() error {
 	logger := log.Ctx(context.Background())
-	
+
 	// 调试：检查QueryParams是否存在
 	logger.Info("parseFromSources开始",
 		zap.Bool("hasQueryParams", t.request.QueryParams != nil),
 		zap.Int("queryParamsCount", len(t.request.QueryParams)))
-	
+
 	if t.request.QueryParams != nil {
 		for i, param := range t.request.QueryParams {
 			logger.Info("QueryParam详情",
@@ -1090,11 +1090,11 @@ func (t *queryTask) parseFromSources() error {
 				zap.String("value", param.Value))
 		}
 	}
-	
+
 	// 额外调试：打印所有参数的详细信息
 	logger.Info("所有QueryParams详细信息",
 		zap.Any("queryParams", t.request.QueryParams))
-	
+
 	// 检查查询参数中是否有 from 参数
 	if t.request.QueryParams == nil || len(t.request.QueryParams) == 0 {
 		// 没有 from 参数是正常的，使用默认数据源

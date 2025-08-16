@@ -215,17 +215,17 @@ func toColumnInfo(left *ExprWithType) *planpb.ColumnInfo {
 	if columnExpr := left.expr.GetColumnExpr(); columnExpr != nil {
 		return columnExpr.GetInfo()
 	}
-	
+
 	// 距离表达式不需要ColumnInfo，返回nil让上层处理
 	if left.expr.GetDistanceExpr() != nil {
 		return nil
 	}
-	
+
 	// 别名表达式也不需要ColumnInfo
 	if left.expr.GetAliasedExpr() != nil {
 		return nil
 	}
-	
+
 	return nil
 }
 
@@ -376,13 +376,13 @@ func handleCompareRightValue(op planpb.OpType, left *ExprWithType, right *planpb
 			// 对于距离表达式，暂时不支持比较操作
 			return nil, errors.New("distance expressions should be used in SELECT context, not in WHERE clauses")
 		}
-		
+
 		// 检查是否是别名表达式
 		if aliasExpr := left.expr.GetAliasedExpr(); aliasExpr != nil {
 			// 对于距离表达式，暂时不支持比较操作
 			return nil, errors.New("distance expressions should be used in SELECT context, not in WHERE clauses")
 		}
-		
+
 		return nil, errors.New("not supported to combine multiple fields")
 	}
 	expr := &planpb.Expr{
@@ -555,17 +555,17 @@ func canBeExecuted(e *ExprWithType) bool {
 	if typeutil.IsBoolType(e.dataType) && !e.nodeDependent {
 		return true
 	}
-	
+
 	// 支持距离查询表达式 - 距离函数可以在查询中使用
 	if e.expr.GetDistanceExpr() != nil {
 		return true
 	}
-	
+
 	// 支持别名表达式 (如 distance(...) as _distance)
 	if e.expr.GetAliasedExpr() != nil {
 		return true
 	}
-	
+
 	return false
 }
 

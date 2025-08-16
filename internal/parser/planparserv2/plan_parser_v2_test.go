@@ -1771,3 +1771,212 @@ func Test_JSONPathNullExpr(t *testing.T) {
 		assert.Equal(t, planStr, plan2Str)
 	}
 }
+
+func TestCreateDistanceQueryPlan(t *testing.T) {
+	schema, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  102,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name            string
+		expr            string
+		fromSources     []*planpb.QueryFromSource
+		outputAliases   []string
+		expectError     bool
+		expectDistQuery bool
+	}{
+		{
+			name: "basic distance query",
+			expr: "distance(a.vector, b.vector, 'L2') as _distance",
+			fromSources: []*planpb.QueryFromSource{
+				{
+					Alias:  "a",
+					Filter: "id IN [1,2,3]",
+					Source: &planpb.QueryFromSource_CollectionName{
+						CollectionName: "test_collection",
+					},
+				},
+				{
+					Alias:  "b",
+					Filter: "id IN [4,5,6]",
+					Source: &planpb.QueryFromSource_CollectionName{
+						CollectionName: "test_collection",
+					},
+				},
+			},
+			outputAliases:   []string{"a.id as id1", "b.id as id2", "_distance"},
+			expectError:     false,
+			expectDistQuery: true,
+		},
+		{
+			name: "empty expression",
+			expr: "",
+			fromSources: []*planpb.QueryFromSource{
+				{
+					Alias:  "a",
+					Filter: "id IN [1,2,3]",
+					Source: &planpb.QueryFromSource_CollectionName{
+						CollectionName: "test_collection",
+					},
+				},
+			},
+			outputAliases:   []string{"a.id"},
+			expectError:     false,
+			expectDistQuery: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, err := CreateDistanceQueryPlan(schema, tt.expr, tt.fromSources, tt.outputAliases, nil)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Nil(t, plan)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, plan)
+
+				queryPlan := plan.GetQuery()
+				assert.NotNil(t, queryPlan)
+				assert.Equal(t, tt.expectDistQuery, queryPlan.GetIsDistanceQuery())
+				assert.Equal(t, tt.fromSources, queryPlan.GetFromSources())
+				assert.Equal(t, tt.outputAliases, queryPlan.GetOutputAliases())
+			}
+		})
+	}
+}
+
+func TestIsDistanceQueryExpression(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		expected bool
+	}{
+		{
+			name:     "distance function with as alias",
+			expr:     "distance(a.vector, b.vector, 'L2') as _distance",
+			expected: true,
+		},
+		{
+			name:     "distance function with aliased fields",
+			expr:     "distance(a.float_vector, b.float_vector, 'IP')",
+			expected: true,
+		},
+		{
+			name:     "distance function uppercase",
+			expr:     "DISTANCE(a.vector, b.vector, 'COSINE') as similarity",
+			expected: true,
+		},
+		{
+			name:     "regular expression",
+			expr:     "id > 0 AND status = 'active'",
+			expected: false,
+		},
+		{
+			name:     "distance in field name but not function",
+			expr:     "distance_field > 0",
+			expected: false,
+		},
+		{
+			name:     "empty expression",
+			expr:     "",
+			expected: false,
+		},
+		{
+			name:     "complex expression with distance",
+			expr:     "id IN [1,2,3] AND distance(a.vector, b.vector, 'L2') as _distance < 0.5",
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isDistanceQueryExpression(tt.expr)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestContainsDistanceExpression(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     *planpb.Expr
+		expected bool
+	}{
+		{
+			name: "direct distance expression",
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_DistanceExpr{
+					DistanceExpr: &planpb.DistanceExpr{
+						LeftVector:  &planpb.Expr{},
+						RightVector: &planpb.Expr{},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "aliased distance expression",
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_AliasedExpr{
+					AliasedExpr: &planpb.AliasedExpr{
+						Alias: "_distance",
+						Expr: &planpb.Expr{
+							Expr: &planpb.Expr_DistanceExpr{
+								DistanceExpr: &planpb.DistanceExpr{
+									LeftVector:  &planpb.Expr{},
+									RightVector: &planpb.Expr{},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "regular column expression",
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{
+							FieldId:  101,
+							DataType: schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name:     "nil expression",
+			expr:     nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsDistanceExpression(tt.expr)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

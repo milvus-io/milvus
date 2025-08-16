@@ -1683,7 +1683,7 @@ func translateOutputFieldsForDistanceQuery(outputFields []string, schema *schema
 		if outputFieldName == primaryFieldName {
 			userRequestedPkFieldExplicitly = true
 		}
-		
+
 		// 检查是否为距离查询的特殊字段
 		if isDistanceQueryField(outputFieldName) {
 			// 对于距离查询的特殊字段（如 "_distance", "a.id as id1"），
@@ -1691,7 +1691,7 @@ func translateOutputFieldsForDistanceQuery(outputFields []string, schema *schema
 			userOutputFieldsMap[outputFieldName] = true
 			continue
 		}
-		
+
 		if outputFieldName == "*" {
 			userRequestedPkFieldExplicitly = true
 			for fieldName, field := range allFieldNameMap {
@@ -1773,22 +1773,22 @@ func isDistanceQueryField(fieldName string) bool {
 	if fieldName == "_distance" {
 		return true
 	}
-	
+
 	// 检查别名语法：如 "a.id as id1", "b.vector as vec"
 	if strings.Contains(fieldName, " as ") {
 		return true
 	}
-	
-	// 检查简单的别名引用：如 "a.id", "b.vector"  
+
+	// 检查简单的别名引用：如 "a.id", "b.vector"
 	if strings.Contains(fieldName, ".") {
 		return true
 	}
-	
+
 	// 检查distance函数调用：如 "distance(vector, vector, 'L2')", "distance(a.vector, b.vector, 'L2') as _distance"
 	if strings.Contains(fieldName, "distance(") {
 		return true
 	}
-	
+
 	// 检查常见的计算字段模式
 	computedFields := []string{"_distance", "_score", "_rank"}
 	for _, computedField := range computedFields {
@@ -1796,7 +1796,7 @@ func isDistanceQueryField(fieldName string) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

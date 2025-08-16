@@ -384,7 +384,7 @@ expr::TypedExprPtr
 ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
     LOG_DEBUG("ParseDistanceExprs called - implementing real distance expression parsing");
     
-    // 验证必要的字段
+    // Verify necessary fields
     if (!expr_pb.has_left_vector()) {
         AssertInfo(false, "Distance expression missing left vector");
     }
@@ -392,11 +392,11 @@ ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
         AssertInfo(false, "Distance expression missing right vector");
     }
     
-    // 解析左侧和右侧向量表达式
+    // Analyze the left and right vector expressions
     auto left_expr = this->ParseExprs(expr_pb.left_vector(), TypeIsAny);
     auto right_expr = this->ParseExprs(expr_pb.right_vector(), TypeIsAny);
     
-    // 验证向量表达式类型
+    //Validate vector expression type
     if (!IsDistanceVectorDataType(left_expr->type()) && left_expr->type() != DataType::NONE) {
         LOG_WARN("Left vector expression has non-vector type: {}", left_expr->type());
     }
@@ -404,10 +404,10 @@ ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
         LOG_WARN("Right vector expression has non-vector type: {}", right_expr->type());
     }
     
-    // 创建距离表达式
+    // Create distance expression
     std::shared_ptr<expr::DistanceExpr> distance_expr;
     
-    // 根据metric字段类型创建表达式
+    // Create an expression based on the metric field type
     switch (expr_pb.metric_case()) {
         case proto::plan::DistanceExpr::kMetricEnum: {
             LOG_DEBUG("Using enum metric: {}", proto::plan::DistanceMetric_Name(expr_pb.metric_enum()));
@@ -423,7 +423,7 @@ ProtoParser::ParseDistanceExprs(const proto::plan::DistanceExpr& expr_pb) {
         }
         case proto::plan::DistanceExpr::METRIC_NOT_SET: {
             LOG_DEBUG("No metric specified, using default L2");
-            // 默认使用L2距离
+            // Default use of L2 distance
             distance_expr = std::make_shared<expr::DistanceExpr>(
                 left_expr, right_expr, proto::plan::DistanceMetric::DISTANCE_METRIC_L2);
             break;

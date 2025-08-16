@@ -233,8 +233,6 @@ func (e *DistanceExecutor) updateMetricType(distanceExpr *planpb.DistanceExpr) {
 	} else {
 		e.metricType = DefaultMetricType // default to L2 distance
 	}
-
-	log.Ctx(e.ctx).Debug("更新距离度量类型", zap.String("metricType", e.metricType))
 }
 
 // validateDistanceExpr validate validity of distance expression
@@ -289,19 +287,14 @@ func (e *DistanceExecutor) convertProtoMetricToString(metric planpb.DistanceMetr
 
 // ParseDistanceQuery parse distance query plan
 func (p *DistanceQueryPlanner) ParseDistanceQuery(plan *planpb.PlanNode) (*planpb.DistanceExpr, error) {
-	p.monitor.markPhaseStart("查询计划解析")
-	defer p.monitor.markPhaseEnd("查询计划解析")
 
 	queryPlan := plan.GetQuery()
 	if queryPlan == nil {
-		p.monitor.recordError("查询计划解析", "无效的查询计划")
 		return nil, fmt.Errorf("invalid query plan")
 	}
 
-	p.monitor.markPhaseStart("距离表达式提取")
 	distanceExpr, err := p.extractDistanceExpression(queryPlan.GetPredicates())
 	if err != nil {
-		p.monitor.recordError("距离表达式提取", err.Error())
 		return nil, fmt.Errorf("failed to extract distance expression: %w", err)
 	}
 
@@ -319,12 +312,10 @@ func (p *DistanceQueryPlanner) ParseDistanceQuery(plan *planpb.PlanNode) (*planp
 		}
 
 		if distanceExpr == nil {
-			p.monitor.recordError("距离表达式提取", "未找到距离表达式")
 			return nil, fmt.Errorf("distance expression not found: predicatesType=%s, isDistanceQuery=%v",
 				predicatesType, queryPlan.GetIsDistanceQuery())
 		}
 	}
-	p.monitor.markPhaseEnd("距离表达式提取")
 
 	return distanceExpr, nil
 }
@@ -403,7 +394,6 @@ func (p *DistanceQueryPlanner) getVectorFieldID() (int64, error) {
 	// Find first vector field
 	for _, field := range p.schema.GetFields() {
 		if isVectorFieldType(field.GetDataType()) {
-			log.Debug("Found vector field", zap.String("name", field.GetName()), zap.Int64("fieldID", field.GetFieldID()))
 			return field.GetFieldID(), nil
 		}
 	}
@@ -903,9 +893,9 @@ func (e *DistanceExecutor) queryVectorDataFromSegmentWithFilter(segment Segment,
 	retrievePlan, err := segcore.NewRetrievePlan(
 		collection.GetCCollection(),
 		planBytes,
-		e.req.Req.GetMvccTimestamp(),    // Use correct timestamp from request
-		e.req.Req.Base.GetMsgID(),       // Use message ID from request
-		e.req.Req.GetConsistencyLevel(), // Use consistency level from request
+		e.req.Req.GetMvccTimestamp(),           // Use correct timestamp from request
+		e.req.Req.Base.GetMsgID(),              // Use message ID from request
+		e.req.Req.GetConsistencyLevel(),        // Use consistency level from request
 		e.req.Req.GetCollectionTtlTimestamps()) // Use TTL timestamps from request
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create RetrievePlan: %w", err)
@@ -937,32 +927,17 @@ func minInt(a, b int) int {
 
 // extractVectorDataFromRetrieveResult extract vector data from query results
 func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb.RetrieveResults, vectorFieldID int64) ([][]float32, []VectorDataResult, error) {
-	log := log.Ctx(context.Background())
-	log.Info("Starting vector data extraction",
-		zap.Bool("resultIsNil", result == nil),
-		zap.Int64("vectorFieldID", vectorFieldID))
-
 	if result == nil {
-		log.Warn("查询结果为空，返回空数据")
 		return [][]float32{}, []VectorDataResult{}, nil
 	}
 
 	// Get ID data
-	log.Info("检查ID数据")
 	ids := result.GetIds()
-	log.Info("ID数据状态", zap.Bool("idsIsNil", ids == nil))
 	if ids == nil {
-		log.Warn("ID数据为空，返回空数据")
 		return [][]float32{}, []VectorDataResult{}, nil
 	}
 
-	// Add detailed ID field debugging
-	log.Info("ID字段详细信息",
-		zap.String("idFieldType", fmt.Sprintf("%T", ids.GetIdField())),
-		zap.Bool("hasIntId", ids.GetIdField() != nil))
-
 	if ids.GetIdField() == nil {
-		log.Warn("ID字段为空，但IDs对象存在")
 		return [][]float32{}, []VectorDataResult{}, nil
 	}
 
@@ -974,84 +949,46 @@ func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb
 		if maxShow > 5 {
 			maxShow = 5
 		}
-		log.Info("获取整数ID列表",
-			zap.Int("count", len(entityIDs)),
-			zap.Int64s("sampleIDs", entityIDs[:maxShow]))
 
-		// Check IntId data structure in detail
-		if idData.IntId == nil {
-			log.Error("IntId对象为nil")
-		} else {
-			log.Info("IntId对象详情",
-				zap.Bool("intIdNotNil", idData.IntId != nil),
-				zap.Int("dataLength", len(idData.IntId.GetData())),
-				zap.String("dataType", fmt.Sprintf("%T", idData.IntId.GetData())))
-		}
 	default:
-		log.Error("不支持的ID类型", zap.String("type", fmt.Sprintf("%T", idData)))
-		return nil, nil, fmt.Errorf("暂不支持的ID类型: %T", idData)
+		return nil, nil, fmt.Errorf("ID types not currently supported: %T", idData)
 	}
 
 	// Check if matching entities were found
 	if len(entityIDs) == 0 {
-		log.Warn("没有找到匹配的实体ID")
 		return [][]float32{}, []VectorDataResult{}, nil
 	}
 
 	// Find vector field data
 	var vectorData [][]float32
-	log.Info("搜索向量字段",
-		zap.Int64("vectorFieldID", vectorFieldID),
-		zap.Int("totalFields", len(result.GetFieldsData())))
 
 	vectorFieldFound := false
-	var vectorFieldDataInfo string
 
-	for i, fieldData := range result.GetFieldsData() {
-		log.Info("检查字段",
-			zap.Int("index", i),
-			zap.Int64("fieldID", fieldData.GetFieldId()),
-			zap.String("fieldType", fieldData.GetType().String()),
-			zap.Int64("targetID", vectorFieldID))
+	for _, fieldData := range result.GetFieldsData() {
 
 		if fieldData.GetFieldId() == vectorFieldID {
-			log.Info("找到目标向量字段")
 			vectorFieldFound = true
 
 			switch vectorField := fieldData.GetField().(type) {
 			case *schemapb.FieldData_Vectors:
-				log.Info("字段为向量类型")
 				switch vectorType := vectorField.Vectors.GetData().(type) {
 				case *schemapb.VectorField_FloatVector:
 					floats := vectorType.FloatVector.GetData()
 					dim := vectorField.Vectors.GetDim()
-					log.Info("浮点向量数据详情",
-						zap.Int("floatCount", len(floats)),
-						zap.Int64("dimension", dim))
 
 					if len(floats) == 0 {
-						log.Warn("向量字段数据为空")
-						vectorFieldDataInfo = "向量字段存在但数据为空"
 						break
 					}
 
 					if dim <= 0 {
-						log.Error("无效的向量维度", zap.Int64("dim", dim))
-						return nil, nil, fmt.Errorf("无效的向量维度: %d", dim)
+						return nil, nil, fmt.Errorf("invalid vector dimension: %d", dim)
 					}
 
 					// 将一维float数组转换为二维向量数组
 					vectorCount := len(floats) / int(dim)
-					log.Info("计算向量数量",
-						zap.Int("vectorCount", vectorCount),
-						zap.Int("totalFloats", len(floats)),
-						zap.Int64("dimension", dim))
 
 					if len(floats)%int(dim) != 0 {
-						log.Error("向量数据长度不匹配维度",
-							zap.Int("floatCount", len(floats)),
-							zap.Int64("dimension", dim))
-						return nil, nil, fmt.Errorf("向量数据长度不匹配维度: %d %% %d != 0", len(floats), dim)
+						return nil, nil, fmt.Errorf("the length of vector data does not match the dimension : %d %% %d != 0", len(floats), dim)
 					}
 
 					vectorData = make([][]float32, vectorCount)
@@ -1060,49 +997,29 @@ func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb
 						end := start + int(dim)
 						vectorData[i] = floats[start:end]
 					}
-					log.Info("向量数据创建完成", zap.Int("vectorCount", len(vectorData)))
-					vectorFieldDataInfo = fmt.Sprintf("成功提取%d个%d维向量", vectorCount, dim)
 				default:
-					log.Error("不支持的向量类型", zap.String("type", fmt.Sprintf("%T", vectorType)))
-					return nil, nil, fmt.Errorf("暂不支持的向量类型: %T", vectorType)
+					return nil, nil, fmt.Errorf("vector types not currently supported: %T", vectorType)
 				}
 			default:
-				log.Warn("字段非向量类型", zap.String("type", fmt.Sprintf("%T", vectorField)))
-				vectorFieldDataInfo = fmt.Sprintf("字段ID %d 存在但不是向量类型: %T", vectorFieldID, vectorField)
-				continue // 跳过非向量字段
+				continue // Skip non vector fields
 			}
 			break
 		}
 	}
 
 	if !vectorFieldFound {
-		log.Error("target vector field not found",
-			zap.Int64("vectorFieldID", vectorFieldID),
-			zap.Int("totalFields", len(result.GetFieldsData())))
 
 		// 列出所有可用字段
 		var availableFields []string
 		for _, field := range result.GetFieldsData() {
 			availableFields = append(availableFields, fmt.Sprintf("ID:%d,Type:%s", field.GetFieldId(), field.GetType().String()))
 		}
-		log.Error("可用字段列表", zap.Strings("fields", availableFields))
 		return nil, nil, fmt.Errorf("vector field ID %d not found", vectorFieldID)
 	}
 
-	// 构建结果
-	log.Info("构建结果数据",
-		zap.Int("entityIDCount", len(entityIDs)),
-		zap.Int("vectorDataCount", len(vectorData)),
-		zap.String("vectorFieldInfo", vectorFieldDataInfo))
-
-	// 检查数据一致性
 	if len(vectorData) != len(entityIDs) {
-		log.Error("向量数据与ID数量不匹配",
-			zap.Int("vectorCount", len(vectorData)),
-			zap.Int("idCount", len(entityIDs)))
-		// 不返回错误，而是取最小值
+		// Not returning an error, taking the minimum value
 		minCount := minInt(len(vectorData), len(entityIDs))
-		log.Warn("使用最小数量进行匹配", zap.Int("minCount", minCount))
 		if minCount == 0 {
 			return [][]float32{}, []VectorDataResult{}, nil
 		}
@@ -1117,24 +1034,16 @@ func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb
 			Fields: make(map[int64]interface{}),
 		}
 	}
-
-	log.Info("向量数据提取完成",
-		zap.Int("vectorCount", len(vectorData)),
-		zap.Int("resultCount", len(results)),
-		zap.String("summary", vectorFieldDataInfo))
-
 	return vectorData, results, nil
 }
 
 // queryAllVectorDataFromSegment 从单个segment查询所有向量数据
 func (e *DistanceExecutor) queryAllVectorDataFromSegment(segment Segment, vectorFieldID int64) ([][]float32, []VectorDataResult, error) {
-	// 获取主键字段ID
 	pkField, err := e.getPrimaryKeyField()
 	if err != nil {
-		return nil, nil, fmt.Errorf("获取主键字段失败: %w", err)
+		return nil, nil, fmt.Errorf("failed to retrieve primary key field: %w", err)
 	}
 
-	// 创建查询所有数据的计划（无过滤条件）
 	outputFieldIds := []int64{vectorFieldID}
 	// Ensure primary key field is in output
 	if pkField.GetFieldID() != vectorFieldID {
@@ -1144,7 +1053,7 @@ func (e *DistanceExecutor) queryAllVectorDataFromSegment(segment Segment, vector
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_Query{
 			Query: &planpb.QueryPlanNode{
-				Predicates: nil, // 无过滤条件
+				Predicates: nil,
 			},
 		},
 		OutputFieldIds: outputFieldIds,
@@ -1166,9 +1075,9 @@ func (e *DistanceExecutor) queryAllVectorDataFromSegment(segment Segment, vector
 	retrievePlan, err := segcore.NewRetrievePlan(
 		collection.GetCCollection(),
 		planBytes,
-		e.req.Req.GetMvccTimestamp(),    // Use correct timestamp from request
-		e.req.Req.Base.GetMsgID(),       // Use message ID from request
-		e.req.Req.GetConsistencyLevel(), // Use consistency level from request
+		e.req.Req.GetMvccTimestamp(),           // Use correct timestamp from request
+		e.req.Req.Base.GetMsgID(),              // Use message ID from request
+		e.req.Req.GetConsistencyLevel(),        // Use consistency level from request
 		e.req.Req.GetCollectionTtlTimestamps()) // Use TTL timestamps from request
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create RetrievePlan: %w", err)
@@ -1185,15 +1094,13 @@ func (e *DistanceExecutor) queryAllVectorDataFromSegment(segment Segment, vector
 	return e.extractVectorDataFromRetrieveResult(result, vectorFieldID)
 }
 
-// queryVectorDataFromSingleSegment 从单个segment查询向量数据 - 使用真实的segment查询逻辑
+// queryVectorDataFromSingleSegment Querying Vector Data from a Single Segment - Using Real Segment Query Logic
 func (e *DistanceExecutor) queryVectorDataFromSingleSegment(segment Segment, fieldID int64) ([][]float32, []VectorDataResult, error) {
-	// 获取主键字段ID
 	pkField, err := e.getPrimaryKeyField()
 	if err != nil {
-		return nil, nil, fmt.Errorf("获取主键字段失败: %w", err)
+		return nil, nil, fmt.Errorf("failed to retrieve primary key field: %w", err)
 	}
 
-	// 创建查询所有数据的计划（无过滤条件）
 	outputFieldIds := []int64{fieldID}
 	// Ensure primary key field is in output
 	if pkField.GetFieldID() != fieldID {
@@ -1203,7 +1110,7 @@ func (e *DistanceExecutor) queryVectorDataFromSingleSegment(segment Segment, fie
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_Query{
 			Query: &planpb.QueryPlanNode{
-				Predicates: nil, // 无过滤条件，查询全部
+				Predicates: nil,
 			},
 		},
 		OutputFieldIds: outputFieldIds,
@@ -1225,9 +1132,9 @@ func (e *DistanceExecutor) queryVectorDataFromSingleSegment(segment Segment, fie
 	retrievePlan, err := segcore.NewRetrievePlan(
 		collection.GetCCollection(),
 		planBytes,
-		e.req.Req.GetMvccTimestamp(),    // Use correct timestamp from request
-		e.req.Req.Base.GetMsgID(),       // Use message ID from request
-		e.req.Req.GetConsistencyLevel(), // Use consistency level from request
+		e.req.Req.GetMvccTimestamp(),           // Use correct timestamp from request
+		e.req.Req.Base.GetMsgID(),              // Use message ID from request
+		e.req.Req.GetConsistencyLevel(),        // Use consistency level from request
 		e.req.Req.GetCollectionTtlTimestamps()) // Use TTL timestamps from request
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create RetrievePlan: %w", err)
@@ -1241,15 +1148,15 @@ func (e *DistanceExecutor) queryVectorDataFromSingleSegment(segment Segment, fie
 			zap.Int64("segmentID", segment.ID()),
 			zap.Int64("fieldID", fieldID),
 			zap.Error(err))
-		return nil, nil, fmt.Errorf("从segment获取向量数据失败: %w", err)
+		return nil, nil, fmt.Errorf("failed to retrieve vector data from segment: %w", err)
 	}
 
-	// 使用extractVectorDataFromRetrieveResult解析结果
+	// Use extractVectorDataMromRetrieve Result to parse the results
 	vectors, results, err := e.extractVectorDataFromRetrieveResult(result, fieldID)
 	return vectors, results, err
 }
 
-// extractVectorDataFromSegcoreResult 从segcore结果中提取向量数据
+// extractVectorDataFromSegcoreResult
 func (e *DistanceExecutor) extractVectorDataFromSegcoreResult(result *segcorepb.RetrieveResults, fieldID int64) ([][]float32, []VectorDataResult, error) {
 	if result == nil {
 		return [][]float32{}, []VectorDataResult{}, nil
@@ -1265,19 +1172,17 @@ func (e *DistanceExecutor) extractVectorDataFromSegcoreResult(result *segcorepb.
 	}
 
 	if vectorField == nil {
-		return nil, nil, fmt.Errorf("未找到字段ID %d 的向量数据", fieldID)
+		return nil, nil, fmt.Errorf("vector data for field ID %d not found", fieldID)
 	}
 
-	// 提取向量数据
 	vectors, err := e.extractVectorsFromFieldData(vectorField)
 	if err != nil {
-		return nil, nil, fmt.Errorf("提取向量数据失败: %w", err)
+		return nil, nil, fmt.Errorf("extracting vector data failed: %w", err)
 	}
 
 	// Get ID data
 	ids := e.extractIDsFromResult(result)
 
-	// 构建结果
 	results := make([]VectorDataResult, len(vectors))
 	for i, vector := range vectors {
 		var id interface{} = int64(i) // 默认ID
@@ -1302,24 +1207,24 @@ func (e *DistanceExecutor) extractVectorsFromFieldData(fieldData *schemapb.Field
 		// 处理浮点向量
 		vectorData := fieldData.GetVectors().GetFloatVector()
 		if vectorData == nil {
-			return nil, fmt.Errorf("浮点向量数据为空")
+			return nil, fmt.Errorf("floating point vector data is empty")
 		}
 
 		// 从字段schema中获取向量维度
 		field, err := e.getFieldByID(fieldData.GetFieldId())
 		if err != nil {
-			return nil, fmt.Errorf("未找到字段schema %d: %w", fieldData.GetFieldId(), err)
+			return nil, fmt.Errorf("field not found schema %d: %w", fieldData.GetFieldId(), err)
 		}
 
 		dim := getDimensionFromField(field)
 		if dim <= 0 {
-			return nil, fmt.Errorf("无效的向量维度: %d", dim)
+			return nil, fmt.Errorf("invalid vector dimension: %d", dim)
 		}
 
 		data := vectorData.GetData()
 
 		if len(data)%dim != 0 {
-			return nil, fmt.Errorf("向量数据长度不匹配维度: %d %% %d != 0", len(data), dim)
+			return nil, fmt.Errorf("the length of vector data does not match the dimension: %d %% %d != 0", len(data), dim)
 		}
 
 		vectorCount := len(data) / dim
@@ -1335,18 +1240,18 @@ func (e *DistanceExecutor) extractVectorsFromFieldData(fieldData *schemapb.Field
 
 	case schemapb.DataType_BinaryVector:
 		// 当前不支持二进制向量，可以在未来扩展
-		return nil, fmt.Errorf("暂不支持二进制向量")
+		return nil, fmt.Errorf("binary vectors are not currently supported")
 
 	case schemapb.DataType_SparseFloatVector:
 		// 当前不支持稀疏向量，可以在未来扩展
-		return nil, fmt.Errorf("暂不支持稀疏向量")
+		return nil, fmt.Errorf("sparse vectors are not currently supported")
 
 	default:
-		return nil, fmt.Errorf("不支持的向量类型: %v", fieldData.GetType())
+		return nil, fmt.Errorf("unsupported vector types: %v", fieldData.GetType())
 	}
 }
 
-// extractIDsFromResult 从查询结果中提取ID
+// extractIDsFromResult
 func (e *DistanceExecutor) extractIDsFromResult(result *segcorepb.RetrieveResults) []interface{} {
 	ids := result.GetIds()
 	if ids == nil {
@@ -1382,7 +1287,7 @@ func (e *DistanceExecutor) extractFieldsFromResult(result *segcorepb.RetrieveRes
 	for _, fieldData := range result.GetFieldsData() {
 		fieldID := fieldData.GetFieldId()
 
-		// 跳过向量字段，只提取标量字段
+		// Skip vector fields and only extract scalar fields
 		if isVectorFieldType(fieldData.GetType()) {
 			continue
 		}
@@ -1396,7 +1301,7 @@ func (e *DistanceExecutor) extractFieldsFromResult(result *segcorepb.RetrieveRes
 	return fields
 }
 
-// extractScalarValueFromField 从字段中提取标量值
+// extractScalarValueFromField
 func (e *DistanceExecutor) extractScalarValueFromField(fieldData *schemapb.FieldData, rowIndex int) interface{} {
 	scalars := fieldData.GetScalars()
 	if scalars == nil {
@@ -1483,7 +1388,7 @@ func (e *DistanceExecutor) convertExternalVectorData(externalData *planpb.Extern
 // extractVectorFromGenericValue 从 GenericValue 提取向量
 func (e *DistanceExecutor) extractVectorFromGenericValue(genericValue *planpb.GenericValue) ([]float32, error) {
 	if genericValue == nil {
-		return nil, fmt.Errorf("GenericValue 为空")
+		return nil, fmt.Errorf("GenericValue is empty")
 	}
 
 	switch val := genericValue.GetVal().(type) {
@@ -1491,28 +1396,28 @@ func (e *DistanceExecutor) extractVectorFromGenericValue(genericValue *planpb.Ge
 		// 从数组值中提取向量
 		array := val.ArrayVal
 		if array == nil {
-			return nil, fmt.Errorf("数组值为空")
+			return nil, fmt.Errorf("the array value is empty")
 		}
 
 		vector := make([]float32, len(array.GetArray()))
 		for i, element := range array.GetArray() {
 			floatVal, err := e.extractFloatFromGenericValue(element)
 			if err != nil {
-				return nil, fmt.Errorf("提取数组元素 %d 失败: %w", i, err)
+				return nil, fmt.Errorf("extract array elements %d faile: %w", i, err)
 			}
 			vector[i] = floatVal
 		}
 		return vector, nil
 
 	default:
-		return nil, fmt.Errorf("不支持的 GenericValue 类型: %T", val)
+		return nil, fmt.Errorf("unsupported GenericValue type: %T", val)
 	}
 }
 
 // extractFloatFromGenericValue 从 GenericValue 提取 float 值
 func (e *DistanceExecutor) extractFloatFromGenericValue(genericValue *planpb.GenericValue) (float32, error) {
 	if genericValue == nil {
-		return 0, fmt.Errorf("GenericValue 为空")
+		return 0, fmt.Errorf("GenericValue is empty")
 	}
 
 	switch val := genericValue.GetVal().(type) {
@@ -1521,7 +1426,7 @@ func (e *DistanceExecutor) extractFloatFromGenericValue(genericValue *planpb.Gen
 	case *planpb.GenericValue_Int64Val:
 		return float32(val.Int64Val), nil
 	default:
-		return 0, fmt.Errorf("不支持的数值类型: %T", val)
+		return 0, fmt.Errorf("unsupported type: %T", val)
 	}
 }
 
@@ -1601,7 +1506,7 @@ func (f *DistanceResultFormatter) FormatResults(results []DistanceQueryResult) (
 	// 创建ID字段
 	idField, err := f.createIdField(results)
 	if err != nil {
-		return nil, fmt.Errorf("创建ID字段失败: %w", err)
+		return nil, fmt.Errorf("failed to create ID field: %w", err)
 	}
 
 	// 创建结果容器
@@ -1742,7 +1647,7 @@ func (f *DistanceResultFormatter) extractOutputField(fieldID int64, results []Di
 	// 查找字段schema
 	field := f.getFieldByID(fieldID)
 	if field == nil {
-		return nil, fmt.Errorf("未找到字段schema: %d", fieldID)
+		return nil, fmt.Errorf("field schema not found: %d", fieldID)
 	}
 
 	// 收集字段数据
@@ -1866,7 +1771,6 @@ func (e *DistanceExecutor) getVectorFieldID() (int64, error) {
 	// Find first vector field
 	for _, field := range schema.GetFields() {
 		if isVectorFieldType(field.GetDataType()) {
-			log.Debug("Found vector field", zap.String("name", field.GetName()), zap.Int64("fieldID", field.GetFieldID()))
 			return field.GetFieldID(), nil
 		}
 	}
@@ -1972,19 +1876,19 @@ func (e *DistanceExecutor) validateSchema() error {
 	// 从请求中获取集合ID
 	collectionID := e.req.GetReq().GetCollectionID()
 	if collectionID == 0 {
-		return fmt.Errorf("无效的集合ID")
+		return fmt.Errorf("invalid collection ID")
 	}
 
 	// 从 manager获取collection
 	collection := e.manager.Collection.Get(collectionID)
 	if collection == nil {
-		return fmt.Errorf("未找到集合: %d", collectionID)
+		return fmt.Errorf("collection not found: %d", collectionID)
 	}
 
 	// 获取schema
 	schema := collection.Schema()
 	if schema == nil {
-		return fmt.Errorf("schema为空")
+		return fmt.Errorf("schema is empty")
 	}
 
 	// 检查是否有向量字段
@@ -1998,7 +1902,7 @@ func (e *DistanceExecutor) validateSchema() error {
 	}
 
 	if !hasVectorField {
-		return fmt.Errorf("schema中未找到向量字段")
+		return fmt.Errorf("vector field not found in schema")
 	}
 
 	return nil
@@ -2009,19 +1913,19 @@ func (e *DistanceExecutor) getFieldByID(fieldID int64) (*schemapb.FieldSchema, e
 	// 从请求中获取集合ID
 	collectionID := e.req.GetReq().GetCollectionID()
 	if collectionID == 0 {
-		return nil, fmt.Errorf("无效的集合ID")
+		return nil, fmt.Errorf("invalid collection ID")
 	}
 
 	// 从manager获取collection
 	collection := e.manager.Collection.Get(collectionID)
 	if collection == nil {
-		return nil, fmt.Errorf("未找到集合: %d", collectionID)
+		return nil, fmt.Errorf("collection not found: %d", collectionID)
 	}
 
 	// 获取schema
 	schema := collection.Schema()
 	if schema == nil {
-		return nil, fmt.Errorf("集合schema为空")
+		return nil, fmt.Errorf("schema is empty")
 	}
 
 	// 查找指定字段

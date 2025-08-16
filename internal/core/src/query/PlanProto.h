@@ -19,7 +19,7 @@
 #include "common/Schema.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
-#include "expr/ITypeExpr.h"  // 距离表达式定义
+#include "expr/ITypeExpr.h"  // Definition of Distance Expression
 
 namespace milvus::query {
 

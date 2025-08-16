@@ -155,13 +155,13 @@ func ParseIdentifier(schema *typeutil.SchemaHelper, identifier string, checkFunc
 func isDistanceQueryExpression(exprStr string) bool {
 	// 检查是否包含distance函数
 	hasDistance := strings.Contains(strings.ToLower(exprStr), "distance(")
-	
+
 	// 检查是否包含别名语法 (as _distance 或类似)
 	hasAlias := strings.Contains(strings.ToLower(exprStr), " as ")
-	
+
 	// 检查是否包含别名字段引用 (a.vector, b.vector)
 	hasAliasedField := strings.Contains(exprStr, ".vector") || strings.Contains(exprStr, ".float_vector")
-	
+
 	return hasDistance && (hasAlias || hasAliasedField)
 }
 
@@ -174,7 +174,7 @@ func CreateRetrievePlanWithAliases(schema *typeutil.SchemaHelper, exprStr string
 	if isDistanceQueryExpression(exprStr) {
 		// 对于距离查询，使用宽松的解析规则，支持别名
 		ret := handleExprWithAliases(schema, exprStr, aliasMap)
-		
+
 		if err := getError(ret); err != nil {
 			return nil, fmt.Errorf("cannot parse distance expression: %s, error: %s", exprStr, err)
 		}
@@ -183,7 +183,7 @@ func CreateRetrievePlanWithAliases(schema *typeutil.SchemaHelper, exprStr string
 		if predicate == nil {
 			return nil, fmt.Errorf("cannot parse distance expression: %s", exprStr)
 		}
-		
+
 		// 距离查询不需要检查布尔类型
 		valueMap, err := UnmarshalExpressionValues(exprTemplateValues)
 		if err != nil {
@@ -207,7 +207,7 @@ func CreateRetrievePlanWithAliases(schema *typeutil.SchemaHelper, exprStr string
 		}
 		return planNode, nil
 	}
-	
+
 	// 标准查询处理
 	expr, err := ParseExpr(schema, exprStr, exprTemplateValues)
 	if err != nil {

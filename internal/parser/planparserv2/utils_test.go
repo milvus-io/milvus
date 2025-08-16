@@ -590,3 +590,70 @@ func Test_handleCompare(t *testing.T) {
 		assert.Equal(t, "var1", result.GetUnaryRangeExpr().GetTemplateVariableName())
 	})
 }
+
+func TestGenericValueUtils(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    *planpb.GenericValue
+		isBool   bool
+		isInt    bool
+		isFloat  bool
+		isNumber bool
+		isString bool
+	}{
+		{
+			name: "bool value",
+			value: &planpb.GenericValue{
+				Val: &planpb.GenericValue_BoolVal{BoolVal: true},
+			},
+			isBool:   true,
+			isInt:    false,
+			isFloat:  false,
+			isNumber: false,
+			isString: false,
+		},
+		{
+			name: "int64 value",
+			value: &planpb.GenericValue{
+				Val: &planpb.GenericValue_Int64Val{Int64Val: 42},
+			},
+			isBool:   false,
+			isInt:    true,
+			isFloat:  false,
+			isNumber: true,
+			isString: false,
+		},
+		{
+			name: "float value",
+			value: &planpb.GenericValue{
+				Val: &planpb.GenericValue_FloatVal{FloatVal: 3.14},
+			},
+			isBool:   false,
+			isInt:    false,
+			isFloat:  true,
+			isNumber: true,
+			isString: false,
+		},
+		{
+			name: "string value",
+			value: &planpb.GenericValue{
+				Val: &planpb.GenericValue_StringVal{StringVal: "hello"},
+			},
+			isBool:   false,
+			isInt:    false,
+			isFloat:  false,
+			isNumber: false,
+			isString: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.isBool, IsBool(tt.value))
+			assert.Equal(t, tt.isInt, IsInteger(tt.value))
+			assert.Equal(t, tt.isFloat, IsFloating(tt.value))
+			assert.Equal(t, tt.isNumber, IsNumber(tt.value))
+			assert.Equal(t, tt.isString, IsString(tt.value))
+		})
+	}
+}
