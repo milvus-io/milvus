@@ -365,11 +365,9 @@ func BatchCalculateDistances(leftVectors, rightVectors [][]float32, metricType s
 		if err != nil {
 			return nil, err
 		}
-
 	}
 	distances, err := calculator.BatchCalculate(leftVectors, rightVectors)
 	if err != nil {
-
 		return nil, err
 	}
 

@@ -1565,9 +1565,9 @@ func (t *queryTask) OnEnqueue() error {
 // parseFromSourcesJSON 高效解析 from 参数 JSON
 func (t *queryTask) parseFromSourcesJSON(fromParam string) ([]FromSourceDefinition, error) {
 	// 简单大小估算，决定解析策略
-	const largeJsonThreshold = 10 * 1024 // 10KB
+	const largeJSONThreshold = 10 * 1024 // 10KB
 
-	if len(fromParam) < largeJsonThreshold {
+	if len(fromParam) < largeJSONThreshold {
 		// 小型JSON：使用快速解析
 		return t.parseFromSourcesSimple(fromParam)
 	} else {

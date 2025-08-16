@@ -194,7 +194,6 @@ func NewDistanceExecutor(
 
 // Execute distance query execution
 func (e *DistanceExecutor) Execute() (*internalpb.RetrieveResults, error) {
-
 	// Parse query plan
 	distanceExpr, err := e.coordinator.planner.ParseDistanceQuery(e.plan)
 	if err != nil {
@@ -287,7 +286,6 @@ func (e *DistanceExecutor) convertProtoMetricToString(metric planpb.DistanceMetr
 
 // ParseDistanceQuery parse distance query plan
 func (p *DistanceQueryPlanner) ParseDistanceQuery(plan *planpb.PlanNode) (*planpb.DistanceExpr, error) {
-
 	queryPlan := plan.GetQuery()
 	if queryPlan == nil {
 		return nil, fmt.Errorf("invalid query plan")
@@ -945,10 +943,6 @@ func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb
 	switch idData := ids.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		entityIDs = idData.IntId.GetData()
-		maxShow := len(entityIDs)
-		if maxShow > 5 {
-			maxShow = 5
-		}
 
 	default:
 		return nil, nil, fmt.Errorf("ID types not currently supported: %T", idData)
@@ -965,7 +959,6 @@ func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb
 	vectorFieldFound := false
 
 	for _, fieldData := range result.GetFieldsData() {
-
 		if fieldData.GetFieldId() == vectorFieldID {
 			vectorFieldFound = true
 
@@ -1008,12 +1001,6 @@ func (e *DistanceExecutor) extractVectorDataFromRetrieveResult(result *segcorepb
 	}
 
 	if !vectorFieldFound {
-
-		// 列出所有可用字段
-		var availableFields []string
-		for _, field := range result.GetFieldsData() {
-			availableFields = append(availableFields, fmt.Sprintf("ID:%d,Type:%s", field.GetFieldId(), field.GetType().String()))
-		}
 		return nil, nil, fmt.Errorf("vector field ID %d not found", vectorFieldID)
 	}
 

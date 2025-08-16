@@ -135,7 +135,6 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 				nodeDependent: true,
 			}, nil
 		}
-
 	}
 
 	// Original logic: directly search for field

@@ -98,10 +98,8 @@ func handleExprWithAliases(schema *typeutil.SchemaHelper, exprStr string, aliasM
 
 	visitor := NewParserVisitor(schema)
 	// 设置别名映射
-	if aliasMap != nil {
-		for alias, aliasSchema := range aliasMap {
-			visitor.SetAlias(alias, aliasSchema)
-		}
+	for alias, aliasSchema := range aliasMap {
+		visitor.SetAlias(alias, aliasSchema)
 	}
 	return ast.Accept(visitor)
 }
