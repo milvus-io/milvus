@@ -43,7 +43,7 @@ func (opt *InsertParams) TWithIsRows(isRows bool) *InsertParams {
 	return opt
 }
 
-// GenColumnDataOption -- create column data --
+// GenDataOption -- create column data --
 type GenDataOption struct {
 	nb               int
 	start            int
@@ -56,6 +56,7 @@ type GenDataOption struct {
 	textLang         string
 	texts            []string
 	textEmptyPercent int
+	validData        []bool
 }
 
 func (opt *GenDataOption) TWithNb(nb int) *GenDataOption {
@@ -113,6 +114,11 @@ func (opt *GenDataOption) TWithTextEmptyPercent(percent int) *GenDataOption {
 	return opt
 }
 
+func (opt *GenDataOption) TWithValidData(validData []bool) *GenDataOption {
+	opt.validData = validData
+	return opt
+}
+
 func TNewDataOption() *GenDataOption {
 	return &GenDataOption{
 		nb:               common.DefaultNb,
@@ -135,6 +141,7 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 		fieldName = GetFieldNameByElementType(eleType)
 	}
 	capacity := option.maxCapacity
+	validDataLen := GetValidDataLen(option.validData)
 	switch eleType {
 	case entity.FieldTypeBool:
 		boolValues := make([][]bool, 0, nb)
@@ -144,6 +151,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 				boolArray = append(boolArray, i%2 == 0)
 			}
 			boolValues = append(boolValues, boolArray)
+		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnBoolArray(fieldName, boolValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnBoolArray failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnBoolArray(fieldName, boolValues)
 	case entity.FieldTypeInt8:
@@ -155,6 +169,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 			}
 			int8Values = append(int8Values, int8Array)
 		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnInt8Array(fieldName, int8Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt8Array failed", zap.Error(err))
+			}
+			return nullableColumn
+		}
 		return column.NewColumnInt8Array(fieldName, int8Values)
 	case entity.FieldTypeInt16:
 		int16Values := make([][]int16, 0, nb)
@@ -164,6 +185,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 				int16Array = append(int16Array, int16(i+j))
 			}
 			int16Values = append(int16Values, int16Array)
+		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnInt16Array(fieldName, int16Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt16Array failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnInt16Array(fieldName, int16Values)
 	case entity.FieldTypeInt32:
@@ -175,6 +203,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 			}
 			int32Values = append(int32Values, int32Array)
 		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnInt32Array(fieldName, int32Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt32Array failed", zap.Error(err))
+			}
+			return nullableColumn
+		}
 		return column.NewColumnInt32Array(fieldName, int32Values)
 	case entity.FieldTypeInt64:
 		int64Values := make([][]int64, 0, nb)
@@ -184,6 +219,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 				int64Array = append(int64Array, int64(i+j))
 			}
 			int64Values = append(int64Values, int64Array)
+		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnInt64Array(fieldName, int64Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt64Array failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnInt64Array(fieldName, int64Values)
 	case entity.FieldTypeFloat:
@@ -195,6 +237,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 			}
 			floatValues = append(floatValues, floatArray)
 		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnFloatArray(fieldName, floatValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnFloatArray failed", zap.Error(err))
+			}
+			return nullableColumn
+		}
 		return column.NewColumnFloatArray(fieldName, floatValues)
 	case entity.FieldTypeDouble:
 		doubleValues := make([][]float64, 0, nb)
@@ -204,6 +253,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 				doubleArray = append(doubleArray, float64(i+j))
 			}
 			doubleValues = append(doubleValues, doubleArray)
+		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnDoubleArray(fieldName, doubleValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnDoubleArray failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnDoubleArray(fieldName, doubleValues)
 	case entity.FieldTypeVarChar:
@@ -216,6 +272,13 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) 
 				varcharArray = append(varcharArray, buf.String())
 			}
 			varcharValues = append(varcharValues, varcharArray)
+		}
+		if validDataLen > 0 {
+			nullableColumn, err := column.NewNullableColumnVarCharArray(fieldName, varcharValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnVarCharArray failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnVarCharArray(fieldName, varcharValues)
 	default:
@@ -301,67 +364,150 @@ func GenNestedJSONExprKey(depth int, jsonField string) string {
 	return fmt.Sprintf("%s['%s']", jsonField, strings.Join(pathParts, "']['"))
 }
 
+func GetValidDataLen(validData []bool) int {
+	validDataLen := 0
+	for _, valid := range validData {
+		if valid {
+			validDataLen++
+		}
+	}
+	return validDataLen
+}
+
+func GetAllFunctionsOutputFields(schema *entity.Schema) []string {
+	var outputFields []string
+	for _, fn := range schema.Functions {
+		if fn.Type == entity.FunctionTypeBM25 || fn.Type == entity.FunctionTypeTextEmbedding {
+			outputFields = append(outputFields, fn.OutputFieldNames...)
+		}
+	}
+	return outputFields
+}
+
 // GenColumnData GenColumnDataOption except dynamic column
 func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
 	dim := option.dim
 	sparseMaxLen := option.sparseMaxLen
 	start := option.start
 	fieldName := option.fieldName
+	validDataLen := nb
+	if option.validData != nil {
+		validDataLen = GetValidDataLen(option.validData)
+		if validDataLen > nb {
+			validDataLen = nb
+		}
+	}
+	log.Debug("GenColumnData", zap.Any("FieldType", fieldType), zap.Int("nb", nb), zap.Int("start", start), zap.Int("validDataLen", validDataLen))
+
 	if option.fieldName == "" {
 		fieldName = GetFieldNameByFieldType(fieldType, TWithElementType(option.elementType))
 	}
 	switch fieldType {
 	case entity.FieldTypeInt64:
-		int64Values := make([]int64, 0, nb)
-		for i := start; i < start+nb; i++ {
+		int64Values := make([]int64, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			int64Values = append(int64Values, int64(i))
+		}
+
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnInt64(fieldName, int64Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt64 failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnInt64(fieldName, int64Values)
 
 	case entity.FieldTypeInt8:
-		int8Values := make([]int8, 0, nb)
-		for i := start; i < start+nb; i++ {
+		count := 0
+		int8Values := make([]int8, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			int8Values = append(int8Values, int8(i))
+			if int8(i) == -1 {
+				count += 1
+			}
+		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnInt8(fieldName, int8Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt8 failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnInt8(fieldName, int8Values)
 
 	case entity.FieldTypeInt16:
-		int16Values := make([]int16, 0, nb)
-		for i := start; i < start+nb; i++ {
+		int16Values := make([]int16, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			int16Values = append(int16Values, int16(i))
+		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnInt16(fieldName, int16Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt16 failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnInt16(fieldName, int16Values)
 
 	case entity.FieldTypeInt32:
-		int32Values := make([]int32, 0, nb)
-		for i := start; i < start+nb; i++ {
+		int32Values := make([]int32, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			int32Values = append(int32Values, int32(i))
+		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnInt32(fieldName, int32Values, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnInt32 failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnInt32(fieldName, int32Values)
 
 	case entity.FieldTypeBool:
-		boolValues := make([]bool, 0, nb)
-		for i := start; i < start+nb; i++ {
+		boolValues := make([]bool, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			boolValues = append(boolValues, i%2 == 0)
+		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnBool(fieldName, boolValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnBool failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnBool(fieldName, boolValues)
 
 	case entity.FieldTypeFloat:
-		floatValues := make([]float32, 0, nb)
-		for i := start; i < start+nb; i++ {
+		floatValues := make([]float32, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			floatValues = append(floatValues, float32(i))
+		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnFloat(fieldName, floatValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnFloat failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnFloat(fieldName, floatValues)
 
 	case entity.FieldTypeDouble:
-		floatValues := make([]float64, 0, nb)
-		for i := start; i < start+nb; i++ {
+		floatValues := make([]float64, 0, validDataLen)
+		for i := start; i < start+validDataLen; i++ {
 			floatValues = append(floatValues, float64(i))
+		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnDouble(fieldName, floatValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnDouble failed", zap.Error(err))
+			}
+			return nullableColumn
 		}
 		return column.NewColumnDouble(fieldName, floatValues)
 
 	case entity.FieldTypeVarChar:
-		varcharValues := make([]string, 0, nb)
+		varcharValues := make([]string, 0, validDataLen)
 		if option.textLang != "" {
 			// Use language-specific text generation
 			var lang string
@@ -377,7 +523,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			}
 
 			// Generate text data with empty values based on textEmptyPercent
-			for i := 0; i < nb; i++ {
+			for i := 0; i < validDataLen; i++ {
 				if rand.Float64()*100 < float64(option.textEmptyPercent) {
 					varcharValues = append(varcharValues, "")
 				} else {
@@ -386,7 +532,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			}
 		} else {
 			// Default behavior: sequential numbers
-			for i := start; i < start+nb; i++ {
+			for i := start; i < start+validDataLen; i++ {
 				varcharValues = append(varcharValues, strconv.Itoa(i))
 			}
 		}
@@ -396,16 +542,33 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 				varcharValues[i] = option.texts[i]
 			}
 		}
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnVarChar(fieldName, varcharValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnVarChar failed", zap.Error(err))
+			}
+			return nullableColumn
+		}
 		return column.NewColumnVarChar(fieldName, varcharValues)
 
 	case entity.FieldTypeArray:
-		return GenArrayColumnData(nb, option.elementType, option)
+		return GenArrayColumnData(validDataLen, option.elementType, option)
 
 	case entity.FieldTypeJSON:
-		jsonValues := GenDefaultJSONData(nb, option)
+		jsonValues := GenDefaultJSONData(validDataLen, option)
+		if validDataLen < nb {
+			nullableColumn, err := column.NewNullableColumnJSONBytes(fieldName, jsonValues, option.validData)
+			if err != nil {
+				log.Fatal("NewNullableColumnJSONBytes failed", zap.Error(err))
+			}
+			return nullableColumn
+		}
 		return column.NewColumnJSONBytes(fieldName, jsonValues)
 
 	case entity.FieldTypeFloatVector:
+		if validDataLen < nb {
+			log.Warn("GenColumnData", zap.String("Note", "fieldType FloatVector not support valid data"))
+		}
 		vecFloatValues := make([][]float32, 0, nb)
 		for i := start; i < start+nb; i++ {
 			vec := common.GenFloatVector(dim)
@@ -414,6 +577,9 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		return column.NewColumnFloatVector(fieldName, option.dim, vecFloatValues)
 
 	case entity.FieldTypeBinaryVector:
+		if validDataLen < nb {
+			log.Warn("GenColumnData", zap.String("Note", "fieldType FloatVector not support valid data"))
+		}
 		binaryVectors := make([][]byte, 0, nb)
 		for i := 0; i < nb; i++ {
 			vec := common.GenBinaryVector(dim)
@@ -421,6 +587,9 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		}
 		return column.NewColumnBinaryVector(fieldName, dim, binaryVectors)
 	case entity.FieldTypeFloat16Vector:
+		if validDataLen < nb {
+			log.Warn("GenColumnData", zap.String("Note", "fieldType FloatVector not support valid data"))
+		}
 		fp16Vectors := make([][]byte, 0, nb)
 		for i := start; i < start+nb; i++ {
 			vec := common.GenFloat16Vector(dim)
@@ -429,6 +598,9 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		return column.NewColumnFloat16Vector(fieldName, dim, fp16Vectors)
 
 	case entity.FieldTypeBFloat16Vector:
+		if validDataLen < nb {
+			log.Warn("GenColumnData", zap.String("Note", "fieldType FloatVector not support valid data"))
+		}
 		bf16Vectors := make([][]byte, 0, nb)
 		for i := start; i < start+nb; i++ {
 			vec := common.GenBFloat16Vector(dim)
@@ -437,6 +609,9 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		return column.NewColumnBFloat16Vector(fieldName, dim, bf16Vectors)
 
 	case entity.FieldTypeSparseVector:
+		if validDataLen < nb {
+			log.Warn("GenColumnData", zap.String("Note", "fieldType FloatVector not support valid data"))
+		}
 		vectors := make([]entity.SparseEmbedding, 0, nb)
 		for i := start; i < start+nb; i++ {
 			vec := common.GenSparseVector(sparseMaxLen)
@@ -530,36 +705,6 @@ func MergeColumnsToDynamic(nb int, columns []column.Column, columnName string) *
 	jsonColumn := column.NewColumnJSONBytes(columnName, values).WithIsDynamic(true)
 
 	return jsonColumn
-}
-
-func GetBm25FunctionsOutputFields(schema *entity.Schema) []string {
-	var outputFields []string
-	for _, fn := range schema.Functions {
-		if fn.Type == entity.FunctionTypeBM25 {
-			outputFields = append(outputFields, fn.OutputFieldNames...)
-		}
-	}
-	return outputFields
-}
-
-func GetTextEmbeddingFunctionsOutputFields(schema *entity.Schema) []string {
-	var outputFields []string
-	for _, fn := range schema.Functions {
-		if fn.Type == entity.FunctionTypeTextEmbedding {
-			outputFields = append(outputFields, fn.OutputFieldNames...)
-		}
-	}
-	return outputFields
-}
-
-func GetAllFunctionsOutputFields(schema *entity.Schema) []string {
-	var outputFields []string
-	for _, fn := range schema.Functions {
-		if fn.Type == entity.FunctionTypeBM25 || fn.Type == entity.FunctionTypeTextEmbedding {
-			outputFields = append(outputFields, fn.OutputFieldNames...)
-		}
-	}
-	return outputFields
 }
 
 // GenTextDocuments generates realistic text documents for embedding tests
@@ -690,35 +835,76 @@ func CallTEIDirectly(endpoint string, texts []string) ([][]float32, error) {
 	return embeddings, nil
 }
 
-func GenColumnsBasedSchema(schema *entity.Schema, option *GenDataOption) ([]column.Column, []column.Column) {
+// Column-level option system
+type ColumnOption struct {
+	FieldName string
+	Options   *GenDataOption
+}
+
+type ColumnOptions []ColumnOption
+
+func TNewColumnOptions() ColumnOptions {
+	return make(ColumnOptions, 0)
+}
+
+func (cos ColumnOptions) WithColumnOption(fieldName string, options *GenDataOption) ColumnOptions {
+	return append(cos, ColumnOption{
+		FieldName: fieldName,
+		Options:   options,
+	})
+}
+
+func (cos ColumnOptions) GetColumnOption(fieldName string) *GenDataOption {
+	for _, co := range cos {
+		if co.FieldName == fieldName {
+			return co.Options
+		}
+	}
+	return nil
+}
+
+// GenColumnsBasedSchema generates columns based on schema with field-specific options
+func GenColumnsBasedSchema(schema *entity.Schema, columnOpts ColumnOptions) ([]column.Column, []column.Column) {
 	if nil == schema || schema.CollectionName == "" {
 		log.Fatal("[GenColumnsBasedSchema] Nil Schema is not expected")
 	}
 	fields := schema.Fields
 	columns := make([]column.Column, 0, len(fields)+1)
 	var dynamicColumns []column.Column
+
 	for _, field := range fields {
-		if field.DataType == entity.FieldTypeArray {
-			option.TWithElementType(field.ElementType)
-		}
 		if field.AutoID {
 			continue
-		}
-		option.fieldName = field.Name
-		if option.fieldName == "" {
-			option.fieldName = field.Name
 		}
 		if slices.Contains(GetAllFunctionsOutputFields(schema), field.Name) {
 			continue
 		}
-		log.Info("GenColumnsBasedSchema", zap.Any("field", field))
-		//  set field name to option
-		option.TWithFieldName(field.Name)
-		columns = append(columns, GenColumnData(option.nb, field.DataType, *option))
+
+		// Get field-specific options
+		fieldOpt := columnOpts.GetColumnOption(field.Name)
+		if fieldOpt == nil {
+			fieldOpt = TNewDataOption()
+		}
+
+		// Set field name and element type if needed
+		fieldOpt.fieldName = field.Name
+		if field.DataType == entity.FieldTypeArray {
+			fieldOpt.elementType = field.ElementType
+		}
+
+		columns = append(columns, GenColumnData(fieldOpt.nb, field.DataType, *fieldOpt))
 	}
+
+	// Check if dynamic field is enabled
 	if schema.EnableDynamicField {
-		dynamicColumns = GenDynamicColumnData(option.start, option.nb)
+		// Use default options for dynamic columns
+		dynamicOpt := columnOpts.GetColumnOption(common.DefaultDynamicFieldName)
+		if dynamicOpt == nil {
+			dynamicOpt = TNewDataOption()
+		}
+		dynamicColumns = GenDynamicColumnData(dynamicOpt.start, dynamicOpt.nb)
 	}
+
 	return columns, dynamicColumns
 }
 
