@@ -132,7 +132,7 @@ func (s *SchemaChangeMessageBody) ID() msgstream.UniqueID {
 }
 
 func NewSchemaChangeMessageBody(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	schChgMsg, err := message.AsImmutableCollectionSchemaChangeV2(msg)
+	schChgMsg, err := message.AsImmutableSchemaChangeMessageV2(msg)
 	if err != nil {
 		return nil, err
 	}

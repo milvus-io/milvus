@@ -26,6 +26,9 @@ type BasicMessage interface {
 	// from 1: new version after streamingnode.
 	Version() Version
 
+	// MessageTypeWithVersion returns the message type with version.
+	MessageTypeWithVersion() MessageTypeWithVersion
+
 	// Payload returns the message payload.
 	// If the underlying message is encrypted, the payload will be decrypted.
 	// !!! So if the message is encrypted, additional overhead will be paid for decryption.
@@ -143,6 +146,9 @@ type ImmutableMessage interface {
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	LastConfirmedMessageID() MessageID
+
+	// IntoImmutableMessageProto converts the message to a protobuf immutable message.
+	IntoImmutableMessageProto() *messagespb.ImmutableMessage
 }
 
 // ImmutableTxnMessage is the read-only transaction message interface.
@@ -163,6 +169,25 @@ type ImmutableTxnMessage interface {
 
 	// Size returns the number of messages in the transaction.
 	Size() int
+}
+
+// SpecializedBroadcastMessage is the specialized broadcast message interface.
+type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
+	BasicMessage
+
+	// MessageHeader returns the message header.
+	// Modifications to the returned header will be reflected in the message.
+	Header() H
+
+	// Body returns the message body.
+	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
+	Body() (B, error)
+
+	// MustBody return the message body, panic if error occurs.
+	MustBody() B
+
+	// OverwriteHeader overwrites the message header.
+	OverwriteHeader(header H)
 }
 
 // specializedMutableMessage is the specialized mutable message interface.
@@ -187,8 +212,8 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	OverwriteHeader(header H)
 }
 
-// specializedImmutableMessage is the specialized immutable message interface.
-type specializedImmutableMessage[H proto.Message, B proto.Message] interface {
+// SpecializedImmutableMessage is the specialized immutable message interface.
+type SpecializedImmutableMessage[H proto.Message, B proto.Message] interface {
 	ImmutableMessage
 
 	// Header returns the message header.
