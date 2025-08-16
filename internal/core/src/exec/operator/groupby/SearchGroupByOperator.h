@@ -21,6 +21,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
+#include "index/ScalarIndex.h"
 #include "knowhere/index/index_node.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -130,8 +131,12 @@ class SealedDataGetter : public DataGetter<T> {
             }
         } else {
             // null is not supported for indexed fields
-            auto pw = segment_.chunk_scalar_index<T>(field_id_, 0);
-            auto* chunk_index = pw.get();
+            auto indices = segment_.GetIndex(field_id_);
+            AssertInfo(indices.size() == 1,
+                       "indexed field should have only one index");
+            auto index = indices[0];
+            auto chunk_index =
+                dynamic_cast<const index::ScalarIndex<T>*>(index.get());
             auto raw = chunk_index->Reverse_Lookup(idx);
             AssertInfo(raw.has_value(), "field data not found");
             return raw.value();
