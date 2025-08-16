@@ -29,7 +29,8 @@ BruteForceSearch(const dataset::SearchDataset& query_ds,
                  const SearchInfo& search_info,
                  const std::map<std::string, std::string>& index_info,
                  const BitsetView& bitset,
-                 DataType data_type);
+                 DataType data_type,
+                 DataType element_type);
 
 knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
 GetBruteForceSearchIterators(

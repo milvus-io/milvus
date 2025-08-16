@@ -50,7 +50,7 @@ func Test_CheckVecIndexWithDataTypeExist(t *testing.T) {
 	}
 
 	for _, test := range cases {
-		if got := CheckVecIndexWithDataTypeExist(test.indexType, test.dataType); got != test.want {
+		if got := CheckVecIndexWithDataTypeExist(test.indexType, test.dataType, schemapb.DataType_None); got != test.want {
 			t.Errorf("CheckVecIndexWithDataTypeExist(%v, %v) = %v", test.indexType, test.dataType, test.want)
 		}
 	}

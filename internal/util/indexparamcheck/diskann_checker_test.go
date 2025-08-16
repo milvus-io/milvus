@@ -76,7 +76,7 @@ func Test_diskannChecker_CheckTrain(t *testing.T) {
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("DISKANN")
 	for _, test := range cases {
 		test.params[common.IndexTypeKey] = "DISKANN"
-		err := c.CheckTrain(schemapb.DataType_FloatVector, test.params)
+		err := c.CheckTrain(schemapb.DataType_FloatVector, schemapb.DataType_None, test.params)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

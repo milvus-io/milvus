@@ -15,7 +15,11 @@
 #include "knowhere/comp/knowhere_check.h"
 
 bool
-CheckVecIndexWithDataType(const char* index_type, enum CDataType data_type) {
+CheckVecIndexWithDataType(const char* index_type,
+                          enum CDataType data_type,
+                          bool is_emb_list_data) {
     return knowhere::KnowhereCheck::IndexTypeAndDataTypeCheck(
-        std::string(index_type), knowhere::VecType(data_type));
+        std::string(index_type),
+        knowhere::VecType(data_type),
+        is_emb_list_data);
 }

@@ -40,6 +40,10 @@ enum VectorType {
   BFloat16Vector = 3;
   SparseFloatVector = 4;
   Int8Vector = 5;
+  EmbListFloatVector = 6;
+  EmbListFloat16Vector = 7;
+  EmbListBFloat16Vector = 8;
+  EmbListInt8Vector = 9;
 };
 
 message GenericValue {

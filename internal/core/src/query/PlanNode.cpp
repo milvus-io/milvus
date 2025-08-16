@@ -50,4 +50,9 @@ RetrievePlanNode::accept(PlanNodeVisitor& visitor) {
     visitor.visit(*this);
 }
 
+void
+EmbListFloatVectorANNS::accept(PlanNodeVisitor& visitor) {
+    visitor.visit(*this);
+}
+
 }  // namespace milvus::query

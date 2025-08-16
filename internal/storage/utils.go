@@ -1532,7 +1532,9 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData) error {
 	batchRows := int64(insertData.GetRowNum())
 
-	for _, field := range schema.Fields {
+	allFields := typeutil.GetAllFieldSchemas(schema)
+
+	for _, field := range allFields {
 		// Skip function output fields and system fields
 		if field.GetIsFunctionOutput() || field.GetFieldID() < 100 {
 			continue

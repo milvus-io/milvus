@@ -360,6 +360,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
 
     if (data_type == DataType::VECTOR_FLOAT) {
         auto index = std::make_unique<milvus::index::VectorMemIndex<float>>(
+            DataType::NONE,
             index_type,
             metric_type,
             knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -375,6 +376,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else if (data_type == DataType::VECTOR_FLOAT16) {
         auto index = std::make_unique<milvus::index::VectorMemIndex<float16>>(
+            DataType::NONE,
             index_type,
             metric_type,
             knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -391,6 +393,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
         auto index = std::make_unique<milvus::index::VectorMemIndex<bfloat16>>(
+            DataType::NONE,
             index_type,
             metric_type,
             knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -407,6 +410,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         EXPECT_EQ(index->Count(), (add_cont + 1) * N);
     } else if (is_sparse) {
         auto index = std::make_unique<milvus::index::VectorMemIndex<float>>(
+            DataType::NONE,
             index_type,
             metric_type,
             knowhere::Version::GetCurrentVersion().VersionNumber(),

@@ -304,7 +304,7 @@ func (s *ArrayStructDataNodeSuite) query(collectionName string) {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.IP)
 	params["radius"] = radius
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, s.dim, topk, roundDecimal)
+		integration.StructSubFloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, s.dim, topk, roundDecimal)
 
 	searchResult, _ := c.MilvusClient.Search(context.TODO(), searchReq)
 

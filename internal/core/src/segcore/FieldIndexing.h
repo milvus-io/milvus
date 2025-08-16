@@ -292,8 +292,9 @@ class IndexingRecord {
                     index_meta_->HasFiled(field_id)) {
                     auto vec_field_meta =
                         index_meta_->GetFieldIndexMeta(field_id);
-                    //Disable growing index for flat
-                    if (!vec_field_meta.IsFlatIndex()) {
+                    //Disable growing index for flat and embedding list
+                    if (!vec_field_meta.IsFlatIndex() &&
+                        field_meta.get_data_type() != DataType::VECTOR_ARRAY) {
                         auto field_raw_data =
                             insert_record->get_data_base(field_id);
                         field_indexings_.try_emplace(

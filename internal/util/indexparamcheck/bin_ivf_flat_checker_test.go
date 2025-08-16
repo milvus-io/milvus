@@ -119,7 +119,7 @@ func Test_binIVFFlatChecker_CheckTrain(t *testing.T) {
 	c, _ := GetIndexCheckerMgrInstance().GetChecker("BIN_IVF_FLAT")
 	for _, test := range cases {
 		test.params[common.IndexTypeKey] = "BIN_IVF_FLAT"
-		err := c.CheckTrain(schemapb.DataType_BinaryVector, test.params)
+		err := c.CheckTrain(schemapb.DataType_BinaryVector, schemapb.DataType_None, test.params)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

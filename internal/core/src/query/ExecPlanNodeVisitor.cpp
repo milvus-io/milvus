@@ -242,4 +242,9 @@ ExecPlanNodeVisitor::visit(Int8VectorANNS& node) {
     VectorVisitorImpl<Int8Vector>(node);
 }
 
+void
+ExecPlanNodeVisitor::visit(EmbListFloatVectorANNS& node) {
+    VectorVisitorImpl<EmbListFloatVector>(node);
+}
+
 }  // namespace milvus::query

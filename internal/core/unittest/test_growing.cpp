@@ -541,3 +541,87 @@ TEST(GrowingTest, LoadVectorArrayData) {
         verify_float_vectors(arrow_array, expected_array);
     }
 }
+
+TEST(GrowingTest, SearchVectorArray) {
+    using namespace milvus::query;
+
+    auto schema = std::make_shared<Schema>();
+    auto metric_type = knowhere::metric::MAX_SIM;
+
+    // Add fields
+    auto int64_field = schema->AddDebugField("int64", DataType::INT64);
+    auto array_vec = schema->AddDebugVectorArrayField(
+        "array_vec", DataType::VECTOR_FLOAT, 128, metric_type);
+    schema->set_primary_field_id(int64_field);
+
+    // Configure segment
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(1024);
+    config.set_enable_interim_segment_index(true);
+
+    std::map<std::string, std::string> index_params = {
+        {"index_type", knowhere::IndexEnum::INDEX_EMB_LIST_HNSW},
+        {"metric_type", metric_type},
+        {"nlist", "128"}};
+    std::map<std::string, std::string> type_params = {{"dim", "128"}};
+    FieldIndexMeta fieldIndexMeta(
+        array_vec, std::move(index_params), std::move(type_params));
+    std::map<FieldId, FieldIndexMeta> fieldMap = {{array_vec, fieldIndexMeta}};
+
+    IndexMetaPtr metaPtr =
+        std::make_shared<CollectionIndexMeta>(100000, std::move(fieldMap));
+    auto segment = CreateGrowingSegment(schema, metaPtr, 1, config);
+    auto segmentImplPtr = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+
+    // Insert data
+    int64_t N = 100;
+    uint64_t seed = 42;
+    int emb_list_len = 5;  // Each row contains 5 vectors
+    auto dataset = DataGen(schema, N, seed, 0, 1, emb_list_len);
+
+    auto offset = 0;
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
+
+    // Prepare search query
+    int vec_num = 10;  // Total number of query vectors
+    int dim = 128;
+    std::vector<float> query_vec = generate_float_vector(vec_num, dim);
+
+    // Create query dataset with lims for VectorArray
+    std::vector<size_t> query_vec_lims;
+    query_vec_lims.push_back(0);  // First query has 3 vectors
+    query_vec_lims.push_back(3);
+    query_vec_lims.push_back(10);  // Second query has 7 vectors
+
+    // Create search plan
+    const char* raw_plan = R"(vector_anns: <
+                                  field_id: 101
+                                  query_info: <
+                                    topk: 5
+                                    round_decimal: 3
+                                    metric_type: "MAX_SIM"
+                                    search_params: "{\"nprobe\": 10}"
+                                  >
+                                  placeholder_tag: "$0"
+      >)";
+
+    auto plan_str = translate_text_plan_to_binary_plan(raw_plan);
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+
+    // Use CreatePlaceholderGroupFromBlob for VectorArray
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob<EmbListFloatVector>(
+        vec_num, dim, query_vec.data(), query_vec_lims);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    // Execute search
+    Timestamp timestamp = 10000000;
+    auto sr = segment->Search(plan.get(), ph_group.get(), timestamp);
+    auto sr_parsed = SearchResultToJson(*sr);
+    std::cout << sr_parsed.dump(1) << std::endl;
+}

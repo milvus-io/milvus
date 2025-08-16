@@ -40,7 +40,7 @@ func HandleCStatus(status *C.CStatus) error {
 	return fmt.Errorf("%s", errorMsg)
 }
 
-func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[string]string) error {
+func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if typeutil.IsDenseFloatVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, FloatVectorMetrics) {
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], FloatVectorMetrics)
@@ -56,6 +56,10 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[stri
 	} else if typeutil.IsIntVectorType(dataType) {
 		if !CheckStrByValues(params, Metric, IntVectorMetrics) {
 			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], IntVectorMetrics)
+		}
+	} else if typeutil.IsArrayOfVectorType(dataType) {
+		if !CheckStrByValues(params, Metric, EmbListMetrics) {
+			return fmt.Errorf("metric type %s not found or not supported, supported: %v", params[Metric], EmbListMetrics)
 		}
 	}
 
@@ -86,31 +90,32 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, params map[stri
 
 	cIndexType := C.CString(indexType)
 	cDataType := uint32(dataType)
-	status = C.ValidateIndexParams(cIndexType, cDataType, (*C.uint8_t)(unsafe.Pointer(&indexParamsBlob[0])), (C.uint64_t)(len(indexParamsBlob)))
+	cElementType := uint32(elementType)
+	status = C.ValidateIndexParams(cIndexType, cDataType, cElementType, (*C.uint8_t)(unsafe.Pointer(&indexParamsBlob[0])), (C.uint64_t)(len(indexParamsBlob)))
 	C.free(unsafe.Pointer(cIndexType))
 
 	return HandleCStatus(&status)
 }
 
-func (c vecIndexChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
-	if err := c.StaticCheck(dataType, params); err != nil {
+func (c vecIndexChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
+	if err := c.StaticCheck(dataType, elementType, params); err != nil {
 		return err
 	}
 
-	if typeutil.IsFixDimVectorType(dataType) {
+	if typeutil.IsFixDimVectorType(dataType) || (typeutil.IsArrayOfVectorType(dataType) && typeutil.IsFixDimVectorType(elementType)) {
 		if !CheckIntByRange(params, DIM, 1, math.MaxInt) {
 			return errors.New("failed to check vector dimension, should be larger than 0 and smaller than math.MaxInt")
 		}
 	}
 
-	return c.baseChecker.CheckTrain(dataType, params)
+	return c.baseChecker.CheckTrain(dataType, elementType, params)
 }
 
 func (c vecIndexChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	if !typeutil.IsVectorType(field.GetDataType()) {
 		return fmt.Errorf("index %s only supports vector data type", indexType)
 	}
-	if !vecindexmgr.GetVecIndexMgrInstance().IsDataTypeSupport(indexType, field.GetDataType()) {
+	if !vecindexmgr.GetVecIndexMgrInstance().IsDataTypeSupport(indexType, field.GetDataType(), field.GetElementType()) {
 		return fmt.Errorf("index %s do not support data type: %s", indexType, schemapb.DataType_name[int32(field.GetDataType())])
 	}
 	return nil

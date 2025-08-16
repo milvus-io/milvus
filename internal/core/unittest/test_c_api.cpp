@@ -1936,6 +1936,7 @@ TEST(CApiTest, LoadIndexSearch) {
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = knowhere::IndexEnum::INDEX_FAISS_IVFSQ8;
     auto index = std::make_unique<VectorMemIndex<float>>(
+        DataType::NONE,
         index_params["index_type"],
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber());
