@@ -5470,7 +5470,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[random.random() for _ in range(128)]]
-        error = {ct.err_code: 65535, ct.err_msg: "Unknow rerank provider"}
+        error = {ct.err_code: 65535, ct.err_msg: "Unknow rerank model provider"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -5525,7 +5525,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Call rerank model failed"}
+        error = {ct.err_code: 65535, ct.err_msg: "Call service failed"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 
@@ -5606,7 +5606,7 @@ class TestMilvusClientSearchModelRerankNegative(TestMilvusClientV2Base):
         )
 
         data = [[0.1] * 128]
-        error = {ct.err_code: 65535, ct.err_msg: "Rerank function lost params endpoint"}
+        error = {ct.err_code: 65535, ct.err_msg: "is not a valid http/https link"}
         self.search(client, collection_name, data, anns_field="dense", limit=5,
                     ranker=ranker, check_task=CheckTasks.err_res, check_items=error)
 

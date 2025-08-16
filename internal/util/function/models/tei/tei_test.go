@@ -20,30 +20,35 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/function/models"
 )
 
-func TestEmbeddingClientCheck(t *testing.T) {
+func TestNewClient(t *testing.T) {
 	{
-		_, err := NewTEIEmbeddingClient("", "http://mymock.com")
+		_, err := NewTEIClient("mock_key", "http://localhost", "true")
 		assert.True(t, err == nil)
 	}
-
 	{
-		c, err := NewTEIEmbeddingClient("mock_key", "mock")
-		assert.True(t, c == nil)
+		_, err := NewTEIClient("mock_key", "http://localhost", "false")
 		assert.True(t, err != nil)
 	}
-
 	{
-		_, err := NewTEIEmbeddingClient("", "")
-		assert.True(t, err != nil)
+		_, err := NewTEIClient("mock_key", "http://localhost", "")
+		assert.True(t, err == nil)
 	}
-
 	{
-		_, err := NewTEIEmbeddingClient("", "http://")
+		os.Setenv(models.EnableTeiEnvStr, "true")
+		_, err := NewTEIClient("mock_key", "http://localhost", "")
+		assert.True(t, err == nil)
+	}
+	{
+		os.Setenv(models.EnableTeiEnvStr, "false")
+		_, err := NewTEIClient("mock_key", "http://localhost", "")
 		assert.True(t, err != nil)
 	}
 }
@@ -63,17 +68,17 @@ func TestEmbeddingOK(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewTEIEmbeddingClient("mock_key", url)
+		c, _ := NewTEIClient("mock_key", url, "true")
 		ret, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
 		assert.True(t, err == nil)
-		assert.Equal(t, ret, [][]float32{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
+		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
 
 	{
-		c, _ := NewTEIEmbeddingClient("mock_key", url)
+		c, _ := NewTEIClient("mock_key", url, "true")
 		ret, err := c.Embedding([]string{"sentence"}, false, "", "", 0)
 		assert.True(t, err == nil)
-		assert.Equal(t, ret, [][]float32{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
+		assert.Equal(t, ret, &EmbeddingResponse{{0.0, 0.1}, {1.0, 1.1}, {2.0, 2.1}})
 	}
 }
 
@@ -86,8 +91,45 @@ func TestEmbeddingFailed(t *testing.T) {
 	url := ts.URL
 
 	{
-		c, _ := NewTEIEmbeddingClient("mock_key", url)
+		c, _ := NewTEIClient("mock_key", url, "true")
 		_, err := c.Embedding([]string{"sentence"}, true, "left", "query", 0)
+		assert.True(t, err != nil)
+	}
+}
+
+func TestRerankOK(t *testing.T) {
+	repStr := `[{"index":0,"score":0.0},{"index":2,"score":0.2}, {"index":1,"score":0.1}]`
+	var res RerankResponse
+	err := json.Unmarshal([]byte(repStr), &res)
+	assert.NoError(t, err)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		data, _ := json.Marshal(res)
+		w.Write(data)
+	}))
+
+	defer ts.Close()
+	url := ts.URL
+
+	{
+		c, _ := NewTEIClient("", url, "true")
+		ret, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
+		assert.True(t, err == nil)
+		assert.Equal(t, ret, &RerankResponse{RerankResponseItem{Index: 0, Score: 0.0}, RerankResponseItem{Index: 1, Score: 0.1}, RerankResponseItem{Index: 2, Score: 0.2}})
+	}
+}
+
+func TestRerankFailed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`not json`))
+	}))
+	defer ts.Close()
+	url := ts.URL
+
+	{
+		c, _ := NewTEIClient("mock_key", url, "true")
+		_, err := c.Rerank("query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err != nil)
 	}
 }
