@@ -34,9 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -47,8 +45,6 @@ import (
 // getQuotaMetrics returns DataCoordQuotaMetrics.
 func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
 	info := s.meta.GetQuotaInfo()
-	// Just generate the metrics data regularly
-	_ = s.meta.SetStoredIndexFileSizeMetric()
 	return info
 }
 
@@ -65,32 +61,6 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 			}
 		}
 		ret.Collections[collectionID].NumEntitiesTotal = total
-		indexInfo, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-			CollectionID: collectionID,
-			IndexName:    "",
-			Timestamp:    0,
-		})
-		if err == merr.ErrIndexNotFound {
-			log.Ctx(ctx).Debug("index not found, ignore to report index metrics",
-				zap.Int64("collection", collectionID),
-				zap.Error(err),
-			)
-			continue
-		}
-		if err := merr.CheckRPCCall(indexInfo, err); err != nil {
-			log.Ctx(ctx).Warn("failed to describe index, ignore to report index metrics",
-				zap.Int64("collection", collectionID),
-				zap.Error(err),
-			)
-			continue
-		}
-		for _, info := range indexInfo.GetIndexInfos() {
-			ret.Collections[collectionID].IndexInfo = append(ret.Collections[collectionID].IndexInfo, &metricsinfo.DataCoordIndexInfo{
-				NumEntitiesIndexed: info.GetIndexedRows(),
-				IndexName:          info.GetIndexName(),
-				FieldID:            info.GetFieldID(),
-			})
-		}
 	}
 	return ret
 }
