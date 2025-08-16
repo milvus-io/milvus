@@ -115,7 +115,7 @@ func TestPartitionManager(t *testing.T) {
 
 	result, err := m.AssignSegment(&AssignSegmentRequest{
 		TimeTick: 125,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 120,
 		},
@@ -125,7 +125,7 @@ func TestPartitionManager(t *testing.T) {
 
 	result, err = m.AssignSegment(&AssignSegmentRequest{
 		TimeTick: 135,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 120,
 		},
@@ -135,7 +135,7 @@ func TestPartitionManager(t *testing.T) {
 	result.Ack()
 	req := &AssignSegmentRequest{
 		TimeTick: 136,
-		InsertMetrics: stats.InsertMetrics{
+		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
 			BinarySize: 120,
 		},

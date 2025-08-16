@@ -33,6 +33,7 @@ const (
 	WALRecoveryStorageStateLabelName  = "state"
 	WALStateLabelName                 = "state"
 	WALChannelLabelName               = channelNameLabelName
+	WALSegmentLevelLabelName          = "lv"
 	WALSegmentSealPolicyNameLabelName = "policy"
 	WALMessageTypeLabelName           = "message_type"
 	WALChannelTermLabelName           = "term"
@@ -251,12 +252,12 @@ var (
 	WALGrowingSegmentRowsTotal = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_rows_total",
 		Help: "Rows of segment growing on wal",
-	}, WALChannelLabelName)
+	}, WALChannelLabelName, WALSegmentLevelLabelName)
 
 	WALGrowingSegmentBytes = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_bytes",
 		Help: "Bytes of segment growing on wal",
-	}, WALChannelLabelName)
+	}, WALChannelLabelName, WALSegmentLevelLabelName)
 
 	WALGrowingSegmentHWMBytes = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "growing_segment_hwm_bytes",
