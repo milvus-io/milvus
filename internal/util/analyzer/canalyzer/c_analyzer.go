@@ -1,4 +1,4 @@
-package ctokenizer
+package canalyzer
 
 /*
 #cgo pkg-config: milvus_core
@@ -11,37 +11,37 @@ import "C"
 import (
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/tokenizerapi"
+	"github.com/milvus-io/milvus/internal/util/analyzer/interfaces"
 )
 
-var _ tokenizerapi.Tokenizer = (*CTokenizer)(nil)
+var _ interfaces.Analyzer = (*CAnalyzer)(nil)
 
-type CTokenizer struct {
+type CAnalyzer struct {
 	ptr C.CTokenizer
 }
 
-func NewCTokenizer(ptr C.CTokenizer) *CTokenizer {
-	return &CTokenizer{
+func NewCAnalyzer(ptr C.CTokenizer) *CAnalyzer {
+	return &CAnalyzer{
 		ptr: ptr,
 	}
 }
 
-func (impl *CTokenizer) NewTokenStream(text string) tokenizerapi.TokenStream {
+func (impl *CAnalyzer) NewTokenStream(text string) interfaces.TokenStream {
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
 	ptr := C.create_token_stream(impl.ptr, cText, (C.uint32_t)(len(text)))
 	return NewCTokenStream(ptr)
 }
 
-func (impl *CTokenizer) Clone() (tokenizerapi.Tokenizer, error) {
+func (impl *CAnalyzer) Clone() (interfaces.Analyzer, error) {
 	var newptr C.CTokenizer
 	status := C.clone_tokenizer(&impl.ptr, &newptr)
 	if err := HandleCStatus(&status, "failed to clone tokenizer"); err != nil {
 		return nil, err
 	}
-	return NewCTokenizer(newptr), nil
+	return NewCAnalyzer(newptr), nil
 }
 
-func (impl *CTokenizer) Destroy() {
+func (impl *CAnalyzer) Destroy() {
 	C.free_tokenizer(impl.ptr)
 }
