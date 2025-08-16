@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 )
 
@@ -42,6 +43,7 @@ type CreateCSegmentRequest struct {
 	SegmentID   int64
 	SegmentType SegmentType
 	IsSorted    bool
+	EZ          *hookutil.EZ
 }
 
 func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
@@ -60,7 +62,15 @@ func (req *CreateCSegmentRequest) getCSegmentType() C.SegmentType {
 // CreateCSegment creates a segment from a CreateCSegmentRequest.
 func CreateCSegment(req *CreateCSegmentRequest) (CSegment, error) {
 	var ptr C.CSegmentInterface
-	status := C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted))
+	var pluginContextPtr *C.CPluginContext
+	if req.EZ != nil {
+		pluginContext := C.CPluginContext{
+			ez_id:         C.int64_t(req.EZ.EzID),
+			collection_id: C.int64_t(req.EZ.CollectionID),
+		}
+		pluginContextPtr = &pluginContext
+	}
+	status := C.NewSegment(req.Collection.rawPointer(), req.getCSegmentType(), C.int64_t(req.SegmentID), &ptr, C.bool(req.IsSorted), pluginContextPtr)
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err
 	}

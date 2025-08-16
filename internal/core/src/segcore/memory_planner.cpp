@@ -35,6 +35,7 @@
 #include "log/Log.h"
 #include "storage/ThreadPools.h"
 #include "common/Common.h"
+#include "storage/KeyRetriever.h"
 
 namespace milvus::segcore {
 
@@ -150,7 +151,8 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  std::unique_ptr<RowGroupSplitStrategy> strategy,
                  const std::vector<std::vector<int64_t>>& row_group_lists,
                  const std::shared_ptr<arrow::Schema> schema,
-                 milvus::proto::common::LoadPriority priority) {
+                 milvus::proto::common::LoadPriority priority,
+                 std::shared_ptr<CPluginContext> plugin_context) {
     try {
         AssertInfo(remote_files.size() == row_group_lists.size(),
                    "[StorageV2] Number of remote files must match number of "
@@ -189,12 +191,14 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                                                   file,
                                                   file_idx,
                                                   schema,
-                                                  reader_memory_limit]() {
+                                                  reader_memory_limit,
+                                                  plugin_context]() {
                     AssertInfo(fs != nullptr,
                                "[StorageV2] file system is nullptr");
                     auto row_group_reader =
                         std::make_shared<milvus_storage::FileRowGroupReader>(
-                            fs, file, schema, reader_memory_limit);
+                            fs, file, schema, reader_memory_limit,
+                            milvus::storage::GetReaderProperties(plugin_context));
                     AssertInfo(row_group_reader != nullptr,
                                "[StorageV2] row group reader is nullptr");
                     row_group_reader->SetRowGroupOffsetAndCount(block.offset,

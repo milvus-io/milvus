@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -280,6 +281,9 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 		return err
 	}
 
+	// Set properties for persistent
+	schema.Properties = t.Req.GetProperties()
+
 	t.appendSysFields(&schema)
 	t.schema = &schema
 	return nil
@@ -377,6 +381,13 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 		t.Req.Properties = reqProperties
 	}
 	t.dbProperties = db.Properties
+
+	if hookutil.IsDBEncyptionEnabled(t.dbProperties) {
+		t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
+			Key:   hookutil.EncryptionEzIDKey,
+			Value: strconv.FormatInt(t.dbID, 10),
+		})
+	}
 
 	if err := t.validate(ctx); err != nil {
 		return err

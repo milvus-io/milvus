@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "common/type_c.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "common/GroupChunk.h"
 #include "mmap/Types.h"
@@ -23,8 +24,10 @@
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "storage/ThreadPools.h"
+#include "storage/KeyRetriever.h"
 #include "segcore/memory_planner.h"
 
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -47,7 +50,8 @@ GroupChunkTranslator::GroupChunkTranslator(
     std::vector<std::string> insert_files,
     bool use_mmap,
     int64_t num_fields,
-    milvus::proto::common::LoadPriority load_priority)
+    milvus::proto::common::LoadPriority load_priority,
+    std::shared_ptr<CPluginContext> context)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
       field_metas_(field_metas),
@@ -55,6 +59,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       insert_files_(insert_files),
       use_mmap_(use_mmap),
       load_priority_(load_priority),
+      plugin_context_(context),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
@@ -77,7 +82,9 @@ GroupChunkTranslator::GroupChunkTranslator(
     // Get row group metadata from files
     for (const auto& file : insert_files_) {
         auto reader =
-            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file);
+            std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
+                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                storage::GetReaderProperties(context));
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
         auto status = reader->Close();
@@ -218,7 +225,8 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 std::move(strategy),
                                 row_group_lists,
                                 nullptr,
-                                load_priority_);
+                                load_priority_,
+                                plugin_context_);
     });
     LOG_INFO(
         "[StorageV2] translator {} submits load column group {} task to thread "

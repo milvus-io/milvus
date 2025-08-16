@@ -611,6 +611,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
 			return t.binlogIO.Download(ctx, paths)
 		}),
+		storage.WithCollectionID(t.GetCollection()),
 		storage.WithVersion(segment.StorageVersion),
 		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
@@ -911,6 +912,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 		storage.WithBufferSize(t.bufferSize),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithNeededFields(requiredFields),
+		storage.WithCollectionID(t.GetCollection()),
 	)
 	if err != nil {
 		log.Warn("new binlog record reader wrong", zap.Error(err))

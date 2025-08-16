@@ -338,6 +338,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		StorageVersion:            segment.StorageVersion,
 		CurrentScalarIndexVersion: st.ievm.GetCurrentScalarIndexEngineVersion(),
 	}
+	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 
 	return req, nil
 }

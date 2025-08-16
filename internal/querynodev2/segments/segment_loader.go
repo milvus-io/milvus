@@ -271,7 +271,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		log.Warn("failed to get collection", zap.Error(err))
 		return nil, err
 	}
-
 	// Filter out loaded & loading segments
 	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
