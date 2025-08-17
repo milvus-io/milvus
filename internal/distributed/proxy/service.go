@@ -641,6 +641,11 @@ func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.Descr
 	return s.proxy.DescribeCollection(ctx, request)
 }
 
+// BatchDescribeCollection notifies Proxy to describe a collection
+func (s *Server) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
+	return s.proxy.BatchDescribeCollection(ctx, request)
+}
+
 // AddCollectionField add a field to collection
 func (s *Server) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.proxy.AddCollectionField(ctx, request)

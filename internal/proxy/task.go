@@ -1008,6 +1008,7 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 			CreatedUtcTimestamps:  make([]uint64, 0, len(resp.CollectionIDs)),
 			InMemoryPercentages:   make([]int64, 0, len(resp.CollectionIDs)),
 			QueryServiceAvailable: make([]bool, 0, len(resp.CollectionIDs)),
+			ShardsNum:             make([]int32, 0, len(resp.CollectionIDs)),
 		}
 
 		for offset, id := range resp.CollectionIDs {
@@ -1030,6 +1031,7 @@ func (t *showCollectionsTask) Execute(ctx context.Context) error {
 			t.result.CreatedUtcTimestamps = append(t.result.CreatedUtcTimestamps, collectionInfo.createdUtcTimestamp)
 			t.result.InMemoryPercentages = append(t.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
 			t.result.QueryServiceAvailable = append(t.result.QueryServiceAvailable, resp.QueryServiceAvailable[offset])
+			t.result.ShardsNum = append(t.result.ShardsNum, collectionInfo.shardsNum)
 		}
 	} else {
 		t.result = respFromRootCoord

@@ -960,6 +960,40 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 	return interceptor.Call(ctx, request)
 }
 
+func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
+	collectionNames := request.GetCollectionName()
+	if len(collectionNames) == 0 {
+		return &milvuspb.BatchDescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection names cannot be empty")),
+		}, nil
+	}
+
+	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(collectionNames))
+
+	for _, collectionName := range collectionNames {
+		describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
+			DbName:         request.GetDbName(),
+			CollectionName: collectionName,
+		}
+
+		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
+		// If there's an error, create a response with error status
+		if err != nil {
+			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{
+				Status:         merr.Status(err),
+				CollectionName: collectionName,
+			}
+		}
+
+		responses = append(responses, describeCollectionResponse)
+	}
+
+	return &milvuspb.BatchDescribeCollectionResponse{
+		Status:    merr.Success(),
+		Responses: responses,
+	}, nil
+}
+
 // AddCollectionField add a field to collection
 func (node *Proxy) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -4261,8 +4295,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		SegmentIDs: getSegmentsByStatesResponse.Segments,
 	})
 	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("GetPersistentSegmentInfo fail",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -4270,8 +4303,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	}
 	err = merr.Error(infoResp.GetStatus())
 	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -4291,8 +4323,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			StorageVersion: info.GetStorageVersion(),
 		}
 	}
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
 	return resp, nil
