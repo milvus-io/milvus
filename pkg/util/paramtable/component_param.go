@@ -4817,10 +4817,10 @@ type dataNodeConfig struct {
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
 	// import
-	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
-	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
-	ImportInsertBufferSize     ParamItem `refreshable:"true"`
-	ImportDeleteBufferSize     ParamItem `refreshable:"true"`
+	ImportConcurrencyPerCPUCore ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB       ParamItem `refreshable:"true"`
+	ImportInsertBufferSize      ParamItem `refreshable:"true"`
+	ImportDeleteBufferSize      ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio       ParamItem `refreshable:"true"`
@@ -5100,15 +5100,15 @@ if this parameter <= 0, will set it as 10`,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
-	p.MaxConcurrentImportTaskNum = ParamItem{
-		Key:          "dataNode.import.maxConcurrentTaskNum",
+	p.ImportConcurrencyPerCPUCore = ParamItem{
+		Key:          "dataNode.import.concurrencyPerCPUCore",
 		Version:      "2.4.0",
-		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
-		DefaultValue: "16",
+		Doc:          "The execution concurrency unit for import/pre-import tasks per CPU core.",
+		DefaultValue: "4",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+	p.ImportConcurrencyPerCPUCore.Init(base.mgr)
 
 	p.MaxImportFileSizeInGB = ParamItem{
 		Key:          "dataNode.import.maxImportFileSizeInGB",
