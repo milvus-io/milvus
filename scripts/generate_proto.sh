@@ -49,6 +49,7 @@ pushd ${PROTO_DIR}
 
 mkdir -p ./etcdpb
 mkdir -p ./indexcgopb
+mkdir -p ./cdcpb
 mkdir -p ./cgopb
 mkdir -p ./internalpb
 mkdir -p ./rootcoordpb
@@ -68,6 +69,7 @@ protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
 
 ${protoc_opt} --go_out=paths=source_relative:./etcdpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./indexcgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
+${protoc_opt} --go_out=paths=source_relative:./cdcpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./cdcpb cdc.proto || { echo 'generate cdc failed '; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./cgopb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./cgopb cgo_msg.proto || { echo 'generate cgo_msg failed '; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./rootcoordpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./rootcoordpb root_coord.proto || { echo 'generate root_coord.proto failed'; exit 1; }
 ${protoc_opt} --go_out=paths=source_relative:./internalpb --go-grpc_out=require_unimplemented_servers=false,paths=source_relative:./internalpb internal.proto || { echo 'generate internal.proto failed'; exit 1; }

@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v2/proto/cdcpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -256,4 +257,14 @@ type StreamingNodeCataLog interface {
 
 	// SaveConsumeCheckpoint saves the consuming checkpoint of the wal.
 	SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error
+}
+
+// CDCCatalog is the interface for CDC catalog
+type CDCCatalog interface {
+	// SaveReplicateConfiguration saves the replicate configuration to metastore.
+	SaveReplicateConfiguration(ctx context.Context, config *cdcpb.ReplicateConfiguration) error
+	// ListReplicateConfigurations lists all replicate configurations from metastore.
+	ListReplicateConfigurations(ctx context.Context) ([]*cdcpb.ReplicateConfiguration, error)
+	// RemoveReplicateConfiguration removes the replicate configuration from metastore.
+	RemoveReplicateConfiguration(ctx context.Context, replicateID string) error
 }
