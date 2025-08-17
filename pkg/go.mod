@@ -15,6 +15,7 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/confluentinc/confluent-kafka-go v1.9.1
 	github.com/containerd/cgroups/v3 v3.0.3
+	github.com/dave/jennifer v1.7.1
 	github.com/expr-lang/expr v1.15.7
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
