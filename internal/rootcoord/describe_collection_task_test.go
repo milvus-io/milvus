@@ -262,6 +262,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 					},
 				},
 			}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 
@@ -341,6 +342,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 			ID:   1,
 			Name: "test db",
 		}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 		ctx := GetContext(context.Background(), "foo:root")
@@ -378,6 +380,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				},
 			}, nil).Once()
 		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error: select grant")).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 		ctx := GetContext(context.Background(), "foo:root")
@@ -424,6 +427,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 			ID:   1,
 			Name: "test db",
 		}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 		ctx := GetContext(context.Background(), "foo:root")
@@ -476,7 +480,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 			ID:   1,
 			Name: "test db",
 		}, nil).Once()
-		meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeGroupCollectionReadOnly.String())).Return(false, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 		ctx := GetContext(context.Background(), "foo:root")
@@ -524,6 +528,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 			ID:   1,
 			Name: "test db",
 		}, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 		ctx := GetContext(context.Background(), "foo:root")
@@ -577,7 +582,7 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 			ID:   1,
 			Name: "test db",
 		}, nil).Once()
-		meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, mock.Anything).Return(false, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return(nil, nil).Once()
 
 		task := getTask(core)
 		ctx := GetContext(context.Background(), "foo:root")
@@ -620,7 +625,11 @@ func TestDescribeCollectionsAuth(t *testing.T) {
 				ObjectName: "test coll",
 			},
 		}, nil).Once()
-		meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "privilege_group").Return(true, nil).Once()
+		meta.EXPECT().ListPrivilegeGroups(mock.Anything).Return([]*milvuspb.PrivilegeGroupInfo{
+			{
+				GroupName: "privilege_group",
+			},
+		}, nil).Once()
 		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.Collection{
 			CollectionID: 1,
 			Name:         "test coll",
