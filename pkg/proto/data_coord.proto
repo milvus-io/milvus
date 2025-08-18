@@ -97,6 +97,9 @@ service DataCoord {
   rpc ReportDataNodeTtMsgs(ReportDataNodeTtMsgsRequest) returns (common.Status) {}
 
   rpc GcControl(GcControlRequest) returns(common.Status){}
+  
+  // GetGcStatus returns the current status of the garbage collector.
+  rpc GetGcStatus(GetGcStatusRequest) returns (GetGcStatusResponse);
 
   // importV2
   rpc ImportV2(internal.ImportRequestInternal) returns(internal.ImportResponse){}
@@ -1024,6 +1027,17 @@ message GcControlRequest {
   common.MsgBase base = 1;
   GcCommand command = 2;
   repeated common.KeyValuePair params = 3;
+}
+
+// The request message for GetGcStatus.
+message GetGcStatusRequest {}
+
+// The response message for GetGcStatus.
+message GetGcStatusResponse {
+  // is_paused is true if the garbage collector is currently paused.
+  bool is_paused = 1;
+  // time_remaining_seconds is the remaining duration in seconds until the GC resumes.
+  int32 time_remaining_seconds = 2;
 }
 
 message QuerySlotRequest {}

@@ -55,6 +55,7 @@ const (
 	QueryCoord_CheckBalanceStatus_FullMethodName         = "/milvus.proto.query.QueryCoord/CheckBalanceStatus"
 	QueryCoord_SuspendNode_FullMethodName                = "/milvus.proto.query.QueryCoord/SuspendNode"
 	QueryCoord_ResumeNode_FullMethodName                 = "/milvus.proto.query.QueryCoord/ResumeNode"
+	QueryCoord_IsNodeSuspended_FullMethodName            = "/milvus.proto.query.QueryCoord/IsNodeSuspended"
 	QueryCoord_TransferSegment_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferSegment"
 	QueryCoord_TransferChannel_FullMethodName            = "/milvus.proto.query.QueryCoord/TransferChannel"
 	QueryCoord_CheckQueryNodeDistribution_FullMethodName = "/milvus.proto.query.QueryCoord/CheckQueryNodeDistribution"
@@ -101,6 +102,7 @@ type QueryCoordClient interface {
 	CheckBalanceStatus(ctx context.Context, in *CheckBalanceStatusRequest, opts ...grpc.CallOption) (*CheckBalanceStatusResponse, error)
 	SuspendNode(ctx context.Context, in *SuspendNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ResumeNode(ctx context.Context, in *ResumeNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	IsNodeSuspended(ctx context.Context, in *IsNodeSuspendedRequest, opts ...grpc.CallOption) (*IsNodeSuspendedResponse, error)
 	TransferSegment(ctx context.Context, in *TransferSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	TransferChannel(ctx context.Context, in *TransferChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -412,6 +414,15 @@ func (c *queryCoordClient) ResumeNode(ctx context.Context, in *ResumeNodeRequest
 	return out, nil
 }
 
+func (c *queryCoordClient) IsNodeSuspended(ctx context.Context, in *IsNodeSuspendedRequest, opts ...grpc.CallOption) (*IsNodeSuspendedResponse, error) {
+	out := new(IsNodeSuspendedResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_IsNodeSuspended_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryCoordClient) TransferSegment(ctx context.Context, in *TransferSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, QueryCoord_TransferSegment_FullMethodName, in, out, opts...)
@@ -488,6 +499,7 @@ type QueryCoordServer interface {
 	CheckBalanceStatus(context.Context, *CheckBalanceStatusRequest) (*CheckBalanceStatusResponse, error)
 	SuspendNode(context.Context, *SuspendNodeRequest) (*commonpb.Status, error)
 	ResumeNode(context.Context, *ResumeNodeRequest) (*commonpb.Status, error)
+	IsNodeSuspended(context.Context, *IsNodeSuspendedRequest) (*IsNodeSuspendedResponse, error)
 	TransferSegment(context.Context, *TransferSegmentRequest) (*commonpb.Status, error)
 	TransferChannel(context.Context, *TransferChannelRequest) (*commonpb.Status, error)
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
@@ -596,6 +608,9 @@ func (UnimplementedQueryCoordServer) SuspendNode(context.Context, *SuspendNodeRe
 }
 func (UnimplementedQueryCoordServer) ResumeNode(context.Context, *ResumeNodeRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResumeNode not implemented")
+}
+func (UnimplementedQueryCoordServer) IsNodeSuspended(context.Context, *IsNodeSuspendedRequest) (*IsNodeSuspendedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IsNodeSuspended not implemented")
 }
 func (UnimplementedQueryCoordServer) TransferSegment(context.Context, *TransferSegmentRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransferSegment not implemented")
@@ -1215,6 +1230,24 @@ func _QueryCoord_ResumeNode_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_IsNodeSuspended_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IsNodeSuspendedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).IsNodeSuspended(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_IsNodeSuspended_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).IsNodeSuspended(ctx, req.(*IsNodeSuspendedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryCoord_TransferSegment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TransferSegmentRequest)
 	if err := dec(in); err != nil {
@@ -1425,6 +1458,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResumeNode",
 			Handler:    _QueryCoord_ResumeNode_Handler,
+		},
+		{
+			MethodName: "IsNodeSuspended",
+			Handler:    _QueryCoord_IsNodeSuspended_Handler,
 		},
 		{
 			MethodName: "TransferSegment",

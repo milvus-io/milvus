@@ -42,17 +42,30 @@ func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*ty
 	return nil, merr.WrapErrNodeNotFound(nodeID, "streaming node not found")
 }
 
+// GetFrozenNodeIDs returns the frozen node ids.
+func (b balancerImpl) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
+	// Update nothing, just fetch the current resp back.
+	resp, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+		Config:     &streamingpb.WALBalancePolicyConfig{},
+		UpdateMask: &fieldmaskpb.FieldMask{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetFreezeNodeIds(), nil
+}
+
 // IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
 func (b balancerImpl) IsRebalanceSuspended(ctx context.Context) (bool, error) {
-	// Update nothing, just fetch the current policy back.
-	policy, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
+	// Update nothing, just fetch the current resp back.
+	resp, err := b.streamingCoordClient.Assignment().UpdateWALBalancePolicy(ctx, &types.UpdateWALBalancePolicyRequest{
 		Config:     &streamingpb.WALBalancePolicyConfig{},
 		UpdateMask: &fieldmaskpb.FieldMask{},
 	})
 	if err != nil {
 		return false, err
 	}
-	return !policy.GetConfig().GetAllowRebalance(), nil
+	return !resp.GetConfig().GetAllowRebalance(), nil
 }
 
 func (b balancerImpl) SuspendRebalance(ctx context.Context) error {

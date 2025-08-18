@@ -67,6 +67,7 @@ const (
 	DataCoord_GcConfirm_FullMethodName                   = "/milvus.proto.data.DataCoord/GcConfirm"
 	DataCoord_ReportDataNodeTtMsgs_FullMethodName        = "/milvus.proto.data.DataCoord/ReportDataNodeTtMsgs"
 	DataCoord_GcControl_FullMethodName                   = "/milvus.proto.data.DataCoord/GcControl"
+	DataCoord_GetGcStatus_FullMethodName                 = "/milvus.proto.data.DataCoord/GetGcStatus"
 	DataCoord_ImportV2_FullMethodName                    = "/milvus.proto.data.DataCoord/ImportV2"
 	DataCoord_GetImportProgress_FullMethodName           = "/milvus.proto.data.DataCoord/GetImportProgress"
 	DataCoord_ListImports_FullMethodName                 = "/milvus.proto.data.DataCoord/ListImports"
@@ -129,6 +130,8 @@ type DataCoordClient interface {
 	GcConfirm(ctx context.Context, in *GcConfirmRequest, opts ...grpc.CallOption) (*GcConfirmResponse, error)
 	ReportDataNodeTtMsgs(ctx context.Context, in *ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GcControl(ctx context.Context, in *GcControlRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// GetGcStatus returns the current status of the garbage collector.
+	GetGcStatus(ctx context.Context, in *GetGcStatusRequest, opts ...grpc.CallOption) (*GetGcStatusResponse, error)
 	// importV2
 	ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error)
 	GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest, opts ...grpc.CallOption) (*internalpb.GetImportProgressResponse, error)
@@ -544,6 +547,15 @@ func (c *dataCoordClient) GcControl(ctx context.Context, in *GcControlRequest, o
 	return out, nil
 }
 
+func (c *dataCoordClient) GetGcStatus(ctx context.Context, in *GetGcStatusRequest, opts ...grpc.CallOption) (*GetGcStatusResponse, error) {
+	out := new(GetGcStatusResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetGcStatus_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *dataCoordClient) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
 	out := new(internalpb.ImportResponse)
 	err := c.cc.Invoke(ctx, DataCoord_ImportV2_FullMethodName, in, out, opts...)
@@ -652,6 +664,8 @@ type DataCoordServer interface {
 	GcConfirm(context.Context, *GcConfirmRequest) (*GcConfirmResponse, error)
 	ReportDataNodeTtMsgs(context.Context, *ReportDataNodeTtMsgsRequest) (*commonpb.Status, error)
 	GcControl(context.Context, *GcControlRequest) (*commonpb.Status, error)
+	// GetGcStatus returns the current status of the garbage collector.
+	GetGcStatus(context.Context, *GetGcStatusRequest) (*GetGcStatusResponse, error)
 	// importV2
 	ImportV2(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)
 	GetImportProgress(context.Context, *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error)
@@ -797,6 +811,9 @@ func (UnimplementedDataCoordServer) ReportDataNodeTtMsgs(context.Context, *Repor
 }
 func (UnimplementedDataCoordServer) GcControl(context.Context, *GcControlRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GcControl not implemented")
+}
+func (UnimplementedDataCoordServer) GetGcStatus(context.Context, *GetGcStatusRequest) (*GetGcStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGcStatus not implemented")
 }
 func (UnimplementedDataCoordServer) ImportV2(context.Context, *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ImportV2 not implemented")
@@ -1620,6 +1637,24 @@ func _DataCoord_GcControl_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DataCoord_GetGcStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGcStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetGcStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetGcStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetGcStatus(ctx, req.(*GetGcStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DataCoord_ImportV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.ImportRequestInternal)
 	if err := dec(in); err != nil {
@@ -1910,6 +1945,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GcControl",
 			Handler:    _DataCoord_GcControl_Handler,
+		},
+		{
+			MethodName: "GetGcStatus",
+			Handler:    _DataCoord_GetGcStatus_Handler,
 		},
 		{
 			MethodName: "ImportV2",

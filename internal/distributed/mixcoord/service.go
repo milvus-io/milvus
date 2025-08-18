@@ -678,6 +678,10 @@ func (s *Server) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 	return s.mixCoord.CheckBalanceStatus(ctx, req)
 }
 
+func (s *Server) IsNodeSuspended(ctx context.Context, req *querypb.IsNodeSuspendedRequest) (*querypb.IsNodeSuspendedResponse, error) {
+	return s.mixCoord.IsNodeSuspended(ctx, req)
+}
+
 func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
 	return s.mixCoord.SuspendNode(ctx, req)
 }
@@ -894,6 +898,10 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 
 func (s *Server) GcControl(ctx context.Context, req *datapb.GcControlRequest) (*commonpb.Status, error) {
 	return s.mixCoord.GcControl(ctx, req)
+}
+
+func (s *Server) GetGcStatus(ctx context.Context, req *datapb.GetGcStatusRequest) (*datapb.GetGcStatusResponse, error) {
+	return s.mixCoord.GetGcStatus(ctx, req)
 }
 
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {

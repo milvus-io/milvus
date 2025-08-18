@@ -94,6 +94,7 @@ service QueryCoord {
   rpc CheckBalanceStatus(CheckBalanceStatusRequest) returns (CheckBalanceStatusResponse) {}
   rpc SuspendNode(SuspendNodeRequest) returns (common.Status) {}
   rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
+  rpc IsNodeSuspended(IsNodeSuspendedRequest) returns (IsNodeSuspendedResponse) {}
   rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
   rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
   rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
@@ -940,6 +941,17 @@ message SuspendNodeRequest {
 message ResumeNodeRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
+}
+
+// New message definitions
+message IsNodeSuspendedRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2; // ID of the node to check
+}
+
+message IsNodeSuspendedResponse {
+  common.Status status = 1;        // Returns the operation status (e.g., if the node was successfully found)
+  bool isSuspended = 2;          // Core result: true if the node is suspended, false otherwise
 }
 
 message TransferSegmentRequest {

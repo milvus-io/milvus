@@ -1428,6 +1428,11 @@ func (c *Client) GcControl(ctx context.Context, req *datapb.GcControlRequest, op
 		return client.GcControl(ctx, req)
 	})
 }
+func (c *Client) GetGcStatus(ctx context.Context, req *datapb.GetGcStatusRequest, opts ...grpc.CallOption) (*datapb.GetGcStatusResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetGcStatusResponse, error) {
+		return client.GetGcStatus(ctx, req)
+	})
+}
 
 func (c *Client) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal, opts ...grpc.CallOption) (*internalpb.ImportResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.ImportResponse, error) {
@@ -1770,6 +1775,17 @@ func (c *Client) CheckBalanceStatus(ctx context.Context, req *querypb.CheckBalan
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.CheckBalanceStatusResponse, error) {
 		return client.CheckBalanceStatus(ctx, req)
+	})
+}
+
+func (c *Client) IsNodeSuspended(ctx context.Context, req *querypb.IsNodeSuspendedRequest, opts ...grpc.CallOption) (*querypb.IsNodeSuspendedResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.IsNodeSuspendedResponse, error) {
+		return client.IsNodeSuspended(ctx, req)
 	})
 }
 
