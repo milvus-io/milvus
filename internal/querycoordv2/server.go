@@ -469,12 +469,10 @@ func (s *Server) startQueryCoord() error {
 		return err
 	}
 
-	if len(sessions) > 0 {
-		log.Info("rewatch nodes", zap.Any("sessions", sessions))
-		err = s.rewatchNodes(sessions)
-		if err != nil {
-			return err
-		}
+	log.Info("rewatch nodes", zap.Any("sessions", sessions))
+	err = s.rewatchNodes(sessions)
+	if err != nil {
+		return err
 	}
 
 	s.wg.Add(1)
