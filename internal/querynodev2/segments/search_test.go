@@ -58,7 +58,7 @@ func (suite *SearchSuite) SetupTest() {
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
 	initcore.InitLocalChunkManager(suite.T().Name())
-	initcore.InitMmapManager(paramtable.Get())
+	initcore.InitMmapManager(paramtable.Get(), 1)
 
 	suite.collectionID = 100
 	suite.partitionID = 10

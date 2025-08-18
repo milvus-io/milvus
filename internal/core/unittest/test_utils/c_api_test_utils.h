@@ -39,9 +39,9 @@
 using namespace milvus;
 using namespace milvus::segcore;
 
-// Test utility function for AppendFieldInfo
+// Test utility function for AppendFieldInfoForTest
 inline CStatus
-AppendFieldInfo(CLoadIndexInfo c_load_index_info,
+AppendFieldInfoForTest(CLoadIndexInfo c_load_index_info,
                 int64_t collection_id,
                 int64_t partition_id,
                 int64_t segment_id,

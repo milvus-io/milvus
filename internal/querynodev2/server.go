@@ -34,7 +34,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"plugin"
 	"strings"
 	"sync"
@@ -61,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -312,7 +312,7 @@ func (node *QueryNode) InitSegcore() error {
 	cEnableConfigParamTypeCheck := C.bool(paramtable.Get().CommonCfg.EnableConfigParamTypeCheck.GetAsBool())
 	C.SetDefaultConfigParamTypeCheck(cEnableConfigParamTypeCheck)
 
-	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	localDataRootPath := pathutil.GetPath(pathutil.LocalChunkPath, node.GetNodeID())
 	initcore.InitLocalChunkManager(localDataRootPath)
 
 	err := initcore.InitRemoteChunkManager(paramtable.Get())
@@ -330,7 +330,7 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	err = initcore.InitMmapManager(paramtable.Get())
+	err = initcore.InitMmapManager(paramtable.Get(), node.GetNodeID())
 	if err != nil {
 		return err
 	}
@@ -400,6 +400,11 @@ func (node *QueryNode) InitSegcore() error {
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
 	evictionEnabled := C.bool(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
+
+	if paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool() && paramtable.Get().CommonCfg.EnablePosixMode.GetAsBool() {
+		panic("tiered storage eviction is not supported in POSIX mode, change config and restart")
+	}
+
 	cacheTouchWindowMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredCacheTouchWindowMs.GetAsInt64())
 	evictionIntervalMs := C.int64_t(paramtable.Get().QueryNodeCfg.TieredEvictionIntervalMs.GetAsInt64())
 	cacheCellUnaccessedSurvivalTime := C.int64_t(paramtable.Get().QueryNodeCfg.CacheCellUnaccessedSurvivalTime.GetAsInt64())

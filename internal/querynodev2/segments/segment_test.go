@@ -48,7 +48,7 @@ func (suite *SegmentSuite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
 	initcore.InitLocalChunkManager(localDataRootPath)
-	initcore.InitMmapManager(paramtable.Get())
+	initcore.InitMmapManager(paramtable.Get(), 1)
 
 	suite.collectionID = 100
 	suite.partitionID = 10

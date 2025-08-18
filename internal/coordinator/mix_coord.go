@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
@@ -78,6 +81,12 @@ type mixCoordImpl struct {
 
 	metaKVCreator  func() kv.MetaKv
 	mixCoordClient types.MixCoordClient
+
+	// POSIX directory cleanup task
+	posixCleanupCancel    context.CancelFunc
+	posixCleanupWg        sync.WaitGroup
+	posixCleanupStartOnce sync.Once
+	posixCleanupStopOnce  sync.Once
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
@@ -221,12 +230,108 @@ func (s *mixCoordImpl) initKVCreator() {
 
 func (s *mixCoordImpl) Start() error {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	s.startPosixCleanupTask()
+
 	var startErr error
 	return startErr
 }
 
+func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
+	return s.queryCoordServer.ServerExist(serverID) || s.datacoordServer.ServerExist(serverID)
+}
+
+func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
+	if !paramtable.Get().CommonCfg.EnablePosixMode.GetAsBool() {
+		return
+	}
+	log := log.Ctx(s.ctx)
+	rootCachePath := pathutil.GetPath(pathutil.RootCachePath, 0)
+	var entries []os.DirEntry
+	var err error
+	if entries, err = os.ReadDir(rootCachePath); err != nil {
+		log.Warn("failed to read root cache directory", zap.String("path", rootCachePath), zap.String("error", err.Error()))
+		return
+	}
+	var subdirs []string
+	var removedDirs []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subdirs = append(subdirs, entry.Name())
+			if nodeID, err := strconv.ParseInt(entry.Name(), 10, 64); err != nil {
+				log.Warn("invalid node directory name", zap.String("dirName", entry.Name()), zap.String("error", err.Error()))
+			} else {
+				if !s.IsServerActive(nodeID) {
+					expiredDirPath := filepath.Join(rootCachePath, entry.Name())
+					if err := os.RemoveAll(expiredDirPath); err != nil {
+						log.Error("failed to remove expired node directory",
+							zap.String("path", expiredDirPath),
+							zap.Int64("nodeID", nodeID),
+							zap.String("error", err.Error()))
+					} else {
+						log.Info("removed expired node directory",
+							zap.String("path", expiredDirPath),
+							zap.Int64("nodeID", nodeID))
+						removedDirs = append(removedDirs, entry.Name())
+					}
+				}
+			}
+		}
+	}
+	if len(removedDirs) > 0 {
+		log.Info("root cache directory cleanup completed",
+			zap.String("path", rootCachePath),
+			zap.Strings("allSubdirectories", subdirs),
+			zap.Strings("removedDirectories", removedDirs),
+			zap.Int("totalDirs", len(subdirs)),
+			zap.Int("removedDirs", len(removedDirs)))
+	}
+}
+
+func (s *mixCoordImpl) startPosixCleanupTask() {
+	s.posixCleanupStartOnce.Do(func() {
+		ctx, cancel := context.WithCancel(s.ctx)
+		s.posixCleanupCancel = cancel
+
+		s.posixCleanupWg.Add(1)
+		go s.posixCleanupLoop(ctx)
+	})
+}
+
+func (s *mixCoordImpl) stopPosixCleanupTask() {
+	s.posixCleanupStopOnce.Do(func() {
+		if s.posixCleanupCancel != nil {
+			s.posixCleanupCancel()
+		}
+		s.posixCleanupWg.Wait()
+	})
+}
+
+func (s *mixCoordImpl) posixCleanupLoop(ctx context.Context) {
+	defer s.posixCleanupWg.Done()
+
+	log := log.Ctx(ctx)
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	log.Info("POSIX directory cleanup task started")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("POSIX directory cleanup task stopped")
+			return
+		case <-ticker.C:
+			s.checkExpiredPOSIXDIR()
+		}
+	}
+}
+
 func (s *mixCoordImpl) Stop() error {
 	log.Info("graceful stop")
+
+	s.stopPosixCleanupTask()
+
 	s.GracefulStop()
 	log.Info("graceful stop done")
 

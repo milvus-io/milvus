@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
@@ -404,7 +405,7 @@ func (o *idfOracle) syncloop() {
 
 func (o *idfOracle) localloop() {
 	pool := conc.NewPool[struct{}](paramtable.Get().QueryNodeCfg.IDFWriteConcurrenct.GetAsInt())
-	o.dirPath = path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "bm25", fmt.Sprintf("%d", o.collectionID))
+	o.dirPath = pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID())
 
 	defer o.wg.Done()
 	for {

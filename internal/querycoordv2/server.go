@@ -157,6 +157,19 @@ func (s *Server) SetSession(session sessionutil.SessionInterface) error {
 	return nil
 }
 
+func (s *Server) ServerExist(serverID int64) bool {
+	sessions, _, err := s.session.GetSessions(typeutil.QueryNodeRole)
+	if err != nil {
+		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
 func (s *Server) registerMetricsRequest() {
 	getSystemInfoAction := func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 		return s.getSystemInfoMetrics(ctx, req)

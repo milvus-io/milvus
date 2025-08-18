@@ -1891,7 +1891,7 @@ TEST(CApiTest, LoadIndexInfo) {
         c_load_index_info, index_param_key2.data(), index_param_value2.data());
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
-    status = AppendFieldInfo(
+    status = AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector, false, "");
     ASSERT_EQ(status.error_code, Success);
     AppendIndexEngineVersionToLoadInfo(
@@ -2069,7 +2069,7 @@ Test_Indexing_Without_Predicate() {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, TraitType::c_data_type, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2225,7 +2225,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2403,7 +2403,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2583,7 +2583,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2755,7 +2755,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -2928,7 +2928,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3109,7 +3109,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3290,7 +3290,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3465,7 +3465,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3663,7 +3663,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -3818,7 +3818,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,
@@ -4049,7 +4049,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
     AppendIndexParam(
         c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
-    AppendFieldInfo(
+    AppendFieldInfoForTest(
         c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector, false, "");
     AppendIndexEngineVersionToLoadInfo(
         c_load_index_info,

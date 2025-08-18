@@ -68,6 +68,7 @@
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "cachinglayer/CacheSlot.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::segcore {
 using namespace milvus::cachinglayer;
@@ -292,19 +293,24 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                   schema_->ShouldLoadField(milvus_field_ids[i]);
         }
 
+        auto mmap_dir_path =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager()
+                ->GetRootPath();
         auto column_group_info = FieldDataInfo(column_group_id.get(),
                                                num_rows,
-                                               load_info.mmap_dir_path,
+                                               mmap_dir_path,
                                                merged_in_load_list);
         LOG_INFO(
             "[StorageV2] segment {} loads column group {} with field ids {} "
             "with "
             "num_rows "
-            "{}",
+            "{} mmap_dir_path={}",
             this->get_segment_id(),
             column_group_id.get(),
             field_id_list.ToString(),
-            num_rows);
+            num_rows,
+            mmap_dir_path);
 
         auto field_metas = schema_->get_field_metas(milvus_field_ids);
 
@@ -353,10 +359,14 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
         auto field_id = FieldId(id);
 
+        auto mmap_dir_path =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager()
+                ->GetRootPath();
         auto field_data_info =
             FieldDataInfo(field_id.get(),
                           num_rows,
-                          load_info.mmap_dir_path,
+                          mmap_dir_path,
                           schema_->ShouldLoadField(field_id));
         LOG_INFO("segment {} loads field {} with num_rows {}, sorted by pk {}",
                  this->get_segment_id(),
