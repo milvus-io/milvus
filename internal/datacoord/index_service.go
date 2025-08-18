@@ -877,7 +877,7 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 func isCollectionLoaded(ctx context.Context, mc types.MixCoord, collID int64) (bool, error) {
 	// get all loading collections
 	resp, err := mc.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
-		CollectionIDs: nil,
+		CollectionIDs: []int64{collID},
 	})
 	if err != nil {
 		return false, err

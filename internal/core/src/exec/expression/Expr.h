@@ -50,10 +50,10 @@ PinIndex(const segcore::SegmentInternalInterface* segment,
          bool is_array = false) {
     if (field_meta.get_data_type() == DataType::JSON) {
         auto pointer = milvus::Json::pointer(path);
-        return segment->GetJsonIndex(
+        return segment->PinJsonIndex(
             field_meta.get_id(), pointer, data_type, any_type, is_array);
     } else {
-        return segment->GetIndex(field_meta.get_id());
+        return segment->PinIndex(field_meta.get_id());
     }
 }
 

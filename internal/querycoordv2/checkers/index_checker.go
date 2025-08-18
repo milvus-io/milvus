@@ -224,7 +224,7 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 // checkRedundantIndices returns redundant indexIDs for each segment
 func (c *IndexChecker) checkRedundantIndices(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) []int64 {
 	var redundant []int64
-	indexInfoMap := typeutil.NewConcurrentSet[int64]()
+	indexInfoMap := typeutil.NewSet[int64]()
 
 	for _, indexInfo := range indexInfos {
 		indexInfoMap.Insert(indexInfo.IndexID)

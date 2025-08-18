@@ -60,7 +60,7 @@ class SegmentSealed : public SegmentInternalInterface {
     get_insert_record() = 0;
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    GetJsonIndex(FieldId field_id,
+    PinJsonIndex(FieldId field_id,
                  const std::string& path,
                  DataType data_type,
                  bool any_type,

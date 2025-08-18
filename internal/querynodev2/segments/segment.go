@@ -507,6 +507,14 @@ func (s *LocalSegment) HasRawData(fieldID int64) bool {
 	return s.csegment.HasRawData(fieldID)
 }
 
+func (s *LocalSegment) HasFieldData(fieldID int64) bool {
+	if !s.ptrLock.PinIf(state.IsNotReleased) {
+		return false
+	}
+	defer s.ptrLock.Unpin()
+	return s.csegment.HasFieldData(fieldID)
+}
+
 func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")

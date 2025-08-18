@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -1449,6 +1450,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 
 			segments: NewSegmentsInfo(),
 		},
+		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
@@ -1643,6 +1645,15 @@ func TestServer_DescribeIndex(t *testing.T) {
 	})
 
 	t.Run("describe after drop index", func(t *testing.T) {
+		s.mixCoord.(*mocks.MixCoord).EXPECT().ShowLoadCollections(
+			mock.Anything,
+			mock.Anything,
+		).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs: []int64{},
+		}, nil)
 		status, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
 			CollectionID: collID,
 			PartitionIDs: nil,

@@ -2047,12 +2047,12 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
 bool
 PhyUnaryRangeFilterExpr::CanExecNgramMatch() {
-    return pinned_ngram_index_ != nullptr && !has_offset_input_;
+    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 
 bool
 PhyUnaryRangeFilterExpr::CanExecNgramMatchForJson() {
-    return pinned_ngram_index_ != nullptr && !has_offset_input_;
+    return pinned_ngram_index_.get() != nullptr && !has_offset_input_;
 }
 
 std::optional<VectorPtr>
@@ -2069,7 +2069,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        auto index = pinned_ngram_index_;
+        auto index = pinned_ngram_index_.get();
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());

@@ -420,9 +420,9 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                 auto pointer =
                     milvus::Json::pointer(expr_->column_.nested_path_);
                 pinned_ngram_index_ =
-                    segment->GetNgramIndexForJson(field_id, pointer).get();
+                    segment->GetNgramIndexForJson(field_id, pointer);
             } else {
-                pinned_ngram_index_ = segment->GetNgramIndex(field_id).get();
+                pinned_ngram_index_ = segment->GetNgramIndex(field_id);
             }
         }
     }
@@ -547,7 +547,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     int64_t overflow_check_pos_{0};
     bool arg_inited_{false};
     SingleElement value_arg_;
-    index::NgramInvertedIndex* pinned_ngram_index_{nullptr};
+    PinWrapper<index::NgramInvertedIndex*> pinned_ngram_index_{nullptr};
 };
 }  // namespace exec
 }  // namespace milvus

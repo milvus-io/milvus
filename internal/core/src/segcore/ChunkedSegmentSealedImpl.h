@@ -78,7 +78,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetFieldDataIfExist(FieldId field_id) const;
 
     std::vector<PinWrapper<const index::IndexBase*>>
-    GetIndex(FieldId field_id) const override {
+    PinIndex(FieldId field_id) const override {
         auto res = scalar_indexings_.withRLock(
             [&](auto& map) -> PinWrapper<const index::IndexBase*> {
                 auto iter = map.find(field_id);

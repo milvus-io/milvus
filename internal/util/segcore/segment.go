@@ -101,6 +101,12 @@ func (s *cSegmentImpl) HasRawData(fieldID int64) bool {
 	return bool(ret)
 }
 
+// HasFieldData checks if the segment has field data.
+func (s *cSegmentImpl) HasFieldData(fieldID int64) bool {
+	ret := C.HasFieldData(s.ptr, C.int64_t(fieldID))
+	return bool(ret)
+}
+
 // Search requests a search on the segment.
 func (s *cSegmentImpl) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
 	traceCtx := ParseCTraceContext(ctx)

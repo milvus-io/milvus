@@ -62,6 +62,9 @@ type basicSegmentMethodSet interface {
 	// HasRawData checks if the segment has raw data.
 	HasRawData(fieldID int64) bool
 
+	// HasFieldData checks if the segment has field data.
+	HasFieldData(fieldID int64) bool
+
 	// Search requests a search on the segment.
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 

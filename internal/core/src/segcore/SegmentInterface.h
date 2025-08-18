@@ -131,6 +131,9 @@ class SegmentInterface {
     HasRawData(int64_t field_id) const = 0;
 
     virtual bool
+    HasFieldData(FieldId field_id) const = 0;
+
+    virtual bool
     is_nullable(FieldId field_id) const = 0;
 
     virtual void
@@ -140,7 +143,7 @@ class SegmentInterface {
     GetTextIndex(FieldId field_id) const = 0;
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    GetJsonIndex(FieldId field_id,
+    PinJsonIndex(FieldId field_id,
                  const std::string& path,
                  DataType data_type,
                  bool any_type,
@@ -149,7 +152,7 @@ class SegmentInterface {
     }
 
     virtual std::vector<PinWrapper<const index::IndexBase*>>
-    GetIndex(FieldId field_id) const {
+    PinIndex(FieldId field_id) const {
         return {};
     };
 
@@ -299,9 +302,6 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
-
-    virtual bool
-    HasFieldData(FieldId field_id) const = 0;
 
     virtual std::string
     debug() const = 0;

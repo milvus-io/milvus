@@ -356,7 +356,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     std::vector<PinWrapper<const index::IndexBase*>>
-    GetIndex(FieldId field_id) const override {
+    PinIndex(FieldId field_id) const override {
         if (!HasIndex(field_id)) {
             return {};
         }

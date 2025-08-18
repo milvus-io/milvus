@@ -187,6 +187,54 @@ func (_c *MockCSegment_DropIndex_Call) RunAndReturn(run func(context.Context, in
 	return _c
 }
 
+// DropJSONIndex provides a mock function with given fields: ctx, fieldID, nestedPath
+func (_m *MockCSegment) DropJSONIndex(ctx context.Context, fieldID int64, nestedPath string) error {
+	ret := _m.Called(ctx, fieldID, nestedPath)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropJSONIndex")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, string) error); ok {
+		r0 = rf(ctx, fieldID, nestedPath)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCSegment_DropJSONIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropJSONIndex'
+type MockCSegment_DropJSONIndex_Call struct {
+	*mock.Call
+}
+
+// DropJSONIndex is a helper method to define mock.On call
+//   - ctx context.Context
+//   - fieldID int64
+//   - nestedPath string
+func (_e *MockCSegment_Expecter) DropJSONIndex(ctx interface{}, fieldID interface{}, nestedPath interface{}) *MockCSegment_DropJSONIndex_Call {
+	return &MockCSegment_DropJSONIndex_Call{Call: _e.mock.On("DropJSONIndex", ctx, fieldID, nestedPath)}
+}
+
+func (_c *MockCSegment_DropJSONIndex_Call) Run(run func(ctx context.Context, fieldID int64, nestedPath string)) *MockCSegment_DropJSONIndex_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_DropJSONIndex_Call) Return(_a0 error) *MockCSegment_DropJSONIndex_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_DropJSONIndex_Call) RunAndReturn(run func(context.Context, int64, string) error) *MockCSegment_DropJSONIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FinishLoad provides a mock function with no fields
 func (_m *MockCSegment) FinishLoad() error {
 	ret := _m.Called()
@@ -228,6 +276,52 @@ func (_c *MockCSegment_FinishLoad_Call) Return(_a0 error) *MockCSegment_FinishLo
 }
 
 func (_c *MockCSegment_FinishLoad_Call) RunAndReturn(run func() error) *MockCSegment_FinishLoad_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HasFieldData provides a mock function with given fields: fieldID
+func (_m *MockCSegment) HasFieldData(fieldID int64) bool {
+	ret := _m.Called(fieldID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasFieldData")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
+		r0 = rf(fieldID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockCSegment_HasFieldData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasFieldData'
+type MockCSegment_HasFieldData_Call struct {
+	*mock.Call
+}
+
+// HasFieldData is a helper method to define mock.On call
+//   - fieldID int64
+func (_e *MockCSegment_Expecter) HasFieldData(fieldID interface{}) *MockCSegment_HasFieldData_Call {
+	return &MockCSegment_HasFieldData_Call{Call: _e.mock.On("HasFieldData", fieldID)}
+}
+
+func (_c *MockCSegment_HasFieldData_Call) Run(run func(fieldID int64)) *MockCSegment_HasFieldData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_HasFieldData_Call) Return(_a0 bool) *MockCSegment_HasFieldData_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_HasFieldData_Call) RunAndReturn(run func(int64) bool) *MockCSegment_HasFieldData_Call {
 	_c.Call.Return(run)
 	return _c
 }

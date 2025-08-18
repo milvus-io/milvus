@@ -889,8 +889,13 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
-		} else if segment.HasRawData(fieldID) {
-			// Lazy load raw data to avoid search failure after dropping index
+		}
+
+		if !storagecommon.IsVectorDataType(field.GetDataType()) &&
+			!segment.HasFieldData(fieldID) &&
+			loadInfo.GetStorageVersion() != storage.StorageV2 {
+			// Lazy load raw data to avoid search failure after dropping index.
+			// storage v2 will load all scalar fields so we don't need to load raw data for them.
 			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, "disable"); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
