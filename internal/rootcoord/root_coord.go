@@ -3346,6 +3346,16 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 	if len(userRoles) == 0 {
 		return privilegeColls, nil
 	}
+
+	// Get all custom privilege groups
+	customPrivilegeGroups, err := c.meta.ListPrivilegeGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customPrivilegeGroupMap := lo.SliceToMap(customPrivilegeGroups, func(group *milvuspb.PrivilegeGroupInfo) (string, struct{}) {
+		return group.GroupName, struct{}{}
+	})
+
 	for _, role := range userRoles[0].Roles {
 		if role.GetName() == util.RoleAdmin {
 			privilegeColls.Insert(util.AnyWord)
@@ -3371,11 +3381,8 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 			}
 			// should list collection level built-in privilege group or custom privilege group objects
 			if objectType != commonpb.ObjectType_Collection.String() {
-				customGroup, err := c.meta.IsCustomPrivilegeGroup(ctx, priv)
-				if err != nil {
-					return nil, err
-				}
-				if !customGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
+				_, isCustomGroup := customPrivilegeGroupMap[priv]
+				if !isCustomGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
 					continue
 				}
 			}
