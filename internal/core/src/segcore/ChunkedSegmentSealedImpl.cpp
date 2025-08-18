@@ -1838,21 +1838,19 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
 
-    auto index = PinIndex(field_id);
-    if (index.empty()) {
-        return get_raw_data(field_id, field_meta, seg_offsets, count);
+    index::IndexBasePtr scalar_index_ptr = nullptr;
+    auto scalar_indexes = PinIndex(field_id);
+    if (!scalar_indexes.empty()) {
+        scalar_index_ptr = scalar_indexes[0].get();
     }
-
-    auto index_ptr = index[0].get();
 
     auto index_has_raw = HasRawData(field_id.get());
 
     if (!IsVectorDataType(field_meta.get_data_type())) {
         // if field has load scalar index, reverse raw data from index
         if (index_has_raw) {
-            // auto index = chunk_index_impl(field_id, 0);
             return ReverseDataFromIndex(
-                index_ptr, seg_offsets, count, field_meta);
+                scalar_index_ptr, seg_offsets, count, field_meta);
         }
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
