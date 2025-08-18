@@ -233,7 +233,7 @@ pulsar:
   tenant: public
   namespace: default # A Pulsar namespace is the administrative unit nomenclature within a tenant.
   requestTimeout: 60 # pulsar client global request timeout in seconds
-  enableClientMetrics: false # Whether to register pulsar client metrics into milvus metrics path.
+  enableClientMetrics: true # Whether to register pulsar client metrics into milvus metrics path.
   # Perform a backlog cleanup every time the data of given bytes is written.
   # Because milvus use puslar reader to read the message, so if there's no pulsar subscriber when milvus running.
   # If the pulsar cluster open the backlog protection (backlogQuotaDefaultLimitBytes), the backlog exceed will reported to fail the write operation
