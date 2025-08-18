@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 )
 
@@ -101,6 +104,9 @@ func GenJSONRow(index int) *JSONStruct {
 }
 
 func GenInt64VecRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
+	if option.validData != nil {
+		log.Fatal("GenInt64VecRows with valid data is not yet implemented")
+	}
 	dim := option.dim
 	start := option.start
 
@@ -124,16 +130,17 @@ func GenInt64VecRows(nb int, enableDynamicField bool, autoID bool, option GenDat
 
 func GenInt64VarcharSparseRows(nb int, enableDynamicField bool, autoID bool, option GenDataOption) []interface{} {
 	start := option.start
+	if option.validData != nil && len(option.validData) != nb {
+		log.Warn("GenInt64VarcharSparseRows", zap.Int("unexpected validData length", len(option.validData)))
+	}
 
 	rows := make([]interface{}, 0, nb)
-
 	// BaseRow generate insert rows
 	for i := start; i < start+nb; i++ {
 		vec := common.GenSparseVector(2)
-		// log.Info("", zap.Any("SparseVec", vec))
-		baseRow := BaseRow{
-			Varchar:   strconv.Itoa(i + 1),
-			SparseVec: vec,
+		baseRow := BaseRow{SparseVec: vec}
+		if option.validData[i] {
+			baseRow.Varchar = strconv.Itoa(i + 1)
 		}
 		if !autoID {
 			baseRow.Int64 = int64(i + 1)
@@ -147,6 +154,9 @@ func GenInt64VarcharSparseRows(nb int, enableDynamicField bool, autoID bool, opt
 }
 
 func GenAllFieldsRows(nb int, enableDynamicField bool, option GenDataOption) []interface{} {
+	if option.validData != nil {
+		log.Fatal("GenAllFieldsRows with valid data is not yet implemented")
+	}
 	rows := make([]interface{}, 0, nb)
 
 	// BaseRow generate insert rows
@@ -182,6 +192,10 @@ func GenAllFieldsRows(nb int, enableDynamicField bool, option GenDataOption) []i
 }
 
 func GenAllArrayRow(index int, option GenDataOption) Array {
+	if option.validData != nil {
+		log.Fatal("GenAllArrayRow with valid data is not yet implemented")
+	}
+
 	capacity := option.maxCapacity
 	boolRow := make([]bool, 0, capacity)
 	int8Row := make([]int8, 0, capacity)

@@ -118,6 +118,109 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     }
 }
 
+TEST_F(DiskAnnFileManagerTest, ReadAndWriteWithStream) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = "/tmp";
+    milvus_storage::ArrowFileSystemSingleton::GetInstance().Init(conf);
+
+    auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    std::string small_index_file_path =
+        "/tmp/diskann/index_files/1000/small_index_file";
+    std::string large_index_file_path =
+        "/tmp/diskann/index_files/1000/large_index_file";
+    auto exist = lcm->Exist(large_index_file_path);
+
+    std::string index_file_path = "/tmp/diskann/index_files/1000/index_file";
+    boost::filesystem::path localPath(index_file_path);
+    auto local_file_name = localPath.filename().string();
+
+    EXPECT_EQ(exist, false);
+    uint64_t large_index_size = 50 << 20;
+    lcm->CreateFile(large_index_file_path);
+    std::vector<uint8_t> large_data(large_index_size);
+    for (size_t i = 0; i < large_index_size; i++) {
+        large_data[i] = i % 255;
+    }
+    lcm->Write(large_index_file_path, large_data.data(), large_index_size);
+
+    uint64_t small_index_size = 10 << 20;
+    lcm->CreateFile(small_index_file_path);
+    std::vector<uint8_t> small_data(small_index_size);
+    for (size_t i = 0; i < small_index_size; i++) {
+        small_data[i] = i % 255;
+    }
+    lcm->Write(small_index_file_path, small_data.data(), small_index_size);
+
+    // collection_id: 1, partition_id: 2, segment_id: 3
+    // field_id: 100, index_build_id: 1000, index_version: 1
+    FieldDataMeta filed_data_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
+        storage::FileManagerContext(filed_data_meta, index_meta, cm_));
+
+    auto os = diskAnnFileManager->OpenOutputStream(index_file_path);
+    size_t write_offset = 0;
+    os->Write(large_index_size);
+    write_offset += sizeof(large_index_size);
+    EXPECT_EQ(os->Tell(), write_offset);
+    os->Write(large_data.data(), large_index_size);
+    write_offset += large_index_size;
+    EXPECT_EQ(os->Tell(), write_offset);
+    os->Write(small_index_size);
+    write_offset += sizeof(small_index_size);
+    EXPECT_EQ(os->Tell(), write_offset);
+    int fd = open(small_index_file_path.c_str(), O_RDONLY);
+    ASSERT_NE(fd, -1);
+    os->Write(fd, small_index_size);
+    write_offset += small_index_size;
+    close(fd);
+    EXPECT_EQ(os->Tell(), write_offset);
+
+    auto is = diskAnnFileManager->OpenInputStream(index_file_path);
+    size_t read_offset = 0;
+    size_t read_large_index_size;
+    is->Read(read_large_index_size);
+    read_offset += sizeof(read_large_index_size);
+    EXPECT_EQ(read_large_index_size, large_index_size);
+    EXPECT_EQ(is->Tell(), read_offset);
+    std::vector<uint8_t> read_large_data(read_large_index_size);
+    is->Read(read_large_data.data(), read_large_index_size);
+    EXPECT_EQ(
+        memcmp(
+            read_large_data.data(), large_data.data(), read_large_index_size),
+        0);
+    read_offset += read_large_index_size;
+    EXPECT_EQ(is->Tell(), read_offset);
+    size_t read_small_index_size;
+    is->Read(read_small_index_size);
+    read_offset += sizeof(read_small_index_size);
+    EXPECT_EQ(read_small_index_size, small_index_size);
+    EXPECT_EQ(is->Tell(), read_offset);
+    std::string small_index_file_path_read =
+        "/tmp/diskann/index_files/1000/small_index_file_read";
+    lcm->CreateFile(small_index_file_path_read);
+    int fd_read = open(small_index_file_path_read.c_str(), O_WRONLY);
+    ASSERT_NE(fd_read, -1);
+    is->Read(fd_read, small_index_size);
+    close(fd_read);
+    std::vector<uint8_t> read_small_data(read_small_index_size);
+    lcm->Read(small_index_file_path_read,
+              read_small_data.data(),
+              read_small_index_size);
+    EXPECT_EQ(
+        memcmp(
+            read_small_data.data(), small_data.data(), read_small_index_size),
+        0);
+    read_offset += read_small_index_size;
+    EXPECT_EQ(is->Tell(), read_offset);
+
+    lcm->Remove(small_index_file_path_read);
+    lcm->Remove(large_index_file_path);
+    lcm->Remove(small_index_file_path);
+}
+
 int
 test_worker(string s) {
     std::cout << s << std::endl;

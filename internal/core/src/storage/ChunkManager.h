@@ -121,6 +121,13 @@ class ChunkManager {
      */
     virtual std::string
     GetRootPath() const = 0;
+
+    /**
+     * @brief Get the Bucket Name
+     * @return std::string
+     */
+    virtual std::string
+    GetBucketName() const = 0;
 };
 
 using ChunkManagerPtr = std::shared_ptr<ChunkManager>;

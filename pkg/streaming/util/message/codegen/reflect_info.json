@@ -1,0 +1,174 @@
+{
+    "packages": {
+        "msgpb": "github.com/milvus-io/milvus-proto/go-api/v2/msgpb",
+        "messagespb": "github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+    },
+    "ExtraExportTypes": [
+        "messagespb.PartitionSegmentAssignment",
+        "messagespb.SegmentAssignment",
+        "messagespb.ManualFlushExtraResponse"
+    ],
+    "messageReflectInfoTable": [
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.TimeTickMessageHeader",
+                "BodyType": "msgpb.TimeTickMsg"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeTimeTick",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.InsertMessageHeader",
+                "BodyType": "msgpb.InsertRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeInsert",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DeleteMessageHeader",
+                "BodyType": "msgpb.DeleteRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDelete",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateCollectionMessageHeader",
+                "BodyType": "msgpb.CreateCollectionRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateCollection",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropCollectionMessageHeader",
+                "BodyType": "msgpb.DropCollectionRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropCollection",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreatePartitionMessageHeader",
+                "BodyType": "msgpb.CreatePartitionRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreatePartition",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.DropPartitionMessageHeader",
+                "BodyType": "msgpb.DropPartitionRequest"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeDropPartition",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.ImportMessageHeader",
+                "BodyType": "msgpb.ImportMsg"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeImport",
+                "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CreateSegmentMessageHeader",
+                "BodyType": "messagespb.CreateSegmentMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCreateSegment",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.FlushMessageHeader",
+                "BodyType": "messagespb.FlushMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeFlush",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.ManualFlushMessageHeader",
+                "BodyType": "messagespb.ManualFlushMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeManualFlush",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.BeginTxnMessageHeader",
+                "BodyType": "messagespb.BeginTxnMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeBeginTxn",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.CommitTxnMessageHeader",
+                "BodyType": "messagespb.CommitTxnMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeCommitTxn",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RollbackTxnMessageHeader",
+                "BodyType": "messagespb.RollbackTxnMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRollbackTxn",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.TxnMessageHeader",
+                "BodyType": "messagespb.TxnMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeTxn",
+                "Version": 2
+            },
+            "NoUtilFunctions": true
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.SchemaChangeMessageHeader",
+                "BodyType": "messagespb.SchemaChangeMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeSchemaChange",
+                "Version": 2
+            }
+        }
+    ]
+}

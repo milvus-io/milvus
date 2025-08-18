@@ -13,7 +13,7 @@ set(BITSET_SRCS
     detail/platform/dynamic.cpp
 )
 
-
+add_library(milvus_bitset)
 
 if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
     list(APPEND BITSET_SRCS
@@ -34,10 +34,35 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
         detail/platform/arm/instruction_set.cpp
     )
 
+    # Perform a test for the ARM SVE command set.
+    # Sometimes, a compiler may support it, but there are no headers available.
+    include(CheckCXXCompilerFlag)
+    include(CheckIncludeFileCXX)
+
+    check_cxx_compiler_flag("-march=armv8-a+sve" COMPILER_SUPPORTS_SVE)
+    check_include_file_cxx("arm_sve.h" COMPILER_HAS_ARM_SVE_HEADER)
+
+    if(COMPILER_SUPPORTS_SVE)
+        message(STATUS "Compiler supports SVE")
+    else()
+        message(STATUS "Compiler does NOT support SVE")
+    endif()
+
+    if(COMPILER_HAS_ARM_SVE_HEADER)
+        message(STATUS "Compiler has arm_sve.h")
+    else()
+        message(STATUS "Compiler has no arm_sve.h")
+    endif()
+
     # targeting AWS graviton, 
     #  https://github.com/aws/aws-graviton-getting-started/blob/main/c-c%2B%2B.md
 
-    #set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
+    if (COMPILER_SUPPORTS_SVE AND COMPILER_HAS_ARM_SVE_HEADER)
+        message(STATUS "SVE support for the bitset library is enabled")
+        target_compile_definitions(milvus_bitset PRIVATE BITSET_ENABLE_SVE_SUPPORT=1)
+
+        set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
+    endif()
 endif()
 
-add_library(milvus_bitset OBJECT ${BITSET_SRCS})
+target_sources(milvus_bitset PRIVATE ${BITSET_SRCS})

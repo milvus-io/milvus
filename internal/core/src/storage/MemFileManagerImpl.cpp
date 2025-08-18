@@ -84,6 +84,21 @@ MemFileManagerImpl::AddBinarySet(const BinarySet& binary_set,
     return true;
 }
 
+std::shared_ptr<InputStream>
+MemFileManagerImpl::OpenInputStream(const std::string& filename) {
+    return nullptr;
+}
+
+std::shared_ptr<OutputStream>
+MemFileManagerImpl::OpenOutputStream(const std::string& filename) {
+    return nullptr;
+}
+
+bool
+MemFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
+    return true;
+}
+
 bool
 MemFileManagerImpl::AddFile(const BinarySet& binary_set) {
     return AddBinarySet(binary_set, GetRemoteIndexObjectPrefix());

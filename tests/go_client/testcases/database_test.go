@@ -302,7 +302,7 @@ func TestDatabasePropertiesCollectionsNum(t *testing.T) {
 		_, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
 		collections = append(collections, schema.CollectionName)
 	}
-	fields := hp.FieldsFact.GenFieldsForCollection(hp.Int64Vec, hp.TNewFieldsOption())
+	fields := hp.FieldsFact.GenFieldsForCollection(hp.Int64Vec, hp.TNewFieldOptions())
 	schema := hp.GenSchema(hp.TNewSchemaOption().TWithFields(fields))
 	err = mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
 	common.CheckErr(t, err, false, "exceeded the limit number of collections")
@@ -406,7 +406,11 @@ func TestDatabasePropertyDeny(t *testing.T) {
 	common.CheckErr(t, err, false, "access has been disabled by the administrator")
 
 	// writing
-	columns, _ := hp.GenColumnsBasedSchema(schema, hp.TNewDataOption().TWithNb(10))
+	columnOps := hp.TNewColumnOptions()
+	for _, fieldName := range hp.GetAllFieldsName(*schema) {
+		columnOps = columnOps.WithColumnOption(fieldName, hp.TNewDataOption().TWithNb(10))
+	}
+	columns, _ := hp.GenColumnsBasedSchema(schema, columnOps)
 	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, columns...))
 	common.CheckErr(t, err, false, "access has been disabled by the administrator")
 }

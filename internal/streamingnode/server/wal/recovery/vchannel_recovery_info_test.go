@@ -195,7 +195,7 @@ func TestNewVChannelRecoveryInfoFromCreateCollectionMessage(t *testing.T) {
 	msgID5 := rmq.NewRmqID(5)
 	ts += 1
 	immutableMsg5 := msg5.WithTimeTick(ts).WithLastConfirmed(msgID5).IntoImmutableMessage(msgID5)
-	info.ObserveSchemaChange(message.MustAsImmutableCollectionSchemaChangeV2(immutableMsg5))
+	info.ObserveSchemaChange(message.MustAsImmutableSchemaChangeMessageV2(immutableMsg5))
 
 	idx, schema2Saved := info.GetSchema(0)
 	assert.Equal(t, 1, idx)

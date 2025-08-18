@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
@@ -195,7 +197,7 @@ func TestSearchFullTextWithPartitionKey(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			analyzerParams := map[string]any{"tokenizer": tc.analyzer}
-			fieldsOption := hp.TNewFieldsOption().TWithAnalyzerParams(analyzerParams).TWithIsPartitionKey(true)
+			fieldsOption := hp.TNewFieldOptions().WithFieldOption(common.DefaultTextFieldName, hp.TNewFieldsOption().TWithIsPartitionKey(true).TWithAnalyzerParams(analyzerParams))
 			function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
 			schemaOption := hp.TNewSchemaOption().TWithFunction(function)
 			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), fieldsOption, schemaOption)
@@ -269,7 +271,7 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			analyzerParams := map[string]any{"tokenizer": tc.analyzer}
-			fieldsOption := hp.TNewFieldsOption().TWithAnalyzerParams(analyzerParams).TWithIsPartitionKey(true)
+			fieldsOption := hp.TNewFieldOptions().WithFieldOption(common.DefaultTextFieldName, hp.TNewFieldsOption().TWithIsPartitionKey(true).TWithAnalyzerParams(analyzerParams))
 			function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
 			schemaOption := hp.TNewSchemaOption().TWithFunction(function)
 			prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), fieldsOption, schemaOption)
@@ -291,5 +293,50 @@ func TestSearchFullTextWithEmptyData(t *testing.T) {
 			common.CheckErr(t, err, true)
 			common.CheckSearchResult(t, resSearch, len(queries), tc.topK)
 		})
+	}
+}
+
+// test full-text-search with default text, output text
+func TestFullTextSearchDefaultValue(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	// create -> insert -> flush -> index -> load
+	defaultText := "data mining supports query expansion"
+	analyzerParams := map[string]any{"tokenizer": "standard"}
+	fieldsOption := hp.TNewFieldOptions().WithFieldOption(common.DefaultTextFieldName, hp.TNewFieldsOption().TWithDefaultValue(defaultText).TWithEnableAnalyzer(true).TWithAnalyzerParams(analyzerParams))
+	function := hp.TNewBM25Function(common.DefaultTextFieldName, common.DefaultTextSparseVecFieldName)
+	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.FullTextSearch), fieldsOption, hp.TNewSchemaOption().TWithFunction(function))
+
+	// insert data with all null
+	validData := make([]bool, common.DefaultNb)
+	for i := 0; i < common.DefaultNb; i++ {
+		validData[i] = false
+	}
+	insertOption := hp.TNewColumnOptions().WithColumnOption(common.DefaultTextFieldName, hp.TNewDataOption().TWithTextLang(common.DefaultTextLang).TWithValidData(validData))
+	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema), insertOption)
+	prepare.FlushData(ctx, t, mc, schema.CollectionName)
+
+	indexParams := hp.TNewIndexParams(schema).TWithFieldIndex(map[string]index.Index{common.DefaultTextSparseVecFieldName: index.NewSparseInvertedIndex(entity.BM25, 0.1)})
+	prepare.CreateIndex(ctx, t, mc, indexParams)
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// full text search
+	vectors := make([]entity.Vector, 0, common.DefaultNq)
+	for i := 0; i < common.DefaultNq; i++ {
+		vectors = append(vectors, entity.Text(defaultText))
+	}
+
+	resSearch, err := mc.Search(ctx, milvusclient.NewSearchOption(schema.CollectionName, common.DefaultLimit, vectors).WithConsistencyLevel(entity.ClStrong).WithOutputFields(common.DefaultTextFieldName))
+	common.CheckErr(t, err, true)
+	common.CheckSearchResult(t, resSearch, common.DefaultNq, common.DefaultLimit)
+	common.CheckOutputFields(t, []string{common.DefaultTextFieldName}, resSearch[0].Fields)
+	for _, field := range resSearch[0].Fields {
+		if field.Name() == common.DefaultTextFieldName {
+			for i := 0; i < field.Len(); i++ {
+				fieldData, _ := field.GetAsString(i)
+				require.EqualValues(t, defaultText, fieldData)
+			}
+		}
 	}
 }

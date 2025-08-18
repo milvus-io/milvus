@@ -344,6 +344,51 @@ func (_c *MockBroadcastMutableMessage_MessageType_Call) RunAndReturn(run func() 
 	return _c
 }
 
+// MessageTypeWithVersion provides a mock function with no fields
+func (_m *MockBroadcastMutableMessage) MessageTypeWithVersion() message.MessageTypeWithVersion {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for MessageTypeWithVersion")
+	}
+
+	var r0 message.MessageTypeWithVersion
+	if rf, ok := ret.Get(0).(func() message.MessageTypeWithVersion); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(message.MessageTypeWithVersion)
+	}
+
+	return r0
+}
+
+// MockBroadcastMutableMessage_MessageTypeWithVersion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MessageTypeWithVersion'
+type MockBroadcastMutableMessage_MessageTypeWithVersion_Call struct {
+	*mock.Call
+}
+
+// MessageTypeWithVersion is a helper method to define mock.On call
+func (_e *MockBroadcastMutableMessage_Expecter) MessageTypeWithVersion() *MockBroadcastMutableMessage_MessageTypeWithVersion_Call {
+	return &MockBroadcastMutableMessage_MessageTypeWithVersion_Call{Call: _e.mock.On("MessageTypeWithVersion")}
+}
+
+func (_c *MockBroadcastMutableMessage_MessageTypeWithVersion_Call) Run(run func()) *MockBroadcastMutableMessage_MessageTypeWithVersion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBroadcastMutableMessage_MessageTypeWithVersion_Call) Return(_a0 message.MessageTypeWithVersion) *MockBroadcastMutableMessage_MessageTypeWithVersion_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBroadcastMutableMessage_MessageTypeWithVersion_Call) RunAndReturn(run func() message.MessageTypeWithVersion) *MockBroadcastMutableMessage_MessageTypeWithVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Payload provides a mock function with no fields
 func (_m *MockBroadcastMutableMessage) Payload() []byte {
 	ret := _m.Called()

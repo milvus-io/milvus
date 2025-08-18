@@ -133,6 +133,11 @@ class LocalChunkManager : public ChunkManager {
     int64_t
     GetSizeOfDir(const std::string& dir);
 
+    virtual std::string
+    GetBucketName() const {
+        return "";
+    }
+
  private:
     std::string path_prefix_;
 };

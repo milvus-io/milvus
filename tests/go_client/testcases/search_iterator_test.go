@@ -435,3 +435,68 @@ func TestSearchIteratorNull(t *testing.T) {
 	}
 	require.LessOrEqual(t, actualLimit, 100)
 }
+
+func TestSearchIteratorDefaultValue(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+	pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+	vecField := entity.NewField().WithName(common.DefaultFloatVecFieldName).WithDataType(entity.FieldTypeFloatVector).WithDim(common.DefaultDim)
+	int32NullField := entity.NewField().WithName(common.DefaultInt32FieldName).WithDataType(entity.FieldTypeInt32).WithDefaultValueInt(100)
+	schema := entity.NewSchema().WithName(common.GenRandomString("null_int32", 10)).WithField(pkField).WithField(vecField).WithField(int32NullField)
+	errCreate := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema).WithConsistencyLevel(entity.ClStrong))
+	common.CheckErr(t, errCreate, true)
+
+	prepare := hp.CollPrepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
+	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
+
+	// Generate test data with boundary values
+	nb := common.DefaultNb * 3
+	pkColumn := hp.GenColumnData(nb, entity.FieldTypeInt64, *hp.TNewDataOption())
+	vecColumn := hp.GenColumnData(nb, entity.FieldTypeFloatVector, *hp.TNewDataOption())
+	int32Values := make([]int32, 0, nb)
+	validData := make([]bool, 0, nb)
+
+	// Generate JSON documents
+	for i := 0; i < nb; i++ {
+		_mod := i % 2
+		if _mod == 0 {
+			validData = append(validData, false)
+		} else {
+			int32Values = append(int32Values, int32(i))
+			validData = append(validData, true)
+		}
+	}
+	nullColumn, err := column.NewNullableColumnInt32(common.DefaultInt32FieldName, int32Values, validData)
+	common.CheckErr(t, err, true)
+	_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(schema.CollectionName, pkColumn, vecColumn, nullColumn))
+	common.CheckErr(t, err, true)
+
+	// search iterator with null expr
+	expr := fmt.Sprintf("%s == 100", common.DefaultInt32FieldName)
+	vector := entity.FloatVector(common.GenFloatVector(common.DefaultDim))
+	itr, err2 := mc.SearchIterator(ctx, client.NewSearchIteratorOption(schema.CollectionName, vector).WithFilter(expr).WithIteratorLimit(100).WithBatchSize(10).WithOutputFields(common.DefaultInt32FieldName))
+	common.CheckErr(t, err2, true)
+	actualLimit := 0
+	for {
+		rs, err := itr.Next(ctx)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Error("SearchIterator next gets error", zap.Error(err))
+			break
+		}
+		actualLimit = actualLimit + rs.ResultCount
+		require.Equal(t, 10, rs.ResultCount)
+		for _, field := range rs.Fields {
+			if field.Name() == common.DefaultInt32FieldName {
+				for i := 0; i < field.Len(); i++ {
+					fieldData, _ := field.Get(i)
+					require.EqualValues(t, 100, fieldData)
+				}
+			}
+		}
+	}
+	require.LessOrEqual(t, actualLimit, 100)
+}

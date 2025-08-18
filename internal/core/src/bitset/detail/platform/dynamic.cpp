@@ -622,7 +622,7 @@ init_dynamic_hook() {
 #endif
 
 #if defined(__aarch64__)
-#if defined(__ARM_FEATURE_SVE)
+#if defined(BITSET_ENABLE_SVE_SUPPORT)
     // sve
     if (arm::InstructionSet::GetInstance().supports_sve()) {
 #define SET_OP_COMPARE_COLUMN_SVE(TTYPE, UTYPE, OP)              \

@@ -21,12 +21,12 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.1-0.20250806032933-1b94535b80c3
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.1-0.20250807065533-ebdc11f5df17
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/prometheus/client_golang v1.14.0
-	github.com/prometheus/client_model v0.3.0
+	github.com/prometheus/client_model v0.5.0
 	github.com/prometheus/common v0.42.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
@@ -72,7 +72,8 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/magiconair/properties v1.8.5
-	github.com/milvus-io/milvus/pkg/v2 v2.0.0-00010101000000-000000000000
+	github.com/milvus-io/milvus/client/v2 v2.5.6
+	github.com/milvus-io/milvus/pkg/v2 v2.5.7
 	github.com/pkg/errors v0.9.1
 	github.com/remeh/sizedwaitgroup v1.0.0
 	github.com/shirou/gopsutil/v4 v4.24.10
@@ -247,7 +248,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	github.com/zilliztech/woodpecker v0.1.3 // indirect
+	github.com/zilliztech/woodpecker v0.1.4-0.20250811124743-7efbd20c3d31 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect

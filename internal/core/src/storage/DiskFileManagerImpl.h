@@ -43,11 +43,20 @@ class DiskFileManagerImpl : public FileManagerImpl {
     bool
     AddFile(const std::string& filename) noexcept override;
 
+    bool
+    AddFileMeta(const FileMeta& file_meta) override;
+
     std::optional<bool>
     IsExisted(const std::string& filename) noexcept override;
 
     bool
     RemoveFile(const std::string& filename) noexcept override;
+
+    std::shared_ptr<InputStream>
+    OpenInputStream(const std::string& filename) override;
+
+    std::shared_ptr<OutputStream>
+    OpenOutputStream(const std::string& filename) override;
 
  public:
     bool
@@ -164,6 +173,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetFileName(const std::string& localfile);
 
+    std::string
+    GetRemoteIndexFilePrefixV2() const override;
+
  private:
     int64_t
     GetIndexBuildId() {
@@ -172,6 +184,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
+
+    /**
+     * @brief Get the Remote Index Path V2
+     * @param file_name; v2 will not split the file with slice_num
+     * @return std::string
+     */
+    std::string
+    GetRemoteIndexPathV2(const std::string& file_name) const;
 
     std::string
     GetRemoteTextLogPath(const std::string& file_name, int64_t slice_num) const;
