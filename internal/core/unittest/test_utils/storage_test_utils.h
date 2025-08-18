@@ -76,7 +76,6 @@ PrepareInsertBinlog(int64_t collection_id,
                     std::vector<int64_t> excluded_field_ids = {}) {
     bool enable_mmap = !mmap_dir_path.empty();
     LoadFieldDataInfo load_info;
-    load_info.mmap_dir_path = mmap_dir_path;
     auto row_count = dataset.row_ids_.size();
     const std::string prefix = TestRemotePath;
 
@@ -148,7 +147,6 @@ PrepareSingleFieldInsertBinlog(int64_t collection_id,
                                const std::string& mmap_dir_path = "") {
     bool enable_mmap = !mmap_dir_path.empty();
     LoadFieldDataInfo load_info;
-    load_info.mmap_dir_path = mmap_dir_path;
     std::vector<std::string> files;
     files.reserve(field_datas.size());
     std::vector<int64_t> row_counts;

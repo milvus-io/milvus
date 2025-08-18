@@ -19,6 +19,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
@@ -186,6 +190,258 @@ func TestMixCoord_FlushAll(t *testing.T) {
 			assert.Error(t, err)
 			assert.Equal(t, expectedErr, err)
 			assert.Nil(t, resp)
+		})
+	})
+}
+
+func TestMixCoord_checkExpiredPOSIXDIR(t *testing.T) {
+	t.Run("POSIX mode disabled", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "false")
+
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		rootCachePath := filepath.Join(tempDir, "cache")
+		err := os.MkdirAll(rootCachePath, 0o755)
+		assert.NoError(t, err)
+
+		// Create some directories
+		nodeIDs := []int64{1001, 1002, 2001}
+		for _, nodeID := range nodeIDs {
+			nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+			err := os.MkdirAll(nodeDir, 0o755)
+			assert.NoError(t, err)
+		}
+
+		coord := &mixCoordImpl{
+			ctx: context.Background(),
+		}
+
+		// Should not remove any directories when POSIX mode is disabled
+		coord.checkExpiredPOSIXDIR()
+
+		// Verify all directories still exist
+		for _, nodeID := range nodeIDs {
+			nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+			assert.DirExists(t, nodeDir)
+		}
+	})
+
+	t.Run("POSIX mode enabled - no expired directories", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "true")
+
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		rootCachePath := filepath.Join(tempDir, "cache")
+		err := os.MkdirAll(rootCachePath, 0o755)
+		assert.NoError(t, err)
+
+		// Create some valid node directories
+		activeNodeIDs := []int64{1001, 1002, 2001}
+		for _, nodeID := range activeNodeIDs {
+			nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+			err := os.MkdirAll(nodeDir, 0o755)
+			assert.NoError(t, err)
+		}
+
+		// Mock queryCoord and dataCoord servers
+		mockQueryCoord := &querycoordv2.Server{}
+		mockDataCoord := &datacoord.Server{}
+
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			queryCoordServer: mockQueryCoord,
+			datacoordServer:  mockDataCoord,
+		}
+
+		// Mock ServerExist methods
+		mockey.PatchConvey("test POSIX cleanup with no expired dirs", t, func() {
+			// Mock ServerExist to return true for QueryCoord, false for DataCoord
+			mockey.Mock((*querycoordv2.Server).ServerExist).Return(true).Build()
+			mockey.Mock((*datacoord.Server).ServerExist).Return(false).Build()
+			mockey.Mock(pathutil.GetPath).Return(rootCachePath).Build()
+
+			// Should not remove any directories
+			coord.checkExpiredPOSIXDIR()
+
+			// Verify all directories still exist
+			for _, nodeID := range activeNodeIDs {
+				nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+				assert.DirExists(t, nodeDir)
+			}
+		})
+	})
+
+	t.Run("POSIX mode enabled - with expired directories", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "true")
+
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		rootCachePath := filepath.Join(tempDir, "cache")
+		err := os.MkdirAll(rootCachePath, 0o755)
+		assert.NoError(t, err)
+
+		// Create node directories (some active, some expired)
+		activeNodeIDs := []int64{1001, 1002}
+		expiredNodeIDs := []int64{1003, 2002}
+		allNodeIDs := append(activeNodeIDs, expiredNodeIDs...)
+
+		for _, nodeID := range allNodeIDs {
+			nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+			err := os.MkdirAll(nodeDir, 0o755)
+			assert.NoError(t, err)
+		}
+
+		// Mock queryCoord and dataCoord servers
+		mockQueryCoord := &querycoordv2.Server{}
+		mockDataCoord := &datacoord.Server{}
+
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			queryCoordServer: mockQueryCoord,
+			datacoordServer:  mockDataCoord,
+		}
+
+		// Mock ServerExist methods - return false for all nodes (simulating expired state)
+		mockey.PatchConvey("test POSIX cleanup with expired dirs", t, func() {
+			mockey.Mock((*querycoordv2.Server).ServerExist).Return(false).Build()
+			mockey.Mock((*datacoord.Server).ServerExist).Return(false).Build()
+			mockey.Mock(pathutil.GetPath).Return(rootCachePath).Build()
+
+			// Should remove all directories since all nodes are expired
+			coord.checkExpiredPOSIXDIR()
+
+			// Verify all directories are removed
+			for _, nodeID := range allNodeIDs {
+				nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+				assert.NoDirExists(t, nodeDir)
+			}
+		})
+	})
+
+	t.Run("POSIX mode enabled - all nodes active", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "true")
+
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		rootCachePath := filepath.Join(tempDir, "cache")
+		err := os.MkdirAll(rootCachePath, 0o755)
+		assert.NoError(t, err)
+
+		// Create node directories
+		nodeIDs := []int64{1001, 1002, 2001, 2002}
+
+		for _, nodeID := range nodeIDs {
+			nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+			err := os.MkdirAll(nodeDir, 0o755)
+			assert.NoError(t, err)
+		}
+
+		// Mock queryCoord and dataCoord servers
+		mockQueryCoord := &querycoordv2.Server{}
+		mockDataCoord := &datacoord.Server{}
+
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			queryCoordServer: mockQueryCoord,
+			datacoordServer:  mockDataCoord,
+		}
+
+		// Mock ServerExist methods
+		mockey.PatchConvey("test POSIX cleanup with all nodes active", t, func() {
+			// Mock ServerExist to return true for both QueryCoord and DataCoord (all nodes active)
+			mockey.Mock((*querycoordv2.Server).ServerExist).Return(true).Build()
+			mockey.Mock((*datacoord.Server).ServerExist).Return(true).Build()
+			mockey.Mock(pathutil.GetPath).Return(rootCachePath).Build()
+
+			// Should not remove any directories
+			coord.checkExpiredPOSIXDIR()
+
+			// Verify all directories still exist
+			for _, nodeID := range nodeIDs {
+				nodeDir := filepath.Join(rootCachePath, fmt.Sprintf("%d", nodeID))
+				assert.DirExists(t, nodeDir)
+			}
+		})
+	})
+
+	t.Run("POSIX mode enabled - invalid directory names", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "true")
+
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		rootCachePath := filepath.Join(tempDir, "cache")
+		err := os.MkdirAll(rootCachePath, 0o755)
+		assert.NoError(t, err)
+
+		// Create directories with invalid names
+		invalidDirs := []string{"invalid_dir", "node_abc", "123abc"}
+		for _, dirName := range invalidDirs {
+			invalidDir := filepath.Join(rootCachePath, dirName)
+			err := os.MkdirAll(invalidDir, 0o755)
+			assert.NoError(t, err)
+		}
+
+		// Create one valid directory
+		validDir := filepath.Join(rootCachePath, "1001")
+		err = os.MkdirAll(validDir, 0o755)
+		assert.NoError(t, err)
+
+		// Mock queryCoord and dataCoord servers
+		mockQueryCoord := &querycoordv2.Server{}
+		mockDataCoord := &datacoord.Server{}
+
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			queryCoordServer: mockQueryCoord,
+			datacoordServer:  mockDataCoord,
+		}
+
+		// Mock ServerExist methods
+		mockey.PatchConvey("test POSIX cleanup with invalid dir names", t, func() {
+			// Mock ServerExist for the valid node
+			mockey.Mock((*querycoordv2.Server).ServerExist).Return(true).Build()
+			mockey.Mock((*datacoord.Server).ServerExist).Return(false).Build()
+			mockey.Mock(pathutil.GetPath).Return(rootCachePath).Build()
+
+			// Should handle invalid directory names gracefully
+			coord.checkExpiredPOSIXDIR()
+
+			// Verify valid directory still exists
+			assert.DirExists(t, validDir)
+
+			// Verify invalid directories are not removed (they should be ignored)
+			for _, dirName := range invalidDirs {
+				invalidDir := filepath.Join(rootCachePath, dirName)
+				assert.DirExists(t, invalidDir)
+			}
+		})
+	})
+
+	t.Run("POSIX mode enabled - read directory error", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.EnablePosixMode.Key, "true")
+
+		// Mock queryCoord and dataCoord servers
+		mockQueryCoord := &querycoordv2.Server{}
+		mockDataCoord := &datacoord.Server{}
+
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			queryCoordServer: mockQueryCoord,
+			datacoordServer:  mockDataCoord,
+		}
+
+		// Mock ServerExist methods
+		mockey.PatchConvey("test POSIX cleanup with read dir error", t, func() {
+			mockey.Mock(pathutil.GetPath).Return("/non/existent/path").Build()
+
+			// Should handle read directory error gracefully
+			coord.checkExpiredPOSIXDIR()
 		})
 	})
 }

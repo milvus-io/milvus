@@ -240,6 +240,19 @@ func (s *Server) Register() error {
 	return nil
 }
 
+func (s *Server) ServerExist(serverID int64) bool {
+	sessions, _, err := s.session.GetSessions(typeutil.DataNodeRole)
+	if err != nil {
+		log.Ctx(s.ctx).Warn("failed to get sessions", zap.Error(err))
+		return false
+	}
+	sessionMap := lo.MapKeys(sessions, func(s *sessionutil.Session, _ string) int64 {
+		return s.ServerID
+	})
+	_, exists := sessionMap[serverID]
+	return exists
+}
+
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	s.registerMetricsRequest()
