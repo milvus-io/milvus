@@ -129,7 +129,7 @@ FileWriter::PositionedWriteWithCheck(const void* data,
             ++empty_loops;
             // if the empty loops is too large or the total wait time is too long, we should write the data directly
             if (empty_loops > MAX_EMPTY_LOOPS || total_wait_us > MAX_WAIT_US) {
-                allowed_bytes = bytes_to_write;
+                allowed_bytes = rate_limiter_.GetBytesPerPeriod();
                 empty_loops = 0;
                 total_wait_us = 0;
             } else {
