@@ -137,6 +137,8 @@ func fromMessageToTsMsgV2(msg message.ImmutableMessage) (msgstream.TsMsg, error)
 		tsMsg, err = NewCreateSegmentMessageBody(msg)
 	case message.MessageTypeSchemaChange:
 		tsMsg, err = NewSchemaChangeMessageBody(msg)
+	case message.MessageTypePutCollection:
+		tsMsg, err = NewPutCollectionMessageBody(msg)
 	default:
 		panic("unsupported message type")
 	}

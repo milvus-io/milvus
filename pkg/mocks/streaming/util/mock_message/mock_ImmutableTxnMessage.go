@@ -257,6 +257,53 @@ func (_c *MockImmutableTxnMessage_EstimateSize_Call) RunAndReturn(run func() int
 	return _c
 }
 
+// IntoBroadcastMutableMessage provides a mock function with no fields
+func (_m *MockImmutableTxnMessage) IntoBroadcastMutableMessage() message.BroadcastMutableMessage {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IntoBroadcastMutableMessage")
+	}
+
+	var r0 message.BroadcastMutableMessage
+	if rf, ok := ret.Get(0).(func() message.BroadcastMutableMessage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.BroadcastMutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IntoBroadcastMutableMessage'
+type MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call struct {
+	*mock.Call
+}
+
+// IntoBroadcastMutableMessage is a helper method to define mock.On call
+func (_e *MockImmutableTxnMessage_Expecter) IntoBroadcastMutableMessage() *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	return &MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call{Call: _e.mock.On("IntoBroadcastMutableMessage")}
+}
+
+func (_c *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call) Run(run func()) *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call) Return(_a0 message.BroadcastMutableMessage) *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call) RunAndReturn(run func() message.BroadcastMutableMessage) *MockImmutableTxnMessage_IntoBroadcastMutableMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IntoImmutableMessageProto provides a mock function with no fields
 func (_m *MockImmutableTxnMessage) IntoImmutableMessageProto() *commonpb.ImmutableMessage {
 	ret := _m.Called()

@@ -23,7 +23,7 @@ func TestCheckMessageCallbackRegistration(t *testing.T) {
 	}
 
 	// Register callback for DropPartition message type
-	RegisterImportMessageV1CheckCallback(callback)
+	RegisterImportV1CheckCallback(callback)
 
 	// Verify callback was registered
 	callbackFuture, ok := messageCheckCallbacks[message.MessageTypeImportV1]

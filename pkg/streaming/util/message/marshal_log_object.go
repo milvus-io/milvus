@@ -8,6 +8,8 @@ import (
 
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 )
 
 // MarshalLogObject encodes the message into zap log object.
@@ -128,6 +130,10 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		encodeSegmentIDs(header.GetFlushedSegmentIds(), enc)
 	case *ImportMessageHeader:
+	case *PutResourceGroupMessageHeader:
+		encodeResourceGroupConfigs(header.GetResourceGroupConfigs(), enc)
+	case *DropResourceGroupMessageHeader:
+		enc.AddString("rg", header.GetResourceGroupName())
 	}
 }
 
@@ -137,4 +143,14 @@ func encodeSegmentIDs(segmentIDs []int64, enc zapcore.ObjectEncoder) {
 		ids = append(ids, strconv.FormatInt(id, 10))
 	}
 	enc.AddString("segmentIDs", strings.Join(ids, "|"))
+}
+
+func encodeResourceGroupConfigs(configs map[string]*rgpb.ResourceGroupConfig, enc zapcore.ObjectEncoder) {
+	strs := make([]string, 0, len(configs))
+	for name, config := range configs {
+		strs = append(strs, fmt.Sprintf(
+			"%s:rn%dln%d", name, config.GetRequests().GetNodeNum(), config.GetLimits().GetNodeNum()),
+		)
+	}
+	enc.AddString("rgs", strings.Join(strs, "|"))
 }
