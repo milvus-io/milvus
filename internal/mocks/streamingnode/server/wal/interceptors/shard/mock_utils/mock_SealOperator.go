@@ -99,6 +99,53 @@ func (_c *MockSealOperator_Channel_Call) RunAndReturn(run func() types.PChannelI
 	return _c
 }
 
+// GetLastL0FlushTimeTick provides a mock function with no fields
+func (_m *MockSealOperator) GetLastL0FlushTimeTick() map[utils.PartitionUniqueKey]uint64 {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLastL0FlushTimeTick")
+	}
+
+	var r0 map[utils.PartitionUniqueKey]uint64
+	if rf, ok := ret.Get(0).(func() map[utils.PartitionUniqueKey]uint64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[utils.PartitionUniqueKey]uint64)
+		}
+	}
+
+	return r0
+}
+
+// MockSealOperator_GetLastL0FlushTimeTick_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLastL0FlushTimeTick'
+type MockSealOperator_GetLastL0FlushTimeTick_Call struct {
+	*mock.Call
+}
+
+// GetLastL0FlushTimeTick is a helper method to define mock.On call
+func (_e *MockSealOperator_Expecter) GetLastL0FlushTimeTick() *MockSealOperator_GetLastL0FlushTimeTick_Call {
+	return &MockSealOperator_GetLastL0FlushTimeTick_Call{Call: _e.mock.On("GetLastL0FlushTimeTick")}
+}
+
+func (_c *MockSealOperator_GetLastL0FlushTimeTick_Call) Run(run func()) *MockSealOperator_GetLastL0FlushTimeTick_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSealOperator_GetLastL0FlushTimeTick_Call) Return(_a0 map[utils.PartitionUniqueKey]uint64) *MockSealOperator_GetLastL0FlushTimeTick_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSealOperator_GetLastL0FlushTimeTick_Call) RunAndReturn(run func() map[utils.PartitionUniqueKey]uint64) *MockSealOperator_GetLastL0FlushTimeTick_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockSealOperator creates a new instance of MockSealOperator. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockSealOperator(t interface {

@@ -219,6 +219,10 @@ func recoverDeleteMsgFromHeader(deleteMsg *msgstream.DeleteMsg, header *message.
 	for i := 0; i < len(timestamps); i++ {
 		timestamps[i] = timetick
 	}
+	if len(header.Partitions) > 0 {
+		// recover segment id from header
+		deleteMsg.SegmentId = header.Partitions[0].SegmentAssignment.SegmentId
+	}
 	deleteMsg.Timestamps = timestamps
 	return deleteMsg, nil
 }

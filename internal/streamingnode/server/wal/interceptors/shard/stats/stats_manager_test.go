@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -153,6 +154,7 @@ func TestConcurrentStasManager(t *testing.T) {
 	params.Save(params.StreamingCfg.FlushMemoryThreshold.Key, "0.000003")
 	params.Save(params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.000002")
 	params.Save(params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.000001")
+	params.Save(params.StreamingCfg.FlushL0MaxLifetime.Key, "10ms")
 	params.Save(params.DataCoordCfg.SegmentMaxLifetime.Key, "0.3")
 	params.Save(params.DataCoordCfg.SegmentMaxIdleTime.Key, "0.1")
 	params.Save(params.DataCoordCfg.SegmentMinSizeFromIdleToSealed.Key, "1024")
@@ -170,6 +172,14 @@ func TestConcurrentStasManager(t *testing.T) {
 			segments.Remove(info.SegmentBelongs)
 			m.UnregisterSealedSegment(info.SegmentBelongs.SegmentID)
 			counter.Dec()
+		})
+		sealOperator.EXPECT().GetLastL0FlushTimeTick().RunAndReturn(func() map[utils.PartitionUniqueKey]uint64 {
+			collectionID := rand.Int63n(10)
+			partitionID := collectionID + 100*rand.Int63n(10)
+			return map[utils.PartitionUniqueKey]uint64{
+				{CollectionID: collectionID, PartitionID: partitionID}: tsoutil.ComposeTSByTime(time.Now(), 0),
+				{CollectionID: collectionID, PartitionID: -1}:          tsoutil.ComposeTSByTime(time.Now(), 0),
+			}
 		})
 		m.RegisterSealOperator(sealOperator, nil, nil)
 	}
@@ -198,17 +208,24 @@ func TestConcurrentStasManager(t *testing.T) {
 		for i := int64(0); i < int64(pchannelCount); i++ {
 			for j := 0; j < 10; j++ {
 				segmentID++
+				collectionID := rand.Int63n(10)
+				partitionID := collectionID + 100*rand.Int63n(10)
 				segment := SegmentBelongs{
 					PChannel:     fmt.Sprintf("pchannel-%d", i),
 					VChannel:     fmt.Sprintf("vchannel-%d", i),
-					CollectionID: i,
-					PartitionID:  i + 1,
+					CollectionID: collectionID,
+					PartitionID:  partitionID,
 					SegmentID:    segmentID,
 				}
 				rows := 1000 + rand.Int63n(1000)
 				binarySize := 1000 + rand.Int63n(1000)
 				maxBinarySize := 4000 + rand.Int63n(10000)
 				stats := createSegmentStats(uint64(rows), uint64(binarySize), uint64(maxBinarySize))
+				if rand.Int31()%2 == 0 {
+					stats.Level = datapb.SegmentLevel_L0
+				} else {
+					stats.Level = datapb.SegmentLevel_L1
+				}
 				m.RegisterNewGrowingSegment(segment, stats)
 				counter.Inc()
 				segments.Insert(segment)
@@ -243,14 +260,16 @@ func TestConcurrentStasManager(t *testing.T) {
 }
 
 func createSegmentStats(row uint64, binarySize uint64, maxBinarSize uint64) *SegmentStats {
+	now := time.Now()
 	return &SegmentStats{
 		Modified: ModifiedMetrics{
 			Rows:       row,
 			BinarySize: binarySize,
 		},
 		MaxBinarySize:    maxBinarSize,
-		CreateTime:       time.Now(),
-		LastModifiedTime: time.Now(),
+		CreateTime:       now,
+		CreateTimeTick:   tsoutil.ComposeTSByTime(now, 0),
+		LastModifiedTime: now,
 		BinLogCounter:    0,
 		Level:            datapb.SegmentLevel_L1,
 	}
