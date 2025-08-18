@@ -11,7 +11,6 @@
 
 #include <gtest/gtest.h>
 #include "storage/ThreadPools.h"
-#include "common/Common.h"
 
 TEST(ThreadPool, ThreadNum) {
     auto& threadPool =

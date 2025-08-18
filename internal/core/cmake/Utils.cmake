@@ -103,10 +103,14 @@ endmacro()
 
 macro(add_source_at_current_directory_recursively)
     file(GLOB_RECURSE SOURCE_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cc" "*.cpp" "*.c" "*.cxx")
+    # Exclude test files from production code
+    list(FILTER SOURCE_FILES EXCLUDE REGEX ".*Test\\.cpp$|.*_test\\.cpp$|.*_test\\.cc$|.*Test\\.cc$")
     message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}  add new source files at current directory recursively: ${SOURCE_FILES}")
 endmacro()
 
 macro(add_source_at_current_directory)
     file(GLOB SOURCE_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cc" "*.cpp" "*.c" "*.cxx")
+    # Exclude test files from production code
+    list(FILTER SOURCE_FILES EXCLUDE REGEX ".*Test\\.cpp$|.*_test\\.cpp$|.*_test\\.cc$|.*Test\\.cc$")
     message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}  add new source files at current directory: ${SOURCE_FILES}")
 endmacro()
