@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 /// Query whether the C schema is released
+/// just test
 static inline int
 ArrowSchemaIsReleased(const struct ArrowSchema* schema) {
     return schema->release == NULL;
