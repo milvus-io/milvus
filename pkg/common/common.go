@@ -235,6 +235,10 @@ const (
 	IndexNonEncoding           = "index.nonEncoding"
 	EnableDynamicSchemaKey     = `dynamicfield.enabled`
 	NamespaceEnabledKey        = "namespace.enabled"
+
+	// timezone releated
+	DatabaseDefaultTimezone   = "database.timezone"
+	CollectionDefaultTimezone = "collection.timezone"
 )
 
 const (

@@ -1177,6 +1177,11 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 				return merr.WrapErrCollectionLoaded(t.CollectionName, "can not alter mmap properties if collection loaded")
 			}
 		}
+		// Check the validation of timezone
+		err := checkTimezone(t.Properties...)
+		if err != nil {
+			return err
+		}
 	} else if len(t.GetDeleteKeys()) > 0 {
 		key := hasPropInDeletekeys(t.DeleteKeys)
 		if key != "" {
