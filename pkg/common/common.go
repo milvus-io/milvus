@@ -217,6 +217,10 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
+
+	// timezone releated
+	DatabaseDefaultTimezone = "database.timezone"
+	CollectionDefaultTimezone = "collection.timezone"
 )
 
 const (
