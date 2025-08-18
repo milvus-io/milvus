@@ -25,7 +25,7 @@ func TestCreateCollection(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 	for _, collectionFieldsType := range []hp.CollectionFieldsType{hp.Int64Vec, hp.VarcharBinary, hp.Int64VarcharSparseVec, hp.AllFields} {
-		fields := hp.FieldsFact.GenFieldsForCollection(collectionFieldsType, hp.TNewFieldsOption())
+		fields := hp.FieldsFact.GenFieldsForCollection(collectionFieldsType, hp.TNewFieldOptions())
 		schema := hp.GenSchema(hp.TNewSchemaOption().TWithFields(fields))
 		err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(schema.CollectionName, schema))
 		common.CheckErr(t, err, true)
@@ -396,7 +396,7 @@ func TestCreateCollectionAllFields(t *testing.T) {
 	schema := entity.NewSchema().WithName(collName)
 
 	// gen all fields except sparse vector
-	fields := hp.FieldsFactory{}.GenFieldsForCollection(hp.AllFields, hp.TNewFieldsOption())
+	fields := hp.FieldsFactory{}.GenFieldsForCollection(hp.AllFields, hp.TNewFieldOptions())
 	for _, field := range fields {
 		schema.WithField(field)
 	}

@@ -1064,6 +1064,7 @@ This helps Milvus-CDC synchronize incremental data`,
 		Export:       true,
 	}
 	p.EnabledOptimizeExpr.Init(base.mgr)
+
 	p.EnabledJSONKeyStats = ParamItem{
 		Key:          "common.enabledJSONKeyStats",
 		Version:      "2.5.5",
@@ -1196,7 +1197,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 
 	t.OtlpHeaders = ParamItem{
 		Key:          "trace.otlp.headers",
-		Version:      "2.4.0",
+		Version:      "2.6.0",
 		DefaultValue: "",
 		Doc:          "otlp header that encoded in base64",
 		Export:       true,
@@ -2891,8 +2892,11 @@ type queryNodeConfig struct {
 	MaxGroupNQ            ParamItem `refreshable:"true"`
 	TopKMergeRatio        ParamItem `refreshable:"true"`
 	CPURatio              ParamItem `refreshable:"true"`
-	MaxTimestampLag       ParamItem `refreshable:"true"`
 	GracefulStopTimeout   ParamItem `refreshable:"false"`
+
+	// tsafe
+	MaxTimestampLag ParamItem `refreshable:"true"`
+	DowngradeTsafe  ParamItem `refreshable:"true"`
 
 	// delete buffer
 	MaxSegmentDeleteBuffer ParamItem `refreshable:"false"`
@@ -3222,6 +3226,15 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.CacheCellUnaccessedSurvivalTime.Init(base.mgr)
+
+	p.EnableDisk = ParamItem{
+		Key:          "queryNode.enableDisk",
+		Version:      "2.2.0",
+		DefaultValue: "false",
+		Doc:          "enable querynode load disk index, and search on disk index",
+		Export:       true,
+	}
+	p.EnableDisk.Init(base.mgr)
 
 	p.KnowhereThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereThreadPoolNumRatio",
@@ -3671,15 +3684,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.CPURatio.Init(base.mgr)
 
-	p.EnableDisk = ParamItem{
-		Key:          "queryNode.enableDisk",
-		Version:      "2.2.0",
-		DefaultValue: "false",
-		Doc:          "enable querynode load disk index, and search on disk index",
-		Export:       true,
-	}
-	p.EnableDisk.Init(base.mgr)
-
 	p.IndexOffsetCacheEnabled = ParamItem{
 		Key:          "queryNode.indexOffsetCacheEnabled",
 		Version:      "2.5.0",
@@ -3745,6 +3749,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export:       true,
 	}
 	p.MaxTimestampLag.Init(base.mgr)
+
+	p.DowngradeTsafe = ParamItem{
+		Key:          "queryNode.downgradeTsafe",
+		Version:      "2.5.17",
+		Doc:          "ops maintenance switch for downgrade tsafe in case of mq failure",
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.DowngradeTsafe.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "queryNode.gracefulStopTimeout",

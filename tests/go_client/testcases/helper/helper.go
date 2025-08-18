@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -73,6 +74,34 @@ func GetAllFieldsType() []entity.FieldType {
 	return allFieldType
 }
 
+func GetAllNullableFieldType() []entity.FieldType {
+	return []entity.FieldType{
+		entity.FieldTypeBool,
+		entity.FieldTypeInt8,
+		entity.FieldTypeInt16,
+		entity.FieldTypeInt32,
+		entity.FieldTypeInt64,
+		entity.FieldTypeFloat,
+		entity.FieldTypeDouble,
+		entity.FieldTypeVarChar,
+		entity.FieldTypeJSON,
+		entity.FieldTypeArray,
+	}
+}
+
+func GetAllDefaultValueFieldType() []entity.FieldType {
+	return []entity.FieldType{
+		entity.FieldTypeBool,
+		entity.FieldTypeInt8,
+		entity.FieldTypeInt16,
+		entity.FieldTypeInt32,
+		entity.FieldTypeInt64,
+		entity.FieldTypeFloat,
+		entity.FieldTypeDouble,
+		entity.FieldTypeVarChar,
+	}
+}
+
 func GetInvalidPkFieldType() []entity.FieldType {
 	nonPkFieldTypes := []entity.FieldType{
 		entity.FieldTypeNone,
@@ -102,6 +131,17 @@ func GetInvalidPartitionKeyFieldType() []entity.FieldType {
 		entity.FieldTypeFloatVector,
 	}
 	return nonPkFieldTypes
+}
+
+func GetAllFieldsName(schema entity.Schema) []string {
+	fields := make([]string, 0)
+	for _, field := range schema.Fields {
+		fields = append(fields, field.Name)
+	}
+	if schema.EnableDynamicField {
+		fields = append(fields, common.DefaultDynamicFieldName)
+	}
+	return fields
 }
 
 // CreateDefaultMilvusClient creates a new client with default configuration
@@ -173,9 +213,29 @@ func mergeOptions(schema *entity.Schema, opts ...CreateCollectionOpt) client.Cre
 }
 
 func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	cp *CreateCollectionParams, fieldOpt *GenFieldsOption, schemaOpt *GenSchemaOption, opts ...CreateCollectionOpt,
+	cp *CreateCollectionParams, fieldOpts interface{}, schemaOpt *GenSchemaOption, opts ...CreateCollectionOpt,
 ) (*CollectionPrepare, *entity.Schema) {
-	fields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpt)
+	var fields []*entity.Field
+
+	// Handle different parameter types for backward compatibility
+	switch v := fieldOpts.(type) {
+	case FieldOptions:
+		fields = FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, v)
+	case *GenFieldsOption:
+		log.Warn("CreateCollection", zap.String("", "*GenFieldsOption has been deprecated, it is recommended to use FieldOptions"))
+		// Convert *GenFieldsOption to FieldOptions for compatibility with GenFieldsForCollection
+		// First generate fields to get field names, then create FieldOptions
+		tempFields := FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, TNewFieldOptions())
+		fieldOpts := TNewFieldOptions()
+		for _, field := range tempFields {
+			log.Info("CreateCollection", zap.String("name", field.Name))
+			fieldOpts = fieldOpts.WithFieldOption(field.Name, v)
+		}
+		fields = FieldsFact.GenFieldsForCollection(cp.CollectionFieldsType, fieldOpts)
+	default:
+		log.Fatal("CreateCollection: fieldOpts must be either FieldOptions or *GenFieldsOption")
+	}
+
 	schemaOpt.Fields = fields
 	schema := GenSchema(schemaOpt)
 
@@ -197,21 +257,44 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 }
 
 func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	ip *InsertParams, option *GenDataOption,
+	ip *InsertParams, columnOpts interface{},
 ) (*CollectionPrepare, client.InsertResult) {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}
-	// print option
-	log.Info("GenDataOption", zap.Any("option", option))
-	columns, dynamicColumns := GenColumnsBasedSchema(ip.Schema, option)
+
+	var columns []column.Column
+	var dynamicColumns []column.Column
+
+	// Handle different parameter types for backward compatibility
+	switch v := columnOpts.(type) {
+	case ColumnOptions:
+		columns, dynamicColumns = GenColumnsBasedSchema(ip.Schema, v)
+	case *GenDataOption:
+		log.Warn("InsertData", zap.String("", "*GenDataOption has been deprecated, it is recommended to use ColumnOptions"))
+		// Convert *GenDataOption to ColumnOptions for compatibility
+		columnOpts := TNewColumnOptions()
+		for _, fieldName := range GetAllFieldsName(*ip.Schema) {
+			columnOpts = columnOpts.WithColumnOption(fieldName, v)
+		}
+		columns, dynamicColumns = GenColumnsBasedSchema(ip.Schema, columnOpts)
+	default:
+		log.Fatal("InsertData: columnOpts must be either ColumnOptions or *GenDataOption")
+	}
+
 	insertOpt := client.NewColumnBasedInsertOption(ip.Schema.CollectionName).WithColumns(columns...).WithColumns(dynamicColumns...)
 	if ip.PartitionName != "" {
 		insertOpt.WithPartition(ip.PartitionName)
 	}
 	insertRes, err := mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
-	require.Equal(t, option.nb, insertRes.IDs.Len())
+
+	// Get the number of records from the first column or use a default
+	nb := 0
+	if len(columns) > 0 {
+		nb = columns[0].Len()
+	}
+	require.Equal(t, nb, insertRes.IDs.Len())
 	return chainTask, insertRes
 }
 

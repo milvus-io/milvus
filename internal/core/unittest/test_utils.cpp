@@ -93,7 +93,8 @@ TEST(Util, GetDeleteBitmap) {
         [&insert_record](
             const std::vector<PkType>& pks,
             const Timestamp* timestamps,
-            std::function<void(SegOffset offset, Timestamp ts)> cb) {
+            std::function<void(const SegOffset offset, const Timestamp ts)>
+                cb) {
             for (size_t i = 0; i < pks.size(); ++i) {
                 auto timestamp = timestamps[i];
                 auto offsets = insert_record.search_pk(pks[i], timestamp);

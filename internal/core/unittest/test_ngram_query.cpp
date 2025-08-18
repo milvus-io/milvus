@@ -21,7 +21,7 @@
 #include "index/IndexFactory.h"
 #include "index/NgramInvertedIndex.h"
 #include "segcore/load_index_c.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "expr/ITypeExpr.h"
 
 using namespace milvus;

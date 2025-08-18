@@ -19,6 +19,8 @@ var (
 	user                = flag.String("user", "root", "user")
 	password            = flag.String("password", "Milvus", "password")
 	logLevel            = flag.String("log.level", "info", "log level for test")
+	teiEndpoint         = flag.String("tei_endpoint", "http://text-embeddings-service.milvus-ci.svc.cluster.local:80", "TEI service endpoint for text embedding tests")
+	teiModelDim         = flag.Int("tei_model_dim", 768, "Vector dimension for text embedding model")
 	defaultClientConfig *client.ClientConfig
 )
 
@@ -40,6 +42,14 @@ func GetUser() string {
 
 func GetPassword() string {
 	return *password
+}
+
+func GetTEIEndpoint() string {
+	return *teiEndpoint
+}
+
+func GetTEIModelDim() int {
+	return *teiModelDim
 }
 
 func parseLogConfig() {

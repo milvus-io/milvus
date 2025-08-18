@@ -1272,6 +1272,64 @@ func (_c *DataCoordCatalog_ListCompactionTask_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// ListFileResource provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListFileResource(ctx context.Context) ([]*model.FileResource, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListFileResource")
+	}
+
+	var r0 []*model.FileResource
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.FileResource, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*model.FileResource); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.FileResource)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListFileResource'
+type DataCoordCatalog_ListFileResource_Call struct {
+	*mock.Call
+}
+
+// ListFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListFileResource(ctx interface{}) *DataCoordCatalog_ListFileResource_Call {
+	return &DataCoordCatalog_ListFileResource_Call{Call: _e.mock.On("ListFileResource", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListFileResource_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListFileResource_Call) Return(_a0 []*model.FileResource, _a1 error) *DataCoordCatalog_ListFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListFileResource_Call) RunAndReturn(run func(context.Context) ([]*model.FileResource, error)) *DataCoordCatalog_ListFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListImportJobs provides a mock function with given fields: ctx
 func (_m *DataCoordCatalog) ListImportJobs(ctx context.Context) ([]*datapb.ImportJob, error) {
 	ret := _m.Called(ctx)
@@ -1831,6 +1889,53 @@ func (_c *DataCoordCatalog_MarkChannelDeleted_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// RemoveFileResource provides a mock function with given fields: ctx, resourceID
+func (_m *DataCoordCatalog) RemoveFileResource(ctx context.Context, resourceID int64) error {
+	ret := _m.Called(ctx, resourceID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, resourceID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_RemoveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveFileResource'
+type DataCoordCatalog_RemoveFileResource_Call struct {
+	*mock.Call
+}
+
+// RemoveFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceID int64
+func (_e *DataCoordCatalog_Expecter) RemoveFileResource(ctx interface{}, resourceID interface{}) *DataCoordCatalog_RemoveFileResource_Call {
+	return &DataCoordCatalog_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", ctx, resourceID)}
+}
+
+func (_c *DataCoordCatalog_RemoveFileResource_Call) Run(run func(ctx context.Context, resourceID int64)) *DataCoordCatalog_RemoveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_RemoveFileResource_Call) Return(_a0 error) *DataCoordCatalog_RemoveFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_RemoveFileResource_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_RemoveFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveAnalyzeTask provides a mock function with given fields: ctx, task
 func (_m *DataCoordCatalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error {
 	ret := _m.Called(ctx, task)
@@ -2113,6 +2218,53 @@ func (_c *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call) Return(_a0 error) *D
 }
 
 func (_c *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call) RunAndReturn(run func(context.Context, []*datapb.SegmentInfo) error) *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveFileResource provides a mock function with given fields: ctx, resource
+func (_m *DataCoordCatalog) SaveFileResource(ctx context.Context, resource *model.FileResource) error {
+	ret := _m.Called(ctx, resource)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveFileResource")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.FileResource) error); ok {
+		r0 = rf(ctx, resource)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveFileResource'
+type DataCoordCatalog_SaveFileResource_Call struct {
+	*mock.Call
+}
+
+// SaveFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resource *model.FileResource
+func (_e *DataCoordCatalog_Expecter) SaveFileResource(ctx interface{}, resource interface{}) *DataCoordCatalog_SaveFileResource_Call {
+	return &DataCoordCatalog_SaveFileResource_Call{Call: _e.mock.On("SaveFileResource", ctx, resource)}
+}
+
+func (_c *DataCoordCatalog_SaveFileResource_Call) Run(run func(ctx context.Context, resource *model.FileResource)) *DataCoordCatalog_SaveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.FileResource))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveFileResource_Call) Return(_a0 error) *DataCoordCatalog_SaveFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveFileResource_Call) RunAndReturn(run func(context.Context, *model.FileResource) error) *DataCoordCatalog_SaveFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

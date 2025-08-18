@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -118,7 +119,9 @@ class DeletedRecord {
             }
         }
         search_pk_func_(
-            pks, timestamps, [&](SegOffset offset, Timestamp delete_ts) {
+            pks,
+            timestamps,
+            [&](const SegOffset offset, const Timestamp delete_ts) {
                 auto row_id = offset.get();
                 // if already deleted, no need to add new record
                 if (deleted_mask_.size() > row_id && deleted_mask_[row_id]) {
@@ -166,7 +169,7 @@ class DeletedRecord {
             // find last meeted snapshot
             if (!snapshots_.empty()) {
                 int loc = snapshots_.size() - 1;
-                while (snapshots_[loc].first > query_timestamp && loc >= 0) {
+                while (loc >= 0 && snapshots_[loc].first > query_timestamp) {
                     loc--;
                 }
                 if (loc >= 0) {
@@ -180,31 +183,9 @@ class DeletedRecord {
             }
         }
 
-        auto start_iter = hit_snapshot ? next_iter : accessor.begin();
-        auto end_iter =
-            accessor.lower_bound(std::make_pair(query_timestamp, 0));
+        auto it = hit_snapshot ? next_iter : accessor.begin();
 
-        auto it = start_iter;
-
-        // when end_iter point to skiplist end, concurrent delete may append new value
-        // after lower_bound() called, so end_iter is not logical valid.
-        if (end_iter == accessor.end()) {
-            while (it != accessor.end() && it->first <= query_timestamp) {
-                if (it->second < insert_barrier) {
-                    bitset.set(it->second);
-                }
-                it++;
-            }
-            return;
-        }
-
-        while (it != accessor.end() && it != end_iter) {
-            if (it->second < insert_barrier) {
-                bitset.set(it->second);
-            }
-            it++;
-        }
-        while (it != accessor.end() && it->first == query_timestamp) {
+        while (it != accessor.end() && it->first <= query_timestamp) {
             if (it->second < insert_barrier) {
                 bitset.set(it->second);
             }
@@ -231,7 +212,7 @@ class DeletedRecord {
     DumpSnapshot() {
         SortedDeleteList::Accessor accessor(deleted_lists_);
         int total_size = accessor.size();
-        int dumped_size = snapshots_.empty() ? 0 : GetSnapshotBitsSize();
+        int dumped_size = dumped_entry_count_.load();
 
         while (total_size - dumped_size > DUMP_BATCH_SIZE) {
             int32_t bitsize = 0;
@@ -276,6 +257,7 @@ class DeletedRecord {
                         snap_next_iter_.push_back(it);
                     }
 
+                    dumped_entry_count_.store(dumped_size + DUMP_BATCH_SIZE);
                     LOG_INFO(
                         "dump delete record snapshot at ts: {}, cursor: {}, "
                         "total size:{} "
@@ -341,6 +323,8 @@ class DeletedRecord {
     std::vector<std::pair<Timestamp, BitsetType>> snapshots_;
     // next delete record iterator that follows every snapshot
     std::vector<SortedDeleteList::iterator> snap_next_iter_;
+    // total number of delete entries that have been incorporated into snapshots
+    std::atomic<int64_t> dumped_entry_count_{0};
 };
 
 }  // namespace milvus::segcore

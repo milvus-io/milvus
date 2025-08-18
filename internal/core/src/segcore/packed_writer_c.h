@@ -45,7 +45,8 @@ NewPackedWriter(struct ArrowSchema* schema,
 
 CStatus
 WriteRecordBatch(CPackedWriter c_packed_writer,
-                 struct ArrowArray* array,
+                 struct ArrowArray* arrays,
+                 struct ArrowSchema* array_schemas,
                  struct ArrowSchema* schema);
 
 CStatus

@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -1202,6 +1203,18 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Empty(t, resp.GetStatus().GetReason())
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
+
+	t.Run("batch describe collection ok", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:         "test_1",
+			CollectionName: []string{"test_collection"},
+		})
+		assert.NoError(t, err)
+		assert.Empty(t, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, 1, len(resp.GetResponses()))
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetResponses()[0].GetStatus().GetErrorCode())
+	})
 }
 
 func TestProxy_AllocTimestamp(t *testing.T) {
@@ -1786,5 +1799,144 @@ func Test_GetSegmentsInfo(t *testing.T) {
 		assert.ElementsMatch(t, []int64{2, 6}, resp.GetSegmentInfos()[0].GetInsertLogs()[1].GetLogIDs())
 		assert.ElementsMatch(t, []int64{3, 7}, resp.GetSegmentInfos()[0].GetInsertLogs()[2].GetLogIDs())
 		assert.ElementsMatch(t, []int64{4, 8}, resp.GetSegmentInfos()[0].GetInsertLogs()[3].GetLogIDs())
+	})
+}
+
+func TestProxy_AddFileResource(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		proxy.mixCoord = NewMixCoordMock()
+
+		req := &milvuspb.AddFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		resp, err := proxy.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+
+	t.Run("proxy not healthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := proxy.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("mixCoord error", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		proxy.mixCoord = mockMixCoord
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := proxy.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+}
+
+func TestProxy_RemoveFileResource(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		proxy.mixCoord = NewMixCoordMock()
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+		}
+
+		resp, err := proxy.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+
+	t.Run("proxy not healthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
+
+		resp, err := proxy.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("mixCoord error", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		proxy.mixCoord = mockMixCoord
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
+
+		resp, err := proxy.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+}
+
+func TestProxy_ListFileResources(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		proxy.mixCoord = NewMixCoordMock()
+
+		req := &milvuspb.ListFileResourcesRequest{
+			Base: &commonpb.MsgBase{},
+		}
+
+		resp, err := proxy.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetResources())
+		assert.Equal(t, 0, len(resp.GetResources())) // Mock returns empty list
+	})
+
+	t.Run("proxy not healthy", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ListFileResourcesRequest{}
+		resp, err := proxy.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+	})
+
+	t.Run("mixCoord error", func(t *testing.T) {
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+
+		mockMixCoord := mocks.NewMockMixCoordClient(t)
+		mockMixCoord.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		proxy.mixCoord = mockMixCoord
+
+		req := &milvuspb.ListFileResourcesRequest{}
+		resp, err := proxy.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 }

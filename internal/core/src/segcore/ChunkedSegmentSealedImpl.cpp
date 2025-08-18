@@ -52,7 +52,7 @@
 #include "milvus-storage/common/metadata.h"
 #include "mmap/ChunkedColumn.h"
 #include "mmap/Types.h"
-#include "monitor/prometheus_client.h"
+#include "monitor/Monitor.h"
 #include "log/Log.h"
 #include "pb/schema.pb.h"
 #include "query/SearchOnSealed.h"
@@ -913,17 +913,18 @@ ChunkedSegmentSealedImpl::search_pk(const PkType& pk,
 void
 ChunkedSegmentSealedImpl::search_batch_pks(
     const std::vector<PkType>& pks,
-    const Timestamp* timestamps,
+    const std::function<Timestamp(const size_t idx)>& get_timestamp,
     bool include_same_ts,
     const std::function<void(const SegOffset offset, const Timestamp ts)>&
         callback) const {
     // handle unsorted case
     if (!is_sorted_by_pk_) {
         for (size_t i = 0; i < pks.size(); i++) {
-            auto offsets = insert_record_.search_pk(
-                pks[i], timestamps[i], include_same_ts);
+            auto timestamp = get_timestamp(i);
+            auto offsets =
+                insert_record_.search_pk(pks[i], timestamp, include_same_ts);
             for (auto offset : offsets) {
-                callback(offset, timestamps[i]);
+                callback(offset, timestamp);
             }
         }
         return;
@@ -953,7 +954,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                 for (size_t j = 0; j < pks.size(); j++) {
                     // get int64 pks
                     auto target = std::get<int64_t>(pks[j]);
-                    auto timestamp = timestamps[j];
+                    auto timestamp = get_timestamp(j);
                     auto it = std::lower_bound(
                         src,
                         src + chunk_row_num,
@@ -985,7 +986,7 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                 for (size_t j = 0; j < pks.size(); ++j) {
                     // get varchar pks
                     auto& target = std::get<std::string>(pks[j]);
-                    auto timestamp = timestamps[j];
+                    auto timestamp = get_timestamp(j);
                     auto offset = string_chunk->binary_search_string(target);
                     for (; offset != -1 && offset < string_chunk->RowNums() &&
                            string_chunk->operator[](offset) == target;
@@ -1139,7 +1140,11 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                  const Timestamp* timestamps,
                  std::function<void(const SegOffset offset, const Timestamp ts)>
                      callback) {
-              this->search_batch_pks(pks, timestamps, false, callback);
+              this->search_batch_pks(
+                  pks,
+                  [&](const size_t idx) { return timestamps[idx]; },
+                  false,
+                  callback);
           },
           segment_id) {
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
@@ -1749,7 +1754,7 @@ ChunkedSegmentSealedImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::vector<SegOffset>
 ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
                                      Timestamp timestamp) const {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
@@ -1760,37 +1765,16 @@ ChunkedSegmentSealedImpl::search_ids(const IdArray& id_array,
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    auto res_id_arr = std::make_unique<IdArray>();
     std::vector<SegOffset> res_offsets;
     res_offsets.reserve(pks.size());
-    for (auto& pk : pks) {
-        std::vector<SegOffset> pk_offsets;
-        if (!is_sorted_by_pk_) {
-            pk_offsets = insert_record_.search_pk(pk, timestamp);
-        } else {
-            pk_offsets = search_pk(pk, timestamp);
-        }
-        for (auto offset : pk_offsets) {
-            switch (data_type) {
-                case DataType::INT64: {
-                    res_id_arr->mutable_int_id()->add_data(
-                        std::get<int64_t>(pk));
-                    break;
-                }
-                case DataType::VARCHAR: {
-                    res_id_arr->mutable_str_id()->add_data(
-                        std::get<std::string>(std::move(pk)));
-                    break;
-                }
-                default: {
-                    ThrowInfo(DataTypeInvalid,
-                              fmt::format("unsupported type {}", data_type));
-                }
-            }
+    this->search_batch_pks(
+        pks,
+        [=](const size_t idx) { return timestamp; },
+        true,
+        [&](const SegOffset offset, const Timestamp ts) {
             res_offsets.push_back(offset);
-        }
-    }
-    return {std::move(res_id_arr), std::move(res_offsets)};
+        });
+    return std::move(res_offsets);
 }
 
 SegcoreError

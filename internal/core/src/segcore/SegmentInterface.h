@@ -445,7 +445,14 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;
 
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    /**
+     * search offset by possible pk values and mvcc timestamp
+     *
+     * @param id_array possible pk values
+     * @param timestamp mvcc timestamp 
+     * @return all the hit entries in vector of offsets
+     */
+    virtual std::vector<SegOffset>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
     /**

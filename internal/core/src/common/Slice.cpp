@@ -90,13 +90,17 @@ Disassemble(BinarySet& binarySet) {
 
     std::vector<std::string> slice_key_list;
     for (auto& kv : binarySet.binary_map_) {
-        if (kv.second->size > FILE_SLICE_SIZE) {
+        if (kv.second->size > FILE_SLICE_SIZE.load()) {
             slice_key_list.push_back(kv.first);
         }
     }
     for (auto& key : slice_key_list) {
         Config slice_i;
-        Slice(key, binarySet.Erase(key), FILE_SLICE_SIZE, binarySet, slice_i);
+        Slice(key,
+              binarySet.Erase(key),
+              FILE_SLICE_SIZE.load(),
+              binarySet,
+              slice_i);
         meta_info[META].emplace_back(slice_i);
     }
     if (!slice_key_list.empty()) {

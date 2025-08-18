@@ -8,6 +8,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import numpy as np
+import csv
 from pymilvus import Collection, utility
 from utils.utils import gen_collection_name
 from utils.util_log import test_log as logger
@@ -874,11 +875,8 @@ class TestCreateImportJob(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.skip("stats task will generate a new segment, "
-                      "using collectionID as prefix will import twice as much data")
     def test_job_import_binlog_file_type(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema, bucket_name, root_path):
-        # todo: copy binlog file to backup bucket
+                                                      is_partition_key, enable_dynamic_schema):
         """
         Insert a vector with a simple payload
         """
@@ -980,15 +978,19 @@ class TestCreateImportJob(TestBase):
         c = Collection(name)
         res = c.describe()
         collection_id = res["collection_id"]
+        # get binlog files
+        binlog_files = self.storage_client.get_collection_binlog(collection_id)
+        files = []
+        for file in binlog_files:
+            files.append([file, ""])
 
         # create import job
         payload = {
             "collectionName": restore_collection_name,
-            "files": [[f"/{root_path}/insert_log/{collection_id}/",
-                       # f"{bucket_name}/{root_path}/delta_log/{collection_id}/"
-                       ]],
+            "files": files,
             "options": {
-                "backup": "true"
+                "backup": "true",
+                "storage_version": "2"
             }
 
         }
@@ -1017,7 +1019,816 @@ class TestCreateImportJob(TestBase):
                     assert False, "import job timeout"
         time.sleep(10)
         c_restore = Collection(restore_collection_name)
-        assert c.num_entities == c_restore.num_entities
+        # since we import both original and sorted segments, the number of entities should be 2x
+        logger.info(f"c.num_entities: {c.num_entities}, c_restore.num_entities: {c_restore.num_entities}")
+        assert c.num_entities*2 == c_restore.num_entities
+
+    def test_import_json_with_nullable_fields(self):
+        """Test JSON import with nullable and default_value fields - fields should be auto-filled"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        default_int_value = 999
+        default_varchar_value = "default_text"
+        varchar_max_length = 256
+        required_field_base = 100
+        
+        # Create collection with nullable and default_value fields
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
+                    {"fieldName": "default_int", "dataType": "Int64", "defaultValue": default_int_value},
+                    {"fieldName": "nullable_varchar", "dataType": "VarChar", "elementTypeParams": {"max_length": str(varchar_max_length)}, "nullable": True},
+                    {"fieldName": "default_varchar", "dataType": "VarChar", "elementTypeParams": {"max_length": str(varchar_max_length)}, "defaultValue": default_varchar_value},
+                    {"fieldName": "required_field", "dataType": "Int64"}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create JSON data with missing nullable and default fields
+        data = []
+        for i in range(num_entities):
+            if i % 2 == 0:
+                # Missing nullable and default fields (should be auto-filled)
+                data.append({
+                    "id": i,
+                    "vector": [np.float32(random.random()) for _ in range(dim)],
+                    "required_field": required_field_base + i
+                })
+            else:
+                # Provide all fields explicitly
+                data.append({
+                    "id": i,
+                    "vector": [np.float32(random.random()) for _ in range(dim)],
+                    "nullable_int": 200 + i,
+                    "default_int": 300 + i,
+                    "nullable_varchar": f"provided_value_{i}",
+                    "default_varchar": f"custom_value_{i}",
+                    "required_field": required_field_base + i
+                })
+        
+        # Save to JSON file
+        file_name = f"test_nullable_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import the file
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import to complete
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+        
+        # Query and verify nullable/default fields were filled correctly
+        # Check even id (missing fields)
+        res = c.query(expr="id == 0", output_fields=["*"])
+        assert res[0]["nullable_int"] is None
+        assert res[0]["default_int"] == default_int_value
+        assert res[0]["nullable_varchar"] is None
+        assert res[0]["default_varchar"] == default_varchar_value
+        
+        # Check odd id (provided fields)
+        res = c.query(expr="id == 1", output_fields=["*"])
+        assert res[0]["nullable_int"] == 201
+        assert res[0]["default_int"] == 301
+        assert res[0]["nullable_varchar"] == "provided_value_1"
+        assert res[0]["default_varchar"] == "custom_value_1"
+
+    def test_import_json_with_function_output_field(self):
+        """Test JSON import with function output field - should fail with error"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        text_max_length = 256
+        
+        # Create collection with BM25 function output field
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": True,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length), "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "dense_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "dense_vector", "indexName": "dense_idx", "metricType": "L2"}
+            ]
+        }
+        
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create JSON data that includes the function output field
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "text": f"sample text for BM25 document {i}",
+                "sparse_vector": {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]},  # This should cause error
+                "dense_vector": [np.float32(random.random()) for _ in range(dim)]
+            })
+        
+        # Save to JSON file
+        file_name = f"test_function_output_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should fail
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait and verify import fails
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "output by function" in reason or "function" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for function output field"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_json_extra_fields_without_dynamic(self):
+        """Test JSON import with extra fields when dynamic field is disabled - should be ignored"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        title_max_length = 256
+        
+        # Create collection without dynamic field
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "title", "dataType": "VarChar", "elementTypeParams": {"max_length": str(title_max_length)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create JSON data with extra fields
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "vector": [np.float32(random.random()) for _ in range(dim)],
+                "title": f"Document {i}",
+                "extra_field1": f"ignored_value_{i}",
+                "extra_field2": 12345 + i,
+                "extra_field3": {"nested": f"data_{i}"},
+                "another_extra": [i, i+1, i+2]
+            })
+        
+        # Save to JSON file
+        file_name = f"test_extra_fields_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should succeed, ignoring extra fields
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import to complete
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data imported successfully
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+        
+        # Verify only defined fields exist (sample check)
+        res = c.query(expr="id in [0, 1, 2]", output_fields=["*"])
+        for item in res:
+            assert "id" in item
+            assert "title" in item
+            assert "extra_field1" not in item
+            assert "extra_field2" not in item
+            assert "another_extra" not in item
+
+    def test_import_csv_nullable_fields_missing_in_header(self):
+        """Test CSV import where nullable fields are missing from header - should succeed"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        text_max_length = 256
+        default_value = 100
+        
+        # Create collection with nullable fields
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "required_text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length)}},
+                    {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True},
+                    {"fieldName": "default_value", "dataType": "Int64", "defaultValue": default_value}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create CSV file without nullable and default_value columns
+        file_name = f"test_csv_nullable_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+        
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'vector', 'required_text']  # Missing nullable_int and default_value
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': i,
+                    'vector': vector_str,
+                    'required_text': f'text_{i}'
+                })
+        
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should succeed
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import to complete
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+        
+        # Verify nullable fields are null and default fields have default value
+        res = c.query(expr="id == 0", output_fields=["*"])
+        assert res[0]["nullable_int"] is None
+        assert res[0]["default_value"] == default_value
+
+    def test_import_csv_with_function_output_field(self):
+        """Test CSV import with function output field - should fail with error"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        text_max_length = 256
+        
+        # Create collection with BM25 function
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length), "enable_analyzer": True}},
+                    {"fieldName": "sparse_vector", "dataType": "SparseFloatVector"},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}}
+                ],
+                "functions": [
+                    {
+                        "name": "bm25_function",
+                        "type": "BM25",
+                        "inputFieldNames": ["text"],
+                        "outputFieldNames": ["sparse_vector"],
+                        "params": {}
+                    }
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_vector", "indexName": "sparse_idx", "metricType": "BM25"},
+                {"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}
+            ]
+        }
+        
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create CSV file that includes the function output field
+        file_name = f"test_csv_function_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+        
+        with open(file_path, 'w', newline='') as csvfile:
+            # Include sparse_vector which is a function output field
+            fieldnames = ['id', 'text', 'sparse_vector', 'vector']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': str(i),
+                    'text': f'sample document {i}',
+                    'sparse_vector': '{"indices": [1, 2], "values": [0.1, 0.2]}',  # This should cause error
+                    'vector': vector_str
+                })
+        
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should fail
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait and verify import fails
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "output by function" in reason or "function" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed for function output field in CSV"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_csv_default_value_with_nullkey(self):
+        """Test CSV import where default_value field has nullkey - should use default value"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        default_value = 999
+        
+        # Create collection with default_value field
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "default_int", "dataType": "Int64", "defaultValue": default_value},
+                    {"fieldName": "nullable_int", "dataType": "Int64", "nullable": True}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create CSV with nullkey for default_value field
+        file_name = f"test_csv_default_nullkey_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+        
+        with open(file_path, 'w', newline='') as csvfile:
+            fieldnames = ['id', 'vector', 'default_int', 'nullable_int']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            # Write rows with nullkey and provided values
+            for i in range(num_entities):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                if i % 2 == 0:
+                    # Use nullkey (empty string)
+                    writer.writerow({
+                        'id': str(i),
+                        'vector': vector_str,
+                        'default_int': '',  # Empty string as nullkey
+                        'nullable_int': ''
+                    })
+                else:
+                    # Provide explicit values
+                    writer.writerow({
+                        'id': str(i),
+                        'vector': vector_str,
+                        'default_int': str(123 + i),  # Provided value
+                        'nullable_int': str(456 + i)
+                    })
+        
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+        
+        # Verify default_value field uses default when nullkey, nullable field is null
+        res = c.query(expr="id == 0", output_fields=["*"])
+        assert res[0]["default_int"] == default_value  # Should use default value
+        assert res[0]["nullable_int"] is None  # Should be null
+        
+        res = c.query(expr="id == 1", output_fields=["*"])
+        assert res[0]["default_int"] == 124  # Should use provided value (123 + 1)
+        assert res[0]["nullable_int"] == 457  # Should use provided value (456 + 1)
+
+    def test_import_parquet_extra_fields_ignored(self):
+        """Test Parquet import with extra fields - should be ignored"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        text_max_length = 256
+        
+        # Create collection
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "text", "dataType": "VarChar", "elementTypeParams": {"max_length": str(text_max_length)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create DataFrame with extra columns
+        data = {
+            'id': list(range(num_entities)),
+            'vector': [[random.random() for _ in range(dim)] for _ in range(num_entities)],
+            'text': [f'text_{i}' for i in range(num_entities)],
+            'extra_column1': list(range(num_entities, num_entities * 2)),  # Extra column
+            'extra_column2': [f'extra_{i}' for i in range(num_entities)],  # Extra column
+            'extra_column3': [[i, i+1, i+2] for i in range(num_entities)]  # Extra column
+        }
+        df = pd.DataFrame(data)
+        
+        # Save to Parquet
+        file_name = f"test_parquet_extra_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        df.to_parquet(file_path, engine='pyarrow')
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should succeed, ignoring extra columns
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+        
+        # Verify only expected fields exist
+        res = c.query(expr="id >= 0", limit=1, output_fields=["*"])
+        assert "id" in res[0]
+        assert "text" in res[0]
+        assert "extra_column1" not in res[0]
+        assert "extra_column2" not in res[0]
+
+    def test_import_numpy_nullable_fields_without_files(self):
+        """Test Numpy import where nullable field files are missing - should succeed"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        default_value = 888
+        
+        # Create collection with nullable fields
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "required_field", "dataType": "Int64"},
+                    {"fieldName": "nullable_field", "dataType": "Int64", "nullable": True},
+                    {"fieldName": "default_field", "dataType": "Int64", "defaultValue": default_value}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create numpy files (excluding nullable and default fields)
+        file_dir = f"numpy_test_{uuid4()}"
+        base_path = f"/tmp/{file_dir}"
+        Path(base_path).mkdir(parents=True, exist_ok=True)
+        
+        # Only create files for required fields
+        np.save(f"{base_path}/id.npy", np.array(list(range(num_entities))))
+        np.save(f"{base_path}/vector.npy", np.random.random((num_entities, dim)).astype(np.float32))
+        np.save(f"{base_path}/required_field.npy", np.array(list(range(100, 100 + num_entities))))
+        # NOT creating nullable_field.npy and default_field.npy
+        
+        # Upload files
+        file_list = []
+        for field in ['id', 'vector', 'required_field']:
+            file_name = f"{file_dir}/{field}.npy"
+            self.storage_client.upload_file(f"{base_path}/{field}.npy", file_name)
+            file_list.append(file_name)
+        
+        # Import should succeed
+        payload = {
+            "collectionName": name,
+            "files": [file_list]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == num_entities
+        
+        # Verify nullable field is null and default field has default value
+        res = c.query(expr="id == 0", output_fields=["*"])
+        assert res[0]["nullable_field"] is None
+        assert res[0]["default_field"] == default_value
+
+    def test_import_json_array_varchar_max_length_validation(self):
+        """Test JSON import with Array<Varchar> field - should validate max_length"""
+        name = gen_collection_name()
+        dim = 128
+        num_entities = 3000
+        max_length = 10
+        max_capacity = 100
+        
+        # Create collection with Array<Varchar> field
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "varchar_array", "dataType": "Array", "elementDataType": "VarChar",
+                     "elementTypeParams": {"max_capacity": str(max_capacity), "max_length": str(max_length)}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create JSON data with varchar array exceeding max_length
+        data = []
+        for i in range(num_entities):
+            data.append({
+                "id": i,
+                "vector": [np.float32(random.random()) for _ in range(dim)],
+                "varchar_array": ["short", "also_ok", "this_string_is_way_too_long_for_limit"]  # Last one exceeds max_length
+            })
+        
+        # Save to JSON file
+        file_name = f"test_array_varchar_{uuid4()}.json"
+        file_path = f"/tmp/{file_name}"
+        with open(file_path, "w") as f:
+            json.dump(data, f, cls=NumpyEncoder)
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should fail due to max_length violation
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait and verify import fails
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                assert "max_length" in rsp['data'].get('reason', '').lower() or "length" in rsp['data'].get('reason', '').lower()
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to max_length violation"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    @pytest.mark.xfail(reason="issue https://github.com/milvus-io/milvus/issues/43819")
+    def test_import_parquet_array_float_nan_validation(self):
+        """Test Parquet import with Array<Float> containing NaN - should fail"""
+        name = gen_collection_name()
+        dim = 128
+        
+        # Create collection with Array<Float> field
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "float_array", "dataType": "Array", "elementDataType": "Float",
+                     "elementTypeParams": {"max_capacity": "100"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create DataFrame with NaN in float array
+        data = {
+            'id': [1, 2],
+            'vector': [[random.random() for _ in range(dim)] for _ in range(2)],
+            'float_array': [[1.0, 2.0, 3.0], [4.0, None, 6.0]]  # Second row has None
+        }
+        df = pd.DataFrame(data)
+        
+        # Save to Parquet
+        file_name = f"test_parquet_nan_{uuid4()}.parquet"
+        file_path = f"/tmp/{file_name}"
+        
+        # Create parquet schema with proper array type
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('vector', pa.list_(pa.float32())),
+            ('float_array', pa.list_(pa.float32()))
+        ])
+        table = pa.Table.from_pandas(df, schema=pa_schema)
+        logger.info(f"table: {table}")
+        pq.write_table(table, file_path)
+        
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should fail due to NaN
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait and verify import fails
+        finished = False
+        t0 = time.time()
+        while not finished:
+            rsp = self.import_job_client.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Failed":
+                reason = rsp['data'].get('reason', '').lower()
+                assert "nan" in reason or "infinite" in reason or "invalid" in reason
+                finished = True
+            elif rsp['data']['state'] == "Completed":
+                assert False, "Import should have failed due to NaN value"
+            time.sleep(5)
+            if time.time() - t0 > IMPORT_TIMEOUT:
+                assert False, "Import job timeout"
+
+    def test_import_csv_extra_columns_without_dynamic(self):
+        """Test CSV import with extra columns when dynamic field is disabled - should be ignored"""
+        name = gen_collection_name()
+        dim = 128
+        
+        # Create collection without dynamic field
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": False,
+                "enableDynamicField": False,
+                "fields": [
+                    {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                    {"fieldName": "vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                    {"fieldName": "name", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}}
+                ]
+            },
+            "indexParams": [{"fieldName": "vector", "indexName": "vector_idx", "metricType": "L2"}]
+        }
+        self.collection_client.collection_create(payload)
+        self.wait_load_completed(name)
+        
+        # Create CSV file with extra columns
+        file_name = f"test_csv_extra_{uuid4()}.csv"
+        file_path = f"/tmp/{file_name}"
+        
+        with open(file_path, 'w', newline='') as csvfile:
+            # Include extra columns that are not in schema
+            fieldnames = ['id', 'vector', 'name', 'extra_col1', 'extra_col2', 'extra_col3']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for i in range(20):
+                vector_str = '[' + ','.join([str(random.random()) for _ in range(dim)]) + ']'
+                writer.writerow({
+                    'id': i,
+                    'vector': vector_str,
+                    'name': f'name_{i}',
+                    'extra_col1': f'extra_value_{i}',
+                    'extra_col2': i * 100,
+                    'extra_col3': f'ignored_{i}'
+                })
+        
+        self.storage_client.upload_file(file_path, file_name)
+        
+        # Import should succeed, ignoring extra columns
+        payload = {
+            "collectionName": name,
+            "files": [[file_name]]
+        }
+        rsp = self.import_job_client.create_import_jobs(payload)
+        job_id = rsp['data']['jobId']
+        
+        # Wait for import to complete
+        res, result = self.import_job_client.wait_import_job_completed(job_id)
+        assert result, f"Import job failed: {res}"
+        
+        # Verify data imported successfully
+        c = Collection(name)
+        c.load(_refresh=True)
+        assert c.num_entities == 20
+        
+        # Verify only expected fields exist
+        res = c.query(expr="id == 0", output_fields=["*"])
+        assert "id" in res[0]
+        assert "name" in res[0]
+        assert "extra_col1" not in res[0]
+        assert "extra_col2" not in res[0]
 
 
 @pytest.mark.L2

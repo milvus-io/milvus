@@ -641,6 +641,11 @@ func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.Descr
 	return s.proxy.DescribeCollection(ctx, request)
 }
 
+// BatchDescribeCollection notifies Proxy to describe a collection
+func (s *Server) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
+	return s.proxy.BatchDescribeCollection(ctx, request)
+}
+
 // AddCollectionField add a field to collection
 func (s *Server) AddCollectionField(ctx context.Context, request *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error) {
 	return s.proxy.AddCollectionField(ctx, request)
@@ -1126,4 +1131,19 @@ func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.proxy.GetQuotaMetrics(ctx, req)
+}
+
+// AddFileResource add file resource
+func (s *Server) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.AddFileResource(ctx, req)
+}
+
+// RemoveFileResource remove file resource
+func (s *Server) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	return s.proxy.RemoveFileResource(ctx, req)
+}
+
+// ListFileResources list file resources
+func (s *Server) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	return s.proxy.ListFileResources(ctx, req)
 }

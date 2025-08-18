@@ -16,6 +16,17 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
+/*
+Info about scalar index
+TRIE: only support varchar
+STL_SORT: only support numeric (not include Array field)
+INVERTED: all supported except Json
+Bitmap: all supported except Json, float, double. (If Array field, according to its ElementType)
+ScalarAutoIndex: {"int_*": "HYBRID","varchar": "HYBRID","bool": "BITMAP", "float/double": "INVERTED"}
+	- except Json
+	- if Array field, according to its ElementType
+*/
+
 func TestIndexVectorDefault(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout*2)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)

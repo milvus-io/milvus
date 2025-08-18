@@ -27,7 +27,7 @@
 #include "common/FieldMeta.h"
 #include "common/Types.h"
 #include "mmap/ChunkedColumnGroup.h"
-#include "test_cachinglayer/cachinglayer_test_utils.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "storage/Event.h"
 #include "storage/Util.h"

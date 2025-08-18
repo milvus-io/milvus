@@ -120,6 +120,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	log.Info("received request to invalidate collection meta cache")
 
+	dbName := request.DbName
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
@@ -192,9 +193,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
-		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), collectionName)
+		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
-			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), alias)
+			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, alias)
 		}
 		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
 	} else if msgType == commonpb.MsgType_DropDatabase {
@@ -957,6 +958,40 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 	return interceptor.Call(ctx, request)
+}
+
+func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
+	collectionNames := request.GetCollectionName()
+	if len(collectionNames) == 0 {
+		return &milvuspb.BatchDescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg("collection names cannot be empty")),
+		}, nil
+	}
+
+	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(collectionNames))
+
+	for _, collectionName := range collectionNames {
+		describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
+			DbName:         request.GetDbName(),
+			CollectionName: collectionName,
+		}
+
+		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
+		// If there's an error, create a response with error status
+		if err != nil {
+			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{
+				Status:         merr.Status(err),
+				CollectionName: collectionName,
+			}
+		}
+
+		responses = append(responses, describeCollectionResponse)
+	}
+
+	return &milvuspb.BatchDescribeCollectionResponse{
+		Status:    merr.Success(),
+		Responses: responses,
+	}, nil
 }
 
 // AddCollectionField add a field to collection
@@ -2591,6 +2626,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.InsertLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
@@ -2696,7 +2732,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.
-		WithLabelValues(nodeID, metrics.InsertLabel, collectionName).
+		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return it.result, nil
 }
@@ -2719,6 +2755,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.DeleteLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -2797,7 +2834,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dr.result, nil
 }
 
@@ -2826,6 +2863,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.UpsertLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
@@ -2940,7 +2978,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	log.Debug("Finish processing upsert request in Proxy")
 	return it.result, nil
@@ -2978,6 +3016,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
+				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
 			// result size still insufficient
@@ -2985,6 +3024,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
 					metrics.SearchLabel,
+					request.GetDbName(),
 					request.GetCollectionName(),
 				).Inc()
 			}
@@ -2999,6 +3039,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
+				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
 			if merr.Ok(rspGT.GetStatus()) {
@@ -3023,11 +3064,13 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.SearchLabel,
+		request.GetDbName(),
 		request.GetCollectionName(),
 	).Add(float64(request.GetNq()))
 
@@ -3204,6 +3247,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	metrics.ProxyCollectionSQLatency.WithLabelValues(
 		nodeID,
 		metrics.SearchLabel,
+		dbName,
 		collectionName,
 	).Observe(float64(searchDur))
 
@@ -3243,6 +3287,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
+				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
 			// result size still insufficient
@@ -3250,6 +3295,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 				metrics.ProxyRetrySearchResultInsufficientCount.WithLabelValues(
 					strconv.FormatInt(paramtable.GetNodeID(), 10),
 					metrics.HybridSearchLabel,
+					request.GetDbName(),
 					request.GetCollectionName(),
 				).Inc()
 			}
@@ -3284,6 +3330,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -3438,6 +3485,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	metrics.ProxyCollectionSQLatency.WithLabelValues(
 		nodeID,
 		metrics.HybridSearchLabel,
+		dbName,
 		collectionName,
 	).Observe(float64(searchDur))
 
@@ -3699,6 +3747,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		metrics.ProxyCollectionSQLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			metrics.QueryLabel,
+			request.DbName,
 			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
@@ -3729,10 +3778,12 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.QueryLabel).
+		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 	metrics.ProxyReceivedNQ.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.QueryLabel,
+		request.GetDbName(),
 		request.GetCollectionName(),
 	).Add(float64(1))
 
@@ -4244,8 +4295,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		SegmentIDs: getSegmentsByStatesResponse.Segments,
 	})
 	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		log.Warn("GetPersistentSegmentInfo fail",
 			zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -4253,8 +4303,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	}
 	err = merr.Error(infoResp.GetStatus())
 	if err != nil {
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -4274,8 +4323,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			StorageVersion: info.GetStorageVersion(),
 		}
 	}
-	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-		metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, req.GetDbName(), req.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
 	return resp, nil
@@ -6857,4 +6905,96 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	log.Info("GetQuotaMetrics success", zap.String("metrics", metricsResp.GetMetricsInfo()))
 
 	return metricsResp, nil
+}
+
+// AddFileResource add file resource to rootcoord
+func (node *Proxy) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourceRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AddFileResource")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("name", req.GetName()),
+		zap.String("path", req.GetPath()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive AddFileResource request")
+
+	status, err := node.mixCoord.AddFileResource(ctx, req)
+	if err != nil {
+		log.Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if err = merr.Error(status); err != nil {
+		log.Warn("AddFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("AddFileResource success")
+	return status, nil
+}
+
+// RemoveFileResource remove file resource from rootcoord
+func (node *Proxy) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileResourceRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RemoveFileResource")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("name", req.GetName()))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log.Info("receive RemoveFileResource request")
+
+	status, err := node.mixCoord.RemoveFileResource(ctx, req)
+	if err != nil {
+		log.Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	if err = merr.Error(status); err != nil {
+		log.Warn("RemoveFileResource fail", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	log.Info("RemoveFileResource success")
+	return status, nil
+}
+
+// ListFileResources list file resources from rootcoord
+func (node *Proxy) ListFileResources(ctx context.Context, req *milvuspb.ListFileResourcesRequest) (*milvuspb.ListFileResourcesResponse, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListFileResources")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(zap.String("role", typeutil.ProxyRole))
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("receive ListFileResources request")
+
+	resp, err := node.mixCoord.ListFileResources(ctx, req)
+	if err != nil {
+		log.Warn("ListFileResources fail", zap.Error(err))
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if err = merr.Error(resp.GetStatus()); err != nil {
+		log.Warn("ListFileResources fail", zap.Error(err))
+		return &milvuspb.ListFileResourcesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	log.Info("ListFileResources success", zap.Int("count", len(resp.GetResources())))
+	return resp, nil
 }

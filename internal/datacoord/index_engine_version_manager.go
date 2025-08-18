@@ -3,6 +3,7 @@ package datacoord
 import (
 	"math"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -43,6 +44,18 @@ func (m *versionManagerImpl) Startup(sessions map[string]*sessionutil.Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	sessionMap := lo.MapKeys(sessions, func(session *sessionutil.Session, _ string) int64 {
+		return session.ServerID
+	})
+
+	// clean offline nodes
+	for sessionID := range m.versions {
+		if _, ok := sessionMap[sessionID]; !ok {
+			m.removeNodeByID(sessionID)
+		}
+	}
+
+	// deal with new online nodes
 	for _, session := range sessions {
 		m.addOrUpdate(session)
 	}
@@ -59,9 +72,13 @@ func (m *versionManagerImpl) RemoveNode(session *sessionutil.Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	delete(m.versions, session.ServerID)
-	delete(m.scalarIndexVersions, session.ServerID)
-	delete(m.indexNonEncoding, session.ServerID)
+	m.removeNodeByID(session.ServerID)
+}
+
+func (m *versionManagerImpl) removeNodeByID(sessionID int64) {
+	delete(m.versions, sessionID)
+	delete(m.scalarIndexVersions, sessionID)
+	delete(m.indexNonEncoding, sessionID)
 }
 
 func (m *versionManagerImpl) Update(session *sessionutil.Session) {

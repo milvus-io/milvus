@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -28,6 +30,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
@@ -1999,5 +2002,312 @@ func TestFlushAll(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
+func TestServer_AddFileResource(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.MatchedBy(func(resource *model.FileResource) bool {
+			return resource.Name == "test_resource" && resource.Path == "/path/to/resource"
+		})).Return(nil)
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("allocator error", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 0, fmt.Errorf("mock error") }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("catalog save error", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		mockCatalog.EXPECT().SaveFileResource(mock.Anything, mock.Anything).Return(errors.New("catalog error"))
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("resource already exists", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+		mockAllocator := tso.NewMockAllocator()
+		mockAllocator.GenerateTSOF = func(count uint32) (uint64, error) { return 100, nil }
+
+		existingResource := &model.FileResource{
+			ID:   1,
+			Name: "test_resource",
+			Path: "/existing/path",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			idAllocator: globalIDAllocator.NewTestGlobalIDAllocator(mockAllocator),
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"test_resource": existingResource,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.AddFileResourceRequest{
+			Name: "test_resource",
+			Path: "/path/to/resource",
+		}
+
+		resp, err := server.AddFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+		assert.Contains(t, resp.GetReason(), "resource name exist")
+	})
+}
+
+func TestServer_RemoveFileResource(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		existingResource := &model.FileResource{
+			ID:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"test_resource": existingResource,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Base: &commonpb.MsgBase{},
+			Name: "test_resource",
+		}
+
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1)).Return(nil)
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp))
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+
+	t.Run("resource not found", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "non_existent_resource",
+		}
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp)) // Should succeed even if resource doesn't exist
+	})
+
+	t.Run("catalog remove error", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		existingResource := &model.FileResource{
+			ID:   1,
+			Name: "test_resource",
+			Path: "/path/to/resource",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"test_resource": existingResource,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.RemoveFileResourceRequest{
+			Name: "test_resource",
+		}
+
+		mockCatalog.EXPECT().RemoveFileResource(mock.Anything, int64(1)).Return(errors.New("catalog error"))
+
+		resp, err := server.RemoveFileResource(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp))
+	})
+}
+
+func TestServer_ListFileResources(t *testing.T) {
+	t.Run("success with empty list", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: make(map[string]*model.FileResource),
+				catalog:      mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.ListFileResourcesRequest{
+			Base: &commonpb.MsgBase{},
+		}
+
+		resp, err := server.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetResources())
+		assert.Equal(t, 0, len(resp.GetResources()))
+	})
+
+	t.Run("success with resources", func(t *testing.T) {
+		mockCatalog := mocks.NewDataCoordCatalog(t)
+
+		resource1 := &model.FileResource{
+			ID:   1,
+			Name: "resource1",
+			Path: "/path/to/resource1",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+		resource2 := &model.FileResource{
+			ID:   2,
+			Name: "resource2",
+			Path: "/path/to/resource2",
+			Type: commonpb.FileResourceType_ANALYZER_DICTIONARY,
+		}
+
+		server := &Server{
+			meta: &meta{
+				resourceMeta: map[string]*model.FileResource{
+					"resource1": resource1,
+					"resource2": resource2,
+				},
+				catalog: mockCatalog,
+			},
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		req := &milvuspb.ListFileResourcesRequest{}
+
+		resp, err := server.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.NotNil(t, resp.GetResources())
+		assert.Equal(t, 2, len(resp.GetResources()))
+
+		// Check that both resources are returned
+		resourceNames := make(map[string]bool)
+		for _, resource := range resp.GetResources() {
+			resourceNames[resource.GetName()] = true
+		}
+		assert.True(t, resourceNames["resource1"])
+		assert.True(t, resourceNames["resource2"])
+	})
+
+	t.Run("server not healthy", func(t *testing.T) {
+		server := &Server{}
+		server.stateCode.Store(commonpb.StateCode_Abnormal)
+
+		req := &milvuspb.ListFileResourcesRequest{}
+
+		resp, err := server.ListFileResources(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 }

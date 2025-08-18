@@ -17,6 +17,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "common/common_type_c.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,14 +32,6 @@ enum SegmentType {
 };
 
 typedef enum SegmentType SegmentType;
-
-enum CacheWarmupPolicy {
-    CacheWarmupPolicy_Disable = 0,
-    CacheWarmupPolicy_Sync = 1,
-};
-
-typedef enum CacheWarmupPolicy CacheWarmupPolicy;
-
 // pure C don't support that we use schemapb.DataType directly.
 // Note: the value of all enumerations must match the corresponding schemapb.DataType.
 // TODO: what if there are increments in schemapb.DataType.
@@ -67,11 +60,6 @@ enum CDataType {
 typedef enum CDataType CDataType;
 
 typedef void* CSegmentInterface;
-
-typedef struct CStatus {
-    int error_code;
-    const char* error_msg;
-} CStatus;
 
 typedef struct CProto {
     const void* proto_blob;

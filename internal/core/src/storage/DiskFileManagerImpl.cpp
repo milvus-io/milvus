@@ -47,6 +47,9 @@
 #include "storage/Util.h"
 #include "storage/FileWriter.h"
 
+#include "storage/RemoteOutputStream.h"
+#include "storage/RemoteInputStream.h"
+
 namespace milvus::storage {
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
@@ -74,6 +77,12 @@ DiskFileManagerImpl::GetRemoteIndexPath(const std::string& file_name,
     std::string remote_prefix;
     remote_prefix = GetRemoteIndexObjectPrefix();
     return remote_prefix + "/" + file_name + "_" + std::to_string(slice_num);
+}
+
+std::string
+DiskFileManagerImpl::GetRemoteIndexPathV2(const std::string& file_name) const {
+    std::string remote_prefix = GetRemoteIndexFilePrefixV2();
+    return remote_prefix + "/" + file_name;
 }
 
 std::string
@@ -128,7 +137,8 @@ DiskFileManagerImpl::AddFileInternal(
             local_file_offsets.clear();
         }
 
-        auto batch_size = std::min(FILE_SLICE_SIZE, int64_t(fileSize) - offset);
+        auto batch_size =
+            std::min(FILE_SLICE_SIZE.load(), int64_t(fileSize) - offset);
         batch_remote_files.emplace_back(get_remote_path(fileName, slice_num));
         remote_file_sizes.emplace_back(batch_size);
         local_file_offsets.emplace_back(offset);
@@ -144,12 +154,53 @@ DiskFileManagerImpl::AddFileInternal(
     return true;
 }  // namespace knowhere
 
+std::shared_ptr<InputStream>
+DiskFileManagerImpl::OpenInputStream(const std::string& filename) {
+    auto local_file_name = GetFileName(filename);
+    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    auto remote_file = fs->OpenInputFile(remote_file_path);
+    AssertInfo(remote_file.ok(), "failed to open remote file");
+    return std::static_pointer_cast<milvus::InputStream>(
+        std::make_shared<milvus::storage::RemoteInputStream>(
+            std::move(remote_file.ValueOrDie())));
+}
+
+std::shared_ptr<OutputStream>
+DiskFileManagerImpl::OpenOutputStream(const std::string& filename) {
+    auto local_file_name = GetFileName(filename);
+    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    auto fs = milvus_storage::ArrowFileSystemSingleton::GetInstance()
+                  .GetArrowFileSystem();
+
+    auto remote_stream = fs->OpenOutputStream(remote_file_path);
+    AssertInfo(remote_stream.ok(),
+               "failed to open remote stream, reason: {}",
+               remote_stream.status().ToString());
+
+    return std::make_shared<milvus::storage::RemoteOutputStream>(
+        std::move(remote_stream.ValueOrDie()));
+}
+
 bool
 DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     return AddFileInternal(file,
                            [this](const std::string& file_name, int slice_num) {
                                return GetRemoteIndexPath(file_name, slice_num);
                            });
+}
+
+bool
+DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
+    auto local_file_name = GetFileName(file_meta.file_path);
+    auto remote_file_path = GetRemoteIndexPathV2(local_file_name);
+
+    remote_paths_to_size_[remote_file_path] = file_meta.file_size;
+    return true;
 }
 
 bool
@@ -258,7 +309,7 @@ DiskFileManagerImpl::CacheIndexToDiskInternal(
         batch_remote_files.reserve(slices.second.size());
 
         uint64_t max_parallel_degree =
-            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
+            uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE.load());
 
         {
             auto file_writer = storage::FileWriter(local_index_file_name);
@@ -881,5 +932,10 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(const Config& config);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bin1>(const Config& config);
+
+std::string
+DiskFileManagerImpl::GetRemoteIndexFilePrefixV2() const {
+    return FileManagerImpl::GetRemoteIndexFilePrefixV2();
+}
 
 }  // namespace milvus::storage

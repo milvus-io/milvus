@@ -46,10 +46,14 @@ TEST(CPackedTest, PackedWriterAndReader) {
                       false,
                       arrow::key_value_metadata(
                           {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
+    auto origin_schema = arrow::schema({schema->fields()[0]->Copy()});
     auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
 
     struct ArrowSchema c_write_schema;
     ASSERT_TRUE(arrow::ExportSchema(*schema, &c_write_schema).ok());
+
+    struct ArrowSchema c_origin_schema;
+    ASSERT_TRUE(arrow::ExportSchema(*origin_schema, &c_origin_schema).ok());
 
     const int64_t buffer_size = 10 * 1024 * 1024;
     char* path = const_cast<char*>("/tmp");
@@ -77,7 +81,10 @@ TEST(CPackedTest, PackedWriterAndReader) {
     struct ArrowSchema cschema;
     ASSERT_TRUE(arrow::ExportRecordBatch(*batch, &carray, &cschema).ok());
 
-    c_status = WriteRecordBatch(c_packed_writer, &carray, &cschema);
+    struct ArrowArray arrays[] = {carray};
+    struct ArrowSchema array_schemas[] = {cschema};
+
+    c_status = WriteRecordBatch(c_packed_writer, arrays, array_schemas, &c_origin_schema);
     EXPECT_EQ(c_status.error_code, 0);
 
     c_status = CloseWriter(c_packed_writer);

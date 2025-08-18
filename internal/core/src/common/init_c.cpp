@@ -18,89 +18,65 @@
 #include "common/init_c.h"
 #include "common/Common.h"
 #include "common/Tracer.h"
+#include "storage/ThreadPool.h"
+#include "log/Log.h"
 
-std::once_flag flag1, flag2, flag3, flag4, flag5, flag6, flag7, flag8, flag9,
-    flag10;
 std::once_flag traceFlag;
-
-void
-InitIndexSliceSize(const int64_t size) {
-    std::call_once(
-        flag1, [](int64_t size) { milvus::SetIndexSliceSize(size); }, size);
-}
-
-void
-InitHighPriorityThreadCoreCoefficient(const float value) {
-    std::call_once(
-        flag2,
-        [](float value) {
-            milvus::SetHighPriorityThreadCoreCoefficient(value);
-        },
-        value);
-}
-
-void
-InitMiddlePriorityThreadCoreCoefficient(const float value) {
-    std::call_once(
-        flag4,
-        [](float value) {
-            milvus::SetMiddlePriorityThreadCoreCoefficient(value);
-        },
-        value);
-}
-
-void
-InitLowPriorityThreadCoreCoefficient(const float value) {
-    std::call_once(
-        flag5,
-        [](float value) { milvus::SetLowPriorityThreadCoreCoefficient(value); },
-        value);
-}
+std::once_flag cpuNumFlag;
 
 void
 InitCpuNum(const int value) {
-    std::call_once(
-        flag3, [](int value) { milvus::SetCpuNum(value); }, value);
+    std::call_once(cpuNumFlag, [value]() { milvus::InitCpuNum(value); });
 }
 
 void
-InitDefaultExprEvalBatchSize(int64_t val) {
-    std::call_once(
-        flag6,
-        [](int val) { milvus::SetDefaultExecEvalExprBatchSize(val); },
-        val);
+SetIndexSliceSize(const int64_t size) {
+    milvus::SetIndexSliceSize(size);
 }
 
 void
-InitDefaultOptimizeExprEnable(bool val) {
-    std::call_once(
-        flag7,
-        [](bool val) { milvus::SetDefaultOptimizeExprEnable(val); },
-        val);
+SetHighPriorityThreadCoreCoefficient(const float value) {
+    milvus::SetHighPriorityThreadCoreCoefficient(value);
 }
 
 void
-InitDefaultJSONKeyStatsCommitInterval(int64_t val) {
-    std::call_once(
-        flag8,
-        [](int val) { milvus::SetDefaultJSONKeyStatsCommitInterval(val); },
-        val);
+SetMiddlePriorityThreadCoreCoefficient(const float value) {
+    milvus::SetMiddlePriorityThreadCoreCoefficient(value);
 }
 
 void
-InitDefaultGrowingJSONKeyStatsEnable(bool val) {
-    std::call_once(
-        flag9,
-        [](bool val) { milvus::SetDefaultGrowingJSONKeyStatsEnable(val); },
-        val);
+SetLowPriorityThreadCoreCoefficient(const float value) {
+    milvus::SetLowPriorityThreadCoreCoefficient(value);
 }
 
 void
-InitDefaultConfigParamTypeCheck(bool val) {
-    std::call_once(
-        flag10,
-        [](bool val) { milvus::SetDefaultConfigParamTypeCheck(val); },
-        val);
+SetDefaultExprEvalBatchSize(int64_t val) {
+    milvus::SetDefaultExecEvalExprBatchSize(val);
+}
+
+void
+SetDefaultOptimizeExprEnable(bool val) {
+    milvus::SetDefaultOptimizeExprEnable(val);
+}
+
+void
+SetDefaultJSONKeyStatsCommitInterval(int64_t val) {
+    milvus::SetDefaultJSONKeyStatsCommitInterval(val);
+}
+
+void
+SetDefaultGrowingJSONKeyStatsEnable(bool val) {
+    milvus::SetDefaultGrowingJSONKeyStatsEnable(val);
+}
+
+void
+SetDefaultConfigParamTypeCheck(bool val) {
+    milvus::SetDefaultConfigParamTypeCheck(val);
+}
+
+void
+SetLogLevel(const char* level) {
+    milvus::SetLogLevel(level);
 }
 
 void
