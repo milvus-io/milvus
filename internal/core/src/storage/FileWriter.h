@@ -82,8 +82,8 @@ class WriteRateLimiter {
                       max_burst_bps);
         }
         std::unique_lock<std::mutex> lock(mutex_);
-        // avoid too small refill period, 10us is used as the minimum refill period
-        refill_period_us_ = std::max<int64_t>(10, refill_period_us);
+        // avoid too small refill period, 1ms is used as the minimum refill period
+        refill_period_us_ = std::max<int64_t>(1000, refill_period_us);
         refill_bytes_per_period_ = avg_bps * refill_period_us_ / 1000000;
         if (refill_bytes_per_period_ <= 0) {
             refill_bytes_per_period_ = 1;
@@ -182,6 +182,11 @@ class WriteRateLimiter {
         return refill_period_us_;
     }
 
+    size_t
+    GetBytesPerPeriod() const {
+        return refill_bytes_per_period_;
+    }
+
     void
     Reset() {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -198,9 +203,12 @@ class WriteRateLimiter {
  private:
     WriteRateLimiter() = default;
 
-    int64_t refill_period_us_ = 100000;       // 100ms
-    int64_t refill_bytes_per_period_ = 1024;  // 1KB
-    int32_t expire_periods_ = 10;             // 10 periods
+    // Set the default rate limit to a valid, reasonable value.
+    // These values should always be overridden by the yaml configuration, but
+    // if not, the default can still serve as a reasonable "no-limit" fallback.
+    int64_t refill_period_us_ = 100000;                       // 100ms
+    int64_t refill_bytes_per_period_ = 1024ll * 1024 * 1024;  // 1GB
+    int32_t expire_periods_ = 10;                             // 10 periods
     std::chrono::steady_clock::time_point last_refill_time_ =
         std::chrono::steady_clock::now();
     size_t available_bytes_ = 0;
