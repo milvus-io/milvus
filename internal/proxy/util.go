@@ -2726,3 +2726,22 @@ func hasTimestamptzField(schema *schemapb.CollectionSchema) bool {
 	}
 	return false
 }
+func getDefaultTimezoneVal(props ...*commonpb.KeyValuePair) (bool, string) {
+	for _, p := range props {
+		if p.GetKey() == common.DatabaseDefaultTimezone || p.GetKey() == common.CollectionDefaultTimezone{
+			return true, p.Value
+		}
+	}
+	return false, ""
+}
+
+func checkTimezone(props ...*commonpb.KeyValuePair) error {
+	has_timezone, timezone_str := getDefaultTimezoneVal(props...)
+	if has_timezone {
+		_, err := time.LoadLocation(timezone_str)
+		if err != nil {
+				return merr.WrapErrParameterInvalidMsg("invalid timezone, should be a IANA timezone name: %s", err.Error())
+			}
+		}
+		return nil
+}
