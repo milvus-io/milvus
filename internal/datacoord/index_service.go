@@ -879,11 +879,8 @@ func isCollectionLoaded(ctx context.Context, mc types.MixCoord, collID int64) (b
 	resp, err := mc.ShowLoadCollections(ctx, &querypb.ShowCollectionsRequest{
 		CollectionIDs: []int64{collID},
 	})
-	if err != nil {
+	if merr.CheckRPCCall(resp, err) != nil {
 		return false, err
-	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return false, merr.Error(resp.GetStatus())
 	}
 
 	for _, loadedCollID := range resp.GetCollectionIDs() {
