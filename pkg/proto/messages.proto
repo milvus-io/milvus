@@ -6,6 +6,10 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/messagespb";
 
 import "schema.proto";
 import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not be in datacoord.proto.
+import "internal.proto";
+import "milvus.proto";
+import "common.proto";
+import "rg.proto";
 
 // MessageID is the unique identifier of a message.
 message MessageID {
@@ -27,19 +31,42 @@ message ImmutableMessage {
 
 // MessageType is the type of message.
 enum MessageType {
-    Unknown          = 0;
-    TimeTick         = 1;
-    Insert           = 2;
-    Delete           = 3;
-    Flush            = 4;
-    CreateCollection = 5;
-    DropCollection   = 6;
-    CreatePartition  = 7;
-    DropPartition    = 8;
-    ManualFlush      = 9;
-    CreateSegment    = 10;
-    Import           = 11;
-    SchemaChange     = 12;
+    Unknown              = 0;
+    TimeTick             = 1;
+    Insert               = 2;
+    Delete               = 3;
+    Flush                = 4;
+    CreateCollection     = 5;
+    DropCollection       = 6;
+    CreatePartition      = 7;
+    DropPartition        = 8;
+    ManualFlush          = 9;
+    CreateSegment        = 10;
+    Import               = 11;
+    SchemaChange         = 12;
+    PutCollection        = 13;
+    PutLoadConfig        = 14;
+    DropLoadConfig       = 15;
+    CreateDatabase       = 16;
+    PutDatabase          = 17;
+    DropDatabase         = 18;
+    PutAlias             = 19;
+    DropAlias            = 20;
+    CreateUser           = 21;
+    PutUser              = 22;
+    DropUser             = 23;
+    CreateRole           = 24;
+    PutRole              = 25;
+    DropRole             = 26;
+    PutUserRole          = 27;
+    DropUserRole         = 28;
+    GrantPrivilege       = 29;
+    RevokePrivilege      = 30;
+    PutPrivilegeGroup    = 31;
+    DropPrivilegeGroup   = 32;
+    PutResourceGroup     = 33;
+    DropResourceGroup    = 34;
+
     // begin transaction message is only used for transaction, once a begin
     // transaction message is received, all messages combined with the
     // transaction message cannot be consumed until a CommitTxn message
@@ -221,6 +248,201 @@ message SchemaChangeMessageHeader{
 // SchemaChangeMessageBody is the body of CollectionSchema update message.
 message SchemaChangeMessageBody{
     schema.CollectionSchema schema = 1;
+}
+
+// PutCollectionMessageHeader is the header of put collection message.
+message PutCollectionMessageHeader {
+    int64 db_id                  = 1;
+    int64 collection_id          = 2;
+}
+
+// PutCollectionMessageBody is the body of put collection message.
+message PutCollectionMessageBody {
+    common.KeyValuePair properties = 1;
+}
+
+// PutLoadConfigMessageHeader is the header of put load config message.
+message PutLoadConfigMessageHeader {
+}
+
+// PutLoadConfigMessageBody is the body of put load config message.
+message PutLoadConfigMessageBody {
+}
+
+// CreateDatabaseMessageHeader is the header of create database message.
+message CreateDatabaseMessageHeader {
+    string db_name = 1;
+    int64 db_id = 2;
+}
+
+// CreateDatabaseMessageBody is the body of create database message.
+message CreateDatabaseMessageBody {
+    common.KeyValuePair properties = 1;
+}
+
+// PutDatabaseMessageHeader is the header of put database message.
+message PutDatabaseMessageHeader {
+    string db_name = 1;
+    int64 db_id = 2;
+}
+
+// PutDatabaseMessageBody is the body of put database message.
+message PutDatabaseMessageBody {
+    common.KeyValuePair properties = 1;
+}
+
+// DropDatabaseMessageHeader is the header of drop database message.
+message DropDatabaseMessageHeader {
+    string db_name = 1;
+    int64 db_id = 2;
+}
+
+// DropDatabaseMessageBody is the body of drop database message.
+message DropDatabaseMessageBody {}
+
+// PutAliasMessageHeader is the header of put alias message.
+message PutAliasMessageHeader {
+    int64 db_id = 1;
+    string db_name = 2;
+    int64 collection_id = 3;
+    string collection_name = 4;
+    string alias = 5;
+}
+
+// PutAliasMessageBody is the body of put alias message.
+message PutAliasMessageBody {}
+
+// DropAliasMessageHeader is the header of drop alias message.
+message DropAliasMessageHeader {
+    int64 db_id = 1;
+    string db_name = 2;
+    string alias = 3;
+}
+
+// DropAliasMessageBody is the body of drop alias message.
+message DropAliasMessageBody {}
+
+message CreateUserMessageHeader {
+    milvus.UserEntity user_entity = 1;
+}
+
+message CreateUserMessageBody {
+    internal.CredentialInfo credential_info = 1;
+}
+
+// PutUserMessageHeader is the header of put user message.
+message PutUserMessageHeader {
+    milvus.UserEntity user_entity = 1;
+}
+
+// PutUserMessageBody is the body of put user message.
+message PutUserMessageBody {
+    internal.CredentialInfo credential_info = 1;
+}
+
+// DropUserMessageHeader is the header of drop user message.
+message DropUserMessageHeader {
+    string user_name = 1;
+}
+
+// DropUserMessageBody is the body of drop user message.
+message DropUserMessageBody {}
+
+message CreateRoleMessageHeader {
+    milvus.RoleEntity role_entity = 1;
+}
+
+message CreateRoleMessageBody {
+}
+
+// PutRoleMessageHeader is the header of put role message.
+message PutRoleMessageHeader {
+    milvus.RoleEntity role_entity = 1;
+}
+
+// PutRoleMessageBody is the body of put role message.
+message PutRoleMessageBody {
+}
+
+// DropRoleMessageHeader is the header of drop role message.
+message DropRoleMessageHeader {
+    string role_name = 1;
+}
+
+// DropRoleMessageBody is the body of drop role message.
+message DropRoleMessageBody {} 
+
+// RoleBinding is the binding of user and role.
+message RoleBinding {
+    milvus.UserEntity user_entity = 1;
+    milvus.RoleEntity role_entity = 2;
+}
+
+// PutUserRoleMessageHeader is the header of put user role message.
+message PutUserRoleMessageHeader {
+    RoleBinding role_binding = 1; // TODO: support multiple role and user bindings in future.
+}
+
+// PutUserRoleMessageBody is the body of put user role message.
+message PutUserRoleMessageBody {}
+
+// DropUserRoleMessageHeader is the header of drop user role message.
+message DropUserRoleMessageHeader {
+    RoleBinding role_binding = 1; // TODO: support multiple role and user bindings in future.
+}
+
+// DropUserRoleMessageBody is the body of drop user role message.
+message DropUserRoleMessageBody {}
+
+// GrantPrivilegeMessageHeader is the header of grant privilege message.
+message GrantPrivilegeMessageHeader {
+    milvus.GrantEntity entity = 1;
+}
+
+// GrantPrivilegeMessageBody is the body of grant privilege message.
+message GrantPrivilegeMessageBody {
+}
+
+// RevokePrivilegeMessageHeader is the header of revoke privilege message.
+message RevokePrivilegeMessageHeader {
+    milvus.GrantEntity entity = 1;
+}
+
+// RevokePrivilegeMessageBody is the body of revoke privilege message.
+message RevokePrivilegeMessageBody {} 
+
+// PutPrivilegeGroupMessageHeader is the header of put privilege group message.
+message PutPrivilegeGroupMessageHeader {
+    milvus.PrivilegeGroupInfo privilege_group_info = 1;
+}
+
+// PutPrivilegeGroupMessageBody is the body of put privilege group message.
+message PutPrivilegeGroupMessageBody {}
+
+// DropPrivilegeGroupMessageHeader is the header of drop privilege group message.
+message DropPrivilegeGroupMessageHeader {
+    string privilege_group_name = 1;
+}
+
+// DropPrivilegeGroupMessageBody is the body of drop privilege group message.
+message DropPrivilegeGroupMessageBody {}
+
+// PutResourceGroupMessageHeader is the header of put resource group message.
+message PutResourceGroupMessageHeader {
+    string resource_group_name = 1;
+    rg.ResourceGroupConfig resource_group_config = 2;
+}
+
+// PutResourceGroupMessageBody is the body of put resource group message.
+message PutResourceGroupMessageBody {}
+
+// DropResourceGroupMessageHeader is the header of drop resource group message.
+message DropResourceGroupMessageHeader {
+    string resource_group_name = 1;
+}
+
+// DropResourceGroupMessageBody is the body of drop resource group message.
+message DropResourceGroupMessageBody {
 }
 
 ///

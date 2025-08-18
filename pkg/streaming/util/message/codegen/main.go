@@ -227,8 +227,13 @@ func (g *Generator) exportTypes() {
 	g.File.Const().Id("MessageTypeUnknown").
 		Qual(messagePackage, "MessageType").Op("=").Qual(messagePackage, "MessageType").
 		Call(jen.Qual(g.getPackagePath("messagespb"), "MessageType_Unknown"))
+	dedupMsgTypeName := make(map[string]struct{})
 	for _, info := range g.Config.MessageReflectInfoTable {
 		msgTypeName := getMessageTypeName(info.MessageTypeWithVersion.MessageType)
+		if _, ok := dedupMsgTypeName[msgTypeName]; ok {
+			continue
+		}
+		dedupMsgTypeName[msgTypeName] = struct{}{}
 		g.File.Const().Id(info.MessageTypeWithVersion.MessageType).
 			Qual(messagePackage, "MessageType").Op("=").Qual(messagePackage, "MessageType").
 			Call(jen.Qual(g.getPackagePath("messagespb"), "MessageType_"+msgTypeName))
@@ -245,13 +250,21 @@ func (g *Generator) exportTypes() {
 
 	// Export message header and body types
 	g.File.Comment("// Export message header and body types")
+	dedupMsgHeaderTypeName := make(map[string]struct{})
+	dedupMsgBodyTypeName := make(map[string]struct{})
 	for _, info := range g.Config.MessageReflectInfoTable {
 		headerPkg, headerName := parseTypeString(info.MessageSpecializedType.HeaderType)
 		bodyPkg, bodyName := parseTypeString(info.MessageSpecializedType.BodyType)
-		g.File.Type().Id(headerName).Op("=").Qual(g.getPackagePath(headerPkg), headerName)
-		g.File.Type().Id(bodyName).Op("=").Qual(g.getPackagePath(bodyPkg), bodyName)
-		g.ExportTypes[info.MessageSpecializedType.HeaderType] = headerName
-		g.ExportTypes[info.MessageSpecializedType.BodyType] = bodyName
+		if _, ok := dedupMsgHeaderTypeName[headerName]; !ok {
+			g.File.Type().Id(headerName).Op("=").Qual(g.getPackagePath(headerPkg), headerName)
+			g.ExportTypes[info.MessageSpecializedType.HeaderType] = headerName
+			dedupMsgHeaderTypeName[headerName] = struct{}{}
+		}
+		if _, ok := dedupMsgBodyTypeName[bodyName]; !ok {
+			g.File.Type().Id(bodyName).Op("=").Qual(g.getPackagePath(bodyPkg), bodyName)
+			g.ExportTypes[info.MessageSpecializedType.BodyType] = bodyName
+			dedupMsgBodyTypeName[bodyName] = struct{}{}
+		}
 	}
 	g.File.Line()
 }
