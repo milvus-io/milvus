@@ -124,8 +124,8 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 		segment.Flush(policy)
 		m.metrics.ObserveSegmentFlushed(
 			string(segment.SealPolicy().Policy),
-			int64(segment.GetFlushedStat().Insert.Rows),
-			int64(segment.GetFlushedStat().Insert.BinarySize),
+			int64(segment.GetFlushedStat().Modified.Rows),
+			int64(segment.GetFlushedStat().Modified.BinarySize),
 		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
@@ -146,8 +146,8 @@ func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 		segment.Flush(policy.PolicyFenced(timeTick))
 		m.metrics.ObserveSegmentFlushed(
 			string(segment.SealPolicy().Policy),
-			int64(segment.GetFlushedStat().Insert.Rows),
-			int64(segment.GetFlushedStat().Insert.BinarySize),
+			int64(segment.GetFlushedStat().Modified.Rows),
+			int64(segment.GetFlushedStat().Modified.BinarySize),
 		)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
@@ -174,8 +174,8 @@ func (m *partitionManager) AsyncFlushSegment(signal utils.SealSegmentSignal) err
 		sm.Flush(signal.SealPolicy)
 		m.metrics.ObserveSegmentFlushed(
 			string(sm.SealPolicy().Policy),
-			int64(sm.GetFlushedStat().Insert.Rows),
-			int64(sm.GetFlushedStat().Insert.BinarySize),
+			int64(sm.GetFlushedStat().Modified.Rows),
+			int64(sm.GetFlushedStat().Modified.BinarySize),
 		)
 		m.asyncFlushSegment(m.ctx, sm)
 	}
