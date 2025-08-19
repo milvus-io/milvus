@@ -289,6 +289,22 @@ func CheckSearchIteratorResult(ctx context.Context, t *testing.T, itr client.Sea
 	}
 }
 
+// check expected columns should be contains in actual columns
+func CheckPartialResult(t *testing.T, expColumns []column.Column, actualColumns []column.Column) {
+	for _, expColumn := range expColumns {
+		exist := false
+		for _, actualColumn := range actualColumns {
+			if expColumn.Name() == actualColumn.Name() && expColumn.Type() != entity.FieldTypeJSON {
+				exist = true
+				EqualColumn(t, expColumn, actualColumn)
+			}
+		}
+		if !exist {
+			log.Error("CheckQueryResult actualColumns no column", zap.String("name", expColumn.Name()))
+		}
+	}
+}
+
 // GenColumnDataOption -- create column data --
 type checkIndexOpt struct {
 	state            index.IndexState

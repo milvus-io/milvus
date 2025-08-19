@@ -284,7 +284,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}, map[string][]bool) {
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) (error, []map[string]interface{}, map[string][]bool) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
@@ -321,7 +321,14 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema) (error,
 					}
 				}
 
-				dataString := gjson.Get(data.Raw, fieldName).String()
+				// For partial update, check if field exists in the data
+				fieldValue := gjson.Get(data.Raw, fieldName)
+				if partialUpdate && !fieldValue.Exists() {
+					// Skip fields that are not provided in partial update
+					continue
+				}
+
+				dataString := fieldValue.String()
 				// if has pass pk than just to try to set it
 				if field.IsPrimaryKey && field.AutoID && len(dataString) == 0 {
 					continue
@@ -732,7 +739,7 @@ func convertToIntArray(dataType schemapb.DataType, arr interface{}) []int32 {
 	return res
 }
 
-func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool) ([]*schemapb.FieldData, error) {
+func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool, sch *schemapb.CollectionSchema, inInsert bool, partialUpdate bool) ([]*schemapb.FieldData, error) {
 	rowsLen := len(rows)
 	if rowsLen == 0 {
 		return []*schemapb.FieldData{}, errors.New("no row need to be convert to columns")
@@ -810,11 +817,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 			IsDynamic: field.IsDynamic,
 		}
 	}
-	if len(nameDims) == 0 && len(sch.Functions) == 0 {
+	if len(nameDims) == 0 && len(sch.Functions) == 0 && !partialUpdate {
 		return nil, fmt.Errorf("collection: %s has no vector field or functions", sch.Name)
 	}
 
 	dynamicCol := make([][]byte, 0, rowsLen)
+	fieldLen := make(map[string]int)
 
 	for _, row := range rows {
 		// collection schema name need not be same, since receiver could have other names
@@ -844,8 +852,12 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 				continue
 			}
 			if !ok {
+				if partialUpdate {
+					continue
+				}
 				return nil, fmt.Errorf("row %d does not has field %s", idx, field.Name)
 			}
+			fieldLen[field.Name] += 1
 			switch field.DataType {
 			case schemapb.DataType_Bool:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([]bool), candi.v.Interface().(bool))
@@ -923,6 +935,22 @@ func anyToColumns(rows []map[string]interface{}, validDataMap map[string][]bool,
 	}
 	columns := make([]*schemapb.FieldData, 0, len(nameColumns))
 	for name, column := range nameColumns {
+		if fieldLen[name] == 0 && partialUpdate {
+			// for partial update, skip update for nullable field
+			// cause we cannot distinguish between missing fields and fields explicitly set to null
+			log.Info("skip empty field for partial update",
+				zap.String("fieldName", name))
+			continue
+		}
+		if fieldLen[name] != rowsLen && partialUpdate {
+			// for partial update, if try to update different field in different rows, return error
+			log.Info("field len is not equal to rows len",
+				zap.String("fieldName", name),
+				zap.Int("fieldLen", fieldLen[name]),
+				zap.Int("rowsLen", rowsLen))
+			return nil, fmt.Errorf("column %s has length %d, expected %d", name, fieldLen[name], rowsLen)
+		}
+
 		colData := fieldData[name]
 		switch colData.Type {
 		case schemapb.DataType_Bool:
