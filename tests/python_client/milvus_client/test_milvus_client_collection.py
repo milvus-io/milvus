@@ -780,40 +780,6 @@ class TestMilvusClientCollectionValid(TestMilvusClientV2Base):
         if self.has_collection(client, collection_name)[0]:
             self.drop_collection(client, collection_name)
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_collection_all_datatype_fields(self):
-        """
-        target: Test create collection with all supported dataType fields
-        method: Create collection with schema containing all supported dataTypes
-        expected: Collection created successfully with all field types
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field(ct.default_int64_field_name, DataType.INT64, is_primary=True)
-        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
-        # Add all supported scalar data types (excluding vectors and unsupported types)
-        supported_types = []
-        for k, v in DataType.__members__.items():
-            if (v and v != DataType.UNKNOWN and v != DataType.STRING 
-                and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR 
-                and v != DataType.BINARY_VECTOR and v != DataType.ARRAY 
-                and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR 
-                and v != DataType.INT8_VECTOR):
-                supported_types.append((k.lower(), v))
-        for field_name, data_type in supported_types:
-            if data_type != DataType.INT64:  # Skip INT64 as it's already added as primary key
-                schema.add_field(field_name, data_type)
-        
-        self.create_collection(client, collection_name, schema=schema)
-        expected_field_count = len([name for name in supported_types]) + 2
-        self.describe_collection(client, collection_name,
-                                 check_task=CheckTasks.check_describe_collection_property,
-                                 check_items={"collection_name": collection_name,
-                                              "enable_dynamic_field": False,
-                                              "fields_num": expected_field_count})
-        self.drop_collection(client, collection_name)
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_collection_self_creation_multiple_vectors(self):
         """
@@ -4196,5 +4162,478 @@ class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
         stats = self.get_collection_stats(client, collection_name)[0]
         assert stats['row_count'] == insert_nb
         self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientCollectionMultipleVectorValid(TestMilvusClientV2Base):
+    """
+    ******************************************************************
+    #  Test case for collection with multiple vector fields - Valid cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("shards_num", [1, 3])
+    def test_milvus_client_collection_multiple_vectors_all_supported_field_type(self, primary_key_type, auto_id, shards_num):
+        """
+        target: test create collection with multiple vector fields and all supported field types
+        method: create collection with multiple vector fields and all supported field types
+        expected: collection created successfully with all field types
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with multiple vector fields and all supported scalar types
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
+        # Add primary key field
+        if primary_key_type == "int64":
+            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+        else:
+            schema.add_field("id", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=auto_id)
+        # Add multiple vector fields
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_binary_vec_field_name, DataType.BINARY_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_float16_vec_field_name, DataType.FLOAT16_VECTOR, dim=default_dim)
+        schema.add_field(ct.default_bfloat16_vec_field_name, DataType.BFLOAT16_VECTOR, dim=default_dim)
+        # Add all supported scalar data types from DataType.__members__
+        supported_types = []
+        for k, v in DataType.__members__.items():
+            if (v and v != DataType.UNKNOWN and v != DataType.STRING 
+                and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR 
+                and v != DataType.BINARY_VECTOR and v != DataType.ARRAY 
+                and v != DataType.FLOAT16_VECTOR and v != DataType.BFLOAT16_VECTOR 
+                and v != DataType.INT8_VECTOR and v != DataType.SPARSE_FLOAT_VECTOR):
+                supported_types.append((k.lower(), v))
+        for field_name, data_type in supported_types:
+            # Skip INT64 and VARCHAR as they're already added as primary key  
+            if data_type != DataType.INT64 and data_type != DataType.VARCHAR: 
+                schema.add_field(field_name, data_type)
+        # Add ARRAY field separately with required parameters
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema, shards_num=shards_num)
+        # Verify collection properties
+        expected_field_count = len([name for name in supported_types]) + 5
+        self.describe_collection(client, collection_name,
+                                 check_task=CheckTasks.check_describe_collection_property,
+                                 check_items={"collection_name": collection_name,
+                                              "enable_dynamic_field": False,
+                                              "auto_id": auto_id,
+                                              "num_shards": shards_num,
+                                              "fields_num": expected_field_count})
+        # Create same collection again
+        self.create_collection(client, collection_name, schema=schema, shards_num=shards_num)
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_field", [True, False])
+    def test_milvus_client_collection_multiple_vectors_different_dim(self, primary_key_type, auto_id, enable_dynamic_field):
+        """
+        target: test create collection with multiple vector fields having different dimensions
+        method: create collection with multiple vector fields with different dims
+        expected: collection created successfully with different vector dimensions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with different vector dimensions
+        schema = self.create_schema(client, enable_dynamic_field=enable_dynamic_field, auto_id=auto_id)[0]
+        # Add primary key field
+        if primary_key_type == "int64":
+            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+        else:
+            schema.add_field("id", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=auto_id)
+        # Add vector fields with different dimensions
+        schema.add_field("float_vec_max_dim", DataType.FLOAT_VECTOR, dim=ct.max_dim)
+        schema.add_field("float_vec_min_dim", DataType.FLOAT_VECTOR, dim=ct.min_dim)
+        schema.add_field("float_vec_default_dim", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection properties
+        expected_dims = [ct.max_dim, ct.min_dim, default_dim]
+        expected_vector_names = ["float_vec_max_dim", "float_vec_min_dim", "float_vec_default_dim"]
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items={"collection_name": collection_name,
+                                           "auto_id": auto_id,
+                                           "enable_dynamic_field": enable_dynamic_field,
+                                           "dim": expected_dims,
+                                           "vector_name": expected_vector_names})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
+    def test_milvus_client_collection_multiple_vectors_maximum_dim(self, primary_key_type):
+        """
+        target: test create collection with multiple vector fields at maximum dimension
+        method: create collection with multiple vector fields all using max dimension
+        expected: collection created successfully with maximum dimensions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with maximum dimension vectors
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Add primary key field
+        if primary_key_type == "int64":
+            schema.add_field("id", DataType.INT64, is_primary=True)
+        else:
+            schema.add_field("id", DataType.VARCHAR, max_length=100, is_primary=True)
+        # Add multiple vector fields with maximum dimension (up to max_vector_field_num)
+        vector_field_names = []
+        for i in range(ct.max_vector_field_num):
+            vector_field_name = f"float_vec_{i+1}"
+            vector_field_names.append(vector_field_name)
+            schema.add_field(vector_field_name, DataType.FLOAT_VECTOR, dim=ct.max_dim)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection properties
+        expected_dims = [ct.max_dim] * ct.max_vector_field_num
+        expected_vector_names = vector_field_names
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items={"collection_name": collection_name,
+                                           "enable_dynamic_field": False,
+                                           "dim": expected_dims,
+                                           "vector_name": expected_vector_names})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("partition_key_type", ["int64", "varchar"])
+    def test_milvus_client_collection_multiple_vectors_partition_key(self, primary_key_type, auto_id, partition_key_type):
+        """
+        target: test create collection with multiple vector fields and partition key
+        method: create collection with multiple vector fields and partition key
+        expected: collection created successfully with partition key and multiple partitions
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with multiple vector fields and partition key
+        schema = self.create_schema(client, enable_dynamic_field=False, auto_id=auto_id)[0]
+        # Add primary key field
+        if primary_key_type == "int64":
+            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=auto_id)
+        else:
+            schema.add_field("id", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=auto_id)
+        schema.add_field(default_vector_field_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("vector_2", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add scalar fields
+        schema.add_field("int8_field", DataType.INT8)
+        schema.add_field("int16_field", DataType.INT16)
+        schema.add_field("int32_field", DataType.INT32)
+        schema.add_field("float_field", DataType.FLOAT)
+        schema.add_field("double_field", DataType.DOUBLE)
+        schema.add_field("json_field", DataType.JSON)
+        schema.add_field("bool_field", DataType.BOOL)
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10)
+        schema.add_field("binary_vec_field", DataType.BINARY_VECTOR, dim=default_dim)
+        # Add partition key field
+        if partition_key_type == "int64":
+            schema.add_field("partition_key_int", DataType.INT64, is_partition_key=True)
+        else:
+            schema.add_field("partition_key_varchar", DataType.VARCHAR, max_length=100, is_partition_key=True)
+        # Create collection
+        self.create_collection(client, collection_name, schema=schema)
+        # Verify collection properties
+        self.describe_collection(client, collection_name,
+                                check_task=CheckTasks.check_describe_collection_property,
+                                check_items={"collection_name": collection_name,
+                                           "auto_id": auto_id,
+                                           "enable_dynamic_field": False,
+                                           "num_partitions": ct.default_partition_num})
+        self.drop_collection(client, collection_name)
+
+
+class TestMilvusClientCollectionMultipleVectorInvalid(TestMilvusClientV2Base):
+    """
+    ******************************************************************
+    #  Test case for collection with multiple vector fields - Invalid cases
+    ******************************************************************
+    """
+
+    @pytest.fixture(scope="function", params=ct.invalid_dims)
+    def get_invalid_dim(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("primary_key_type", ["int64", "varchar"])
+    def test_milvus_client_collection_multiple_vectors_same_vector_field_name(self, primary_key_type):
+        """
+        target: test create collection with multiple vector fields having duplicate names
+        method: create collection with multiple vector fields using same field name
+        expected: raise exception for duplicated field name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with duplicate vector field names
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        # Add primary key field
+        if primary_key_type == "int64":
+            schema.add_field("id", DataType.INT64, is_primary=True)
+        else:
+            schema.add_field("id", DataType.VARCHAR, max_length=100, is_primary=True)
+        # Add multiple vector fields with same name
+        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Add other fields
+        schema.add_field("int8_field", DataType.INT8)
+        schema.add_field("int16_field", DataType.INT16)
+        schema.add_field("int32_field", DataType.INT32)
+        schema.add_field("float_field", DataType.FLOAT)
+        schema.add_field("double_field", DataType.DOUBLE)
+        schema.add_field("varchar_field", DataType.VARCHAR, max_length=100)
+        schema.add_field("json_field", DataType.JSON)
+        schema.add_field("bool_field", DataType.BOOL)
+        schema.add_field("array_field", DataType.ARRAY, element_type=DataType.INT64, max_capacity=10)
+        schema.add_field("binary_vec_field", DataType.BINARY_VECTOR, dim=default_dim)
+        # Try to create collection with duplicate field names
+        error = {ct.err_code: 1100, ct.err_msg: "duplicated field name"}
+        self.create_collection(client, collection_name, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("invalid_vector_name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    def test_milvus_client_collection_multiple_vectors_invalid_all_vector_field_name(self, invalid_vector_name):
+        """
+        target: test create collection with multiple vector fields where all have invalid names
+        method: create collection with multiple vector fields, all with invalid names
+        expected: raise exception for invalid field name
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with all invalid vector field names
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        # Add vector fields - all with invalid names
+        schema.add_field(invalid_vector_name, DataType.FLOAT_VECTOR, dim=default_dim)
+        schema.add_field(invalid_vector_name + " ", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Try to create collection with invalid field names
+        error = {ct.err_code: 1100, ct.err_msg: f"Invalid field name: {invalid_vector_name}"}
+        self.create_collection(client, collection_name, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("issue #37543")
+    def test_milvus_client_collection_multiple_vectors_invalid_dim(self, get_invalid_dim):
+        """
+        target: test create collection with multiple vector fields where one has invalid dimension
+        method: create collection with multiple vector fields, one with invalid dimension
+        expected: raise exception for invalid dimension
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create schema with one invalid vector dimension
+        schema = self.create_schema(client, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        # Add vector fields - one with invalid dimension, one with valid dimension
+        schema.add_field("vector_field_1", DataType.FLOAT_VECTOR, dim=get_invalid_dim)
+        schema.add_field("vector_field_2", DataType.FLOAT_VECTOR, dim=default_dim)
+        # Try to create collection with invalid dimension
+        error = {ct.err_code: 65535, ct.err_msg: "invalid dimension"}
+        self.create_collection(client, collection_name, schema=schema,
+                              check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestMilvusClientCollectionMmap(TestMilvusClientV2Base):
+    """
+    ******************************************************************
+    #  Test case for collection mmap functionality
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_describe_collection_mmap(self):
+        """
+        target: enable or disable mmap in the collection
+        method: enable or disable mmap in the collection
+        expected: description information contains mmap
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        # Test enable mmap
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert "mmap.enabled" in properties.keys()
+        assert properties["mmap.enabled"] == 'True'
+        # Test disable mmap
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": False})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'False'
+        # Test enable mmap again
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'True'
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_load_mmap_collection(self):
+        """
+        target: after loading, enable mmap for the collection
+        method: 1. data preparation and create index
+        2. load collection
+        3. enable mmap on collection
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection with data and index
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        # Get collection schema to generate compatible data
+        collection_info = self.describe_collection(client, collection_name)[0]
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=collection_info)
+        self.insert(client, collection_name, data)
+        self.flush(client, collection_name)
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        
+        self.release_collection(client, collection_name)
+        # Set mmap enabled before loading
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'True'
+        # Load collection
+        self.load_collection(client, collection_name)
+        # Try to alter mmap after loading - should raise exception
+        error = {ct.err_code: 999, ct.err_msg: "can not alter mmap properties if collection loaded"}
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
+                                        check_task=CheckTasks.err_res, check_items=error)
+        
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_drop_mmap_collection(self):
+        """
+        target: set mmap on collection and then drop it
+        method: 1. set mmap on collection
+        2. drop collection
+        3. recreate collection with same name
+        expected: new collection doesn't inherit mmap settings
+        """
+        client = self._client()
+        collection_name = "coll_mmap_test"
+        # Create collection and set mmap
+        self.create_collection(client, collection_name, default_dim)
+        self.release_collection(client, collection_name)
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'True'
+        # Drop collection
+        self.drop_collection(client, collection_name)
+        # Recreate collection with same name
+        self.create_collection(client, collection_name, default_dim)
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert "mmap.enabled" not in properties.keys()
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_multiple_collections_enable_mmap(self):
+        """
+        target: enabling mmap for multiple collections in a single instance
+        method: enabling mmap for multiple collections in a single instance
+        expected: the collection description message for mmap is normal
+        """
+        client = self._client()
+        collection_name_1 = cf.gen_collection_name_by_testcase_name() + "_1"
+        collection_name_2 = cf.gen_collection_name_by_testcase_name() + "_2"
+        collection_name_3 = cf.gen_collection_name_by_testcase_name() + "_3"
+        # Create multiple collections
+        self.create_collection(client, collection_name_1, default_dim)
+        self.create_collection(client, collection_name_2, default_dim)
+        self.create_collection(client, collection_name_3, default_dim)
+        # Release collections before setting mmap
+        self.release_collection(client, collection_name_1)
+        self.release_collection(client, collection_name_2)
+        self.release_collection(client, collection_name_3)
+        # Enable mmap for first two collections
+        self.alter_collection_properties(client, collection_name_1, properties={"mmap.enabled": True})
+        self.alter_collection_properties(client, collection_name_2, properties={"mmap.enabled": True})
+        # Verify mmap settings
+        describe_res_1 = self.describe_collection(client, collection_name_1)[0]
+        describe_res_2 = self.describe_collection(client, collection_name_2)[0]
+        properties_1 = describe_res_1.get("properties")
+        properties_2 = describe_res_2.get("properties")
+        assert properties_1["mmap.enabled"] == 'True'
+        assert properties_2["mmap.enabled"] == 'True'
+        # Enable mmap for third collection
+        self.alter_collection_properties(client, collection_name_3, properties={"mmap.enabled": True})
+        describe_res_3 = self.describe_collection(client, collection_name_3)[0]
+        properties_3 = describe_res_3.get("properties")
+        assert properties_3["mmap.enabled"] == 'True'
+        # Clean up
+        self.drop_collection(client, collection_name_1)
+        self.drop_collection(client, collection_name_2)
+        self.drop_collection(client, collection_name_3)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_flush_collection_mmap(self):
+        """
+        target: after flush, collection enables mmap
+        method: after flush, collection enables mmap
+        expected: the collection description message for mmap is normal
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create collection and insert data
+        self.create_collection(client, collection_name, default_dim)
+        # Get collection schema to generate compatible data
+        collection_info = self.describe_collection(client, collection_name)[0]
+        data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=collection_info)
+        self.insert(client, collection_name, data)
+        # Create index
+        self.release_collection(client, collection_name)
+        self.drop_index(client, collection_name, "vector")
+        index_params = self.prepare_index_params(client)[0]
+        index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        self.create_index(client, collection_name, index_params)
+        # Set index mmap to False
+        self.alter_index_properties(client, collection_name, "vector", properties={"mmap.enabled": False})
+        # Flush data
+        self.flush(client, collection_name)
+        # Set collection mmap to True
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True})
+        describe_res = self.describe_collection(client, collection_name)[0]
+        properties = describe_res.get("properties")
+        assert properties["mmap.enabled"] == 'True'
+        # Set index mmap to True
+        self.alter_index_properties(client, collection_name, "vector", properties={"mmap.enabled": True})
+        # Load collection and perform search to verify functionality
+        self.load_collection(client, collection_name)
+        # Generate search vectors 
+        search_data = cf.gen_vectors(default_nq, default_dim)
+        self.search(client, collection_name, search_data, 
+                               check_task=CheckTasks.check_search_results,
+                               check_items={"nq": default_nq, "limit": default_limit})
+        self.drop_collection(client, collection_name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_enable_mmap_after_drop_collection(self):
+        """
+        target: enable mmap after deleting a collection
+        method: enable mmap after deleting a collection
+        expected: raise exception
+        """
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        # Create and drop collection
+        self.create_collection(client, collection_name, default_dim)
+        self.drop_collection(client, collection_name)
+        # Try to enable mmap on dropped collection - should raise exception
+        error = {ct.err_code: 100, ct.err_msg: "collection not found"}
+        self.alter_collection_properties(client, collection_name, properties={"mmap.enabled": True},
+                                        check_task=CheckTasks.err_res, check_items=error)
+
 
 
