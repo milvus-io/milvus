@@ -344,6 +344,30 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	return nil
 }
 
+func (t *createCollectionTask) processNamespaceProp(hasPartitionKey bool) error {
+	enabled, has, err := parseNamespaceProp(t.GetProperties()...)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return nil
+	}
+
+	f := typeutil.GetFieldByName(t.schema, common.NamespaceFieldName)
+	if f != nil {
+		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+			"namespace field already exists")
+	}
+
+	if enabled {
+		if hasPartitionKey {
+			return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
+		}
+		addNamespaceField(t.schema)
+	}
+	return nil
+}
+
 func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.MsgType = commonpb.MsgType_CreateCollection
 	t.Base.SourceID = paramtable.GetNodeID()
@@ -414,6 +438,11 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
+		return err
+	}
+
+	err = t.processNamespaceProp(hasPartitionKey)
+	if err != nil {
 		return err
 	}
 
@@ -1097,6 +1126,38 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	t.Base.MsgType = commonpb.MsgType_AlterCollection
 	t.Base.SourceID = paramtable.GetNodeID()
 	return nil
+}
+
+func addNamespaceField(schema *schemapb.CollectionSchema) {
+	fid := int64(-1)
+	for _, field := range schema.Fields {
+		if field.FieldID > fid {
+			fid = field.FieldID
+		}
+	}
+
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:        fid + 1,
+		Name:           common.NamespaceFieldName,
+		IsPartitionKey: true,
+		DataType:       schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.MaxLengthKey, Value: fmt.Sprintf("%d", paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt())},
+		},
+	})
+}
+
+func parseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
+	for _, p := range props {
+		if p.GetKey() == common.NamespaceFieldName {
+			value, err := strconv.ParseBool(p.GetValue())
+			if err != nil {
+				return false, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid namespace prop value: %s", p.GetValue()))
+			}
+			return value, true, nil
+		}
+	}
+	return false, false, nil
 }
 
 func hasMmapProp(props ...*commonpb.KeyValuePair) bool {
