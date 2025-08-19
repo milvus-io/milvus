@@ -14,13 +14,15 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/attributes"
+	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestSessionDiscoverer(t *testing.T) {
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	targetVersion := "0.1.0"
-	d := NewSessionDiscoverer(etcdClient, "session/", false, ">="+targetVersion)
+	prefix := funcutil.RandomString(10) + "/"
+	d := NewSessionDiscoverer(etcdClient, prefix, false, ">="+targetVersion)
 
 	expected := []map[int64]*sessionutil.SessionRaw{
 		{},
@@ -71,7 +73,7 @@ func TestSessionDiscoverer(t *testing.T) {
 			for k, v := range expected[idx+1] {
 				sessionStr, err := json.Marshal(v)
 				assert.NoError(t, err)
-				ops = append(ops, clientv3.OpPut(fmt.Sprintf("session/%d", k), string(sessionStr)))
+				ops = append(ops, clientv3.OpPut(fmt.Sprintf("%s%d", prefix, k), string(sessionStr)))
 			}
 
 			resp, err := etcdClient.Txn(ctx).Then(
@@ -87,7 +89,7 @@ func TestSessionDiscoverer(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 
 	// Do a init discover here.
-	d = NewSessionDiscoverer(etcdClient, "session/", false, ">="+targetVersion)
+	d = NewSessionDiscoverer(etcdClient, prefix, false, ">="+targetVersion)
 	err = d.Discover(ctx, func(state VersionedState) error {
 		// balance attributes
 		sessions := state.Sessions()
