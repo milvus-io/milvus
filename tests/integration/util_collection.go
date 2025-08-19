@@ -74,6 +74,10 @@ func (s *MiniClusterSuite) InsertAndFlush(ctx context.Context, dbName, collectio
 
 func (s *MiniClusterSuite) CreateCollectionWithConfiguration(ctx context.Context, cfg *CreateCollectionConfig) {
 	schema := ConstructSchema(cfg.CollectionName, cfg.Dim, true)
+	s.CreateCollection(ctx, cfg, schema)
+}
+
+func (s *MiniClusterSuite) CreateCollection(ctx context.Context, cfg *CreateCollectionConfig, schema *schemapb.CollectionSchema) {
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 	s.NotNil(marshaledSchema)

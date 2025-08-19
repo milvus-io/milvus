@@ -55,7 +55,7 @@ type DecayFunction[T PKType, R int32 | int64 | float32 | float64] struct {
 }
 
 func newDecayFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, decayFunctionName, true)
+	base, err := newRerankBase(collSchema, funcSchema, DecayFunctionName, true)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func newFunction[T PKType, R int32 | int64 | float32 | float64](base *RerankBase
 	case linearFunction:
 		decayFunc.reScorer = linearDecay
 	default:
-		return nil, fmt.Errorf("Invaild decay function: %s, only support [%s,%s,%s]", decayFunctionName, gaussFunction, linearFunction, expFunction)
+		return nil, fmt.Errorf("Invaild decay function: %s, only support [%s,%s,%s]", DecayFunctionName, gaussFunction, linearFunction, expFunction)
 	}
 	return decayFunc, nil
 }

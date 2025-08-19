@@ -190,6 +190,18 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 	return "", fmt.Errorf("key %s not found", key)
 }
 
+// TryGetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
+// return false if key not exist
+func TryGetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, bool) {
+	for _, kv := range kvs {
+		if kv.Key == key {
+			return kv.Value, true
+		}
+	}
+
+	return "", false
+}
+
 // CheckCtxValid check if the context is valid
 func CheckCtxValid(ctx context.Context) bool {
 	return ctx.Err() != context.DeadlineExceeded && ctx.Err() != context.Canceled

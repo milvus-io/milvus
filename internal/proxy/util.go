@@ -1931,6 +1931,38 @@ func checkPrimaryFieldData(allFields []*schemapb.FieldSchema, schema *schemapb.C
 	return ids, nil
 }
 
+// check whether insertMsg has all fields in schema
+func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*schemapb.FieldData, skipPkFieldCheck bool, skipDynamicFieldCheck bool) error {
+	log := log.With(zap.String("collection", schema.GetName()))
+
+	// find bm25 generated fields
+	bm25Fields := typeutil.NewSet[string](GetFunctionOutputFields(schema)...)
+	dataNameMap := make(map[string]*schemapb.FieldData)
+	for _, data := range fieldsData {
+		dataNameMap[data.GetFieldName()] = data
+	}
+
+	for _, fieldSchema := range schema.Fields {
+		if bm25Fields.Contain(fieldSchema.GetName()) {
+			continue
+		}
+
+		if _, ok := dataNameMap[fieldSchema.GetName()]; !ok {
+			if (fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && skipPkFieldCheck) ||
+				IsBM25FunctionOutputField(fieldSchema, schema) ||
+				(skipDynamicFieldCheck && fieldSchema.GetIsDynamic()) {
+				// autoGenField
+				continue
+			}
+
+			log.Info("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+		}
+	}
+
+	return nil
+}
+
 // for some varchar with analzyer
 // we need check char format before insert it to message queue
 // now only support utf-8
@@ -2485,6 +2517,14 @@ func IsBM25FunctionOutputField(field *schemapb.FieldSchema, collSchema *schemapb
 		}
 	}
 	return false
+}
+
+func GetFunctionOutputFields(collSchema *schemapb.CollectionSchema) []string {
+	fields := make([]string, 0)
+	for _, fSchema := range collSchema.Functions {
+		fields = append(fields, fSchema.OutputFieldNames...)
+	}
+	return fields
 }
 
 func getCollectionTTL(pairs []*commonpb.KeyValuePair) uint64 {

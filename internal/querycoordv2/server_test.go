@@ -761,7 +761,7 @@ func TestRewatchNodesWithEmptySessions(t *testing.T) {
 	defer mockHandleNodeDown.UnPatch()
 
 	// Act: Call rewatchNodes with empty sessions
-	err := server.rewatchNodes(map[string]*sessionutil.Session{})
+	err := server.rewatchNodes(nil)
 
 	// Assert: All nodes should be removed
 	assert.NoError(t, err)

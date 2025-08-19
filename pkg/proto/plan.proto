@@ -257,6 +257,11 @@ message QueryPlanNode {
   int64 limit = 3;
 };
 
+message ScoreFunction {
+  Expr filter =1;
+  float weight = 2;  
+}
+
 message PlanNode {
   oneof node {
     VectorANNS vector_anns = 1;
@@ -265,4 +270,5 @@ message PlanNode {
   }
   repeated int64 output_field_ids = 3;
   repeated string dynamic_fields = 5;
+  repeated ScoreFunction scorers = 6;
 }

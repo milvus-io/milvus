@@ -981,7 +981,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -992,7 +992,7 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true)
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, true, false)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1045,6 +1045,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
 		PartitionName:  httpReq.PartitionName,
+		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
 	}
 	c.Set(ContextRequest, req)
@@ -1055,7 +1056,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	var validDataMap map[string][]bool
-	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema)
+	err, httpReq.Data, validDataMap = checkAndSetData(body.([]byte), collSchema, httpReq.PartialUpdate)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
@@ -1066,7 +1067,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	}
 
 	req.NumRows = uint32(len(httpReq.Data))
-	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false)
+	req.FieldsData, err = anyToColumns(httpReq.Data, validDataMap, collSchema, false, httpReq.PartialUpdate)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

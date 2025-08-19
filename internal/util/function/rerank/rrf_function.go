@@ -40,7 +40,7 @@ type RRFFunction[T PKType] struct {
 }
 
 func newRRFFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, rrfName, true)
+	base, err := newRerankBase(collSchema, funcSchema, RRFName, true)
 	if err != nil {
 		return nil, err
 	}
