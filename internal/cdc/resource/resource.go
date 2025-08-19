@@ -7,8 +7,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
 	"github.com/milvus-io/milvus/internal/cdc/configuration"
-	"github.com/milvus-io/milvus/internal/cdc/replicatemanager"
-	"github.com/milvus-io/milvus/internal/cdc/replicatestream"
+	"github.com/milvus-io/milvus/internal/cdc/controller"
+	"github.com/milvus-io/milvus/internal/cdc/replication"
 )
 
 var r *resourceImpl // singleton resource instance
@@ -30,11 +30,11 @@ func Init(opts ...optResourceInit) {
 		opt(newR)
 	}
 	newR.configManager = configuration.NewManager()
-	// TODO: init
-	assertNotNil(newR.ConfigManager())
+	// TODO: sheep, init
 	assertNotNil(newR.ClusterClient())
+	assertNotNil(newR.ConfigManager())
 	assertNotNil(newR.ReplicateManagerClient())
-	assertNotNil(newR.ReplicateStreamClient())
+	assertNotNil(newR.Controller())
 	r = newR
 }
 
@@ -50,10 +50,10 @@ func Resource() *resourceImpl {
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
 	etcdClient             *clientv3.Client
-	configManager          configuration.Manager
 	clusterClient          cluster.ClusterClient
-	replicateManagerClient replicatemanager.ReplicateManagerClient
-	replicateStreamClient  replicatestream.ReplicateStreamClient
+	configManager          configuration.Manager
+	replicateManagerClient replication.ReplicateManagerClient
+	controller             controller.Controller
 }
 
 // ETCD returns the etcd client.
@@ -72,13 +72,13 @@ func (r *resourceImpl) ClusterClient() cluster.ClusterClient {
 }
 
 // ReplicateManagerClient returns the replicate manager client.
-func (r *resourceImpl) ReplicateManagerClient() replicatemanager.ReplicateManagerClient {
+func (r *resourceImpl) ReplicateManagerClient() replication.ReplicateManagerClient {
 	return r.replicateManagerClient
 }
 
-// ReplicateStreamClient returns the replicate stream client.
-func (r *resourceImpl) ReplicateStreamClient() replicatestream.ReplicateStreamClient {
-	return r.replicateStreamClient
+// Controller returns the controller.
+func (r *resourceImpl) Controller() controller.Controller {
+	return r.controller
 }
 
 // assertNotNil panics if the resource is nil.
