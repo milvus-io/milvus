@@ -717,6 +717,11 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 		}
 	}
 
+	// Note: Node manager doesn't persist node list, so after query coord restart, we cannot
+	// update all node statuses in resource manager based on session and node manager's node list.
+	// Therefore, manual status checking of all nodes in resource manager is needed.
+	s.meta.ResourceManager.CheckNodesInResourceGroup(s.ctx)
+
 	return nil
 }
 
