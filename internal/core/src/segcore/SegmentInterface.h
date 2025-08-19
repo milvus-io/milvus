@@ -31,6 +31,7 @@
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "common/QueryInfo.h"
+#include "folly/SharedMutex.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
@@ -585,8 +586,8 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     // mutex protecting rw options on schema_
     std::shared_mutex sch_mutex_;
-
-    mutable std::shared_mutex mutex_;
+    
+    mutable folly::SharedMutex mutex_;
     // fieldID -> std::pair<num_rows, avg_size>
     std::unordered_map<FieldId, std::pair<int64_t, int64_t>>
         variable_fields_avg_size_;  // bytes;
