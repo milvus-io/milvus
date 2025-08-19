@@ -1314,6 +1314,19 @@ struct ArithHelperI64<ArithOpType::Mul, CmpOp> {
     }
 };
 
+template <CompareOpType CmpOp>
+struct ArithHelperI64<ArithOpType::Div, CmpOp> {
+    static inline svbool_t
+    op(const svbool_t pred,
+       const svint64_t left,
+       const svint64_t right,
+       const svint64_t value) {
+        // left / right == value
+        return CmpHelper<CmpOp>::compare(
+            pred, svdiv_s64_z(pred, left, right), value);
+    }
+};
+
 //
 template <ArithOpType AOp, CompareOpType CmpOp>
 struct ArithHelperF32 {};
