@@ -129,6 +129,10 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load ngram index");
 
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
     auto files_value = index_files.value();
     auto it = std::find_if(
         files_value.begin(), files_value.end(), [](const std::string& file) {
@@ -140,8 +144,8 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
         std::vector<std::string> file;
         file.push_back(*it);
         files_value.erase(it);
-        auto index_datas = mem_file_manager_->LoadIndexToMemory(
-            file, config[milvus::LOAD_PRIORITY]);
+        auto index_datas =
+            mem_file_manager_->LoadIndexToMemory(file, load_priority);
         BinarySet binary_set;
         AssembleIndexDatas(index_datas, binary_set);
         // clear index_datas to free memory early
@@ -153,8 +157,7 @@ NgramInvertedIndex::Load(milvus::tracer::TraceContext ctx,
                (size_t)index_valid_data->size);
     }
 
-    disk_file_manager_->CacheNgramIndexToDisk(files_value,
-                                              config[milvus::LOAD_PRIORITY]);
+    disk_file_manager_->CacheNgramIndexToDisk(files_value, load_priority);
     AssertInfo(
         tantivy_index_exist(path_.c_str()), "index not exist: {}", path_);
     auto load_in_mmap =

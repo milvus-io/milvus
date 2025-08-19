@@ -215,10 +215,13 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
         auto aligned_size =
             ((index_data->size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
         {
-            auto file_writer =
-                storage::FileWriter(mmap_filepath_,
-                                    storage::io::GetPriorityFromLoadPriority(
-                                        config[milvus::LOAD_PRIORITY]));
+            auto load_priority =
+                GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                    config, milvus::LOAD_PRIORITY)
+                    .value_or(milvus::proto::common::LoadPriority::HIGH);
+            auto file_writer = storage::FileWriter(
+                mmap_filepath_,
+                storage::io::GetPriorityFromLoadPriority(load_priority));
             file_writer.Write(index_data->data.get(), (size_t)index_data->size);
 
             if (aligned_size > index_data->size) {
@@ -299,8 +302,12 @@ ScalarIndexSort<T>::Load(milvus::tracer::TraceContext ctx,
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load disk ann index");
-    auto index_datas = file_manager_->LoadIndexToMemory(
-        index_files.value(), config[milvus::LOAD_PRIORITY]);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto index_datas =
+        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     // clear index_datas to free memory early

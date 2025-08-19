@@ -538,7 +538,10 @@ BitmapIndex<T>::LoadWithoutAssemble(const BinarySet& binary_set,
         build_mode_ == BitmapIndexBuildMode::ROARING) {
         auto mmap_filepath =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
-        auto priority = config[milvus::LOAD_PRIORITY];
+        auto priority =
+            GetValueFromConfig<milvus::proto::common::LoadPriority>(
+                config, milvus::LOAD_PRIORITY)
+                .value_or(milvus::proto::common::LoadPriority::HIGH);
         AssertInfo(mmap_filepath.has_value(),
                    "mmap filepath is empty when load index");
         MMapIndexData(mmap_filepath.value(),
@@ -575,8 +578,12 @@ BitmapIndex<T>::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(),
                "index file paths is empty when load bitmap index");
-    auto index_datas = file_manager_->LoadIndexToMemory(
-        index_files.value(), config[milvus::LOAD_PRIORITY]);
+    auto load_priority =
+        GetValueFromConfig<milvus::proto::common::LoadPriority>(
+            config, milvus::LOAD_PRIORITY)
+            .value_or(milvus::proto::common::LoadPriority::HIGH);
+    auto index_datas =
+        file_manager_->LoadIndexToMemory(index_files.value(), load_priority);
     BinarySet binary_set;
     AssembleIndexDatas(index_datas, binary_set);
     // clear index_datas to free memory early
