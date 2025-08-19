@@ -41,7 +41,7 @@ func (c *controller) Start() {
 				log.Ctx(c.ctx).Info("CDC controller stopped")
 				return
 			case <-timer.C:
-				c.processConfigurations()
+				c.run()
 			}
 		}
 	}()
@@ -54,7 +54,7 @@ func (c *controller) Stop() {
 	})
 }
 
-func (c *controller) processConfigurations() {
+func (c *controller) run() {
 	configs := resource.Resource().ConfigManager().GetAllConfigurations()
 	for _, config := range configs {
 		log.Ctx(c.ctx).Info("processing configuration...", configuration.WrapConfigLog(config)...)
@@ -71,9 +71,9 @@ func (c *controller) processConfigurations() {
 			action := configuration.UpdateState(cdcpb.ReplicateState_Running)
 			resource.Resource().ConfigManager().UpdateConfiguration(config.GetReplicateID(), action)
 		case cdcpb.ReplicateState_Running:
-			// TODO: update metrics
+			// TODO: sheep, update metrics
 		case cdcpb.ReplicateState_Failed:
-			// TODO: log and update metrics
+			// TODO: sheep, log and update metrics
 		default:
 			panic(fmt.Sprintf("unknown state: %s", config.GetState()))
 		}

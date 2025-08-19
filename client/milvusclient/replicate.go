@@ -17,3 +17,23 @@ func (c *Client) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.
 	})
 	return err
 }
+
+func (c *Client) GetReplicateInfo(ctx context.Context, in *milvuspb.GetReplicateInfoRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicateInfoResponse, error) {
+	var resp *milvuspb.GetReplicateInfoResponse
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		var err error
+		resp, err = milvusService.GetReplicateInfo(ctx, in, opts...)
+		return merr.CheckRPCCall(resp, err)
+	})
+	return resp, err
+}
+
+func (c *Client) CreateReplicateStream(ctx context.Context, opts ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
+	var resp milvuspb.MilvusService_CreateReplicateStreamClient
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+		var err error
+		resp, err = milvusService.CreateReplicateStream(ctx, opts...)
+		return merr.CheckRPCCall(resp, err)
+	})
+	return resp, err
+}
