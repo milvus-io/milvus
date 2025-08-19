@@ -738,6 +738,12 @@ func TestRewatchNodes(t *testing.T) {
 	mockHandleNodeStopping := mockey.Mock((*Server).handleNodeStopping).Return().Build()
 	defer mockHandleNodeStopping.UnPatch()
 
+	server.meta = &meta.Meta{
+		ResourceManager: meta.NewResourceManager(nil, nil),
+	}
+	mockCheckNodesInResourceGroup := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+	defer mockCheckNodesInResourceGroup.UnPatch()
+
 	// Act: Call rewatchNodes
 	err := server.rewatchNodes(sessions)
 
@@ -773,6 +779,12 @@ func TestRewatchNodesWithEmptySessions(t *testing.T) {
 	// Mock external calls
 	mockHandleNodeDown := mockey.Mock((*Server).handleNodeDown).Return().Build()
 	defer mockHandleNodeDown.UnPatch()
+
+	server.meta = &meta.Meta{
+		ResourceManager: meta.NewResourceManager(nil, nil),
+	}
+	mockCheckNodesInResourceGroup := mockey.Mock((*meta.ResourceManager).CheckNodesInResourceGroup).Return().Build()
+	defer mockCheckNodesInResourceGroup.UnPatch()
 
 	// Act: Call rewatchNodes with empty sessions
 	err := server.rewatchNodes(nil)
