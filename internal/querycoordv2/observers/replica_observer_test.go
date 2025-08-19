@@ -33,6 +33,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -216,13 +217,13 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 	suite.observer.Stop()
 	snmanager.ResetStreamingNodeManager()
-	balancer := mock_balancer.NewMockBalancer(suite.T())
+	b := mock_balancer.NewMockBalancer(suite.T())
 	change := make(chan struct{})
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, wcac balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	balancer.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).RunAndReturn(func(ctx context.Context) (map[int64]*types.StreamingNodeInfo, error) {
 		pchans := []map[int64]*types.StreamingNodeInfo{
 			{
 				1: {ServerID: 1, Address: "localhost:1"},
@@ -241,7 +242,7 @@ func (suite *ReplicaObserverSuite) TestCheckSQnodesInReplica() {
 			return pchans[0], nil
 		}
 	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 	suite.observer = NewReplicaObserver(suite.meta, suite.distMgr)
 	suite.observer.Start()
 
