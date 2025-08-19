@@ -1838,10 +1838,10 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
 
-    index::IndexBasePtr scalar_index_ptr = nullptr;
+    PinWrapper<const index::IndexBase*> pin_scalar_index_ptr;
     auto scalar_indexes = PinIndex(field_id);
     if (!scalar_indexes.empty()) {
-        scalar_index_ptr = scalar_indexes[0].get();
+        pin_scalar_index_ptr = std::move(scalar_indexes[0]);
     }
 
     auto index_has_raw = HasRawData(field_id.get());
@@ -1850,7 +1850,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(FieldId field_id,
         // if field has load scalar index, reverse raw data from index
         if (index_has_raw) {
             return ReverseDataFromIndex(
-                scalar_index_ptr, seg_offsets, count, field_meta);
+                pin_scalar_index_ptr.get(), seg_offsets, count, field_meta);
         }
         return get_raw_data(field_id, field_meta, seg_offsets, count);
     }
