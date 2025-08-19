@@ -86,6 +86,7 @@ type queryParams struct {
 	reduceType   reduce.IReduceType
 	isIterator   bool
 	collectionID int64
+	timezone 	 string
 }
 
 // translateToOutputFieldIDs translates output fields name to output fields id.
@@ -168,6 +169,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		isIterator        bool
 		err               error
 		collectionID      int64
+		timezone 					string
 	)
 	reduceStopForBestStr, err := funcutil.GetAttrByKeyFromRepeatedKV(ReduceStopForBestKey, queryParamsPair)
 	// if reduce_stop_for_best is provided
@@ -226,6 +228,11 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
+	timezone_str, err := funcutil.GetAttrByKeyFromRepeatedKV(TimezoneKey, queryParamsPair)
+	if err == nil {
+		timezone = timezone_str
+	}
+
 	// validate max result window.
 	if err = validateMaxQueryResultWindow(offset, limit); err != nil {
 		return nil, fmt.Errorf("invalid max query result window, %w", err)
@@ -237,6 +244,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		reduceType:   reduceType,
 		isIterator:   isIterator,
 		collectionID: collectionID,
+		timezone: timezone,
 	}, nil
 }
 
@@ -694,7 +702,14 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	}
 	colTimezone := getColTimezone(colInfo)
 	dbTimezone := getDbTimezone(dbInfo)
-	timestamptzUtc2IsoStr(t.result.GetFieldsData(), "", colTimezone, dbTimezone) // TODO: support user define
+	if !t.reQuery {
+		log.Debug("Translate timstamp to ISO string", zap.String("timezone", t.queryParams.timezone))
+		err = timestamptzUtc2IsoStr(t.result.GetFieldsData(), t.queryParams.timezone, colTimezone, dbTimezone)
+		if err != nil {
+			log.Warn("fail to convert timestamp", zap.Error(err))
+			return err
+		}
+	}
 	log.Debug("Query PostExecute done")
 	return nil
 }

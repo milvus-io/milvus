@@ -839,7 +839,11 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 	colTimezone := getColTimezone(colInfo)
 	dbTimezone := getDbTimezone(dbInfo)
-	timestamptzUtc2IsoStr(t.result.GetResults().GetFieldsData(), "", colTimezone, dbTimezone) // TODO: support user define
+	err = timestamptzUtc2IsoStr(t.result.GetResults().GetFieldsData(), parseTimezone(t.request.SearchParams), colTimezone, dbTimezone)
+	if err != nil {
+		log.Warn("fail to convert timestamp", zap.Error(err))
+		return err
+	}
 
 	log.Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
