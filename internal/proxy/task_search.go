@@ -819,6 +819,28 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
+	// Translate timestamp to ISO string
+	collName := t.request.GetCollectionName()
+	dbName := t.request.GetDbName()
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), dbName, collName)
+	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collName, collID)
+	if err != nil {
+		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
+	if err != nil {
+		log.Warn("fail to get database info", zap.Error(err))
+		return err
+	}
+	colTimezone := getColTimezone(colInfo)
+	dbTimezone := getDbTimezone(dbInfo)
+	timestamptzUtc2IsoStr(t.result.GetResults().GetFieldsData(), "", colTimezone, dbTimezone) // TODO: support user define
+
 	log.Debug("Search post execute done",
 		zap.Int64("collection", t.GetCollectionID()),
 		zap.Int64s("partitionIDs", t.GetPartitionIDs()))
