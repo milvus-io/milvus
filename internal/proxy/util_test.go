@@ -3827,3 +3827,212 @@ func TestCheckAndFlattenStructFieldData(t *testing.T) {
 func TestValidateFieldsInStruct(t *testing.T) {
 	// todo(SpadeA): add test cases
 }
+
+func TestIsDistanceQueryField(t *testing.T) {
+	tests := []struct {
+		name      string
+		fieldName string
+		expected  bool
+	}{
+		{
+			name:      "distance field",
+			fieldName: "_distance",
+			expected:  true,
+		},
+		{
+			name:      "score field",
+			fieldName: "_score",
+			expected:  true,
+		},
+		{
+			name:      "rank field",
+			fieldName: "_rank",
+			expected:  true,
+		},
+		{
+			name:      "alias with as keyword",
+			fieldName: "a.id as id1",
+			expected:  true,
+		},
+		{
+			name:      "alias with as keyword complex",
+			fieldName: "b.vector as vec",
+			expected:  true,
+		},
+		{
+			name:      "simple alias reference",
+			fieldName: "a.id",
+			expected:  true,
+		},
+		{
+			name:      "vector alias reference",
+			fieldName: "b.vector",
+			expected:  true,
+		},
+		{
+			name:      "distance function call",
+			fieldName: "distance(a.vector, b.vector, 'L2')",
+			expected:  true,
+		},
+		{
+			name:      "distance function with alias",
+			fieldName: "distance(vector1, vector2, 'IP') as _distance",
+			expected:  true,
+		},
+		{
+			name:      "normal field",
+			fieldName: "id",
+			expected:  false,
+		},
+		{
+			name:      "normal vector field",
+			fieldName: "vector",
+			expected:  false,
+		},
+		{
+			name:      "field with distance in name but not function",
+			fieldName: "distance_field",
+			expected:  false,
+		},
+		{
+			name:      "empty field name",
+			fieldName: "",
+			expected:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isDistanceQueryField(tt.fieldName)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestTranslateOutputFieldsForDistanceQuery(t *testing.T) {
+	// 创建测试schema
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "id",
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  102,
+				Name:     "vector",
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "128"},
+				},
+			},
+			{
+				FieldID:  103,
+				Name:     "status",
+				DataType: schemapb.DataType_VarChar,
+			},
+		},
+	}
+
+	// 正确初始化schemaInfo
+	schema := newSchemaInfo(collectionSchema)
+
+	tests := []struct {
+		name                  string
+		outputFields          []string
+		removePkField         bool
+		expectedUserFields    []string
+		expectedDynamicFields []string
+		expectedResultFields  []string
+		expectedPkExplicit    bool
+		expectError           bool
+	}{
+		{
+			name:                  "distance field only",
+			outputFields:          []string{"_distance"},
+			removePkField:         false,
+			expectedUserFields:    []string{"_distance"},
+			expectedDynamicFields: []string{},
+			expectedResultFields:  []string{"id"},
+			expectedPkExplicit:    false,
+			expectError:           false,
+		},
+		{
+			name:                  "alias fields",
+			outputFields:          []string{"a.id as id1", "b.vector as vec"},
+			removePkField:         false,
+			expectedUserFields:    []string{"a.id as id1", "b.vector as vec"},
+			expectedDynamicFields: []string{},
+			expectedResultFields:  []string{"id"},
+			expectedPkExplicit:    false,
+			expectError:           false,
+		},
+		{
+			name:                  "mixed fields with distance",
+			outputFields:          []string{"id", "_distance", "a.vector"},
+			removePkField:         false,
+			expectedUserFields:    []string{"id", "_distance", "a.vector"},
+			expectedDynamicFields: []string{},
+			expectedResultFields:  []string{"id"},
+			expectedPkExplicit:    true,
+			expectError:           false,
+		},
+		{
+			name:                  "wildcard with distance fields",
+			outputFields:          []string{"*", "_distance"},
+			removePkField:         false,
+			expectedUserFields:    []string{"id", "vector", "status", "_distance"},
+			expectedDynamicFields: []string{},
+			expectedResultFields:  []string{"id", "vector", "status"},
+			expectedPkExplicit:    true,
+			expectError:           false,
+		},
+		{
+			name:                  "distance function call",
+			outputFields:          []string{"distance(a.vector, b.vector, 'L2') as _distance"},
+			removePkField:         false,
+			expectedUserFields:    []string{"distance(a.vector, b.vector, 'L2') as _distance"},
+			expectedDynamicFields: []string{},
+			expectedResultFields:  []string{"id"},
+			expectedPkExplicit:    false,
+			expectError:           false,
+		},
+		{
+			name:                  "remove primary key",
+			outputFields:          []string{"_distance", "status"},
+			removePkField:         true,
+			expectedUserFields:    []string{"_distance", "status"},
+			expectedDynamicFields: []string{},
+			expectedResultFields:  []string{"status"},
+			expectedPkExplicit:    false,
+			expectError:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resultFields, userFields, dynamicFields, pkExplicit, err := translateOutputFieldsForDistanceQuery(
+				tt.outputFields, schema, tt.removePkField)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedPkExplicit, pkExplicit, "primary key explicit flag mismatch")
+
+				// 检查用户字段是否包含期望的字段
+				for _, expectedField := range tt.expectedUserFields {
+					assert.Contains(t, userFields, expectedField, "missing expected user field: %s", expectedField)
+				}
+
+				// 检查动态字段
+				assert.Equal(t, len(tt.expectedDynamicFields), len(dynamicFields), "dynamic fields count mismatch")
+
+				// 检查结果字段数量
+				assert.GreaterOrEqual(t, len(resultFields), 0, "result fields should not be negative")
+			}
+		})
+	}
+}

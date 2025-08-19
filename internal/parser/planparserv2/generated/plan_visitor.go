@@ -16,11 +16,17 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Parens.
 	VisitParens(ctx *ParensContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#DistanceCall.
+	VisitDistanceCall(ctx *DistanceCallContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#String.
 	VisitString(ctx *StringContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#Floating.
 	VisitFloating(ctx *FloatingContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#AliasedIdentifier.
+	VisitAliasedIdentifier(ctx *AliasedIdentifierContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#JSONContainsAll.
 	VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{}
@@ -108,6 +114,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Exists.
 	VisitExists(ctx *ExistsContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#AliasExpression.
+	VisitAliasExpression(ctx *AliasExpressionContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}

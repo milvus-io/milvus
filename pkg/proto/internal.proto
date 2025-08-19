@@ -5,6 +5,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/internalpb";
 import "common.proto";
 import "schema.proto";
 import "milvus.proto";
+import "plan.proto";
 
 message GetTimeTickChannelRequest {
 }
@@ -201,6 +202,11 @@ message RetrieveRequest {
   common.ConsistencyLevel consistency_level = 18;
   bool is_iterator = 19;
   uint64 collection_ttl_timestamps = 20;
+  
+  // 距离查询扩展
+  bool is_distance_query = 21;                     // 是否为距离查询
+  repeated plan.QueryFromSource from_sources = 22; // 查询数据源列表 (引用 plan.proto 中的定义)
+  repeated string output_aliases = 23;             // 输出字段别名
 }
 
 
