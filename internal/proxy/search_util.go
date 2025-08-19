@@ -633,6 +633,14 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 	}, nil
 }
 
+func parseTimezone(params []*commonpb.KeyValuePair) string {
+	timezone, err := funcutil.GetAttrByKeyFromRepeatedKV(TimezoneKey, params)
+	if err != nil {
+		return ""
+	}
+	return timezone
+}
+
 func getGroupScorerStr(params []*commonpb.KeyValuePair) string {
 	groupScorerStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RankGroupScorer, params)
 	if err != nil {
