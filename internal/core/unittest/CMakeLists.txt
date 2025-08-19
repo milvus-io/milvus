@@ -121,7 +121,6 @@ endif()
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/1757
             test_minio_chunk_manager.cpp
             )
 endif()
@@ -139,8 +138,7 @@ if (DEFINED AZURE_BUILD_DIR)
     set(MILVUS_TEST_FILES
                 ${MILVUS_TEST_FILES}
                 test_azure_chunk_manager.cpp
-            #need update aws-sdk-cpp, see more from https://github.com/aws/aws-sdk-cpp/issues/2119
-                #test_remote_chunk_manager.cpp
+                test_remote_chunk_manager.cpp
                 )
     include_directories("${AZURE_BUILD_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
 endif()

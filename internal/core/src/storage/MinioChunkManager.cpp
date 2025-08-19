@@ -240,7 +240,7 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
              config.ToString());
     try {
         // Just test connection not check real list, avoid cost resource.
-        ListWithPrefix("justforconnectioncheck");
+        BucketExists(config.bucket_name);
     } catch (SegcoreError& e) {
         auto err_message = fmt::format(
             "precheck chunk manager client failed, "

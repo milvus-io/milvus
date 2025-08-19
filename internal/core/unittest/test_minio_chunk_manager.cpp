@@ -30,6 +30,7 @@ class MinioChunkManagerTest : public testing::Test {
     virtual void
     SetUp() {
         configs_ = StorageConfig{};
+        configs_.bucket_name = "minio-test-bucket";
         chunk_manager_ = std::make_unique<MinioChunkManager>(configs_);
     }
 
