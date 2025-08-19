@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache/pkoracle"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
@@ -23,9 +24,6 @@ import (
 
 type l0WriteBuffer struct {
 	*writeBufferBase
-
-	l0Segments  map[int64]int64 // partitionID => l0 segment ID
-	l0partition map[int64]int64 // l0 segment id => partition id
 
 	syncMgr     syncmgr.SyncManager
 	idAllocator allocator.Interface
@@ -40,8 +38,6 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syn
 		return nil, err
 	}
 	return &l0WriteBuffer{
-		l0Segments:      make(map[int64]int64),
-		l0partition:     make(map[int64]int64),
 		writeBufferBase: base,
 		syncMgr:         syncMgr,
 		idAllocator:     option.idAllocator,
@@ -50,7 +46,7 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, syncMgr syn
 
 func (wb *l0WriteBuffer) dispatchDeleteMsgsWithoutFilter(deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
 	for _, msg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(msg.GetPartitionID(), startPos)
+		l0SegmentID := wb.getL0SegmentID(msg, startPos)
 		pks := storage.ParseIDs2PrimaryKeys(msg.GetPrimaryKeys())
 		pkTss := msg.GetTimestamps()
 		if len(pks) > 0 {
@@ -92,9 +88,22 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 
 // bufferInsert function InsertMsg into bufferred InsertData and returns primary key field data for future usage.
 func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgpb.MsgPosition) error {
-	wb.CreateNewGrowingSegment(inData.partitionID, inData.segmentID, startPos)
-	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
+	segmentInfo := &datapb.SegmentInfo{
+		ID:             inData.segmentID,
+		PartitionID:    inData.partitionID,
+		CollectionID:   wb.collectionID,
+		InsertChannel:  wb.channelName,
+		StartPosition:  startPos,
+		State:          commonpb.SegmentState_Growing,
+		StorageVersion: storage.StorageV1,
+		Level:          datapb.SegmentLevel_L1,
+	}
+	wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
+		return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
+	}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
+	log.Info("add growing segment", zap.Int64("segmentID", inData.segmentID), zap.Int64("storageVersion", storage.StorageV1))
 
+	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
 	wb.metaCache.UpdateSegments(metacache.SegmentActions(
 		metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
@@ -106,7 +115,12 @@ func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgp
 	return nil
 }
 
-func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPosition) int64 {
+func (wb *l0WriteBuffer) getL0SegmentID(body *msgstream.DeleteMsg, startPos *msgpb.MsgPosition) int64 {
+	if body.SegmentId >= 0 {
+		return body.SegmentId
+	}
+
+	partitionID := body.GetPartitionID()
 	log := wb.logger
 	segmentID, ok := wb.l0Segments[partitionID]
 	if !ok {

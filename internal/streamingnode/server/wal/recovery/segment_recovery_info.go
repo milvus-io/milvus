@@ -3,7 +3,7 @@ package recovery
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -13,6 +13,10 @@ import (
 func newSegmentRecoveryInfoFromSegmentAssignmentMeta(metas []*streamingpb.SegmentAssignmentMeta) map[int64]*segmentRecoveryInfo {
 	infos := make(map[int64]*segmentRecoveryInfo, len(metas))
 	for _, m := range metas {
+		if m.Stat.Level == datapb.SegmentLevel_Legacy {
+			// legacy segment level is always L1.
+			m.Stat.Level = datapb.SegmentLevel_L1
+		}
 		infos[m.SegmentId] = &segmentRecoveryInfo{
 			meta: m,
 			// recover from persisted info, so it is not dirty.
@@ -35,6 +39,11 @@ func newSegmentRecoveryInfoFromCreateSegmentMessage(msg message.ImmutableCreateS
 func NewSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreateSegmentMessageV2) *streamingpb.SegmentAssignmentMeta {
 	header := msg.Header()
 	now := tsoutil.PhysicalTime(msg.TimeTick()).Unix()
+	level := header.Level
+	if level == datapb.SegmentLevel_Legacy {
+		// legacy segment level is always L1.
+		level = datapb.SegmentLevel_L1
+	}
 	return &streamingpb.SegmentAssignmentMeta{
 		CollectionId:       header.CollectionId,
 		PartitionId:        header.PartitionId,
@@ -52,7 +61,7 @@ func NewSegmentAssignmentMetaFromCreateSegmentMessage(msg message.ImmutableCreat
 			LastModifiedTimestamp: now,
 			BinlogCounter:         0,
 			CreateSegmentTimeTick: msg.TimeTick(),
-			Level:                 header.Level,
+			Level:                 level,
 		},
 	}
 }
@@ -66,6 +75,21 @@ type segmentRecoveryInfo struct {
 // IsGrowing returns true if the segment is in growing state.
 func (info *segmentRecoveryInfo) IsGrowing() bool {
 	return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
+}
+
+// VChannel returns the vchannel of the segment.
+func (info *segmentRecoveryInfo) VChannel() string {
+	return info.meta.Vchannel
+}
+
+// PartitionID returns the partition id of the segment.
+func (info *segmentRecoveryInfo) PartitionID() int64 {
+	return info.meta.PartitionId
+}
+
+// IsL0 returns true if the segment is an L0 segment.
+func (info *segmentRecoveryInfo) IsL0() bool {
+	return info.meta.Stat.Level == datapb.SegmentLevel_L0
 }
 
 // CreateSegmentTimeTick returns the time tick when the segment was created.
@@ -83,17 +107,18 @@ func (info *segmentRecoveryInfo) BinarySize() uint64 {
 	return info.meta.Stat.ModifiedBinarySize
 }
 
-// ObserveInsert is called when an insert message is observed.
-func (info *segmentRecoveryInfo) ObserveInsert(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
+// ObserveModified is called when an message is observed.
+func (info *segmentRecoveryInfo) ObserveModified(timetick uint64, rows uint64, binarySize uint64) {
 	if timetick < info.meta.CheckpointTimeTick {
 		// the txn message will share the same time tick.
 		// so we only filter the time tick is less than the checkpoint time tick.
 		// Consistent state is guaranteed by the recovery storage's mutex.
 		return
 	}
-	info.meta.Stat.ModifiedBinarySize += assignment.BinarySize
-	info.meta.Stat.ModifiedRows += assignment.Rows
+	info.meta.Stat.ModifiedBinarySize += binarySize
+	info.meta.Stat.ModifiedRows += rows
 	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
+	info.meta.Stat.LastModifiedTimeTick = timetick
 	info.meta.CheckpointTimeTick = timetick
 	info.dirty = true
 }
@@ -113,6 +138,7 @@ func (info *segmentRecoveryInfo) ObserveFlush(timetick uint64) {
 	}
 	info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
 	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
+	info.meta.Stat.LastModifiedTimeTick = timetick
 	info.meta.CheckpointTimeTick = timetick
 	info.dirty = true
 }

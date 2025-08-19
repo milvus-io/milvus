@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -111,7 +112,7 @@ func TestPartitionManager(t *testing.T) {
 	assert.Nil(t, m.GetSegmentManager(1))
 
 	// There's no waiting growing segment
-	<-m.WaitPendingGrowingSegmentReady()
+	<-m.WaitPendingGrowingSegmentReady(datapb.SegmentLevel_L1)
 
 	result, err := m.AssignSegment(&AssignSegmentRequest{
 		TimeTick: 125,
@@ -119,6 +120,7 @@ func TestPartitionManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 120,
 		},
+		Level: datapb.SegmentLevel_L1,
 	})
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, ErrFencedAssign)
@@ -129,6 +131,7 @@ func TestPartitionManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 120,
 		},
+		Level: datapb.SegmentLevel_L1,
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
@@ -139,6 +142,7 @@ func TestPartitionManager(t *testing.T) {
 			Rows:       100,
 			BinarySize: 120,
 		},
+		Level: datapb.SegmentLevel_L1,
 	}
 
 	result, _ = m.AssignSegment(req)
@@ -148,7 +152,7 @@ func TestPartitionManager(t *testing.T) {
 
 	<-createSegmentDone
 	// should ready
-	<-m.WaitPendingGrowingSegmentReady()
+	<-m.WaitPendingGrowingSegmentReady(datapb.SegmentLevel_L1)
 
 	_, err = m.AssignSegment(req)
 	assert.ErrorIs(t, err, ErrTimeTickTooOld)
@@ -182,7 +186,7 @@ func TestPartitionManager(t *testing.T) {
 	<-createSegmentDone
 	segmentIDs = m.FlushAndDropPartition(policy.PolicyPartitionRemoved())
 	assert.Len(t, segmentIDs, 1)
-	<-m.WaitPendingGrowingSegmentReady()
+	<-m.WaitPendingGrowingSegmentReady(datapb.SegmentLevel_L1)
 }
 
 type mockedTxnManager struct{}

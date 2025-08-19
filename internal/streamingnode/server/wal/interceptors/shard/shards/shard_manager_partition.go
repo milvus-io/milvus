@@ -22,7 +22,7 @@ func (m *shardManagerImpl) checkIfPartitionCanBeCreated(uniquePartitionKey Parti
 		return ErrCollectionNotFound
 	}
 
-	if _, ok := m.collections[uniquePartitionKey.CollectionID].PartitionIDs[uniquePartitionKey.PartitionID]; ok {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID].Partitions[uniquePartitionKey.PartitionID]; ok {
 		return ErrPartitionExists
 	}
 	return nil
@@ -41,7 +41,7 @@ func (m *shardManagerImpl) checkIfPartitionExists(uniquePartitionKey PartitionUn
 	if _, ok := m.collections[uniquePartitionKey.CollectionID]; !ok {
 		return ErrCollectionNotFound
 	}
-	if _, ok := m.collections[uniquePartitionKey.CollectionID].PartitionIDs[uniquePartitionKey.PartitionID]; !ok {
+	if _, ok := m.collections[uniquePartitionKey.CollectionID].Partitions[uniquePartitionKey.PartitionID]; !ok {
 		return ErrPartitionNotFound
 	}
 	return nil
@@ -64,7 +64,7 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		return
 	}
 
-	m.collections[collectionID].PartitionIDs[partitionID] = struct{}{}
+	m.collections[collectionID].Partitions[partitionID] = newPartitionInfo()
 	if _, ok := m.partitionManagers[uniquePartitionKey]; ok {
 		logger.Warn("partition manager already exists")
 		return
@@ -101,7 +101,7 @@ func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessa
 		logger.Warn("partition can not be dropped", zap.Error(err))
 		return
 	}
-	delete(m.collections[collectionID].PartitionIDs, partitionID)
+	delete(m.collections[collectionID].Partitions, partitionID)
 
 	pm, ok := m.partitionManagers[uniquePartitionKey]
 	if !ok {

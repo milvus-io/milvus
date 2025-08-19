@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
@@ -36,8 +37,8 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeDropCollection:   impl.handleDropCollection,
 		message.MessageTypeCreatePartition:  impl.handleCreatePartition,
 		message.MessageTypeDropPartition:    impl.handleDropPartition,
-		message.MessageTypeInsert:           impl.handleInsertMessage,
-		message.MessageTypeDelete:           impl.handleDeleteMessage,
+		message.MessageTypeInsert:           impl.handleInsertOrDeleteMessage,
+		message.MessageTypeDelete:           impl.handleInsertOrDeleteMessage,
 		message.MessageTypeManualFlush:      impl.handleManualFlushMessage,
 		message.MessageTypeSchemaChange:     impl.handleSchemaChange,
 		message.MessageTypeAlterCollection:  impl.handleAlterCollection,
@@ -137,12 +138,13 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 	return msgID, nil
 }
 
-// handleInsertMessage handles the insert message.
-func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	insertMsg := message.MustAsMutableInsertMessageV1(msg)
-	// Assign segment for insert message.
-	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
-	header := insertMsg.Header()
+// handleInsertOrDeleteMessage handles the insert/delete message.
+func (impl *shardInterceptor) handleInsertOrDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	prepareAssignSegmentResult := impl.prepareAssignSegment(ctx, msg)
+	header := prepareAssignSegmentResult.Header
+
+	// Assign segment for insert/delete message.
+	// !!! Current implementation a insert/delete message only has one parition, but we need to merge the message for partition-key in future.
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
 			// binary size should be set at proxy with estimate, but we don't implement it right now.
@@ -157,6 +159,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 				BinarySize: partition.GetBinarySize(),
 			},
 			TimeTick: msg.TimeTick(),
+			Level:    prepareAssignSegmentResult.Level,
 		}
 		if session := txn.GetTxnSessionFromContext(ctx); session != nil {
 			// because the shard manager use the interface, txn is a struct,
@@ -170,7 +173,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// 3. segment is not ready.
 			// we just redo it to refresh a new latest timetick.
 			if impl.shardManager.Logger().Level().Enabled(zap.DebugLevel) {
-				impl.shardManager.Logger().Debug("segment assign interceptor redo insert message", zap.Object("message", msg), zap.Error(err))
+				impl.shardManager.Logger().Debug("segment assign interceptor redo message", zap.Object("message", msg), zap.Error(err))
 			}
 			return nil, redo.ErrRedo
 		}
@@ -192,22 +195,54 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			SegmentId: result.SegmentID,
 		}
 	}
-	// Update the insert message headers.
-	insertMsg.OverwriteHeader(header)
+	// Update the insert/delete message headers.
+	prepareAssignSegmentResult.Callback()
 	return appendOp(ctx, msg)
 }
 
-// handleDeleteMessage handles the delete message.
-func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
-	header := deleteMessage.Header()
-	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
-		// The collection can not be deleted at current shard, ignored
-		return nil, status.NewUnrecoverableError(err.Error())
-	}
+// prepareAssignSegmentResult is the result of prepareAssignSegment.
+type prepareAssignSegmentResult struct {
+	Header   assignSegmentHeader
+	Level    datapb.SegmentLevel
+	Callback func()
+}
 
-	impl.shardManager.ApplyDelete(deleteMessage)
-	return appendOp(ctx, msg)
+// assignSegmentHeader is the header that can be used to ask for segment assignment.
+type assignSegmentHeader interface {
+	GetPartitions() []*messagespb.PartitionSegmentAssignment
+	GetCollectionId() int64
+}
+
+// prepareAssignSegment prepares the assign segment header and the callback to overwrite the header.
+func (impl *shardInterceptor) prepareAssignSegment(ctx context.Context, msg message.MutableMessage) *prepareAssignSegmentResult {
+	type assignSegmentHeader interface {
+		GetPartitions() []*messagespb.PartitionSegmentAssignment
+		GetCollectionId() int64
+	}
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		insertMsg := message.MustAsMutableInsertMessageV1(msg)
+		header := insertMsg.Header()
+		return &prepareAssignSegmentResult{
+			Header: header,
+			Level:  datapb.SegmentLevel_L1,
+			Callback: func() {
+				insertMsg.OverwriteHeader(header)
+			},
+		}
+	case message.MessageTypeDelete:
+		deleteMsg := message.MustAsMutableDeleteMessageV1(msg)
+		header := deleteMsg.Header()
+		return &prepareAssignSegmentResult{
+			Header: header,
+			Level:  datapb.SegmentLevel_L0,
+			Callback: func() {
+				deleteMsg.OverwriteHeader(header)
+			},
+		}
+	default:
+		panic("unsupported message type")
+	}
 }
 
 // handleManualFlushMessage handles the manual flush message.
