@@ -5,10 +5,29 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 )
 
+// newProtoFromSegmentStat creates a new proto from segment assignment stat.
+func newProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentStat {
+	if stat == nil {
+		return nil
+	}
+	return &streamingpb.SegmentAssignmentStat{
+		MaxRows:               stat.MaxRows,
+		MaxBinarySize:         stat.MaxBinarySize,
+		ModifiedRows:          stat.Modified.Rows,
+		ModifiedBinarySize:    stat.Modified.BinarySize,
+		CreateTimestamp:       stat.CreateTime.Unix(),
+		BinlogCounter:         stat.BinLogCounter,
+		LastModifiedTimestamp: stat.LastModifiedTime.Unix(),
+		Level:                 stat.Level,
+	}
+}
+
 func TestStatsConvention(t *testing.T) {
-	assert.Nil(t, NewProtoFromSegmentStat(nil))
 	stat := &SegmentStats{
 		Modified: ModifiedMetrics{
 			Rows:       1,
@@ -18,14 +37,9 @@ func TestStatsConvention(t *testing.T) {
 		CreateTime:       time.Now(),
 		LastModifiedTime: time.Now(),
 		BinLogCounter:    3,
+		Level:            datapb.SegmentLevel_L1,
 	}
-	pb := NewProtoFromSegmentStat(stat)
-	assert.Equal(t, stat.MaxBinarySize, pb.MaxBinarySize)
-	assert.Equal(t, stat.Modified.Rows, pb.ModifiedRows)
-	assert.Equal(t, stat.Modified.BinarySize, pb.ModifiedBinarySize)
-	assert.Equal(t, stat.CreateTime.Unix(), pb.CreateTimestamp)
-	assert.Equal(t, stat.LastModifiedTime.Unix(), pb.LastModifiedTimestamp)
-	assert.Equal(t, stat.BinLogCounter, pb.BinlogCounter)
+	pb := newProtoFromSegmentStat(stat)
 
 	stat2 := NewSegmentStatFromProto(pb)
 	assert.Equal(t, stat.MaxBinarySize, stat2.MaxBinarySize)
@@ -34,6 +48,7 @@ func TestStatsConvention(t *testing.T) {
 	assert.Equal(t, stat.CreateTime.Unix(), stat2.CreateTime.Unix())
 	assert.Equal(t, stat.LastModifiedTime.Unix(), stat2.LastModifiedTime.Unix())
 	assert.Equal(t, stat.BinLogCounter, stat2.BinLogCounter)
+	assert.Equal(t, stat.Level, stat2.Level)
 
 	stat3 := stat2.Copy()
 	stat3.Modified.Subtract(ModifiedMetrics{

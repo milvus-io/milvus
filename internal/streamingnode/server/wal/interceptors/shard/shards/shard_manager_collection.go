@@ -59,7 +59,7 @@ func (m *shardManagerImpl) CreateCollection(msg message.ImmutableCreateCollectio
 	}
 
 	m.collections[collectionID] = newCollectionInfo(vchannel, partitionIDs)
-	for partitionID := range m.collections[collectionID].PartitionIDs {
+	for partitionID := range m.collections[collectionID].Partitions {
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		if _, ok := m.partitionManagers[uniqueKey]; ok {
 			logger.Warn("partition already exists", zap.Int64("partitionID", partitionID))
@@ -101,9 +101,9 @@ func (m *shardManagerImpl) DropCollection(msg message.ImmutableDropCollectionMes
 	collectionInfo := m.collections[collectionID]
 	delete(m.collections, collectionID)
 	// remove all partition and segment
-	partitionIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
-	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
-	for partitionID := range collectionInfo.PartitionIDs {
+	partitionIDs := make([]int64, 0, len(collectionInfo.Partitions))
+	segmentIDs := make([]int64, 0, len(collectionInfo.Partitions))
+	for partitionID := range collectionInfo.Partitions {
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		pm, ok := m.partitionManagers[uniqueKey]
 		if !ok {

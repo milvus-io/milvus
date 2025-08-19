@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 )
 
 // PartitionUniqueKey is the unique key of a partition.
@@ -44,6 +45,7 @@ type SegmentStats struct {
 	MaxRows           uint64    // MaxRows of current segment should be assigned, it's a fixed value when segment is transfer int growing.
 	MaxBinarySize     uint64    // MaxBinarySize of current segment should be assigned, it's a fixed value when segment is transfer int growing.
 	CreateTime        time.Time // created timestamp of this segment, it's a fixed value when segment is created, not a tso.
+	CreateTimeTick    uint64    // create time tick of this segment, it's a fixed value when segment is created, not a tso.
 	LastModifiedTime  time.Time // LastWriteTime is the last write time of this segment, it's not a tso, just a local time.
 	BinLogCounter     uint64    // BinLogCounter is the counter of binlog (equal to the binlog file count of primary key), it's an async stat not real time.
 	BinLogFileCounter uint64    // BinLogFileCounter is the counter of binlog files, it's an async stat not real time.
@@ -74,27 +76,11 @@ func NewSegmentStatFromProto(statProto *streamingpb.SegmentAssignmentStat) *Segm
 		},
 		MaxRows:          maxRows,
 		MaxBinarySize:    statProto.MaxBinarySize,
-		CreateTime:       time.Unix(statProto.CreateTimestamp, 0),
+		CreateTime:       tsoutil.PhysicalTime(statProto.CreateSegmentTimeTick),
+		CreateTimeTick:   statProto.CreateSegmentTimeTick,
 		BinLogCounter:    statProto.BinlogCounter,
-		LastModifiedTime: time.Unix(statProto.LastModifiedTimestamp, 0),
+		LastModifiedTime: tsoutil.PhysicalTime(statProto.LastModifiedTimeTick),
 		Level:            lv,
-	}
-}
-
-// NewProtoFromSegmentStat creates a new proto from segment assignment stat.
-func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentStat {
-	if stat == nil {
-		return nil
-	}
-	return &streamingpb.SegmentAssignmentStat{
-		MaxRows:               stat.MaxRows,
-		MaxBinarySize:         stat.MaxBinarySize,
-		ModifiedRows:          stat.Modified.Rows,
-		ModifiedBinarySize:    stat.Modified.BinarySize,
-		CreateTimestamp:       stat.CreateTime.Unix(),
-		BinlogCounter:         stat.BinLogCounter,
-		LastModifiedTimestamp: stat.LastModifiedTime.Unix(),
-		Level:                 stat.Level,
 	}
 }
 

@@ -67,7 +67,6 @@ func NewStreamingNodeBalanceAttrsFromProto(m *streamingpb.StreamingNodeMetrics) 
 	}
 }
 
-// NewProtoFrom
 func NewProtoFromStreamingNodeMetrics(info StreamingNodeMetrics) *streamingpb.StreamingNodeMetrics {
 	wals := make([]*streamingpb.StreamingNodeWALMetrics, 0, len(info.WALMetrics))
 	for _, metrics := range info.WALMetrics {
