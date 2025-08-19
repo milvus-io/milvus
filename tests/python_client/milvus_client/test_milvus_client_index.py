@@ -182,7 +182,10 @@ class TestMilvusClientIndexInvalid(TestMilvusClientV2Base):
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.drop_index(client, collection_name, "vector")
+        error = {ct.err_code: 65535, ct.err_msg: f"index cannot be dropped, collection is loaded, "
+                                                 f"please release it first"}
+        self.drop_index(client, collection_name, "vector",
+                        check_task=CheckTasks.err_res, check_items=error)
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
