@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/util/commonpbutil"
@@ -216,28 +217,56 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	// prefer to load segment by latest and serviceable shard leader
-	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard), meta.WithServiceable())
-	if view == nil {
-		// if no serviceable shard leader, try to find the latest shard leader
-		view = ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
-		if view == nil {
-			msg := "no shard leader for the segment to execute loading"
+
+	var targetDelegator *meta.LeaderView
+	// Note: In the original design, all segments are forwarded through serviceable delegators to target workers for loading.
+	// However, L0 segments are always an exception and need to be loaded directly on the delegator.
+	// Therefore, L0 segments cannot reuse the existing shard leader selection logic and need to be handled separately.
+	// We need to select one from all delegators that are missing L0 segments as the loading target for the L0 segment.
+	if loadInfo.Level == datapb.SegmentLevel_L0 {
+		// load l0 in it's target node
+		views := ex.dist.LeaderViewManager.GetByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+		if len(views) == 0 {
+			msg := "no shard leader for the  l0 segment to execute loading"
 			err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 			log.Warn(msg, zap.Error(err))
 			return err
 		}
+
+		// find delegator which lack of l0 segment
+		for _, view := range views {
+			if _, ok := view.Segments[task.SegmentID()]; !ok {
+				targetDelegator = view
+				break
+			}
+		}
 	}
-	log = log.With(zap.Int64("shardLeader", view.ID))
+
+	if targetDelegator == nil {
+		// prefer to load segment by latest and serviceable shard leader
+		targetDelegator = ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard), meta.WithServiceable())
+		if targetDelegator == nil {
+			// if no serviceable shard leader, try to find the latest shard leader
+			targetDelegator = ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard))
+			if targetDelegator == nil {
+				msg := "no shard leader for the segment to execute loading"
+				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+				log.Warn(msg, zap.Error(err))
+				return err
+			}
+		}
+	}
+
+	log = log.With(zap.Int64("shardLeader", targetDelegator.ID))
 
 	// NOTE: for balance segment task, expected load and release execution on the same shard leader
 	if GetTaskType(task) == TaskTypeMove {
-		task.SetShardLeaderID(view.ID)
+		task.SetShardLeaderID(targetDelegator.ID)
 	}
 
 	startTs := time.Now()
 	log.Info("load segments...")
-	status, err := ex.cluster.LoadSegments(task.Context(), view.ID, req)
+	status, err := ex.cluster.LoadSegments(task.Context(), targetDelegator.ID, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Error(err))
