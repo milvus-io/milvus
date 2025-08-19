@@ -5,6 +5,7 @@ package milvus.proto.messages;
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/messagespb";
 
 import "schema.proto";
+import "data_coord.proto"; // for SegmentLevel, but it's a basic type should not be in datacoord.proto.
 
 // MessageID is the unique identifier of a message.
 message MessageID {
@@ -152,8 +153,10 @@ message CreateSegmentMessageHeader {
     int64 collection_id     = 1;
     int64 partition_id      = 2;
     int64 segment_id        = 3;
-    int64 storage_version   = 4;        // the storage version of the segment.
+    int64 storage_version   = 4; // the storage version of the segment.
     uint64 max_segment_size = 5; // the max size bytes of the segment.
+    uint64 max_rows         = 6; // the max rows of the segment.
+    data.SegmentLevel level = 7; // the level of the segment.
 }
 
 message ManualFlushMessageHeader {

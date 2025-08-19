@@ -33,7 +33,7 @@ func (w *walImpl) Append(ctx context.Context, msg message.MutableMessage) (messa
 	}
 	pb := msg.IntoMessageProto()
 	r := w.p.Write(ctx,
-		&wp.WriterMessage{
+		&wp.WriteMessage{
 			Payload:    pb.Payload,
 			Properties: pb.Properties,
 		},

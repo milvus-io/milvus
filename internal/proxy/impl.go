@@ -128,7 +128,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	if globalMetaCache != nil {
 		switch msgType {
-		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
+		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias, commonpb.MsgType_CreateAlias:
 			if request.CollectionID != UniqueID(0) {
 				aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID, request.GetBase().GetTimestamp(), msgType == commonpb.MsgType_DropCollection)
 				for _, name := range aliasName {
@@ -2845,10 +2845,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.String("partition", request.PartitionName),
-		zap.Uint32("NumRows", request.NumRows),
+		zap.String("db", request.GetDbName()),
+		zap.String("collection", request.GetCollectionName()),
+		zap.String("partition", request.GetPartitionName()),
+		zap.Uint32("NumRows", request.GetNumRows()),
+		zap.Bool("partialUpdate", request.GetPartialUpdate()),
 	)
 	log.Debug("Start processing upsert request in Proxy")
 
@@ -2890,6 +2891,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		idAllocator:     node.rowIDAllocator,
 		chMgr:           node.chMgr,
 		schemaTimestamp: request.SchemaTimestamp,
+		node:            node,
 	}
 
 	log.Debug("Enqueue upsert request in Proxy",

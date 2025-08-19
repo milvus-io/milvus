@@ -5798,10 +5798,16 @@ type streamingConfig struct {
 
 	// logging
 	LoggingAppendSlowThreshold ParamItem `refreshable:"true"`
+
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesLwmThreshold ParamItem `refreshable:"true"`
+
+	// Flush control
+	FlushL0MaxLifetime ParamItem `refreshable:"true"`
+	FlushL0MaxRowNum   ParamItem `refreshable:"true"`
+	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval      ParamItem `refreshable:"true"`
@@ -6038,6 +6044,36 @@ until the total bytes of growing segment is less than this threshold, 0.1 by def
 		Export:       true,
 	}
 	p.FlushGrowingSegmentBytesLwmThreshold.Init(base.mgr)
+
+	p.FlushL0MaxLifetime = ParamItem{
+		Key:     "streaming.flush.l0.maxLifetime",
+		Version: "2.6.0",
+		Doc: `The max lifetime of l0 segment, 10 minutes by default.
+If the l0 segment is older than this time, it will be flushed.`,
+		DefaultValue: "10m",
+		Export:       true,
+	}
+	p.FlushL0MaxLifetime.Init(base.mgr)
+
+	p.FlushL0MaxRowNum = ParamItem{
+		Key:     "streaming.flush.l0.maxRowNum",
+		Version: "2.6.0",
+		Doc: `The max row num of l0 segment, 500000 by default.
+If the row num of l0 segment is greater than this num, it will be flushed.`,
+		DefaultValue: "500000",
+		Export:       true,
+	}
+	p.FlushL0MaxRowNum.Init(base.mgr)
+
+	p.FlushL0MaxSize = ParamItem{
+		Key:     "streaming.flush.l0.maxSize",
+		Version: "2.6.0",
+		Doc: `The max size of l0 segment, 32m by default.
+If the binary size of l0 segment is greater than this size, it will be flushed.`,
+		DefaultValue: "32m",
+		Export:       true,
+	}
+	p.FlushL0MaxSize.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

@@ -57,6 +57,13 @@ func (impl *msgHandlerImpl) HandleCreateSegment(ctx context.Context, createSegme
 }
 
 func (impl *msgHandlerImpl) createNewGrowingSegment(ctx context.Context, vchannel string, h *message.CreateSegmentMessageHeader) error {
+	if h.Level == datapb.SegmentLevel_L0 {
+		// L0 segment should not be flushed directly, but not create than flush.
+		// the create segment operation is used to protect the binlog from garbage collection.
+		// L0 segment's binlog upload and flush operation is handled once.
+		// so we can skip the create segment operation here. (not strict promise exactly)
+		return nil
+	}
 	// Transfer the pending segment into growing state.
 	// Alloc the growing segment at datacoord first.
 	mix, err := resource.Resource().MixCoordClient().GetWithContext(ctx)

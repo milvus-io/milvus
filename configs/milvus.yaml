@@ -474,9 +474,9 @@ queryNode:
       # - If the current memory/disk usage exceeds the high watermark, an eviction will be triggered to evict data from memory/disk
       #   until the memory/disk usage is below the low watermark.
       # - The max amount of memory/disk that can be used for cache is controlled by overloadedMemoryThresholdPercentage and diskMaxUsagePercentage.
-      memoryLowWatermarkRatio: 0.6
+      memoryLowWatermarkRatio: 0.75
       memoryHighWatermarkRatio: 0.8
-      diskLowWatermarkRatio: 0.6
+      diskLowWatermarkRatio: 0.75
       diskHighWatermarkRatio: 0.8
       # Enable eviction for Tiered Storage. Defaults to false.
       # Note that if eviction is enabled, cache data loaded during sync warmup is also subject to eviction.
@@ -1313,6 +1313,16 @@ streaming:
     # growing segment flush process will try to flush some growing segment into sealed 
     # until the total bytes of growing segment is less than this threshold, 0.1 by default.
     growingSegmentBytesLwmThreshold: 0.1
+    l0:
+      # The max lifetime of l0 segment, 10 minutes by default.
+      # If the l0 segment is older than this time, it will be flushed.
+      maxLifetime: 10m
+      # The max row num of l0 segment, 500000 by default.
+      # If the row num of l0 segment is greater than this num, it will be flushed.
+      maxRowNum: 500000
+      # The max size of l0 segment, 32m by default.
+      # If the binary size of l0 segment is greater than this size, it will be flushed.
+      maxSize: 32m
   walRecovery:
     # The interval of persist recovery info, 10s by default. 
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.

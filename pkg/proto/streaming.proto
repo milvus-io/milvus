@@ -4,6 +4,7 @@ package milvus.proto.streaming;
 
 option go_package = "github.com/milvus-io/milvus/pkg/v2/proto/streamingpb";
 
+import "data_coord.proto";
 import "messages.proto";
 import "milvus.proto";
 import "schema.proto";
@@ -574,7 +575,7 @@ message SegmentAssignmentMeta {
     string vchannel              = 4;
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
-    int64 storage_version        = 7;
+    int64 storage_version        = 7; // only available if level is L1 or Legacy.
     uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
 }
 
@@ -587,12 +588,14 @@ enum SegmentAssignmentState {
 // SegmentAssignmentStat is the stat of segment assignment.
 message SegmentAssignmentStat {
     uint64 max_binary_size                    = 1;
-    uint64 inserted_rows                      = 2;
-    uint64 inserted_binary_size               = 3;
+    uint64 modified_rows                      = 2;
+    uint64 modified_binary_size               = 3;
     int64 create_timestamp                    = 4;
     int64 last_modified_timestamp             = 5;
     uint64 binlog_counter                     = 6;
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
+    data.SegmentLevel level                   = 8; // The level of the segment, only L0 or L1.
+    uint64 max_rows                           = 9; // The max rows of the segment.
 }
 
 // The WALCheckpoint that is used to recovery the wal scanner.

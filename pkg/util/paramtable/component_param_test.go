@@ -666,6 +666,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
+		assert.Equal(t, 10*time.Minute, params.StreamingCfg.FlushL0MaxLifetime.GetAsDurationByParse())
+		assert.Equal(t, 500000, params.StreamingCfg.FlushL0MaxRowNum.GetAsInt())
+		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.FlushL0MaxSize.GetAsSize())
 		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALTruncateSampleInterval.GetAsDurationByParse())
 		assert.Equal(t, 72*time.Hour, params.StreamingCfg.WALTruncateRetentionInterval.GetAsDurationByParse())
 

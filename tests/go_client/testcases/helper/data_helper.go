@@ -384,6 +384,10 @@ func GetAllFunctionsOutputFields(schema *entity.Schema) []string {
 	return outputFields
 }
 
+func GenColumnDataWithOption(fieldType entity.FieldType, option GenDataOption) column.Column {
+	return GenColumnData(option.nb, fieldType, option)
+}
+
 // GenColumnData GenColumnDataOption except dynamic column
 func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
 	dim := option.dim
@@ -653,6 +657,10 @@ func GenColumnDataWithFp32VecConversion(nb int, fieldType entity.FieldType, opti
 		log.Fatal("GenFp16OrBf16ColumnDataFromFloatVector failed", zap.Any("FieldType", fieldType))
 		return nil
 	}
+}
+
+func GenDynamicColumnDataWithOption(option GenDataOption) []column.Column {
+	return GenDynamicColumnData(option.start, option.nb)
 }
 
 func GenDynamicColumnData(start int, nb int) []column.Column {

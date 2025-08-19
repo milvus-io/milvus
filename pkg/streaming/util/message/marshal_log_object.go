@@ -107,6 +107,7 @@ func marshalSpecializedHeader(t MessageType, v Version, h string, enc zapcore.Ob
 	case *CreateSegmentMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		enc.AddInt64("segmentID", header.GetSegmentId())
+		enc.AddInt64("lv", int64(header.GetLevel()))
 	case *FlushMessageHeader:
 		enc.AddInt64("collectionID", header.GetCollectionId())
 		enc.AddInt64("segmentID", header.GetSegmentId())
