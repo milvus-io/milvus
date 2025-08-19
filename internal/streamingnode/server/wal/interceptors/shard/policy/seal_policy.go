@@ -1,6 +1,8 @@
 package policy
 
-import "time"
+import (
+	"time"
+)
 
 type PolicyName string
 
@@ -17,7 +19,17 @@ var (
 	PolicyNameIdle                   PolicyName = "idle"
 	PolicyNameGrowingSegmentBytesHWM PolicyName = "growing_bytes_hwm"
 	PolicyNameNodeMemory             PolicyName = "node_memory"
+	PolicyNameL0BlockRows            PolicyName = "l0_block_rows"
+	PolicyNameL0BlockBytes           PolicyName = "l0_block_bytes"
 )
+
+// NilPolicy returns a SealPolicy for no policy.
+func NilPolicy() SealPolicy {
+	return SealPolicy{
+		Policy: "",
+		Extra:  nil,
+	}
+}
 
 // PolicyPartitionNotFound returns a SealPolicy for partition not found.
 func PolicyParitionNotFound() SealPolicy {
@@ -103,10 +115,31 @@ func PolicyNodeMemory(usedRatio float64) SealPolicy {
 	}
 }
 
+// PolicyL0BlockRows returns a SealPolicy for L0 block rows.
+func PolicyL0BlockRows(partitionID int64, blockRowNum uint64) SealPolicy {
+	return SealPolicy{
+		Policy: PolicyNameL0BlockRows,
+		Extra:  sealByL0BlockRowsExtraInfo{PartitionID: partitionID, BlockRowNum: blockRowNum},
+	}
+}
+
+// PolicyL0BlockBytes returns a SealPolicy for L0 block bytes.
+func PolicyL0BlockBytes(partitionID int64, blockBytes uint64) SealPolicy {
+	return SealPolicy{
+		Policy: PolicyNameL0BlockBytes,
+		Extra:  sealByL0BlockBytesExtraInfo{PartitionID: partitionID, BlockBytes: blockBytes},
+	}
+}
+
 // PolicyRecover returns a SealPolicy for recover.
 type SealPolicy struct {
 	Policy PolicyName
 	Extra  interface{}
+}
+
+// IsNil returns true if the policy is nil.
+func (p SealPolicy) IsNil() bool {
+	return p.Policy == ""
 }
 
 type sealFenced struct {
@@ -137,4 +170,14 @@ type nodeMemory struct {
 type sealByIdleTimeExtraInfo struct {
 	IdleTime    time.Duration
 	MinimalSize uint64
+}
+
+type sealByL0BlockRowsExtraInfo struct {
+	PartitionID int64
+	BlockRowNum uint64
+}
+
+type sealByL0BlockBytesExtraInfo struct {
+	PartitionID int64
+	BlockBytes  uint64
 }

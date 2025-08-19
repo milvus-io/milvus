@@ -207,7 +207,7 @@ type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
 	MustBody() B
 
 	// OverwriteHeader overwrites the message header.
-	OverwriteHeader(header H)
+	OverwriteHeader(header any)
 
 	// BroadcastMessage returns the broadcast message.
 	BroadcastMessage() BroadcastMutableMessage
@@ -232,7 +232,7 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	MustBody() B
 
 	// OverwriteHeader overwrites the message header.
-	OverwriteHeader(header H)
+	OverwriteHeader(header any)
 
 	// OverwriteBody overwrites the message body.
 	OverwriteBody(body B)

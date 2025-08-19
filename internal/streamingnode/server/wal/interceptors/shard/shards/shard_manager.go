@@ -30,11 +30,12 @@ var (
 	ErrSegmentOnGrowing   = errors.New("segment on growing")
 	ErrFencedAssign       = errors.New("fenced assign")
 
-	ErrTimeTickTooOld    = errors.New("time tick is too old")
-	ErrWaitForNewSegment = errors.New("wait for new segment")
-	ErrNotGrowing        = errors.New("segment is not growing")
-	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
-	ErrTooLargeInsert    = stats.ErrTooLargeInsert
+	ErrTimeTickTooOld       = errors.New("time tick is too old")
+	ErrWaitForNewSegment    = errors.New("wait for new segment")
+	ErrNotGrowing           = errors.New("segment is not growing")
+	ErrSegmentLevelNotMatch = errors.New("segment level not match")
+	ErrNotEnoughSpace       = stats.ErrNotEnoughSpace
+	ErrTooLargeInsert       = stats.ErrTooLargeInsert
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.
@@ -59,10 +60,11 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 	segmentTotal := 0
 	metrics := metricsutil.NewSegmentAssignMetrics(param.ChannelInfo.Name)
 	for collectionID, collectionInfo := range collections {
-		for partitionID := range collectionInfo.PartitionIDs {
+		partitionIDs := lo.Keys(collectionInfo.Partitions)
+		for _, partitionID := range partitionIDs {
+			uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 			segmentManagers := make(map[int64]*segmentAllocManager, 0)
 			// recovery meta is recovered , use it.
-			uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 			if managers, ok := partitionToSegmentManagers[uniqueKey]; ok {
 				segmentManagers = managers
 			}
@@ -123,7 +125,7 @@ func newSegmentAllocManagersFromRecovery(pchannel types.PChannelInfo, recoverInf
 		if !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, collection not found, %d", rawMeta.GetCollectionId()))
 		}
-		if _, ok := coll.PartitionIDs[rawMeta.GetPartitionId()]; !ok {
+		if _, ok := coll.Partitions[rawMeta.GetPartitionId()]; !ok {
 			panic(fmt.Sprintf("segment assignment meta is dirty, partition not found, partition not found, %d", rawMeta.GetPartitionId()))
 		}
 		if _, ok := growingBelongs[rawMeta.GetSegmentId()]; ok {
@@ -153,15 +155,19 @@ func newCollectionInfos(recoverInfos *recovery.RecoverySnapshot) map[int64]*Coll
 	// collectionMap is a map from collectionID to collectionInfo.
 	collectionInfoMap := make(map[int64]*CollectionInfo, len(recoverInfos.VChannels))
 	for _, vchannelInfo := range recoverInfos.VChannels {
-		currentPartition := make(map[int64]struct{}, len(vchannelInfo.CollectionInfo.Partitions))
+		currentPartition := make(map[int64]*PartitionInfo, len(vchannelInfo.CollectionInfo.Partitions))
 		for _, partition := range vchannelInfo.CollectionInfo.Partitions {
-			currentPartition[partition.PartitionId] = struct{}{}
+			currentPartition[partition.PartitionId] = &PartitionInfo{
+				LastL0FlushTimeTick: partition.LastL0FlushTimeTick,
+			}
 		}
 		// add all partitions id into the collection info.
-		currentPartition[common.AllPartitionsID] = struct{}{}
+		currentPartition[common.AllPartitionsID] = &PartitionInfo{
+			LastL0FlushTimeTick: vchannelInfo.CollectionInfo.LastL0FlushTimeTick,
+		}
 		collectionInfoMap[vchannelInfo.CollectionInfo.CollectionId] = &CollectionInfo{
-			VChannel:     vchannelInfo.Vchannel,
-			PartitionIDs: currentPartition,
+			VChannel:   vchannelInfo.Vchannel,
+			Partitions: currentPartition,
 		}
 	}
 	return collectionInfoMap
@@ -185,8 +191,12 @@ type shardManagerImpl struct {
 }
 
 type CollectionInfo struct {
-	VChannel     string
-	PartitionIDs map[int64]struct{}
+	VChannel   string
+	Partitions map[int64]*PartitionInfo
+}
+
+type PartitionInfo struct {
+	LastL0FlushTimeTick uint64
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {
@@ -213,13 +223,18 @@ func (m *shardManagerImpl) updateMetrics() {
 // newCollectionInfo creates a new collection info.
 func newCollectionInfo(vchannel string, partitionIDs []int64) *CollectionInfo {
 	info := &CollectionInfo{
-		VChannel:     vchannel,
-		PartitionIDs: make(map[int64]struct{}, len(partitionIDs)),
+		VChannel:   vchannel,
+		Partitions: make(map[int64]*PartitionInfo, len(partitionIDs)),
 	}
 	for _, partitionID := range partitionIDs {
-		info.PartitionIDs[partitionID] = struct{}{}
+		info.Partitions[partitionID] = newPartitionInfo()
 	}
 	// add all partitions id into the collection info.
-	info.PartitionIDs[common.AllPartitionsID] = struct{}{}
+	info.Partitions[common.AllPartitionsID] = newPartitionInfo()
 	return info
+}
+
+// newPartitionInfo creates a new partition info.
+func newPartitionInfo() *PartitionInfo {
+	return &PartitionInfo{LastL0FlushTimeTick: 0}
 }
