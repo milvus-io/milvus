@@ -717,6 +717,19 @@ func (s *Server) rewatchNodes(sessions map[string]*sessionutil.Session) error {
 		}
 	}
 
+	// check resource group nodes and remove legacy nodes
+	for _, rgName := range s.meta.ListResourceGroups(s.ctx) {
+		rg := s.meta.ResourceManager.GetResourceGroup(s.ctx, rgName)
+		for _, node := range rg.GetNodes() {
+			info := s.nodeMgr.Get(node)
+			if info == nil {
+				s.meta.ResourceManager.HandleNodeDown(context.Background(), node)
+			} else if info.IsStoppingState() {
+				s.meta.ResourceManager.HandleNodeStopping(context.Background(), node)
+			}
+		}
+	}
+
 	return nil
 }
 
