@@ -27,52 +27,6 @@ func (_m *MockShardManager) EXPECT() *MockShardManager_Expecter {
 	return &MockShardManager_Expecter{mock: &_m.Mock}
 }
 
-// ApplyDelete provides a mock function with given fields: msg
-func (_m *MockShardManager) ApplyDelete(msg message.MutableDeleteMessageV1) error {
-	ret := _m.Called(msg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ApplyDelete")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(message.MutableDeleteMessageV1) error); ok {
-		r0 = rf(msg)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardManager_ApplyDelete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyDelete'
-type MockShardManager_ApplyDelete_Call struct {
-	*mock.Call
-}
-
-// ApplyDelete is a helper method to define mock.On call
-//   - msg message.MutableDeleteMessageV1
-func (_e *MockShardManager_Expecter) ApplyDelete(msg interface{}) *MockShardManager_ApplyDelete_Call {
-	return &MockShardManager_ApplyDelete_Call{Call: _e.mock.On("ApplyDelete", msg)}
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) Run(run func(msg message.MutableDeleteMessageV1)) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.MutableDeleteMessageV1))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) Return(_a0 error) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) RunAndReturn(run func(message.MutableDeleteMessageV1) error) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // AssignSegment provides a mock function with given fields: req
 func (_m *MockShardManager) AssignSegment(req *shards.AssignSegmentRequest) (*shards.AssignSegmentResult, error) {
 	ret := _m.Called(req)
@@ -823,9 +777,9 @@ func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *log.MLogger) *M
 	return _c
 }
 
-// WaitUntilGrowingSegmentReady provides a mock function with given fields: uniquePartitionKey
-func (_m *MockShardManager) WaitUntilGrowingSegmentReady(uniquePartitionKey shards.PartitionUniqueKey) (<-chan struct{}, error) {
-	ret := _m.Called(uniquePartitionKey)
+// WaitUntilGrowingSegmentReady provides a mock function with given fields: msg
+func (_m *MockShardManager) WaitUntilGrowingSegmentReady(msg message.MutableMessage) (<-chan struct{}, error) {
+	ret := _m.Called(msg)
 
 	if len(ret) == 0 {
 		panic("no return value specified for WaitUntilGrowingSegmentReady")
@@ -833,19 +787,19 @@ func (_m *MockShardManager) WaitUntilGrowingSegmentReady(uniquePartitionKey shar
 
 	var r0 <-chan struct{}
 	var r1 error
-	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey) (<-chan struct{}, error)); ok {
-		return rf(uniquePartitionKey)
+	if rf, ok := ret.Get(0).(func(message.MutableMessage) (<-chan struct{}, error)); ok {
+		return rf(msg)
 	}
-	if rf, ok := ret.Get(0).(func(shards.PartitionUniqueKey) <-chan struct{}); ok {
-		r0 = rf(uniquePartitionKey)
+	if rf, ok := ret.Get(0).(func(message.MutableMessage) <-chan struct{}); ok {
+		r0 = rf(msg)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(<-chan struct{})
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(shards.PartitionUniqueKey) error); ok {
-		r1 = rf(uniquePartitionKey)
+	if rf, ok := ret.Get(1).(func(message.MutableMessage) error); ok {
+		r1 = rf(msg)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -859,14 +813,14 @@ type MockShardManager_WaitUntilGrowingSegmentReady_Call struct {
 }
 
 // WaitUntilGrowingSegmentReady is a helper method to define mock.On call
-//   - uniquePartitionKey shards.PartitionUniqueKey
-func (_e *MockShardManager_Expecter) WaitUntilGrowingSegmentReady(uniquePartitionKey interface{}) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
-	return &MockShardManager_WaitUntilGrowingSegmentReady_Call{Call: _e.mock.On("WaitUntilGrowingSegmentReady", uniquePartitionKey)}
+//   - msg message.MutableMessage
+func (_e *MockShardManager_Expecter) WaitUntilGrowingSegmentReady(msg interface{}) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
+	return &MockShardManager_WaitUntilGrowingSegmentReady_Call{Call: _e.mock.On("WaitUntilGrowingSegmentReady", msg)}
 }
 
-func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) Run(run func(uniquePartitionKey shards.PartitionUniqueKey)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
+func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) Run(run func(msg message.MutableMessage)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(shards.PartitionUniqueKey))
+		run(args[0].(message.MutableMessage))
 	})
 	return _c
 }
@@ -876,7 +830,7 @@ func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) Return(_a0 <-chan 
 	return _c
 }
 
-func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) RunAndReturn(run func(shards.PartitionUniqueKey) (<-chan struct{}, error)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
+func (_c *MockShardManager_WaitUntilGrowingSegmentReady_Call) RunAndReturn(run func(message.MutableMessage) (<-chan struct{}, error)) *MockShardManager_WaitUntilGrowingSegmentReady_Call {
 	_c.Call.Return(run)
 	return _c
 }

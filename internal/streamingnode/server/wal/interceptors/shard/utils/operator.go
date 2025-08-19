@@ -20,4 +20,8 @@ type SealOperator interface {
 	// AsyncFlushSegment sends a signal to flush the segment.
 	// It should be non-blocking.
 	AsyncFlushSegment(infos SealSegmentSignal)
+
+	// GetLastL0FlushTimeTick returns the last L0 flush time tick of the partition.
+	// return the max one of collection and partition l0 flush time tick.
+	GetLastL0FlushTimeTick() map[PartitionUniqueKey]uint64
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
@@ -38,7 +39,7 @@ type WriteBuffer interface {
 	// HasSegment checks whether certain segment exists in this buffer.
 	HasSegment(segmentID int64) bool
 	// CreateNewGrowingSegment creates a new growing segment in the buffer.
-	CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition)
+	CreateNewGrowingSegment(msg message.ImmutableCreateSegmentMessageV2)
 	// BufferData is the method to buffer dml data msgs.
 	BufferData(insertMsgs []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) error
 	// FlushTimestamp set flush timestamp for write buffer
@@ -135,6 +136,12 @@ type writeBufferBase struct {
 	// pre build logger
 	logger        *log.MLogger
 	cpRatedLogger *log.MLogger
+
+	// After move the segment assignment from log consuming into write ahead at shard manager of wal.
+	// Here we only manage L0 segments that are generated before 2.6.0.
+	// For L0 segments that are generated after 2.6.0, we will manage them same as L1 segments.
+	l0Segments  map[int64]int64 // partitionID => l0 segment ID
+	l0partition map[int64]int64 // l0 segment id => partition id
 }
 
 func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
@@ -162,6 +169,8 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, syncMgr s
 		flushTimestamp:       flushTs,
 		errHandler:           option.errorHandler,
 		taskObserverCallback: option.taskObserverCallback,
+		l0Segments:           make(map[int64]int64),
+		l0partition:          make(map[int64]int64),
 	}
 
 	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
@@ -343,12 +352,26 @@ func (wb *writeBufferBase) getSegmentsToSync(ts typeutil.Timestamp, policies ...
 	segments := typeutil.NewSet[int64]()
 	for _, policy := range policies {
 		result := policy.SelectSegments(buffers, ts)
+		for _, segmentID := range result {
+			if segmentInfo, ok := wb.metaCache.GetSegmentByID(segmentID); ok {
+				if segmentInfo.Level() == datapb.SegmentLevel_L0 && segmentInfo.State() == commonpb.SegmentState_Growing && !wb.isLegacyL0Segment(segmentID) {
+					// L0 segment is only allowed to be synced when it is not growing.
+					// Because L0 segment can be seen by data coord when it is flushed.
+					// Some operation like compaction doen't promise to be safe when a L0 segment is growing.
+					// legacy l0 segment is allocated after write into wal before 2.6.0, so the lifetime is not controlled by wal.
+					// it's recorded in l0Segments map, we need to flush it without waiting wal notification.
+					continue
+				}
+				segments.Insert(segmentID)
+			} else {
+				log.Warn("segment not found in meta, it's a critical error", zap.Int64("segmentID", segmentID))
+			}
+		}
 		if len(result) > 0 {
 			log.Info("SyncPolicy selects segments", zap.Int64s("segmentIDs", result), zap.String("reason", policy.Reason()))
 			segments.Insert(result...)
 		}
 	}
-
 	return segments.Collect()
 }
 
@@ -495,27 +518,25 @@ func (id *InsertData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits
 	return hits
 }
 
-func (wb *writeBufferBase) CreateNewGrowingSegment(partitionID int64, segmentID int64, startPos *msgpb.MsgPosition) {
-	_, ok := wb.metaCache.GetSegmentByID(segmentID)
+func (wb *writeBufferBase) CreateNewGrowingSegment(msg message.ImmutableCreateSegmentMessageV2) {
+	h := msg.Header()
+	_, ok := wb.metaCache.GetSegmentByID(h.SegmentId)
 	// new segment
 	if !ok {
-		storageVersion := storage.StorageV1
-		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
-			storageVersion = storage.StorageV2
-		}
 		segmentInfo := &datapb.SegmentInfo{
-			ID:             segmentID,
-			PartitionID:    partitionID,
+			ID:             h.SegmentId,
+			PartitionID:    h.PartitionId,
 			CollectionID:   wb.collectionID,
-			InsertChannel:  wb.channelName,
-			StartPosition:  startPos,
+			InsertChannel:  msg.VChannel(),
+			StartPosition:  nil, // start position will be set in insert data.
 			State:          commonpb.SegmentState_Growing,
-			StorageVersion: storageVersion,
+			StorageVersion: h.StorageVersion,
+			Level:          h.Level,
 		}
 		wb.metaCache.AddSegment(segmentInfo, func(_ *datapb.SegmentInfo) pkoracle.PkStat {
 			return pkoracle.NewBloomFilterSetWithBatchSize(wb.getEstBatchSize())
 		}, metacache.NewBM25StatsFactory, metacache.SetStartPosRecorded(false))
-		log.Info("add growing segment", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName), zap.Int64("storage version", storageVersion))
+		log.Info("add growing segment", log.FieldMessage(msg), zap.Int64("storageVersion", h.StorageVersion))
 	}
 }
 
@@ -581,9 +602,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		pack.WithBM25Stats(bm25)
 	}
 
-	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
-		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
+	isLegacyL0 := wb.isLegacyL0Segment(segmentID)
+	if segmentInfo.State() == commonpb.SegmentState_Flushing || isLegacyL0 { // legacy L0 segment will always be sync as flushed
 		pack.WithFlush()
+		if isLegacyL0 {
+			log.Info("legacy l0 segment is found to be flushed", zap.Int64("segmentID", segmentID), zap.String("channel", wb.channelName))
+		}
 	}
 
 	if segmentInfo.State() == commonpb.SegmentState_Dropped {
@@ -599,6 +623,12 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithSchema(schema).
 		WithSyncPack(pack)
 	return task, nil
+}
+
+// isLegacyL0Segment checks if the segment is a legacy L0 segment.
+func (wb *writeBufferBase) isLegacyL0Segment(segmentID int64) bool {
+	_, ok := wb.l0Segments[segmentID]
+	return ok
 }
 
 // getEstBatchSize returns the batch size based on estimated size per record and FlushBufferSize configuration value.

@@ -11,7 +11,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 )
@@ -43,7 +45,7 @@ func newPartitionSegmentManager(
 		vchannel:             vchannel,
 		collectionID:         collectionID,
 		partitionID:          paritionID,
-		onAllocating:         nil,
+		onAllocatingNotifier: newOnAllocatingNotifier(),
 		segments:             segments,
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
@@ -63,7 +65,7 @@ type partitionManager struct {
 	vchannel             string
 	collectionID         int64
 	partitionID          int64
-	onAllocating         chan struct{}                  // indicates that if the partition manager is on-allocating a new segment.
+	onAllocatingNotifier *onAllocatingNotifier          // indicates that if the partition manager is on-allocating a new segment.
 	segments             map[int64]*segmentAllocManager // there will be very few segments in this list.
 	fencedAssignTimeTick uint64                         // the time tick that the assign operation is fenced.
 	metrics              *metricsutil.SegmentAssignMetrics
@@ -71,11 +73,11 @@ type partitionManager struct {
 
 // AddSegment adds a segment to the partition segment manager.
 func (m *partitionManager) AddSegment(s *segmentAllocManager) {
-	if m.onAllocating == nil {
-		panic("critical bug: onAllocating is nil when receive a create segment message")
+	if m.partitionID == common.AllPartitionsID && s.Level() != datapb.SegmentLevel_L0 {
+		panic("critical bug: add L1 segment to all partition")
 	}
-	close(m.onAllocating)
-	m.onAllocating = nil
+	m.onAllocatingNotifier.Done(s.Level())
+
 	if s.CreateSegmentTimeTick() <= m.fencedAssignTimeTick {
 		panic("critical bug: create segment time tick is less than fenced assign time tick")
 	}
@@ -101,23 +103,15 @@ func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 }
 
 // WaitPendingGrowingSegmentReady waits until the growing segment is ready.
-func (m *partitionManager) WaitPendingGrowingSegmentReady() <-chan struct{} {
-	if m.onAllocating != nil {
-		return m.onAllocating
-	}
-	ready := make(chan struct{})
-	close(ready)
-	return ready
+func (m *partitionManager) WaitPendingGrowingSegmentReady(level datapb.SegmentLevel) <-chan struct{} {
+	return m.onAllocatingNotifier.GetNotifier(level)
 }
 
 // FlushAndDropPartition flushes all segments in the partition.
 // !!! caller should ensure that the returned segment is flushed by other message (not FlushMessage), such as DropPartition, DropCollection.
 func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int64 {
 	m.fencedAssignTimeTick = math.MaxInt64
-	if m.onAllocating != nil {
-		close(m.onAllocating)
-		m.onAllocating = nil
-	}
+	m.onAllocatingNotifier.Drop()
 
 	segmentIDs := make([]int64, 0, len(m.segments))
 	for _, segment := range m.segments {
@@ -211,6 +205,55 @@ func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegm
 
 	// There is no segment can be allocated for the insert request.
 	// Ask a new pending segment to insert.
-	m.asyncAllocSegment()
+	m.asyncAllocSegment(req.Level)
 	return nil, ErrWaitForNewSegment
+}
+
+// newOnAllocatingNotifier creates a new on allocating notifier.
+func newOnAllocatingNotifier() *onAllocatingNotifier {
+	return &onAllocatingNotifier{
+		onAllocating: make(map[datapb.SegmentLevel]chan struct{}),
+	}
+}
+
+type onAllocatingNotifier struct {
+	onAllocating map[datapb.SegmentLevel]chan struct{}
+}
+
+// Start starts allocating a new segment.
+// If the level is already on allocating, return false.
+func (m *onAllocatingNotifier) Start(level datapb.SegmentLevel) bool {
+	if m.onAllocating[level] != nil {
+		return false
+	}
+	m.onAllocating[level] = make(chan struct{})
+	return true
+}
+
+// GetNotifier gets the notifier of the given level.
+func (m *onAllocatingNotifier) GetNotifier(level datapb.SegmentLevel) <-chan struct{} {
+	notifier := m.onAllocating[level]
+	if notifier != nil {
+		return notifier
+	}
+	ready := make(chan struct{})
+	close(ready)
+	return ready
+}
+
+// Done notifies the partition manager that the allocating is done.
+func (m *onAllocatingNotifier) Done(level datapb.SegmentLevel) {
+	if m.onAllocating[level] == nil {
+		panic("critical bug: onAllocating is nil when receive a create segment message")
+	}
+	close(m.onAllocating[level])
+	delete(m.onAllocating, level)
+}
+
+// Drop drops all the notifiers.
+func (m *onAllocatingNotifier) Drop() {
+	for _, notifier := range m.onAllocating {
+		close(notifier)
+	}
+	m.onAllocating = make(map[datapb.SegmentLevel]chan struct{})
 }

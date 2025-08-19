@@ -82,6 +82,7 @@ func (m *sealWorker) loop() {
 		case <-timer.C:
 			m.statsManager.updateConfig()
 			m.notifyToSealSegmentWithTimePolicy()
+			m.notifyToSealSegmentWithL0BlockPolicy()
 		case policy := <-memoryNotifier:
 			m.statsManager.updateConfig()
 			m.notifyToSealSegmentUntilLessThanLWM(policy)
@@ -97,6 +98,17 @@ func (m *sealWorker) notifyToSealSegmentWithTimePolicy() {
 	sealSegmentIDs := m.statsManager.selectSegmentsWithTimePolicy()
 	if len(sealSegmentIDs) != 0 {
 		m.Logger().Info("notify to seal segments with time policy", zap.Int("segmentNum", len(sealSegmentIDs)))
+		for segmentID, sealPolicy := range sealSegmentIDs {
+			m.asyncMustSealSegment(segmentID, sealPolicy)
+		}
+	}
+}
+
+// notifyToSealSegmentWithL0BlockPolicy notifies to seal segments with L0 block policy.
+func (m *sealWorker) notifyToSealSegmentWithL0BlockPolicy() {
+	sealSegmentIDs := m.statsManager.selectSegmentsWithL0BlockPolicy()
+	if len(sealSegmentIDs) != 0 {
+		m.Logger().Info("notify to seal segments with L0 block policy", zap.Int("segmentNum", len(sealSegmentIDs)))
 		for segmentID, sealPolicy := range sealSegmentIDs {
 			m.asyncMustSealSegment(segmentID, sealPolicy)
 		}

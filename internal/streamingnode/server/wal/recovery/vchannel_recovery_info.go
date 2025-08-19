@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message/messageutil"
@@ -157,6 +158,32 @@ func (info *vchannelRecoveryInfo) ObserveAlterCollection(msg message.ImmutableAl
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
+}
+
+// ObserveL0Flush is called when a l0 flush message is observed.
+func (info *vchannelRecoveryInfo) ObserveL0Flush(partitionId int64, timetick uint64) {
+	if timetick < info.meta.CheckpointTimeTick {
+		return
+	}
+	if info.meta.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+		// make it idempotent, only the first drop collection message can be observed.
+		return
+	}
+	if partitionId == common.AllPartitionsID {
+		if info.meta.CollectionInfo.LastL0FlushTimeTick < timetick {
+			info.meta.CollectionInfo.LastL0FlushTimeTick = timetick
+			info.dirty = true
+		}
+		return
+	}
+	for _, partition := range info.meta.CollectionInfo.Partitions {
+		if partition.PartitionId == partitionId {
+			if partition.LastL0FlushTimeTick < timetick {
+				partition.LastL0FlushTimeTick = timetick
+				info.dirty = true
+			}
+		}
+	}
 }
 
 // ObserveDropCollection is called when a drop collection message is observed.

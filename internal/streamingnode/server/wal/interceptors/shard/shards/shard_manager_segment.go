@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 )
 
@@ -17,6 +18,7 @@ type AssignSegmentRequest struct {
 	ModifiedMetrics stats.ModifiedMetrics
 	TimeTick        uint64
 	TxnSession      TxnSession
+	Level           datapb.SegmentLevel
 }
 
 // AssignSegmentResult is a result of segment allocation.
@@ -135,30 +137,54 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	}
 	result, err := pm.AssignSegment(req)
 	if err == nil {
-		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
+		switch req.Level {
+		case datapb.SegmentLevel_L0:
+			m.metrics.ObserveDelete(req.ModifiedMetrics.Rows)
+			return result, nil
+		case datapb.SegmentLevel_L1:
+			m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
+			return result, nil
+		}
 		return result, nil
 	}
 	return nil, err
 }
 
-// ApplyDelete: TODO move the L0 flush operation here.
-func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error {
+// WaitUntilGrowingSegmentReady waits until the growing segment is ready.
+func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(msg message.MutableMessage) (<-chan struct{}, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.metrics.ObserveDelete(msg.Header().GetRows())
-	return nil
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		insertMessage := message.MustAsMutableInsertMessageV1(msg)
+		h := insertMessage.Header()
+		uniquePartitionKey := PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: h.Partitions[0].PartitionId}
+		if len(h.Partitions) != 1 {
+			// TODO: We will support multi-partition insert in the future.
+			panic("insert message should only have one partition")
+		}
+		return m.waitUntilGrowingSegmentReady(uniquePartitionKey, datapb.SegmentLevel_L1)
+	case message.MessageTypeDelete:
+		deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
+		h := deleteMessage.Header()
+		uniquePartitionKey := PartitionUniqueKey{CollectionID: h.CollectionId, PartitionID: h.Partitions[0].PartitionId}
+		if len(h.Partitions) != 1 {
+			// TODO: We will support multi-partition delete in the future.
+			panic("delete message should only have one partition")
+		}
+		return m.waitUntilGrowingSegmentReady(uniquePartitionKey, datapb.SegmentLevel_L0)
+	default:
+		panic("only insert and delete message can be waited for growing segment ready")
+	}
 }
 
-// WaitUntilGrowingSegmentReady waits until the growing segment is ready.
-func (m *shardManagerImpl) WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// waitUntilGrowingSegmentReady waits until the growing segment is ready.
+func (m *shardManagerImpl) waitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey, level datapb.SegmentLevel) (<-chan struct{}, error) {
 	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
 		return nil, err
 	}
-	return m.partitionManagers[uniquePartitionKey].WaitPendingGrowingSegmentReady(), nil
+	return m.partitionManagers[uniquePartitionKey].WaitPendingGrowingSegmentReady(level), nil
 }
 
 // FlushAndFenceSegmentAllocUntil flush all segment that contains the message which timetick is less than the incoming timetick.
@@ -176,9 +202,9 @@ func (m *shardManagerImpl) FlushAndFenceSegmentAllocUntil(collectionID int64, ti
 	}
 
 	collectionInfo := m.collections[collectionID]
-	segmentIDs := make([]int64, 0, len(collectionInfo.PartitionIDs))
+	segmentIDs := make([]int64, 0, len(collectionInfo.Partitions))
 	// collect all partitions
-	for partitionID := range collectionInfo.PartitionIDs {
+	for partitionID := range collectionInfo.Partitions {
 		// Seal all segments and fence assign to the partition manager.
 		uniqueKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
 		pm, ok := m.partitionManagers[uniqueKey]

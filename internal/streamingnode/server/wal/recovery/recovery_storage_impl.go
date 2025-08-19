@@ -343,21 +343,28 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableInsertMessageV1) {
 	for _, partition := range msg.Header().GetPartitions() {
 		if segment, ok := r.segments[partition.SegmentAssignment.SegmentId]; ok && segment.IsGrowing() {
-			segment.ObserveInsert(msg.TimeTick(), partition)
+			segment.ObserveModified(msg.TimeTick(), partition.Rows, partition.BinarySize)
 			if r.Logger().Level().Enabled(zap.DebugLevel) {
 				r.Logger().Debug("insert entity", log.FieldMessage(msg), zap.Uint64("segmentRows", segment.Rows()), zap.Uint64("segmentBinary", segment.BinarySize()))
 			}
 		} else {
-			r.detectInconsistency(msg, "segment not found")
+			r.detectInconsistency(msg, "L1 segment not found")
 		}
 	}
 }
 
 // handleDelete handles the delete message.
 func (r *recoveryStorageImpl) handleDelete(msg message.ImmutableDeleteMessageV1) {
-	// nothing, current delete operation is managed by flowgraph, not recovery storage.
-	if r.Logger().Level().Enabled(zap.DebugLevel) {
-		r.Logger().Debug("delete entity", log.FieldMessage(msg))
+	for _, partition := range msg.Header().GetPartitions() {
+		if segment, ok := r.segments[partition.SegmentAssignment.SegmentId]; ok && segment.IsGrowing() {
+			segment.ObserveModified(msg.TimeTick(), partition.Rows, partition.BinarySize)
+			if r.Logger().Level().Enabled(zap.DebugLevel) {
+				r.Logger().Debug("delete entity", log.FieldMessage(msg), zap.Uint64("segmentRows", segment.Rows()), zap.Uint64("segmentBinary", segment.BinarySize()))
+			}
+		} else {
+			// nothing, current delete operation is managed by flowgraph, not recovery storage.
+			r.detectInconsistency(msg, "L0 segment not found")
+		}
 	}
 }
 
@@ -372,7 +379,7 @@ func (r *recoveryStorageImpl) handleCreateSegment(msg message.ImmutableCreateSeg
 func (r *recoveryStorageImpl) handleFlush(msg message.ImmutableFlushMessageV2) {
 	header := msg.Header()
 	if segment, ok := r.segments[header.SegmentId]; ok {
-		segment.ObserveFlush(msg.TimeTick())
+		r.observeFlush(segment, msg.TimeTick())
 		r.Logger().Info("flush segment", log.FieldMessage(msg), zap.Uint64("rows", segment.Rows()), zap.Uint64("binarySize", segment.BinarySize()))
 	}
 }
@@ -393,7 +400,7 @@ func (r *recoveryStorageImpl) flushSegments(msg message.ImmutableMessage, sealSe
 	binarySize := make([]uint64, 0)
 	for _, segment := range r.segments {
 		if _, ok := sealSegmentIDs[segment.meta.SegmentId]; ok {
-			segment.ObserveFlush(msg.TimeTick())
+			r.observeFlush(segment, msg.TimeTick())
 			segmentIDs = append(segmentIDs, segment.meta.SegmentId)
 			rows = append(rows, segment.Rows())
 			binarySize = append(binarySize, segment.BinarySize())
@@ -431,7 +438,7 @@ func (r *recoveryStorageImpl) flushAllSegmentOfCollection(msg message.ImmutableM
 	rows := make([]uint64, 0)
 	for _, segment := range r.segments {
 		if segment.meta.CollectionId == collectionID {
-			segment.ObserveFlush(msg.TimeTick())
+			r.observeFlush(segment, msg.TimeTick())
 			segmentIDs = append(segmentIDs, segment.meta.SegmentId)
 			rows = append(rows, segment.Rows())
 		}
@@ -467,7 +474,7 @@ func (r *recoveryStorageImpl) flushAllSegmentOfPartition(msg message.ImmutableMe
 	rows := make([]uint64, 0)
 	for _, segment := range r.segments {
 		if segment.meta.PartitionId == partitionID {
-			segment.ObserveFlush(msg.TimeTick())
+			r.observeFlush(segment, msg.TimeTick())
 			segmentIDs = append(segmentIDs, segment.meta.SegmentId)
 			rows = append(rows, segment.Rows())
 		}
@@ -481,6 +488,16 @@ func (r *recoveryStorageImpl) handleTxn(msg message.ImmutableTxnMessage) {
 		r.handleMessage(im)
 		return nil
 	})
+}
+
+// observeFlush observes the flush message and update the recovery storage.
+func (r *recoveryStorageImpl) observeFlush(segment *segmentRecoveryInfo, timetick uint64) {
+	if segment.IsL0() {
+		if vchannel, ok := r.vchannels[segment.VChannel()]; ok {
+			vchannel.ObserveL0Flush(segment.PartitionID(), timetick)
+		}
+	}
+	segment.ObserveFlush(timetick)
 }
 
 // handleImport handles the import message.

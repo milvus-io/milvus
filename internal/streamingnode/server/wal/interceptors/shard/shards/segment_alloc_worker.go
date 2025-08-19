@@ -18,19 +18,19 @@ import (
 )
 
 // asyncAllocSegment allocates a new growing segment asynchronously.
-func (m *partitionManager) asyncAllocSegment() {
-	if m.onAllocating != nil {
-		m.Logger().Debug("segment alloc worker is already on allocating")
-		// manager is already on allocating.
+func (m *partitionManager) asyncAllocSegment(lv datapb.SegmentLevel) {
+	// Create a notifier to notify the waiter when the allocation is done.
+	if !m.onAllocatingNotifier.Start(lv) {
+		m.Logger().Debug("segment alloc worker is already on allocating", zap.Stringer("level", lv))
 		return
 	}
-	// Create a notifier to notify the waiter when the allocation is done.
-	m.onAllocating = make(chan struct{})
+
 	w := &segmentAllocWorker{
 		ctx:          m.ctx,
 		collectionID: m.collectionID,
 		partitionID:  m.partitionID,
 		vchannel:     m.vchannel,
+		level:        lv,
 		wal:          m.wal.Get(),
 	}
 	w.SetLogger(m.Logger())
@@ -46,6 +46,7 @@ type segmentAllocWorker struct {
 	collectionID int64
 	partitionID  int64
 	vchannel     string
+	level        datapb.SegmentLevel
 	wal          wal.WAL
 	msg          message.MutableMessage
 }
@@ -109,7 +110,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 		return err
 	}
 	storageVersion := storage.StorageV1
-	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() && w.level == datapb.SegmentLevel_L1 {
 		storageVersion = storage.StorageV2
 	}
 	// Getnerate growing segment limitation.
@@ -124,7 +125,7 @@ func (w *segmentAllocWorker) generateNewGrowingSegmentMessage() error {
 			StorageVersion: storageVersion,
 			MaxRows:        limitation.SegmentRows,
 			MaxSegmentSize: limitation.SegmentSize,
-			Level:          datapb.SegmentLevel_L1,
+			Level:          w.level,
 		}).
 		WithBody(&message.CreateSegmentMessageBody{}).
 		MustBuildMutable()
