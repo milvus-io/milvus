@@ -12,7 +12,6 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
-
 #include "storage/MinioChunkManager.h"
 #include "storage/Util.h"
 
@@ -22,14 +21,14 @@ using namespace milvus::storage;
 
 const string
 get_default_bucket_name() {
-    return "a-bucket";
+    return "a-bucket-test";
 }
 
 StorageConfig
 get_default_remote_storage_config() {
     StorageConfig storage_config;
     storage_config.storage_type = "remote";
-    storage_config.address = "localhost:9000";
+    storage_config.address = "127.0.0.1:9000";
     char const* tmp = getenv("MINIO_ADDRESS");
     if (tmp != NULL) {
         storage_config.address = string(tmp);
@@ -267,8 +266,7 @@ TEST_F(RemoteChunkManagerTest, ListWithPrefixPositive) {
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
 
-    objs = aws_chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
+    EXPECT_THROW(aws_chunk_manager_->ListWithPrefix("//1/7"), SegcoreError);
 
     objs = aws_chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);

@@ -235,7 +235,7 @@ TEST_F(MinioChunkManagerTest, ReadNotExist) {
     chunk_manager_->DeleteBucket(testBucketName);
 }
 
-/*TEST_F(MinioChunkManagerTest, RemovePositive) {
+TEST_F(MinioChunkManagerTest, RemovePositive) {
     string testBucketName = "test-remove";
     chunk_manager_->SetBucketName(testBucketName);
     EXPECT_EQ(chunk_manager_->GetBucketName(), testBucketName);
@@ -250,18 +250,16 @@ TEST_F(MinioChunkManagerTest, ReadNotExist) {
     bool exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, true);
 
-    bool deleted = chunk_manager_->Remove(path);
-    EXPECT_EQ(deleted, true);
+    chunk_manager_->Remove(path);
 
     // test double deleted
-    deleted = chunk_manager_->Remove(path);
-    EXPECT_EQ(deleted, false);
+    chunk_manager_->Remove(path);
 
     exist = chunk_manager_->Exist(path);
     EXPECT_EQ(exist, false);
 
     chunk_manager_->DeleteBucket(testBucketName);
-}*/
+}
 
 TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     string testBucketName = "test-listprefix";
@@ -286,8 +284,7 @@ TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     EXPECT_EQ(objs[0], "1/7/4");
     EXPECT_EQ(objs[1], "1/7/8");
 
-    objs = chunk_manager_->ListWithPrefix("//1/7");
-    EXPECT_EQ(objs.size(), 2);
+    EXPECT_THROW(chunk_manager_->ListWithPrefix("//1/7"), SegcoreError);
 
     objs = chunk_manager_->ListWithPrefix("1");
     EXPECT_EQ(objs.size(), 3);

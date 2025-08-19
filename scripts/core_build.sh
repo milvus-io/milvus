@@ -236,7 +236,7 @@ fi
 if [ "$OS" = "ubuntu" ] || [ "$OS" = "rocky" ] || [ "$OS" = "amzn" ]; then
   BUILD_DISK_ANN=ON
 fi
-BUILD_DISK_ANN=OFF
+
 pushd ${BUILD_OUTPUT_DIR}
 
 # Remove make cache since build.sh -l use default variables

@@ -87,7 +87,7 @@ struct IndexMeta {
 };
 
 struct StorageConfig {
-    std::string address = "localhost:9000";
+    std::string address = "127.0.0.1:9000";
     std::string bucket_name = "a-bucket";
     std::string access_key_id = "minioadmin";
     std::string access_key_value = "minioadmin";
