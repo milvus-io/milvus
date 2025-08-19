@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
@@ -69,6 +70,8 @@ func TestBalancer(t *testing.T) {
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
 	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, merr.ErrIoKeyNotFound)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
@@ -120,16 +123,16 @@ func TestBalancer(t *testing.T) {
 	resource.Resource().ETCD().Put(context.Background(), dataNodePath, string(data))
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx)
+	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
 	doneErr := errors.New("done")
-	err = b.WatchChannelAssignments(context.Background(), func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
-		for _, relation := range relations {
+	err = b.WatchChannelAssignments(context.Background(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		for _, relation := range param.Relations {
 			assert.Equal(t, relation.Channel.AccessMode, types.AccessModeRO)
 		}
-		if len(relations) == 3 {
+		if len(param.Relations) == 3 {
 			return doneErr
 		}
 		return nil
@@ -140,12 +143,12 @@ func TestBalancer(t *testing.T) {
 	resource.Resource().ETCD().Delete(context.Background(), dataNodePath)
 
 	checkReady := func() {
-		err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+		err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 			// should one pchannel be assigned to per nodes
 			nodeIDs := typeutil.NewSet[int64]()
-			if len(relations) == 3 {
+			if len(param.Relations) == 3 {
 				rwCount := types.AccessModeRW
-				for _, relation := range relations {
+				for _, relation := range param.Relations {
 					if relation.Channel.AccessMode == types.AccessModeRW {
 						rwCount++
 					}
@@ -172,7 +175,7 @@ func TestBalancer(t *testing.T) {
 	// create a inifite block watcher and can be interrupted by close of balancer.
 	f := syncutil.NewFuture[error]()
 	go func() {
-		err := b.WatchChannelAssignments(context.Background(), func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+		err := b.WatchChannelAssignments(context.Background(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 			return nil
 		})
 		f.Set(err)
@@ -193,8 +196,8 @@ func TestBalancer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool())
 	b.Trigger(ctx)
-	err = b.WatchChannelAssignments(ctx, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
-		for _, relation := range relations {
+	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
+		for _, relation := range param.Relations {
 			if relation.Node.ServerID == 1 {
 				return nil
 			}
@@ -278,6 +281,8 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
 	resource.InitForTest(resource.OptETCD(etcdClient), resource.OptStreamingCatalog(catalog), resource.OptStreamingManagerClient(streamingNodeManager))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(nil, merr.ErrIoKeyNotFound)
+	catalog.EXPECT().SaveCChannel(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListPChannel(mock.Anything).Unset()
@@ -324,16 +329,16 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	catalog.EXPECT().SavePChannels(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	ctx := context.Background()
-	b, err := balancer.RecoverBalancer(ctx)
+	b, err := balancer.RecoverBalancer(ctx, "test-channel-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, b)
 
 	b.Trigger(context.Background())
 	ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	b.WatchChannelAssignments(ctx2, func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+	b.WatchChannelAssignments(ctx2, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 		counts := map[int64]int{}
-		for _, relation := range relations {
+		for _, relation := range param.Relations {
 			assert.Equal(t, relation.Channel.AccessMode, types.AccessModeRW)
 			counts[relation.Node.ServerID]++
 		}
@@ -346,9 +351,9 @@ func TestBalancer_WithRecoveryLag(t *testing.T) {
 	lag.Store(false)
 	b.Trigger(context.Background())
 	doneErr := errors.New("done")
-	b.WatchChannelAssignments(context.Background(), func(version typeutil.VersionInt64Pair, relations []types.PChannelInfoAssigned) error {
+	b.WatchChannelAssignments(context.Background(), func(param balancer.WatchChannelAssignmentsCallbackParam) error {
 		counts := map[int64]int{}
-		for _, relation := range relations {
+		for _, relation := range param.Relations {
 			assert.Equal(t, relation.Channel.AccessMode, types.AccessModeRW)
 			counts[relation.Node.ServerID]++
 		}

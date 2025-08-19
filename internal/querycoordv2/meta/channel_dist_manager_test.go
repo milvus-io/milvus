@@ -27,8 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -347,8 +349,8 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	suite.Nil(leader)
 
 	// Test streaming node
-	balancer := mock_balancer.NewMockBalancer(suite.T())
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b := mock_balancer.NewMockBalancer(suite.T())
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		versions := []typeutil.VersionInt64Pair{
 			{Global: 1, Local: 2},
 		}
@@ -361,13 +363,17 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 			},
 		}
 		for i := 0; i < len(versions); i++ {
-			cb(versions[i], pchans[i])
+			cb(balancer.WatchChannelAssignmentsCallbackParam{
+				Version:            versions[i],
+				CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+				Relations:          pchans[i],
+			})
 		}
 		<-ctx.Done()
 		return context.Cause(ctx)
 	})
 	defer snmanager.ResetStreamingNodeManager()
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 	suite.Eventually(func() bool {
 		nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()
 		return nodeIDs.Contain(4)

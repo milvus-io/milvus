@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestChannelManager(t *testing.T) {
@@ -26,6 +25,9 @@ func TestChannelManager(t *testing.T) {
 
 	ctx := context.Background()
 	// Test recover failure.
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test",
+	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
 		Version: 1,
 	}, nil)
@@ -123,6 +125,9 @@ func TestStreamingEnableChecker(t *testing.T) {
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
 	resource.InitForTest(resource.OptStreamingCatalog(catalog))
 	// Test recover failure.
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveVersion(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListPChannel(mock.Anything).Return(nil, nil)
@@ -156,6 +161,9 @@ func TestChannelManagerWatch(t *testing.T) {
 
 	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
 	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{
+		Pchannel: "test-channel",
+	}, nil)
 	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{
 		Version: 1,
 	}, nil)
@@ -184,7 +192,7 @@ func TestChannelManagerWatch(t *testing.T) {
 	called := make(chan struct{}, 1)
 	go func() {
 		defer close(done)
-		err := manager.WatchAssignmentResult(ctx, func(version typeutil.VersionInt64Pair, assignments []types.PChannelInfoAssigned) error {
+		err := manager.WatchAssignmentResult(ctx, func(param WatchChannelAssignmentsCallbackParam) error {
 			select {
 			case called <- struct{}{}:
 			default:

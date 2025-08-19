@@ -11,14 +11,16 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 func TestAssignChannelToWALLocatedFirst(t *testing.T) {
-	balancer := mock_balancer.NewMockBalancer(t)
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
 		versions := []typeutil.VersionInt64Pair{
 			{Global: 1, Local: 2},
 		}
@@ -39,12 +41,16 @@ func TestAssignChannelToWALLocatedFirst(t *testing.T) {
 			},
 		}
 		for i := 0; i < len(versions); i++ {
-			cb(versions[i], pchans[i])
+			cb(balancer.WatchChannelAssignmentsCallbackParam{
+				Version:            versions[i],
+				CChannelAssignment: &streamingpb.CChannelAssignment{Meta: &streamingpb.CChannelMeta{Pchannel: "pchannel"}},
+				Relations:          pchans[i],
+			})
 		}
 		<-ctx.Done()
 		return context.Cause(ctx)
 	})
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 
 	channels := []*meta.DmChannel{
 		{VchannelInfo: &datapb.VchannelInfo{ChannelName: "pchannel_v1"}},
