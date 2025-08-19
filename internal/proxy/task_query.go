@@ -674,6 +674,27 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		// first page for iteration, need to set up sessionTs for iterator
 		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
 	}
+	// Translate timestamp to ISO string
+	collName := t.request.GetCollectionName()
+	dbName := t.request.GetDbName()
+	collID, err := globalMetaCache.GetCollectionID(context.Background(), dbName, collName)
+	if err != nil {
+		log.Warn("fail to get collection id", zap.Error(err))
+		return err
+	}
+	colInfo, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collName, collID)
+	if err != nil {
+		log.Warn("fail to get collection info", zap.Error(err))
+		return err
+	}
+	dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
+	if err != nil {
+		log.Warn("fail to get database info", zap.Error(err))
+		return err
+	}
+	colTimezone := getColTimezone(colInfo)
+	dbTimezone := getDbTimezone(dbInfo)
+	timestamptzUtc2IsoStr(t.result.GetFieldsData(), "", colTimezone, dbTimezone) // TODO: support user define
 	log.Debug("Query PostExecute done")
 	return nil
 }

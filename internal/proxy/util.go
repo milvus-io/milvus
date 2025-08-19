@@ -2745,3 +2745,136 @@ func checkTimezone(props ...*commonpb.KeyValuePair) error {
 		}
 		return nil
 }
+
+func getColTimezone(colInfo *collectionInfo) string {
+	for _, pair := range colInfo.properties {
+		if pair.GetKey() == common.CollectionDefaultTimezone {
+			return pair.GetValue()
+		}
+	}
+	return ""
+}
+
+func getDbTimezone(dbInfo *databaseInfo) string {
+	for _, pair := range dbInfo.properties {
+		if pair.GetKey() == common.DatabaseDefaultTimezone {
+			return pair.GetValue()
+		}
+	}
+	return ""
+}
+
+func timestamptzIsoStr2Utc(columns []*schemapb.FieldData, colTimezone string, dbTimezone string) error {
+	naiveLayouts := []string{
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05.999999999", 
+		"2006-01-02 15:04:05",
+	}
+	for _, fieldData := range columns {
+		
+		if fieldData.GetType() != schemapb.DataType_Timestamptz {
+			continue
+		}
+
+		scalarField := fieldData.GetScalars()
+		if scalarField == nil || scalarField.GetStringData() == nil {
+			log.Warn("field data is not string data", zap.String("fieldName", fieldData.GetFieldName()))
+			return merr.WrapErrParameterInvalidMsg("field data is not string data")
+		}
+
+		stringData := scalarField.GetStringData().GetData()
+		utcTimestamps := make([]int64, len(stringData))
+
+		for i, isoStr := range stringData {
+			var t time.Time
+			var err error
+			// parse directly
+			t, err = time.Parse(time.RFC3339Nano, isoStr)
+			if err == nil {
+				utcTimestamps[i] = t.UnixNano()
+				continue
+			}
+			// no timezone, try to find timezone in collecion -> database level
+			defaultTZ := "UTC"
+			if colTimezone != "" {
+				defaultTZ = colTimezone
+			} else if dbTimezone != "" {
+				defaultTZ = dbTimezone
+			}
+			
+			location, err := time.LoadLocation(defaultTZ)
+			if err != nil {
+				log.Error("invalid timezone", zap.String("timezone", defaultTZ), zap.Error(err))
+				return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", defaultTZ)
+			}
+			var parsed bool
+			for _, layout := range naiveLayouts {
+				t, err = time.ParseInLocation(layout, isoStr, location)
+				if err == nil {
+					parsed = true
+					break
+				}
+			}
+			if !parsed {
+				log.Warn("Can not parse timestamptz string", zap.String("timestamp_string", isoStr))
+				return merr.WrapErrParameterInvalidMsg("got invalid timestamptz string: %s", isoStr)
+			}
+			utcTimestamps[i] = t.UnixNano()
+		}
+		// Replace data in place
+		fieldData.GetScalars().Data = &schemapb.ScalarField_TimestamptzData{
+			TimestamptzData: &schemapb.TimestamptzArray{
+				Data: utcTimestamps,
+			},
+		}
+	}
+	return nil
+
+}
+
+func timestamptzUtc2IsoStr(results []*schemapb.FieldData, userDefineTimezone string, colTimezone string, dbTimezone string) error {
+	// Determine the target timezone based on priority: collection -> database -> UTC.
+	defaultTZ := "UTC"
+	if userDefineTimezone != "" {
+		defaultTZ = userDefineTimezone
+	} else if colTimezone != "" {
+		defaultTZ = colTimezone
+	} else if dbTimezone != "" {
+		defaultTZ = dbTimezone
+	}
+
+	location, err := time.LoadLocation(defaultTZ)
+	if err != nil {
+		log.Error("invalid timezone", zap.String("timezone", defaultTZ), zap.Error(err))
+		return merr.WrapErrParameterInvalidMsg("got invalid default timezone: %s", defaultTZ)
+	}
+
+	for _, fieldData := range results {
+		if fieldData.GetType() != schemapb.DataType_Timestamptz {
+			continue
+		}
+		scalarField := fieldData.GetScalars()
+		if scalarField == nil || scalarField.GetTimestamptzData() == nil {
+			log.Warn("field data is not Timestamptz data", zap.String("fieldName", fieldData.GetFieldName()))
+			return merr.WrapErrParameterInvalidMsg("field data for '%s' is not Timestamptz data", fieldData.GetFieldName())
+		}
+
+		utcTimestamps := scalarField.GetTimestamptzData().GetData()
+		isoStrings := make([]string, len(utcTimestamps))
+
+		for i, ts := range utcTimestamps {
+			t := time.Unix(0, ts).UTC()
+			localTime := t.In(location)
+			isoStrings[i] = localTime.Format(time.RFC3339Nano)
+		}
+
+		// Replace the TimestamptzData with the new StringData in place.
+		fieldData.GetScalars().Data = &schemapb.ScalarField_StringData{
+			StringData: &schemapb.StringArray{
+				Data: isoStrings,
+			},
+		}
+	}
+	return nil
+}
