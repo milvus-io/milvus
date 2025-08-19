@@ -27,11 +27,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 type ChannelDistManagerSuite struct {
@@ -349,18 +349,18 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 
 	// Test streaming node
 	snmanager.ResetStreamingNodeManager()
-	balancer := mock_balancer.NewMockBalancer(suite.T())
-	balancer.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb func(typeutil.VersionInt64Pair, []types.PChannelInfoAssigned) error) error {
+	b := mock_balancer.NewMockBalancer(suite.T())
+	b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, wcac balancer.WatchChannelAssignmentsCallback) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	balancer.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
+	b.EXPECT().GetAllStreamingNodes(mock.Anything).Return(map[int64]*types.StreamingNodeInfo{
 		4: {
 			ServerID: 4,
 			Address:  "localhost:1",
 		},
 	}, nil)
-	snmanager.StaticStreamingNodeManager.SetBalancerReady(balancer)
+	snmanager.StaticStreamingNodeManager.SetBalancerReady(b)
 	defer snmanager.ResetStreamingNodeManager()
 	suite.Eventually(func() bool {
 		nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs()

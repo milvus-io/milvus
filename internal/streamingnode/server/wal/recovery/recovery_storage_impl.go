@@ -238,7 +238,7 @@ func (r *recoveryStorageImpl) observeMessage(msg message.ImmutableMessage) {
 // The incoming message id is always sorted with timetick.
 func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 	if msg.VChannel() != "" && msg.MessageType() != message.MessageTypeCreateCollection &&
-		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil {
+		msg.MessageType() != message.MessageTypeDropCollection && r.vchannels[msg.VChannel()] == nil && msg.VChannel() != message.ControlChannel {
 		r.detectInconsistency(msg, "vchannel not found")
 	}
 
