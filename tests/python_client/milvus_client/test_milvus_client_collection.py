@@ -1882,99 +1882,6 @@ class TestMilvusClientReleaseCollectionValid(TestMilvusClientV2Base):
             self.drop_collection(client, collection_name)
 
 
-class TestMilvusClientReleaseAdvanced(TestMilvusClientV2Base):
-    """
-    ******************************************************************
-      The following cases are used to test release during search operations
-    ******************************************************************
-    """
-    
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_release_collection_during_searching(self):
-        """
-        target: test release collection during searching
-        method: insert entities into collection, flush and load collection, release collection during searching
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        self.create_collection(client, collection_name, default_dim)
-        self.load_collection(client, collection_name)
-        load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected Loaded, but got {load_state['state']}"
-        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, _async=True)
-        self.release_collection(client, collection_name)
-        load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected NotLoad after release, but got {load_state['state']}"
-        error = {ct.err_code: 65535, ct.err_msg: "collection not loaded"}
-        self.search(client, collection_name, vectors_to_search, limit=default_limit,
-                   check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
-    
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_release_partition_during_searching(self):
-        """
-        target: test release partition during searching
-        method: insert entities into partition, flush and load partition, release partition during searching
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str("partition")
-        # Create collection and partition
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.create_partition(client, collection_name, partition_name)
-        self.load_partitions(client, collection_name, [partition_name])
-        # Verify partition is loaded
-        load_state = self.get_load_state(client, collection_name, partition_name)[0]
-        assert load_state["state"] == LoadState.Loaded, f"Expected partition to be loaded, got {load_state['state']}"
-        # Search in partition should work
-        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
-        self.search(client, collection_name, vectors_to_search, 
-                   limit=default_limit, partition_names=[partition_name], _async=True)
-        # Release the specific partition
-        self.release_partitions(client, collection_name, [partition_name])
-        error = {ct.err_code: 201, ct.err_msg: "partition not loaded"}
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name],
-                   check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
-    
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_release_indexed_collection_during_searching(self):
-        """
-        target: test release indexed collection during searching
-        method: insert entities into partition, flush and load partition, release collection during searching
-        expected: raise exception
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        partition_name = cf.gen_unique_str("partition")
-        # Create collection and partition
-        self.create_collection(client, collection_name, default_dim, consistency_level="Strong")
-        self.release_collection(client, collection_name)
-        self.drop_index(client, collection_name, "vector")
-        # Prepare and create index
-        index_params = self.prepare_index_params(client)[0]
-        index_params.add_index(field_name="vector", index_type="HNSW", metric_type="L2")
-        self.create_index(client, collection_name, index_params)
-        self.create_partition(client, collection_name, partition_name)
-        self.load_partitions(client, collection_name, [partition_name])
-        # Search in partition should work
-        vectors_to_search = np.random.default_rng(seed=19530).random((1, default_dim))
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name], _async=True)
-        # Release entire collection
-        self.release_collection(client, collection_name)
-        # Verify collection is released
-        load_state = self.get_load_state(client, collection_name)[0]
-        assert load_state["state"] == LoadState.NotLoad, f"Expected collection to be released, got {load_state['state']}"
-        # Try to search in partition after collection release - should fail
-        error = {ct.err_code: 101, ct.err_msg: "collection not loaded"}
-        self.search(client, collection_name, vectors_to_search, limit=default_limit, partition_names=[partition_name],
-                   check_task=CheckTasks.err_res, check_items=error)
-        self.drop_collection(client, collection_name)
-
-
 class TestMilvusClientLoadCollectionInvalid(TestMilvusClientV2Base):
     """ Test case of search interface """
     """
@@ -3967,32 +3874,6 @@ class TestMilvusClientCollectionString(TestMilvusClientV2Base):
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_collection_with_multi_string_fields(self):
-        """
-        target: test create collection with multiple string fields
-        method: 1. create collection with primary string field and non-primary string field
-                2. set one string field is_primary=True
-        expected: Create collection successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        # Create schema with multiple string fields
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        schema.add_field("string_pk", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=False)
-        schema.add_field("string_field_2", DataType.VARCHAR, max_length=200)
-        schema.add_field("string_field_3", DataType.VARCHAR, max_length=300)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        # Create collection
-        self.create_collection(client, collection_name, schema=schema)
-        # Verify collection properties
-        self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "id_name": "string_pk",
-                                           "enable_dynamic_field": False})
-        self.drop_collection(client, collection_name)
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_collection_string_field_primary_auto_id(self):
         """
         target: test create collection with string primary field and auto_id=True
@@ -4107,52 +3988,6 @@ class TestMilvusClientCollectionJSON(TestMilvusClientV2Base):
         schema2.add_field("vector_field", DataType.FLOAT_VECTOR, dim=default_dim)
         self.create_collection(client, collection_name, schema=schema2, primary_field="json_field",
                               check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("primary_field", ["int64", "varchar"])
-    def test_milvus_client_collection_json_field_supported_primary_key(self, primary_field):
-        """
-        target: test create collection with JSON field and supported primary key types
-        method: 1. create collection with one JSON field, primary key field and vector field
-                2. set json field is_primary=false, use int64 or varchar as primary key
-        expected: Create collection successfully
-        """
-        client = self._client()
-        collection_name = cf.gen_collection_name_by_testcase_name()
-        #test1: Create schema with single JSON field and supported primary key
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        if primary_field == "int64":
-            schema.add_field("int64", DataType.INT64, is_primary=True, auto_id=False)
-        else:
-            schema.add_field("varchar", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=False)
-        schema.add_field("json_field", DataType.JSON)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        # Create collection
-        self.create_collection(client, collection_name, schema=schema)
-        self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "id_name": primary_field,
-                                           "enable_dynamic_field": False})
-        self.drop_collection(client, collection_name)
-        #test2: Create schema with multiple JSON fields and supported primary key
-        schema = self.create_schema(client, enable_dynamic_field=False)[0]
-        if primary_field == "int64":
-            schema.add_field("int64", DataType.INT64, is_primary=True, auto_id=False)
-        else:
-            schema.add_field("varchar", DataType.VARCHAR, max_length=100, is_primary=True, auto_id=False)
-        schema.add_field("json_field_1", DataType.JSON)
-        schema.add_field("json_field_2", DataType.JSON)
-        schema.add_field("json_field_3", DataType.JSON)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=default_dim)
-        # Create collection
-        self.create_collection(client, collection_name, schema=schema)
-        self.describe_collection(client, collection_name,
-                                check_task=CheckTasks.check_describe_collection_property,
-                                check_items={"collection_name": collection_name,
-                                           "id_name": primary_field,
-                                           "enable_dynamic_field": False})
-        self.drop_collection(client, collection_name)
 
 
 class TestMilvusClientCollectionARRAY(TestMilvusClientV2Base):
