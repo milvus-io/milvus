@@ -1314,6 +1314,10 @@ struct ArithHelperI64<ArithOpType::Mul, CmpOp> {
     }
 };
 
+//
+template <ArithOpType AOp, CompareOpType CmpOp>
+struct ArithHelperF32 {};
+
 template <CompareOpType CmpOp>
 struct ArithHelperF32<ArithOpType::Div, CmpOp> {
     static inline svbool_t
@@ -1337,10 +1341,6 @@ struct ArithHelperF32<ArithOpType::Div, CmpOp> {
             pred, svdiv_f32_z(pred, left, right), value);
     }
 };
-
-//
-template <ArithOpType AOp, CompareOpType CmpOp>
-struct ArithHelperF32 {};
 
 template <CompareOpType CmpOp>
 struct ArithHelperF32<ArithOpType::Add, CmpOp> {
