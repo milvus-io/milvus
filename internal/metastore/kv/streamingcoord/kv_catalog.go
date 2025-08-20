@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v2/kv"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
@@ -26,6 +27,12 @@ import (
 //	├── pchannel-1
 //	└── pchannel-2
 func NewCataLog(metaKV kv.MetaKv) metastore.StreamingCoordCataLog {
+	return &catalog{
+		metaKV: metaKV,
+	}
+}
+
+func NewReplicationCatalog(metaKV kv.MetaKv) metastore.ReplicationCatalog {
 	return &catalog{
 		metaKV: metaKV,
 	}
@@ -136,4 +143,33 @@ func buildPChannelInfoPath(name string) string {
 // buildBroadcastTaskPath builds the path for broadcast task.
 func buildBroadcastTaskPath(id uint64) string {
 	return BroadcastTaskPrefix + strconv.FormatUint(id, 10)
+}
+
+func (c *catalog) SaveReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error {
+	key := ReplicateConfigurationKey
+	if config == nil {
+		return errors.New("replicate configuration is nil")
+	}
+	v, err := proto.Marshal(config)
+	if err != nil {
+		return errors.Wrapf(err, "marshal replicate configuration failed")
+	}
+	return c.metaKV.Save(ctx, key, string(v))
+}
+
+func (c *catalog) GetReplicateConfiguration(ctx context.Context) (*milvuspb.ReplicateConfiguration, error) {
+	key := ReplicateConfigurationKey
+	value, err := c.metaKV.Load(ctx, key)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			// Return an empty replicate configuration if the key is not found.
+			return &milvuspb.ReplicateConfiguration{}, nil
+		}
+		return nil, err
+	}
+	config := &milvuspb.ReplicateConfiguration{}
+	if err = proto.Unmarshal([]byte(value), config); err != nil {
+		return nil, errors.Wrapf(err, "unmarshal replicate configuration failed")
+	}
+	return config, nil
 }

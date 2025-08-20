@@ -14,17 +14,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package replication
+package metrics
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"sync"
+
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-// ReplicateManagerClient is the client that manages the replicate configuration.
-type ReplicateManagerClient interface {
-	// UpdateReplications updates the replications by the configuration.
-	UpdateReplications(config *milvuspb.ReplicateConfiguration)
+var registerCDCOnce sync.Once
 
-	// Close stops all replications.
-	Close()
+var CDCNumReplications = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: milvusNamespace,
+		Subsystem: typeutil.CDCRole,
+		Name:      "num_replications",
+		Help:      "Number of replications",
+	}, []string{
+		"replication_id",
+	},
+)
+
+// RegisterCDCMetrics registers CDC metrics
+func RegisterCDC(registry *prometheus.Registry) {
+	registerCDCOnce.Do(func() {
+		registerCDCMetricsOnce(registry)
+	})
+}
+
+// registerCDCMetricsOnce registers CDC metrics
+func registerCDCMetricsOnce(registry *prometheus.Registry) {
+	registry.MustRegister(CDCNumReplications)
 }

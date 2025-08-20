@@ -1,15 +1,26 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package replicatemanager
 
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/cdc/resource"
 	"github.com/milvus-io/milvus/internal/cdc/util"
-	"github.com/milvus-io/milvus/pkg/v2/log"
-	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
 // replicateManager is the implementation of ReplicateManagerClient.
@@ -17,70 +28,43 @@ type replicateManager struct {
 	ctx context.Context
 
 	// clusterReplicators is a map of target clusterID to ClusterReplicator.
-	clusterReplicators *typeutil.ConcurrentMap[string, ClusterReplicator]
+	clusterReplicators map[string]ClusterReplicator
 }
 
 func NewReplicateManager() *replicateManager {
 	return &replicateManager{
 		ctx:                context.Background(),
-		clusterReplicators: typeutil.NewConcurrentMap[string, ClusterReplicator](),
+		clusterReplicators: make(map[string]ClusterReplicator),
 	}
 }
 
-func (r *replicateManager) BroadcastReplicateConfiguration(config *milvuspb.ReplicateConfiguration) error {
-	updateConfigFn := func(topology *milvuspb.CrossClusterTopology) error {
-		targetCluster := util.GetMilvusCluster(topology.GetTargetClusterID(), config)
-		logger := log.Ctx(r.ctx).With(
-			zap.String("target_cluster", targetCluster.GetClusterID()),
-			zap.String("URI", targetCluster.GetConnectionParam().GetUri()),
-		)
-		targetClient, err := resource.Resource().ClusterClient().CreateMilvusClient(r.ctx, targetCluster)
-		if err != nil {
-			logger.Warn("failed to create milvus client", zap.Error(err))
-			return err
-		}
-		defer targetClient.Close(r.ctx)
-		err = targetClient.UpdateReplicateConfiguration(r.ctx, &milvuspb.UpdateReplicateConfigurationRequest{
-			ReplicateConfiguration: config,
-		})
-		if err != nil {
-			logger.Warn("failed to update replicate configuration", zap.Error(err))
-			return err
-		}
-		return nil
-	}
+func (r *replicateManager) UpdateReplications(config *milvuspb.ReplicateConfiguration) {
+	candidateClusters := make(map[string]*milvuspb.MilvusCluster)
 	for _, topology := range config.GetCrossClusterTopology() {
-		err := updateConfigFn(topology)
-		if err != nil {
-			return err
-		}
+		clusterID := topology.GetTargetClusterID()
+		candidateClusters[clusterID] = util.GetMilvusCluster(clusterID, config)
 	}
-	return nil
-}
-
-func (r *replicateManager) StartReplications(config *milvuspb.ReplicateConfiguration) {
-	for _, topology := range config.GetCrossClusterTopology() {
-		targetCluster := util.GetMilvusCluster(topology.GetTargetClusterID(), config)
-		clusterReplicator := NewClusterReplicator(targetCluster)
-		clusterReplicator.StartReplicateCluster()
-		r.clusterReplicators.Insert(targetCluster.GetClusterID(), clusterReplicator)
-	}
-}
-
-func (r *replicateManager) StopReplications(config *milvuspb.ReplicateConfiguration) {
-	for _, topology := range config.GetCrossClusterTopology() {
-		targetCluster := util.GetMilvusCluster(topology.GetTargetClusterID(), config)
-		replicator, ok := r.clusterReplicators.Get(targetCluster.GetClusterID())
-		if !ok {
+	// Add and start new cluster replicators that in candidates but not in clusterReplicators.
+	for _, cluster := range candidateClusters {
+		if _, ok := r.clusterReplicators[cluster.GetClusterID()]; ok {
 			continue
 		}
-		replicator.StopReplicateCluster()
+		clusterReplicator := NewClusterReplicator(cluster)
+		clusterReplicator.StartReplicateCluster()
+		r.clusterReplicators[cluster.GetClusterID()] = clusterReplicator
+	}
+	// Stop and remove cluster replicators that are not in the candidate clusters.
+	for clusterID, clusterReplicator := range r.clusterReplicators {
+		if _, ok := candidateClusters[clusterID]; !ok {
+			clusterReplicator.StopReplicateCluster()
+			delete(r.clusterReplicators, clusterID)
+		}
 	}
 }
 
 func (r *replicateManager) Close() {
-	r.clusterReplicators.Range(func(key string, value ClusterReplicator) bool {
-		value.StopReplicateCluster()
-		return true
-	})
+	for _, clusterReplicator := range r.clusterReplicators {
+		clusterReplicator.StopReplicateCluster()
+	}
+	r.clusterReplicators = make(map[string]ClusterReplicator)
 }

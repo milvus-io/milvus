@@ -1,14 +1,30 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package resource
 
 import (
 	"reflect"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/milvus-io/milvus/internal/cdc/cluster"
-	"github.com/milvus-io/milvus/internal/cdc/configuration"
 	"github.com/milvus-io/milvus/internal/cdc/controller"
 	"github.com/milvus-io/milvus/internal/cdc/replication"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/pkg/v2/kv"
 )
 
 var r *resourceImpl // singleton resource instance
@@ -16,10 +32,24 @@ var r *resourceImpl // singleton resource instance
 // optResourceInit is the option to initialize the resource.
 type optResourceInit func(r *resourceImpl)
 
-// OptETCD provides the etcd client to the resource.
-func OptETCD(etcd *clientv3.Client) optResourceInit {
+// OptMetaKV provides the meta kv to the resource.
+func OptMetaKV(metaKV kv.MetaKv) optResourceInit {
 	return func(r *resourceImpl) {
-		r.etcdClient = etcd
+		r.metaKV = metaKV
+	}
+}
+
+// OptReplicateManagerClient provides the replicate manager client to the resource.
+func OptReplicateManagerClient(replicateManagerClient replication.ReplicateManagerClient) optResourceInit {
+	return func(r *resourceImpl) {
+		r.replicateManagerClient = replicateManagerClient
+	}
+}
+
+// OptController provides the controller to the resource.
+func OptController(controller controller.Controller) optResourceInit {
+	return func(r *resourceImpl) {
+		r.controller = controller
 	}
 }
 
@@ -29,10 +59,13 @@ func Init(opts ...optResourceInit) {
 	for _, opt := range opts {
 		opt(newR)
 	}
-	newR.configManager = configuration.NewManager()
-	// TODO: sheep, init
+
+	newR.catalog = streamingcoord.NewReplicationCatalog(newR.MetaKV())
+	newR.clusterClient = cluster.NewClusterClient()
+
+	assertNotNil(newR.MetaKV())
+	assertNotNil(newR.ReplicationCatalog())
 	assertNotNil(newR.ClusterClient())
-	assertNotNil(newR.ConfigManager())
 	assertNotNil(newR.ReplicateManagerClient())
 	assertNotNil(newR.Controller())
 	r = newR
@@ -49,21 +82,21 @@ func Resource() *resourceImpl {
 // resourceImpl is a basic resource dependency for streamingnode server.
 // All utility on it is concurrent-safe and singleton.
 type resourceImpl struct {
-	etcdClient             *clientv3.Client
+	metaKV                 kv.MetaKv
+	catalog                metastore.ReplicationCatalog
 	clusterClient          cluster.ClusterClient
-	configManager          configuration.Manager
 	replicateManagerClient replication.ReplicateManagerClient
 	controller             controller.Controller
 }
 
-// ETCD returns the etcd client.
-func (r *resourceImpl) ETCD() *clientv3.Client {
-	return r.etcdClient
+// MetaKV returns the meta kv.
+func (r *resourceImpl) MetaKV() kv.MetaKv {
+	return r.metaKV
 }
 
-// ConfigManager returns the configuration manager.
-func (r *resourceImpl) ConfigManager() configuration.Manager {
-	return r.configManager
+// ReplicationCatalog returns the replication catalog.
+func (r *resourceImpl) ReplicationCatalog() metastore.ReplicationCatalog {
+	return r.catalog
 }
 
 // ClusterClient returns the cluster client.

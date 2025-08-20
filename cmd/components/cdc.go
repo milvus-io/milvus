@@ -14,17 +14,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package replication
+package components
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"context"
+
+	"github.com/milvus-io/milvus/internal/distributed/cdc"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
-// ReplicateManagerClient is the client that manages the replicate configuration.
-type ReplicateManagerClient interface {
-	// UpdateReplications updates the replications by the configuration.
-	UpdateReplications(config *milvuspb.ReplicateConfiguration)
+type CDC struct {
+	*cdc.Server
+}
 
-	// Close stops all replications.
-	Close()
+// NewCDC creates a new CDC
+func NewCDC(ctx context.Context, factory dependency.Factory) (*CDC, error) {
+	svr, err := cdc.NewServer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &CDC{
+		Server: svr,
+	}, nil
+}
+
+func (c *CDC) GetName() string {
+	return typeutil.CDCRole
 }
