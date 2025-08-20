@@ -1505,11 +1505,79 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
+    if (!has_offset_input_ && is_pk_field_ && IsCompareOp(expr_->op_type_)) {
+        if (pk_type_ == DataType::VARCHAR) {
+            return ExecRangeVisitorImplForPk<std::string_view>(context);
+        } else {
+            return ExecRangeVisitorImplForPk<int64_t>(context);
+        }
+    }
+
     if (CanUseIndex<T>() && !has_offset_input_) {
         return ExecRangeVisitorImplForIndex<T>();
     } else {
         return ExecRangeVisitorImplForData<T>(context);
     }
+}
+
+template <typename T>
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForPk(EvalCtx& context) {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+
+    if (!arg_inited_) {
+        value_arg_.SetValue<IndexInnerType>(expr_->val_);
+        arg_inited_ = true;
+    }
+    if (auto res = PreCheckOverflow<T>()) {
+        return res;
+    }
+
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    if (cached_index_chunk_id_ != 0) {
+        cached_index_chunk_id_ = 0;
+        cached_index_chunk_res_.resize(active_count_);
+        auto cache_view = cached_index_chunk_res_.view();
+
+        auto op_type = expr_->op_type_;
+        PkType pk = value_arg_.GetValue<IndexInnerType>();
+        auto query_timestamp = context.get_exec_context()
+                                   ->get_query_context()
+                                   ->get_query_timestamp();
+
+        switch (op_type) {
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual:
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual:
+            case proto::plan::Equal:
+                segment_->pk_range(op_type, pk, query_timestamp, cache_view);
+                break;
+            case proto::plan::NotEqual: {
+                segment_->pk_range(
+                    proto::plan::Equal, pk, query_timestamp, cache_view);
+                cache_view.flip();
+                break;
+            }
+            default:
+                ThrowInfo(
+                    OpTypeInvalid,
+                    fmt::format("unsupported operator type for unary expr: {}",
+                                op_type));
+        }
+    }
+    TargetBitmap result;
+    result.append(
+        cached_index_chunk_res_, current_data_global_pos_, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(result),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename T>

@@ -611,3 +611,280 @@ TEST(chunk, test_sparse_float) {
         }
     }
 }
+
+TEST(chunk, test_lower_bound_string) {
+    // Test data: sorted strings
+    FixedVector<std::string> data = {
+        "apple", "banana", "cherry", "date", "elderberry", 
+        "fig", "grape", "honeydew", "kiwi", "lemon"
+    };
+    
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+
+    // Test cases for lower_bound_string
+    // Case 1: Target exists in the middle
+    EXPECT_EQ(string_chunk->lower_bound_string("cherry"), 2);
+    
+    // Case 2: Target exists at the beginning
+    EXPECT_EQ(string_chunk->lower_bound_string("apple"), 0);
+    
+    // Case 3: Target exists at the end
+    EXPECT_EQ(string_chunk->lower_bound_string("lemon"), 9);
+    
+    // Case 4: Target doesn't exist, should return insertion point
+    EXPECT_EQ(string_chunk->lower_bound_string("blueberry"), 2);  // between banana and cherry
+    EXPECT_EQ(string_chunk->lower_bound_string("mango"), 10);     // after lemon
+    EXPECT_EQ(string_chunk->lower_bound_string("apricot"), 1);    // after apple
+    
+    // Case 5: Target is less than all elements
+    EXPECT_EQ(string_chunk->lower_bound_string("aardvark"), 0);
+    
+    // Case 6: Target is greater than all elements
+    EXPECT_EQ(string_chunk->lower_bound_string("zebra"), 10);
+    
+    // Case 7: Empty string edge case
+    EXPECT_EQ(string_chunk->lower_bound_string(""), 0);
+    
+    // Case 8: Duplicate elements (if they existed, lower_bound would return first occurrence)
+    // Since our data has no duplicates, test with existing elements
+    EXPECT_EQ(string_chunk->lower_bound_string("banana"), 1);
+}
+
+TEST(chunk, test_upper_bound_string) {
+    // Test data: sorted strings
+    FixedVector<std::string> data = {
+        "apple", "banana", "cherry", "date", "elderberry", 
+        "fig", "grape", "honeydew", "kiwi", "lemon"
+    };
+    
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+
+    // Test cases for upper_bound_string
+    // Case 1: Target exists in the middle
+    EXPECT_EQ(string_chunk->upper_bound_string("cherry"), 3);  // points to next element
+    
+    // Case 2: Target exists at the beginning
+    EXPECT_EQ(string_chunk->upper_bound_string("apple"), 1);   // points to next element
+    
+    // Case 3: Target exists at the end
+    EXPECT_EQ(string_chunk->upper_bound_string("lemon"), 10);  // points to end
+    
+    // Case 4: Target doesn't exist, should return insertion point
+    EXPECT_EQ(string_chunk->upper_bound_string("blueberry"), 2);  // between banana and cherry
+    EXPECT_EQ(string_chunk->upper_bound_string("mango"), 10);     // after lemon
+    EXPECT_EQ(string_chunk->upper_bound_string("apricot"), 1);    // after apple
+    
+    // Case 5: Target is less than all elements
+    EXPECT_EQ(string_chunk->upper_bound_string("aardvark"), 0);
+    
+    // Case 6: Target is greater than all elements
+    EXPECT_EQ(string_chunk->upper_bound_string("zebra"), 10);
+    
+    // Case 7: Empty string edge case
+    EXPECT_EQ(string_chunk->upper_bound_string(""), 0);
+    
+    // Case 8: Test with existing elements (upper_bound points to next element)
+    EXPECT_EQ(string_chunk->upper_bound_string("banana"), 2);
+    EXPECT_EQ(string_chunk->upper_bound_string("date"), 4);
+}
+
+TEST(chunk, test_binary_search_methods_edge_cases) {
+    // Test with single element
+    FixedVector<std::string> single_data = {"middle"};
+    
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    field_data->FillFieldData(single_data.data(), single_data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+
+    // Test with single element
+    EXPECT_EQ(string_chunk->lower_bound_string("middle"), 0);
+    EXPECT_EQ(string_chunk->upper_bound_string("middle"), 1);
+    EXPECT_EQ(string_chunk->lower_bound_string("before"), 0);
+    EXPECT_EQ(string_chunk->upper_bound_string("before"), 0);
+    EXPECT_EQ(string_chunk->lower_bound_string("next"), 1);
+    EXPECT_EQ(string_chunk->upper_bound_string("next"), 1);
+}
+
+TEST(chunk, test_binary_search_methods_duplicates) {
+    // Test with duplicate elements (if the data had duplicates)
+    FixedVector<std::string> data = {
+        "apple", "apple", "banana", "banana", "banana", "cherry"
+    };
+    
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+
+    // Test with duplicates
+    // lower_bound should return the first occurrence
+    EXPECT_EQ(string_chunk->lower_bound_string("apple"), 0);
+    EXPECT_EQ(string_chunk->lower_bound_string("banana"), 2);
+    EXPECT_EQ(string_chunk->lower_bound_string("cherry"), 5);
+    
+    // upper_bound should return the position after the last occurrence
+    EXPECT_EQ(string_chunk->upper_bound_string("apple"), 2);
+    EXPECT_EQ(string_chunk->upper_bound_string("banana"), 5);
+    EXPECT_EQ(string_chunk->upper_bound_string("cherry"), 6);
+}
+
+TEST(chunk, test_binary_search_methods_comparison) {
+    // Test to verify the relationship between lower_bound and upper_bound
+    FixedVector<std::string> data = {
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"
+    };
+    
+    auto field_data = milvus::storage::CreateFieldData(storage::DataType::VARCHAR);
+    field_data->FillFieldData(data.data(), data.size());
+
+    storage::InsertEventData event_data;
+    auto payload_reader = std::make_shared<milvus::storage::PayloadReader>(field_data);
+    event_data.payload_reader = payload_reader;
+    auto ser_data = event_data.Serialize();
+    auto buffer = std::make_shared<arrow::io::BufferReader>(
+        ser_data.data() + 2 * sizeof(milvus::Timestamp),
+        ser_data.size() - 2 * sizeof(milvus::Timestamp));
+
+    parquet::arrow::FileReaderBuilder reader_builder;
+    auto s = reader_builder.Open(buffer);
+    EXPECT_TRUE(s.ok());
+    std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    s = reader_builder.Build(&arrow_reader);
+    EXPECT_TRUE(s.ok());
+
+    std::shared_ptr<::arrow::RecordBatchReader> rb_reader;
+    s = arrow_reader->GetRecordBatchReader(&rb_reader);
+    EXPECT_TRUE(s.ok());
+
+    FieldMeta field_meta(FieldName("a"),
+                         milvus::FieldId(1),
+                         DataType::STRING,
+                         false,
+                         std::nullopt);
+    arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
+    auto chunk = create_chunk(field_meta, array_vec);
+    auto string_chunk = static_cast<StringChunk*>(chunk.get());
+
+    // Test that upper_bound >= lower_bound for any target
+    for (const auto& target : {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "z", ""}) {
+        auto lb = string_chunk->lower_bound_string(target);
+        auto ub = string_chunk->upper_bound_string(target);
+        EXPECT_GE(ub, lb) << "For target: " << target;
+        
+        // For existing elements, upper_bound should be lower_bound + 1
+        if (std::find(data.begin(), data.end(), target) != data.end()) {
+            EXPECT_EQ(ub, lb + 1) << "For existing target: " << target;
+        }
+    }
+}
