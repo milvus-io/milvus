@@ -1886,7 +1886,7 @@ bool
 PhyUnaryRangeFilterExpr::CanUseIndex() {
     use_index_ =
         is_index_mode_ && SegmentExpr::CanUseIndex<T>(expr_->op_type_) &&
-        // The ngram index cannot be used as a normal index
+        // Ngram index should be used in specific execution path (CanExecNgramMatch -> ExecNgramMatch).
         // TODO: if multiple indexes are supported, this logic should be changed
         !segment_->HasNgramIndex(field_id_);
     return use_index_;
