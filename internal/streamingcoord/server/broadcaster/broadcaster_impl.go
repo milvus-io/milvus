@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -67,14 +66,6 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 		}
 	}()
 
-	// We need to check if the message is valid before adding it to the broadcaster.
-	// TODO: add resource key lock here to avoid state race condition.
-	// TODO: add all ddl to check operation here after ddl framework is ready.
-	if err := registry.CallMessageCheckCallback(ctx, msg); err != nil {
-		b.Logger().Warn("check message ack callback failed", zap.Error(err))
-		return nil, err
-	}
-
 	t, err := b.manager.AddTask(ctx, msg)
 	if err != nil {
 		return nil, err
@@ -93,6 +84,19 @@ func (b *broadcasterImpl) Broadcast(ctx context.Context, msg message.BroadcastMu
 	r, err := t.BlockUntilTaskDone(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Fast ack all the vchannels after the message is already write into wal.
+	// The operation order of broadcast message is determined by the wal,
+	// the order of message in wal is protected by the broadcast resource key lock.
+	// So when we do a broadcast operation done, the order of message in wal is determined,
+	// we can fast ack all the vchannels after the message is already write into wal
+	// without waiting for the message to be acked by the streamingnode.
+	// These optimization can reduce the latency of the broadcast message ack that is suffering from timetick commit at streamingnode.
+	if err := t.FastAckAll(ctx); err != nil {
+		t.Logger().Warn("fast ack all failed, fallback to the normal ack from streamingnode", zap.Error(err))
+	} else {
+		t.Logger().Info("fast ack all success")
 	}
 
 	// wait for all the vchannels acked.
@@ -222,8 +226,6 @@ func (b *broadcasterImpl) worker(no int) {
 				case b.backoffChan <- task:
 				}
 			}
-			// All message of broadcast task is sent, release the resource keys to let other task with same resource keys to apply operation.
-			b.manager.ReleaseResourceKeys(task.Header().BroadcastID)
 		}
 	}
 }

@@ -2895,8 +2895,9 @@ func TestServer_InitMessageCallback(t *testing.T) {
 		}).
 		WithBroadcast([]string{"ch-0"}, resourceKey).
 		BuildBroadcast()
-	err = registry.CallMessageCheckCallback(ctx, msg)
+	newMsg, err := registry.CallMessageCheckCallback(ctx, msg)
 	assert.NoError(t, err)
+	assert.NotNil(t, newMsg)
 
 	// Test Import message ack callback
 	importMsg, err := message.NewImportMessageBuilderV1().

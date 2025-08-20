@@ -155,7 +155,7 @@ func asSpecializedBroadcastMessage[H proto.Message, B proto.Message](msg BasicMe
 	if err != nil {
 		return nil, err
 	}
-	return sm, nil
+	return sm.(*specializedMutableMessageImpl[H, B]), nil
 }
 
 // MustAsSpecializedBroadcastMessage converts a BasicMessage to a specialized BroadcastMessage.
@@ -201,6 +201,11 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 		panic(fmt.Sprintf("failed to encode insert header, there's a bug, %+v, %s", m.header, err.Error()))
 	}
 	m.messageImpl.properties.Set(messageHeader, newHeader)
+}
+
+// BroadcastMessage returns the broadcast message.
+func (m *specializedMutableMessageImpl[H, B]) BroadcastMessage() BroadcastMutableMessage {
+	return m.messageImpl
 }
 
 // specializedImmutableMessageImpl is the specialized immmutable message implementation.

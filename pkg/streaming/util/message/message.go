@@ -188,6 +188,9 @@ type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
 
 	// OverwriteHeader overwrites the message header.
 	OverwriteHeader(header H)
+
+	// BroadcastMessage returns the broadcast message.
+	BroadcastMessage() BroadcastMutableMessage
 }
 
 // specializedMutableMessage is the specialized mutable message interface.

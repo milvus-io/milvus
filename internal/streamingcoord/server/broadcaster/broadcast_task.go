@@ -8,20 +8,21 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
 )
 
 // newBroadcastTaskFromProto creates a new broadcast task from the proto.
 func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadcasterMetrics) *broadcastTask {
 	m := metrics.NewBroadcastTask(proto.GetState())
 	msg := message.NewBroadcastMutableMessageBeforeAppend(proto.Message.Payload, proto.Message.Properties)
-	bh := msg.BroadcastHeader()
 	bt := &broadcastTask{
 		mu:               sync.Mutex{},
-		header:           bh,
+		msg:              msg,
 		task:             proto,
 		recoverPersisted: true, // the task is recovered from the recovery info, so it's persisted.
 		metrics:          m,
@@ -40,7 +41,7 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 	bt := &broadcastTask{
 		Binder: log.Binder{},
 		mu:     sync.Mutex{},
-		header: header,
+		msg:    msg,
 		task: &streamingpb.BroadcastTask{
 			Message:             msg.IntoMessageProto(),
 			State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -60,17 +61,34 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 type broadcastTask struct {
 	log.Binder
 	mu               sync.Mutex
-	header           *message.BroadcastHeader
+	msg              message.BroadcastMutableMessage
+	result           map[string]*types.AppendResult
 	task             *streamingpb.BroadcastTask
 	recoverPersisted bool // a flag to indicate that the task has been persisted into the recovery info and can be recovered.
 	metrics          *taskMetricsGuard
 	allAcked         chan struct{}
+	guards           *lockGuards
+}
+
+// SetLogger sets the logger of the broadcast task.
+func (b *broadcastTask) SetLogger(logger *log.MLogger) {
+	b.Binder.SetLogger(logger.With(log.FieldMessage(b.msg)))
+}
+
+// WithResourceKeyLockGuards sets the lock guards for the broadcast task.
+func (b *broadcastTask) WithResourceKeyLockGuards(guards *lockGuards) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.guards != nil {
+		panic("broadcast task already has lock guards")
+	}
+	b.guards = guards
 }
 
 // Header returns the header of the broadcast task.
 func (b *broadcastTask) Header() *message.BroadcastHeader {
 	// header is a immutable field, no need to lock.
-	return b.header
+	return b.msg.BroadcastHeader()
 }
 
 // State returns the State of the broadcast task.
@@ -116,27 +134,68 @@ func (b *broadcastTask) InitializeRecovery(ctx context.Context) error {
 }
 
 // GetImmutableMessageFromVChannel gets the immutable message from the vchannel.
-// If the vchannel is already acked, it returns nil.
 func (b *broadcastTask) GetImmutableMessageFromVChannel(vchannel string) message.ImmutableMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	return b.getImmutableMessageFromVChannel(vchannel)
+}
+
+func (b *broadcastTask) getImmutableMessageFromVChannel(vchannel string) message.ImmutableMessage {
 	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
 	msgs := msg.SplitIntoMutableMessage()
 	for _, msg := range msgs {
 		if msg.VChannel() == vchannel {
+			timetick := uint64(0)
+			var messageID message.MessageID
+			if result, ok := b.result[vchannel]; ok {
+				messageID = result.MessageID
+				timetick = result.TimeTick
+			}
 			// The legacy message don't have timetick, so we need to set it to 0.
-			return msg.WithTimeTick(0).IntoImmutableMessage(nil)
+			return msg.WithTimeTick(timetick).IntoImmutableMessage(messageID)
 		}
 	}
 	return nil
 }
 
-// Ack acknowledges the message at the specified vchannel.
-func (b *broadcastTask) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+// FastAckAll is used to fast ack all the vchannels after the broadcast message is already write into wal.
+func (b *broadcastTask) FastAckAll(ctx context.Context) error {
+	msgs := b.getAllBroadcastedImmutableMessages()
+	if err := registry.CallMessageAckCallback(ctx, msgs...); err != nil {
+		return errors.Wrap(err, "when calling message ack callback")
+	}
+	if err := b.Ack(ctx, msgs...); err != nil {
+		return errors.Wrap(err, "when acking the broadcast message")
+	}
+	return nil
+}
+
+// getAllBroadcastedImmutableMessages gets all the broadcasted immutable messages.
+func (b *broadcastTask) getAllBroadcastedImmutableMessages() []message.ImmutableMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	task, ok := b.copyAndSetVChannelAcked(msg.VChannel())
+
+	msgs := make([]message.ImmutableMessage, 0, len(b.result))
+	for vchannel := range b.result {
+		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel))
+	}
+	if len(msgs) != len(b.msg.BroadcastHeader().VChannels) {
+		panic("the number of broadcasted messages should be equal to the number of vchannels")
+	}
+	return msgs
+}
+
+// Ack acknowledges the message at the specified vchannel.
+func (b *broadcastTask) Ack(ctx context.Context, msg ...message.ImmutableMessage) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	vchannels := make([]string, 0, len(msg))
+	for _, msg := range msg {
+		vchannels = append(vchannels, msg.VChannel())
+	}
+	task, ok := b.copyAndSetVChannelAcked(vchannels...)
 	if !ok {
 		return nil
 	}
@@ -144,11 +203,13 @@ func (b *broadcastTask) Ack(ctx context.Context, msg message.ImmutableMessage) e
 	// We should always save the task after acked.
 	// Even if the task mark as done in memory.
 	// Because the task is set as done in memory before save the recovery info.
-	if err := b.saveTask(ctx, task, b.Logger().With(zap.String("ackVChannel", msg.VChannel()))); err != nil {
+	if err := b.saveTask(ctx, task, b.Logger().With(zap.Strings("ackVChannels", vchannels))); err != nil {
 		return err
 	}
 	b.task = task
 	if isAllDone(task) {
+		// all the vchannels are acked, so we can unlock the resource keys.
+		b.guards.Unlock()
 		b.metrics.ObserveAckAll()
 		close(b.allAcked)
 	}
@@ -167,20 +228,22 @@ func (b *broadcastTask) BlockUntilAllAck(ctx context.Context) error {
 
 // copyAndSetVChannelAcked copies the task and set the vchannel as acked.
 // if the vchannel is already acked, it returns nil and false.
-func (b *broadcastTask) copyAndSetVChannelAcked(vchannel string) (*streamingpb.BroadcastTask, bool) {
+func (b *broadcastTask) copyAndSetVChannelAcked(vchannels ...string) (*streamingpb.BroadcastTask, bool) {
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
-	idx, err := findIdxOfVChannel(vchannel, b.Header().VChannels)
-	if err != nil {
-		panic(err)
-	}
-	if task.AckedVchannelBitmap[idx] != 0 {
-		return nil, false
-	}
-	task.AckedVchannelBitmap[idx] = 1
-	if isAllDone(task) {
-		// All vchannels are acked, mark the task as done, even if there are still pending messages on working.
-		// The pending messages is repeated sent operation, can be ignored.
-		task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+	for _, vchannel := range vchannels {
+		idx, err := findIdxOfVChannel(vchannel, b.Header().VChannels)
+		if err != nil {
+			panic(err)
+		}
+		if task.AckedVchannelBitmap[idx] != 0 {
+			return nil, false
+		}
+		task.AckedVchannelBitmap[idx] = 1
+		if isAllDone(task) {
+			// All vchannels are acked, mark the task as done, even if there are still pending messages on working.
+			// The pending messages is repeated sent operation, can be ignored.
+			task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+		}
 	}
 	return task, true
 }
@@ -196,7 +259,7 @@ func findIdxOfVChannel(vchannel string, vchannels []string) (int, error) {
 }
 
 // BroadcastDone marks the broadcast operation is done.
-func (b *broadcastTask) BroadcastDone(ctx context.Context) error {
+func (b *broadcastTask) BroadcastDone(ctx context.Context, appendResult map[string]*types.AppendResult) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -205,6 +268,7 @@ func (b *broadcastTask) BroadcastDone(ctx context.Context) error {
 		return err
 	}
 	b.task = task
+	b.result = appendResult
 	b.metrics.ObserveBroadcastDone()
 	return nil
 }
@@ -246,7 +310,7 @@ func ackedCount(task *streamingpb.BroadcastTask) int {
 // saveTask saves the broadcast task recovery info.
 func (b *broadcastTask) saveTask(ctx context.Context, task *streamingpb.BroadcastTask, logger *log.MLogger) error {
 	logger = logger.With(zap.String("state", task.State.String()), zap.Int("ackedVChannelCount", ackedCount(task)))
-	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header.BroadcastID, task); err != nil {
+	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.msg.BroadcastHeader().BroadcastID, task); err != nil {
 		logger.Warn("save broadcast task failed", zap.Error(err))
 		return err
 	}
