@@ -394,9 +394,14 @@ class SegmentInternalInterface : public SegmentInterface {
                          const std::string& nested_path) const override;
 
  public:
+    // `query_lims` is not null only for vector array (embedding list) search
+    // where it denotes the number of vectors in each embedding list. The length
+    // of `query_lims` is the number of queries in the search plus one (the first
+    // element in query_lims is 0).
     virtual void
     vector_search(SearchInfo& search_info,
                   const void* query_data,
+                  const size_t* query_lims,
                   int64_t query_count,
                   Timestamp timestamp,
                   const BitsetView& bitset,

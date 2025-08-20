@@ -95,10 +95,6 @@ ChunkedSegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
 
-    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
-    }
-
     if (field_meta.is_vector()) {
         LoadVecIndex(info);
     } else {
@@ -127,6 +123,7 @@ ChunkedSegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     LoadResourceRequest request =
         milvus::index::IndexFactory::GetInstance().VecIndexLoadResource(
             field_meta.get_data_type(),
+            info.element_type,
             info.index_engine_version,
             info.index_size,
             info.index_params,
@@ -498,10 +495,6 @@ int64_t
 ChunkedSegmentSealedImpl::num_chunk_index(FieldId field_id) const {
     auto& field_meta = schema_->operator[](field_id);
 
-    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
-        ThrowInfo(DataTypeInvalid, "VECTOR_ARRAY is not implemented");
-    }
-
     if (field_meta.is_vector()) {
         return int64_t(vector_indexings_.is_ready(field_id));
     }
@@ -720,6 +713,7 @@ ChunkedSegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
 void
 ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                         const void* query_data,
+                                        const size_t* query_lims,
                                         int64_t query_count,
                                         Timestamp timestamp,
                                         const BitsetView& bitset,
@@ -745,6 +739,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    vector_indexings_,
                                    binlog_search_info,
                                    query_data,
+                                   query_lims,
                                    query_count,
                                    bitset,
                                    output);
@@ -758,6 +753,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                    vector_indexings_,
                                    search_info,
                                    query_data,
+                                   query_lims,
                                    query_count,
                                    bitset,
                                    output);
@@ -782,6 +778,7 @@ ChunkedSegmentSealedImpl::vector_search(SearchInfo& search_info,
                                     search_info,
                                     index_info,
                                     query_data,
+                                    query_lims,
                                     query_count,
                                     row_count,
                                     bitset,

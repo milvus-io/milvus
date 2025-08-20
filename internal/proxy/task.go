@@ -68,6 +68,8 @@ const (
 	RoundDecimalKey      = "round_decimal"
 	OffsetKey            = "offset"
 	LimitKey             = "limit"
+	// offsets for embedding list search
+	LimsKey = "lims"
 
 	SearchIterV2Key        = "search_iter_v2"
 	SearchIterBatchSizeKey = "search_iter_batch_size"
@@ -2047,15 +2049,14 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 
 	loadFieldsSet := typeutil.NewSet(loadFields...)
 	unindexedVecFields := make([]string, 0)
-	for _, field := range collSchema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
+	for _, field := range allFields {
 		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
 		}
 	}
-
-	// todo(SpadeA): check vector field in StructArrayField when index is implemented
 
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
@@ -2305,15 +2306,14 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 
 	loadFieldsSet := typeutil.NewSet(loadFields...)
 	unindexedVecFields := make([]string, 0)
-	for _, field := range collSchema.GetFields() {
+	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
+	for _, field := range allFields {
 		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
 		}
 	}
-
-	// todo(SpadeA): check vector field in StructArrayField when index is implemented
 
 	if len(unindexedVecFields) != 0 {
 		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)

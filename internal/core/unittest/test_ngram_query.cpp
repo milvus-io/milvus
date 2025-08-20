@@ -45,13 +45,13 @@ test_ngram_with_data(const boost::container::vector<std::string>& data,
     auto schema = std::make_shared<Schema>();
     auto field_id = schema->AddDebugField("ngram", DataType::VARCHAR);
 
-    auto field_meta = gen_field_meta(collection_id,
-                                     partition_id,
-                                     segment_id,
-                                     field_id.get(),
-                                     DataType::VARCHAR,
-                                     DataType::NONE,
-                                     false);
+    auto field_meta = milvus::segcore::gen_field_meta(collection_id,
+                                                      partition_id,
+                                                      segment_id,
+                                                      field_id.get(),
+                                                      DataType::VARCHAR,
+                                                      DataType::NONE,
+                                                      false);
     auto index_meta = gen_index_meta(
         segment_id, field_id.get(), index_build_id, index_version);
 

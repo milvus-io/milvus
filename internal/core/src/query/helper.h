@@ -24,6 +24,7 @@ struct RawDataset {
     int64_t dim;
     int64_t num_raw_data;
     const void* raw_data;
+    const size_t* raw_data_lims = nullptr;
 };
 struct SearchDataset {
     knowhere::MetricType metric_type;
@@ -32,6 +33,8 @@ struct SearchDataset {
     int64_t round_decimal;
     int64_t dim;
     const void* query_data;
+    // used for embedding list query
+    const size_t* query_lims = nullptr;
 };
 
 }  // namespace dataset

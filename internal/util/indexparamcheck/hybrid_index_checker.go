@@ -14,12 +14,12 @@ type HYBRIDChecker struct {
 	scalarIndexChecker
 }
 
-func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
+func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
 	if !CheckIntByRange(params, common.BitmapCardinalityLimitKey, 1, MaxBitmapCardinalityLimit) {
 		return fmt.Errorf("failed to check bitmap cardinality limit, should be larger than 0 and smaller than %d",
 			MaxBitmapCardinalityLimit)
 	}
-	return c.scalarIndexChecker.CheckTrain(dataType, params)
+	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
 }
 
 func (c *HYBRIDChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {

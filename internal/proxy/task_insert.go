@@ -217,11 +217,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	allFields := make([]*schemapb.FieldSchema, 0, len(it.schema.Fields)+5)
-	allFields = append(allFields, it.schema.Fields...)
-	for _, structField := range it.schema.GetStructArrayFields() {
-		allFields = append(allFields, structField.GetFields()...)
-	}
+	allFields := typeutil.GetAllFieldSchemas(it.schema)
 
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true

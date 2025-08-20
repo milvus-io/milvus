@@ -43,6 +43,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     void
     visit(RetrievePlanNode& node) override;
 
+    void
+    visit(EmbListFloatVectorANNS& node) override;
+
  public:
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
