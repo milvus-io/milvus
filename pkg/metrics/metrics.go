@@ -26,11 +26,13 @@ import (
 const (
 	milvusNamespace = "milvus"
 
-	AbandonLabel = "abandon"
-	SuccessLabel = "success"
-	FailLabel    = "fail"
-	CancelLabel  = "cancel"
-	TotalLabel   = "total"
+	AbandonLabel  = "abandon"
+	SuccessLabel  = "success"
+	FailLabel     = "fail"
+	CancelLabel   = "cancel"
+	TotalLabel    = "total"
+	RetryLabel    = "retry"
+	RejectedLabel = "rejected"
 
 	HybridSearchLabel = "hybrid_search"
 
