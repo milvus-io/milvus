@@ -8,8 +8,10 @@ import (
 )
 
 type Broadcaster interface {
-	// Broadcast broadcasts the message to all channels.
-	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+	// WithResourceKeys sets the resource keys of the broadcast operation.
+	// It will acquire locks of the resource keys and return the broadcast api.
+	// Once the broadcast api is returned, the Close() method of the broadcast api should be called to release the resource safely.
+	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
 	// LegacyAck is the legacy ack interface for the 2.6.0 import message.
 	LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error
@@ -18,6 +20,14 @@ type Broadcaster interface {
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 
 	// Close closes the broadcaster.
+	Close()
+}
+
+type BroadcastAPI interface {
+	// Broadcast broadcasts the message to all channels.
+	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
+
+	// Close releases the resource keys that broadcast api holds.
 	Close()
 }
 

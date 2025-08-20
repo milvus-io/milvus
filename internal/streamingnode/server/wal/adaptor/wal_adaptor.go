@@ -198,10 +198,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 
 	// unwrap the messageID if needed.
 	r := &wal.AppendResult{
-		MessageID: messageID,
-		TimeTick:  extraAppendResult.TimeTick,
-		TxnCtx:    extraAppendResult.TxnCtx,
-		Extra:     extra,
+		MessageID:              messageID,
+		LastConfirmedMessageID: extraAppendResult.LastConfirmedMessageID,
+		TimeTick:               extraAppendResult.TimeTick,
+		TxnCtx:                 extraAppendResult.TxnCtx,
+		Extra:                  extra,
 	}
 	appendMetrics.Done(r, nil)
 	return r, nil

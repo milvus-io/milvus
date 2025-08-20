@@ -162,7 +162,7 @@ func asSpecializedBroadcastMessage[H proto.Message, B proto.Message](msg BasicMe
 	if err != nil {
 		return nil, err
 	}
-	return sm, nil
+	return sm.(*specializedMutableMessageImpl[H, B]), nil
 }
 
 // MustAsSpecializedBroadcastMessage converts a BasicMessage to a specialized BroadcastMessage.
@@ -217,6 +217,11 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
 		panic(fmt.Sprintf("failed to marshal specialized body, %s", err.Error()))
 	}
 	m.messageImpl.payload = payload
+}
+
+// BroadcastMessage returns the broadcast message.
+func (m *specializedMutableMessageImpl[H, B]) BroadcastMessage() BroadcastMutableMessage {
+	return m.messageImpl
 }
 
 // specializedImmutableMessageImpl is the specialized immmutable message implementation.

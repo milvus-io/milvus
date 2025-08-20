@@ -86,7 +86,8 @@ func TestProducer(t *testing.T) {
 				RequestId: 2,
 				Response: &streamingpb.ProduceMessageResponse_Result{
 					Result: &streamingpb.ProduceMessageResponseResult{
-						Id: walimplstest.NewTestMessageID(1).IntoProto(),
+						Id:                     walimplstest.NewTestMessageID(1).IntoProto(),
+						LastConfirmedId: walimplstest.NewTestMessageID(1).IntoProto(),
 					},
 				},
 			},

@@ -70,19 +70,17 @@ func (b *pendingBroadcastTask) Execute(ctx context.Context) error {
 			b.appendResult[b.pendingMessages[idx].VChannel()] = resp.AppendResult
 		}
 		b.pendingMessages = newPendings
-		if len(newPendings) == 0 {
-			b.future.Set(&types.BroadcastAppendResult{
-				BroadcastID:   b.header.BroadcastID,
-				AppendResults: b.appendResult,
-			})
-		}
 		b.Logger().Info("broadcast task make a new broadcast done", zap.Int("backoffRetryMessages", len(b.pendingMessages)))
 	}
 	if len(b.pendingMessages) == 0 {
-		if err := b.broadcastTask.BroadcastDone(ctx); err != nil {
+		if err := b.broadcastTask.BroadcastDone(ctx, b.appendResult); err != nil {
 			b.UpdateInstantWithNextBackOff()
 			return err
 		}
+		b.future.Set(&types.BroadcastAppendResult{
+			BroadcastID:   b.Header().BroadcastID,
+			AppendResults: b.appendResult,
+		})
 		return nil
 	}
 	b.UpdateInstantWithNextBackOff()

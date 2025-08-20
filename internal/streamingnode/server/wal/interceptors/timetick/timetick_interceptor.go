@@ -45,6 +45,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 
 	ackManager := impl.operator.AckManager()
 	var txnSession *txn.TxnSession
+	var immutableMsg message.ImmutableMessage
 	if msg.MessageType() != message.MessageTypeTimeTick {
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
@@ -69,7 +70,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 				return
 			}
 			acker.Ack(
-				ack.OptImmutableMessage(msg.IntoImmutableMessage(msgID)),
+				ack.OptImmutableMessage(immutableMsg),
 				ack.OptTxnSession(txnSession),
 			)
 		}()
@@ -115,8 +116,10 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	if txnSession != nil {
 		ctx = txn.WithTxnSession(ctx, txnSession)
 	}
-	msgID, err = impl.appendMsg(ctx, msg, append)
-	return
+	if immutableMsg, err = impl.appendMsg(ctx, msg, append); err != nil {
+		return nil, err
+	}
+	return immutableMsg.MessageID(), nil
 }
 
 // GracefulClose implements InterceptorWithGracefulClose.
@@ -207,12 +210,14 @@ func (impl *timeTickAppendInterceptor) appendMsg(
 	ctx context.Context,
 	msg message.MutableMessage,
 	append func(context.Context, message.MutableMessage) (message.MessageID, error),
-) (message.MessageID, error) {
+) (message.ImmutableMessage, error) {
 	msgID, err := append(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
-	utility.ReplaceAppendResultTimeTick(ctx, msg.TimeTick())
-	utility.ReplaceAppendResultTxnContext(ctx, msg.TxnContext())
-	return msgID, nil
+	immutableMsg := msg.IntoImmutableMessage(msgID)
+	utility.ReplaceAppendResultTimeTick(ctx, immutableMsg.TimeTick())
+	utility.ReplaceAppendResultLastConfirmedMessageID(ctx, immutableMsg.LastConfirmedMessageID())
+	utility.ReplaceAppendResultTxnContext(ctx, immutableMsg.TxnContext())
+	return immutableMsg, nil
 }

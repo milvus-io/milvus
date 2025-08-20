@@ -18,7 +18,7 @@ func TestMessageCallbackRegistration(t *testing.T) {
 
 	// Test registering a callback
 	called := false
-	callback := func(ctx context.Context, msg message.ImmutableDropPartitionMessageV1) error {
+	callback := func(ctx context.Context, msg ...message.ImmutableDropPartitionMessageV1) error {
 		called = true
 		return nil
 	}
