@@ -220,6 +220,7 @@ const (
 	ReplicateIDKey             = "replicate.id"
 	ReplicateEndTSKey          = "replicate.endTS"
 	IndexNonEncoding           = "index.nonEncoding"
+	NamespaceEnabledKey        = "namespace.enabled"
 )
 
 const (
