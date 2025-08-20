@@ -344,26 +344,32 @@ func (t *createCollectionTask) validateClusteringKey(ctx context.Context) error 
 	return nil
 }
 
-func (t *createCollectionTask) processNamespaceProp(hasPartitionKey bool) error {
+func (t *createCollectionTask) handleNamespaceProperty() error {
+	exists := hasNamespaceField(t.schema)
+	if exists {
+		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
+			"namespace field name is reserved and cannot be user-defined")
+	}
+
+	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	enabled, has, err := parseNamespaceProp(t.GetProperties()...)
 	if err != nil {
 		return err
 	}
+
 	if !has {
 		return nil
 	}
 
-	f := typeutil.GetFieldByName(t.schema, common.NamespaceFieldName)
-	if f != nil {
-		return merr.WrapErrCollectionIllegalSchema(t.schema.Name,
-			"namespace field already exists")
+	if enabled && hasPartitionKey {
+		return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
 	}
 
 	if enabled {
-		if hasPartitionKey {
-			return merr.WrapErrParameterInvalidMsg("namespace is not supported with partition key mode")
-		}
 		addNamespaceField(t.schema)
+		log.Ctx(t.TraceCtx()).Info("added namespace field",
+			zap.String("collectionName", t.schema.Name),
+			zap.String("fieldName", common.NamespaceFieldName))
 	}
 	return nil
 }
@@ -431,6 +437,10 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	if err := t.handleNamespaceProperty(); err != nil {
+		return err
+	}
+
 	// validate partition key mode
 	if err := t.validatePartitionKey(ctx); err != nil {
 		return err
@@ -438,11 +448,6 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 
 	hasPartitionKey := hasPartitionKeyModeField(t.schema)
 	if _, err := validatePartitionKeyIsolation(ctx, t.CollectionName, hasPartitionKey, t.GetProperties()...); err != nil {
-		return err
-	}
-
-	err = t.processNamespaceProp(hasPartitionKey)
-	if err != nil {
 		return err
 	}
 
@@ -1128,11 +1133,41 @@ func (t *alterCollectionTask) OnEnqueue() error {
 	return nil
 }
 
+func hasNamespaceField(schema *schemapb.CollectionSchema) bool {
+	for _, f := range schema.Fields {
+		if f.Name == common.NamespaceFieldName {
+			return true
+		}
+	}
+	for _, f := range schema.StructArrayFields {
+		if f.Name == common.NamespaceFieldName {
+			return true
+		}
+		for _, inner := range f.Fields {
+			if inner.Name == common.NamespaceFieldName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func addNamespaceField(schema *schemapb.CollectionSchema) {
 	fid := int64(-1)
-	for _, field := range schema.Fields {
-		if field.FieldID > fid {
-			fid = field.FieldID
+	for _, f := range schema.Fields {
+		if f.FieldID > fid {
+			fid = f.FieldID
+		}
+	}
+
+	for _, f := range schema.StructArrayFields {
+		if f.FieldID > fid {
+			fid = f.FieldID
+		}
+		for _, inner := range f.Fields {
+			if inner.FieldID > fid {
+				fid = inner.FieldID
+			}
 		}
 	}
 
@@ -1149,7 +1184,7 @@ func addNamespaceField(schema *schemapb.CollectionSchema) {
 
 func parseNamespaceProp(props ...*commonpb.KeyValuePair) (value bool, has bool, err error) {
 	for _, p := range props {
-		if p.GetKey() == common.NamespaceFieldName {
+		if p.GetKey() == common.NamespaceEnabledKey {
 			value, err := strconv.ParseBool(p.GetValue())
 			if err != nil {
 				return false, false, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid namespace prop value: %s", p.GetValue()))
