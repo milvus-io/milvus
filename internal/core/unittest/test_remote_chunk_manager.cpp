@@ -28,7 +28,7 @@ StorageConfig
 get_default_remote_storage_config() {
     StorageConfig storage_config;
     storage_config.storage_type = "remote";
-    storage_config.address = "127.0.0.1:9000";
+    storage_config.address = "minio:9000";
     char const* tmp = getenv("MINIO_ADDRESS");
     if (tmp != NULL) {
         storage_config.address = string(tmp);
