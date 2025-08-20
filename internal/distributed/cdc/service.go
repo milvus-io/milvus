@@ -78,12 +78,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("cdc init done ...")
+	log.Ctx(s.ctx).Info("cdc init done")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Ctx(s.ctx).Info("cdc start done ...")
+	log.Ctx(s.ctx).Info("cdc start done")
 	return nil
 }
 
