@@ -338,8 +338,6 @@ VectorMemIndex<T>::Build(const Config& config) {
         for (auto data : field_datas) {
             total_size += data->Size();
             total_num_rows += data->get_num_rows();
-            AssertInfo(dim == 0 || dim == data->get_dim(),
-                       "inconsistent dim value between field datas!");
 
             // todo(SapdeA): now, vector arrays (embedding list) are serialized
             // to parquet by using binary format which does not provide dim
@@ -349,6 +347,9 @@ VectorMemIndex<T>::Build(const Config& config) {
                            "embedding list index must have elem_type");
                 dim = config[DIM_KEY].get<int64_t>();
             } else {
+                AssertInfo(dim == 0 || dim == data->get_dim(),
+                           "inconsistent dim value between field datas!");
+
                 dim = data->get_dim();
             }
         }
@@ -580,7 +581,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto local_filepath =
         GetValueFromConfig<std::string>(config, MMAP_FILE_PATH);
     AssertInfo(local_filepath.has_value(),

@@ -81,8 +81,11 @@ class ChunkedColumnInterface {
     ArrayViews(int64_t chunk_id,
                std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
-    virtual PinWrapper<std::vector<VectorArrayView>>
-    VectorArrayViews(int64_t chunk_id) const = 0;
+    virtual PinWrapper<
+        std::pair<std::vector<VectorArrayView>, FixedVector<bool>>>
+    VectorArrayViews(
+        int64_t chunk_id,
+        std::optional<std::pair<int64_t, int64_t>> offset_len) const = 0;
 
     virtual PinWrapper<const size_t*>
     VectorArrayLims(int64_t chunk_id) const = 0;

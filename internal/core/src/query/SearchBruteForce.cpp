@@ -11,6 +11,11 @@
 
 #include <string>
 #include <vector>
+#include <execinfo.h>
+#include <cxxabi.h>
+#include <dlfcn.h>
+#include <sstream>
+#include <iostream>
 
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"

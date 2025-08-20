@@ -284,6 +284,27 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
+
+		case schemapb.DataType_ArrayOfVector:
+			f, err := schema.GetFieldFromName(field.GetFieldName())
+			if err != nil {
+				return err
+			}
+			dim, err := typeutil.GetDim(f)
+			if err != nil {
+				return err
+			}
+
+			dataDim := field.GetVectors().GetVectorArray().GetDim()
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
+			}
+
+			n := uint64(len(field.GetVectors().GetVectorArray().GetData()))
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n)
+			}
+
 		default:
 			// error won't happen here.
 			n, err := funcutil.GetNumRowOfFieldDataWithSchema(field, schema)

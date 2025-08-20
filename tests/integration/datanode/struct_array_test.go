@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/stretchr/testify/suite"
 )
 
 type ArrayStructDataNodeSuite struct {
@@ -323,5 +324,5 @@ func (s *ArrayStructDataNodeSuite) TestSwapQN() {
 
 func TestArrayStructDataNodeUtil(t *testing.T) {
 	// skip struct array test
-	// suite.Run(t, new(ArrayStructDataNodeSuite))
+	suite.Run(t, new(ArrayStructDataNodeSuite))
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
+	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -47,6 +48,11 @@ type TestArrayStructSuite struct {
 }
 
 func (s *TestArrayStructSuite) run() {
+	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().CommonCfg.EnableStorageV2.Key: "true",
+	})
+	defer revertGuard()
+
 	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
 	defer cancel()
 
@@ -102,7 +108,7 @@ func (s *TestArrayStructSuite) run() {
 	}
 
 	structSubVec := &schemapb.FieldSchema{
-		FieldID:      102,
+		FieldID:      103,
 		Name:         structSubVecFieldName,
 		IsPrimaryKey: false,
 		Description:  "",
@@ -118,7 +124,7 @@ func (s *TestArrayStructSuite) run() {
 	}
 
 	structField := &schemapb.StructArrayFieldSchema{
-		FieldID: 103,
+		FieldID: 102,
 		Name:    structFieldName,
 		Fields:  []*schemapb.FieldSchema{structSubVec},
 	}
@@ -179,25 +185,68 @@ func (s *TestArrayStructSuite) run() {
 	s.Require().NoError(err)
 	s.Require().NotEmpty(segments)
 
-	// // create index
-	// createIndexResult, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-	// 	DbName:         s.dbName,
-	// 	CollectionName: collection,
-	// 	FieldName:      structSubVecFieldName,
-	// 	IndexName:      "_default",
-	// 	ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
-	// })
-	// s.Require().NoError(err)
-	// s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
+	// create index for float vector field
+	// create index
+	_, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		DbName:         s.dbName,
+		CollectionName: collection,
+		FieldName:      vecFieldName,
+		IndexName:      "float_vector_index",
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
 
-	// s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, structSubVecFieldName)
+	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, vecFieldName)
+
+	// create index for struct sub-vector field
+	createIndexResult, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		DbName:         s.dbName,
+		CollectionName: collection,
+		FieldName:      structSubVecFieldName,
+		IndexName:      "array_of_vector_index",
+		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(createIndexResult.GetErrorCode(), commonpb.ErrorCode_Success)
+
+	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, structSubVecFieldName)
+
+	// load
+	_, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         s.dbName,
+		CollectionName: collection,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal(createCollectionStatus.GetErrorCode(), commonpb.ErrorCode_Success)
+	s.WaitForLoadWithDB(ctx, s.dbName, collection)
+
+	// search
+	nq := s.nq
+	topk := s.topK
+
+	outputFields := []string{structSubVecFieldName}
+	params := integration.GetSearchParams(s.indexType, s.metricType)
+	searchReq := integration.ConstructEmbeddingListSearchRequest(s.dbName, collection, "",
+		structSubVecFieldName, s.vecType, outputFields, s.metricType, params, nq, dim, topk, -1)
+
+	searchResp, err := s.Cluster.MilvusClient.Search(ctx, searchReq)
+	s.Require().NoError(err)
+	s.Require().Equal(commonpb.ErrorCode_Success, searchResp.GetStatus().GetErrorCode())
+
+	result := searchResp.GetResults()
+	s.Require().Len(result.GetIds().GetIntId().GetData(), nq*topk)
+	s.Require().Len(result.GetScores(), nq*topk)
+	s.Require().GreaterOrEqual(len(result.GetFieldsData()), 1)
+	s.Require().EqualValues(nq, result.GetNumQueries())
+	s.Require().EqualValues(topk, result.GetTopK())
 }
 
 func (s *TestArrayStructSuite) TestGetVector_ArrayStruct_FloatVector() {
 	s.nq = 10
 	s.topK = 10
-	s.indexType = integration.IndexHNSW
-	s.metricType = metric.L2
+	s.indexType = integration.IndexEmbListHNSW
+	s.metricType = metric.MaxSim
 	s.vecType = schemapb.DataType_FloatVector
 	s.run()
 }

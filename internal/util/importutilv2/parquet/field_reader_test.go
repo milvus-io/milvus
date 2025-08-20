@@ -51,7 +51,7 @@ func TestInvalidUTF8(t *testing.T) {
 	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	assert.NoError(t, err)
 
-	pqSchema, err := ConvertToArrowSchema(schema, false)
+	pqSchema, err := ConvertToArrowSchemaForUT(schema, false)
 	assert.NoError(t, err)
 	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
 		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())

@@ -270,7 +270,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 
 // This method is used only by import util and related tests. Returned arrow.Schema
 // doesn't include function output fields.
-func ConvertToArrowSchema(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
+func ConvertToArrowSchemaForUT(schema *schemapb.CollectionSchema, useNullType bool) (*arrow.Schema, error) {
 	arrFields := make([]arrow.Field, 0)
 	for _, field := range schema.GetFields() {
 		if typeutil.IsAutoPKField(field) || field.GetIsFunctionOutput() {

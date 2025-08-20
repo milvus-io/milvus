@@ -105,8 +105,14 @@ ParsePlaceholderGroup(const Plan* plan,
                     field_meta.get_element_type());
                 for (auto& line : info.values()) {
                     target.insert(target.end(), line.begin(), line.end());
+                    AssertInfo(
+                        line.size() % (dim * elem_size) == 0,
+                        "line.size() % (dim * elem_size) == 0 assert failed, "
+                        "line.size() = {}, dim = {}, elem_size = {}",
+                        line.size(),
+                        dim,
+                        elem_size);
 
-                    Assert(line.size() % (dim * elem_size) == 0);
                     offset += line.size() / (dim * elem_size);
                     lims.push_back(offset);
                 }
