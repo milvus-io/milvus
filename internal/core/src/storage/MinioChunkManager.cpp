@@ -17,6 +17,8 @@
 #include "storage/MinioChunkManager.h"
 
 #include <fstream>
+#include <folly/ExceptionWrapper.h>
+#include <boost/filesystem.hpp>
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/utils/logging/ConsoleLogSystem.h>
@@ -385,6 +387,64 @@ MinioChunkManager::ListWithPrefix(const std::string& filepath) {
 uint64_t
 MinioChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
     return GetObjectBuffer(default_bucket_name_, filepath, buf, size);
+}
+
+folly::SemiFuture<uint64_t>
+MinioChunkManager::ReadAsync(const std::string& remote_filepath,
+            const std::string& outputFile,
+            uint64_t offset,
+            uint64_t len) {
+    Aws::S3Crt::Model::GetObjectRequest request;
+    request.WithBucket(default_bucket_name_).WithKey(remote_filepath);
+
+    // Set range if requested
+    if (offset > 0 || len > 0) {
+        if (len > 0) {
+            uint64_t end_pos = offset + len - 1;
+            std::string range = fmt::format("bytes={}-{}", offset, end_pos);
+            request.SetRange(range.c_str());
+        } else {
+            std::string range = fmt::format("bytes={}-", offset);
+            request.SetRange(range.c_str());
+        }
+    }
+
+    // Save to local file
+    request.SetResponseStreamFactory([outputFile]() {
+        return Aws::New<Aws::FStream>(
+            "S3",
+            outputFile.c_str(),
+            std::ios::out | std::ios::binary | std::ios::trunc);
+    });
+
+    auto [promise, future] = folly::makePromiseContract<uint64_t>();
+
+    // auto promise_ptr = std::make_shared<folly::Promise<uint64_t>>(std::move(promise));
+    crt_client_->GetObjectAsync(
+        request,
+        [&promise, bucket_name = default_bucket_name_, remote_filepath, outputFile](
+            const Aws::S3Crt::S3CrtClient* /*client*/,
+            const Aws::S3Crt::Model::GetObjectRequest& /*request*/,
+            const Aws::S3Crt::Model::GetObjectOutcome& outcome,
+            const std::shared_ptr<const Aws::Client::AsyncCallerContext>& /*context*/) mutable {
+            if (!outcome.IsSuccess()) {
+                const auto& err = outcome.GetError();
+                auto message = fmt::format(
+                    "Error in ReadAsync [bucket={}, object={}, local={}]: errcode={}, exception={}, message={}",
+                    bucket_name,
+                    remote_filepath,
+                    outputFile,
+                    static_cast<int>(err.GetResponseCode()),
+                    err.GetExceptionName(),
+                    err.GetMessage());
+                promise.setException(folly::make_exception_wrapper<SegcoreError>(S3Error, message));
+                return;
+            }
+            auto bytes = static_cast<uint64_t>(outcome.GetResult().GetContentLength());
+            promise.setValue(bytes);
+        });
+
+    return std::move(future);
 }
 
 void

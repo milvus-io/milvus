@@ -168,6 +168,20 @@ class MinioChunkManager : public ChunkManager {
     virtual uint64_t
     Read(const std::string& filepath, void* buf, uint64_t len);
 
+    virtual folly::SemiFuture<uint64_t>
+    ReadAsync(const std::string& remote_filepath,
+              uint64_t offset,
+              void* buf,
+              uint64_t len) {
+        ThrowInfo(NotImplemented, GetName() + "ReadAsync with offset not implement");
+    }   
+
+    virtual folly::SemiFuture<uint64_t>
+    ReadAsync(const std::string& remote_filepath,
+              const std::string& local_filepath,
+              uint64_t offset,
+              uint64_t len);
+
     virtual void
     Write(const std::string& filepath, void* buf, uint64_t len);
 
