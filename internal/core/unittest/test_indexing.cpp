@@ -184,7 +184,8 @@ TEST(Indexing, BinaryBruteForce) {
                                               search_info,
                                               index_info,
                                               nullptr,
-                                              DataType::VECTOR_BINARY);
+                                              DataType::VECTOR_BINARY,
+                                              DataType::NONE);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;

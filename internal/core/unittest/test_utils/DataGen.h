@@ -1004,7 +1004,10 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
 
 template <class TraitType = milvus::FloatVector>
 inline auto
-CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const void* src) {
+CreatePlaceholderGroupFromBlob(int64_t num_queries,
+                               int dim,
+                               const void* src,
+                               std::vector<size_t> offsets = {}) {
     if (std::is_same_v<TraitType, milvus::BinaryVector>) {
         assert(dim % 8 == 0);
     }
@@ -1017,12 +1020,27 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const void* src) {
     value->set_type(TraitType::placeholder_type);
     int64_t src_index = 0;
 
-    for (int i = 0; i < num_queries; ++i) {
-        std::vector<elem_type> vec;
-        for (int d = 0; d < dim / TraitType::dim_factor; ++d) {
-            vec.push_back(((elem_type*)src)[src_index++]);
+    if (offsets.empty()) {
+        for (int i = 0; i < num_queries; ++i) {
+            std::vector<elem_type> vec;
+            for (int d = 0; d < dim / TraitType::dim_factor; ++d) {
+                vec.push_back(((elem_type*)src)[src_index++]);
+            }
+            value->add_values(vec.data(), vec.size() * sizeof(elem_type));
         }
-        value->add_values(vec.data(), vec.size() * sizeof(elem_type));
+    } else {
+        assert(offsets.back() == num_queries);
+        for (int i = 0; i < offsets.size() - 1; i++) {
+            auto start = offsets[i];
+            auto end = offsets[i + 1];
+            std::vector<elem_type> vec;
+            for (int j = start; j < end; j++) {
+                for (int d = 0; d < dim / TraitType::dim_factor; ++d) {
+                    vec.push_back(((elem_type*)src)[src_index++]);
+                }
+            }
+            value->add_values(vec.data(), vec.size() * sizeof(elem_type));
+        }
     }
     return raw_group;
 }
@@ -1362,6 +1380,7 @@ GenVecIndexing(int64_t N,
     milvus::storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, chunk_manager);
     auto indexing = std::make_unique<index::VectorMemIndex<float>>(
+        DataType::NONE,
         index_type,
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
@@ -1630,5 +1649,30 @@ GenChunkedSegmentTestSchema(bool pk_is_string) {
     schema->set_primary_field_id(pk_fid);
     return schema;
 }
+
+inline std::vector<float>
+generate_float_vector(int64_t N, int64_t dim) {
+    auto seed = 42;
+    auto offset = 0;
+    std::vector<float> final(dim * N);
+    for (int n = 0; n < N; ++n) {
+        std::vector<float> data(dim);
+        float sum = 0;
+
+        std::default_random_engine er2(seed + n);
+        std::normal_distribution<> distr2(0, 1);
+        for (auto& x : data) {
+            x = distr2(er2) + offset++;
+            sum += x * x;
+        }
+        sum = sqrt(sum);
+        for (auto& x : data) {
+            x /= sum;
+        }
+
+        std::copy(data.begin(), data.end(), final.begin() + dim * n);
+    }
+    return final;
+};
 
 }  // namespace milvus::segcore

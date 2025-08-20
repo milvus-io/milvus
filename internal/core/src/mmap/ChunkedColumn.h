@@ -273,6 +273,13 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
             "VectorArrayViews only supported for ChunkedVectorArrayColumn");
     }
 
+    virtual PinWrapper<const size_t*>
+    VectorArrayLims(int64_t chunk_id) const override {
+        ThrowInfo(
+            ErrorCode::Unsupported,
+            "VectorArrayLims only supported for ChunkedVectorArrayColumn");
+    }
+
     PinWrapper<std::pair<std::vector<std::string_view>, FixedVector<bool>>>
     StringViewsByOffsets(int64_t chunk_id,
                          const FixedVector<int32_t>& offsets) const override {
@@ -620,6 +627,15 @@ class ChunkedVectorArrayColumn : public ChunkedColumnBase {
         auto chunk = ca->get_cell_of(chunk_id);
         return PinWrapper<std::vector<VectorArrayView>>(
             ca, static_cast<VectorArrayChunk*>(chunk)->Views());
+    }
+
+    PinWrapper<const size_t*>
+    VectorArrayLims(int64_t chunk_id) const override {
+        auto ca =
+            SemiInlineGet(slot_->PinCells({static_cast<cid_t>(chunk_id)}));
+        auto chunk = ca->get_cell_of(chunk_id);
+        return PinWrapper<const size_t*>(
+            ca, static_cast<VectorArrayChunk*>(chunk)->Lims());
     }
 };
 

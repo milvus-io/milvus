@@ -12,8 +12,8 @@ type TRIEChecker struct {
 	scalarIndexChecker
 }
 
-func (c *TRIEChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
-	return c.scalarIndexChecker.CheckTrain(dataType, params)
+func (c *TRIEChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
+	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
 }
 
 func (c *TRIEChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {

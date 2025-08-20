@@ -12,8 +12,8 @@ type STLSORTChecker struct {
 	scalarIndexChecker
 }
 
-func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, params map[string]string) error {
-	return c.scalarIndexChecker.CheckTrain(dataType, params)
+func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType schemapb.DataType, params map[string]string) error {
+	return c.scalarIndexChecker.CheckTrain(dataType, elementType, params)
 }
 
 func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {

@@ -21,6 +21,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -1161,6 +1162,131 @@ func Test_parseIndexParams(t *testing.T) {
 		jsonPath, err = funcutil.GetAttrByKeyFromRepeatedKV(common.JSONPathKey, cit.newIndexParams)
 		assert.NoError(t, err)
 		assert.Equal(t, jsonPath, "DynamicField")
+	})
+}
+
+func Test_checkEmbeddingListIndex(t *testing.T) {
+	t.Run("check embedding list index", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "EMB_LIST_HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.MaxSim,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "EmbListFloat",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_ArrayOfVector,
+				ElementType:  schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.NoError(t, err)
+	})
+
+	t.Run("metrics wrong for embedding list index", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "EMB_LIST_HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.L2,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "EmbListFloat",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_ArrayOfVector,
+				ElementType:  schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.True(t, strings.Contains(err.Error(), "array of vector index does not support metric type: L2"))
+	})
+
+	t.Run("metric type wrong", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.MaxSim,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldFloat",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+		err := cit.parseIndexParams(context.TODO())
+		assert.True(t, strings.Contains(err.Error(), "float vector index does not support metric type: MAX_SIM"))
+	})
+
+	t.Run("data type wrong", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "EMB_LIST_HNSW",
+					},
+					{
+						Key:   common.MetricTypeKey,
+						Value: metric.L2,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldFloat",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+		}
+
+		err := cit.parseIndexParams(context.TODO())
+		assert.True(t, strings.Contains(err.Error(), "data type FloatVector can't build with this index EMB_LIST_HNSW"))
 	})
 }
 

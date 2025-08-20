@@ -109,7 +109,7 @@ TEST(VectorArray, TestConstructVectorArray) {
     field_float_vector_array.mutable_float_vector()->mutable_data()->Add(
         data.begin(), data.end());
 
-    auto float_vector_array = VectorArray(field_float_vector_array);
+    auto float_vector_array = milvus::VectorArray(field_float_vector_array);
     ASSERT_EQ(float_vector_array.length(), N);
     ASSERT_EQ(float_vector_array.dim(), dim);
     ASSERT_EQ(float_vector_array.get_element_type(), DataType::VECTOR_FLOAT);
@@ -117,16 +117,16 @@ TEST(VectorArray, TestConstructVectorArray) {
 
     ASSERT_TRUE(float_vector_array.is_same_array(field_float_vector_array));
 
-    auto float_vector_array_tmp = VectorArray(float_vector_array);
+    auto float_vector_array_tmp = milvus::VectorArray(float_vector_array);
 
     ASSERT_TRUE(float_vector_array_tmp.is_same_array(field_float_vector_array));
 
     auto float_vector_array_view =
-        VectorArrayView(const_cast<char*>(float_vector_array.data()),
-                        float_vector_array.length(),
-                        float_vector_array.dim(),
-                        float_vector_array.byte_size(),
-                        float_vector_array.get_element_type());
+        milvus::VectorArrayView(const_cast<char*>(float_vector_array.data()),
+                                float_vector_array.length(),
+                                float_vector_array.dim(),
+                                float_vector_array.byte_size(),
+                                float_vector_array.get_element_type());
 
     ASSERT_TRUE(
         float_vector_array_view.is_same_array(field_float_vector_array));

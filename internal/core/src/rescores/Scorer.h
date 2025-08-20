@@ -15,27 +15,44 @@
 // limitations under the License.
 
 #pragma once
-#include "common/Types.h"
 
-namespace milvus::query {
-namespace dataset {
-struct RawDataset {
-    int64_t begin_id = 0;
-    int64_t dim;
-    int64_t num_raw_data;
-    const void* raw_data;
-    const size_t* raw_data_lims = nullptr;
-};
-struct SearchDataset {
-    knowhere::MetricType metric_type;
-    int64_t num_queries;
-    int64_t topk;
-    int64_t round_decimal;
-    int64_t dim;
-    const void* query_data;
-    // used for embedding list query
-    const size_t* query_lims = nullptr;
+#include "expr/ITypeExpr.h"
+
+namespace milvus::rescores {
+class Scorer {
+ public:
+    virtual expr::TypedExprPtr
+    filter() = 0;
+
+    virtual float
+    rescore(float old_score) = 0;
+
+    virtual float
+    weight() = 0;
 };
 
-}  // namespace dataset
-}  // namespace milvus::query
+class WeightScorer : public Scorer {
+ public:
+    WeightScorer(expr::TypedExprPtr filter, float weight)
+        : filter_(std::move(filter)), weight_(weight){};
+
+    expr::TypedExprPtr
+    filter() override {
+        return filter_;
+    }
+
+    float
+    rescore(float old_score) override {
+        return old_score * weight_;
+    }
+
+    float
+    weight() override{
+        return weight_;
+    }
+
+ private:
+    expr::TypedExprPtr filter_;
+    float weight_;
+};
+}  // namespace milvus::rescores

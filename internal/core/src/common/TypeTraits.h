@@ -47,6 +47,7 @@ constexpr bool IsVariableType =
     IsSparse<T> || std::is_same_v<T, VectorArray> ||
     std::is_same_v<T, VectorArrayView>;
 
+// todo(SpadeA): support vector array
 template <typename T>
 constexpr bool IsVariableTypeSupportInChunk =
     std::is_same_v<T, std::string> || std::is_same_v<T, Array> ||

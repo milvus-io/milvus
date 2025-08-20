@@ -174,11 +174,38 @@ func ConstructSearchRequest(
 	params map[string]any,
 	nq, dim int, topk, roundDecimal int,
 ) *milvuspb.SearchRequest {
+	return constructSearchRequest(dbName, collectionName, expr, vecField, false, vectorType, outputFields, metricType, params, nq, dim, topk, roundDecimal)
+}
+
+func ConstructEmbeddingListSearchRequest(
+	dbName, collectionName string,
+	expr string,
+	vecField string,
+	vectorType schemapb.DataType,
+	outputFields []string,
+	metricType string,
+	params map[string]any,
+	nq, dim int, topk, roundDecimal int,
+) *milvuspb.SearchRequest {
+	return constructSearchRequest(dbName, collectionName, expr, vecField, true, vectorType, outputFields, metricType, params, nq, dim, topk, roundDecimal)
+}
+
+func constructSearchRequest(
+	dbName, collectionName string,
+	expr string,
+	vecField string,
+	isEmbeddingList bool,
+	vectorType schemapb.DataType,
+	outputFields []string,
+	metricType string,
+	params map[string]any,
+	nq, dim int, topk, roundDecimal int,
+) *milvuspb.SearchRequest {
 	b, err := json.Marshal(params)
 	if err != nil {
 		panic(err)
 	}
-	plg := constructPlaceholderGroup(nq, dim, vectorType)
+	plg := constructPlaceholderGroup(nq, dim, vectorType, isEmbeddingList)
 	plgBs, err := proto.Marshal(plg)
 	if err != nil {
 		panic(err)
@@ -237,7 +264,7 @@ func ConstructSearchRequestWithConsistencyLevel(
 	if err != nil {
 		panic(err)
 	}
-	plg := constructPlaceholderGroup(nq, dim, vectorType)
+	plg := constructPlaceholderGroup(nq, dim, vectorType, false)
 	plgBs, err := proto.Marshal(plg)
 	if err != nil {
 		panic(err)
@@ -281,12 +308,16 @@ func ConstructSearchRequestWithConsistencyLevel(
 	}
 }
 
-func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commonpb.PlaceholderGroup {
+func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType, isEmbeddingList bool) *commonpb.PlaceholderGroup {
 	values := make([][]byte, 0, nq)
 	var placeholderType commonpb.PlaceholderType
 	switch vectorType {
 	case schemapb.DataType_FloatVector:
-		placeholderType = commonpb.PlaceholderType_FloatVector
+		if !isEmbeddingList {
+			placeholderType = commonpb.PlaceholderType_FloatVector
+		} else {
+			placeholderType = commonpb.PlaceholderType_EmbListFloatVector
+		}
 		for i := 0; i < nq; i++ {
 			bs := make([]byte, 0, dim*4)
 			for j := 0; j < dim; j++ {

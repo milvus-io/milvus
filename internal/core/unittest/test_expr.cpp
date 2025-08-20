@@ -16674,6 +16674,7 @@ TEST(JsonIndexTest, TestJsonNotEqualExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::CreateIndexInfo{
@@ -16784,6 +16785,7 @@ TEST_P(JsonIndexExistsTest, TestExistsExpr) {
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
     file_manager_ctx.fieldDataMeta.field_schema.set_nullable(true);
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::CreateIndexInfo{
             .index_type = index::INVERTED_INDEX_TYPE,
@@ -16971,6 +16973,7 @@ TEST_P(JsonIndexBinaryExprTest, TestBinaryRangeExpr) {
     file_manager_ctx.fieldDataMeta.field_schema.set_data_type(
         milvus::proto::schema::JSON);
     file_manager_ctx.fieldDataMeta.field_schema.set_fieldid(json_fid.get());
+    file_manager_ctx.fieldDataMeta.field_id = json_fid.get();
 
     auto inv_index = index::IndexFactory::GetInstance().CreateJsonIndex(
         index::CreateIndexInfo{

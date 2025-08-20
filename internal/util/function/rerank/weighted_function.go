@@ -44,7 +44,7 @@ type WeightedFunction[T PKType] struct {
 }
 
 func newWeightedFunction(collSchema *schemapb.CollectionSchema, funcSchema *schemapb.FunctionSchema) (Reranker, error) {
-	base, err := newRerankBase(collSchema, funcSchema, weightedName, true)
+	base, err := newRerankBase(collSchema, funcSchema, WeightedName, true)
 	if err != nil {
 		return nil, err
 	}

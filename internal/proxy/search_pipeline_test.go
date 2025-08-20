@@ -560,6 +560,79 @@ func (s *SearchPipelineSuite) TestHybridSearchPipe() {
 	s.Len(results.Results.Scores, 20) // 2 queries * 10 topk
 }
 
+func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "int64", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "intField", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "floatField", DataType: schemapb.DataType_Float},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{
+				Name: "structArray",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 104, Name: "structArrayField", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
+					{FieldID: 105, Name: "structVectorField", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector},
+				},
+			},
+		},
+	}
+
+	task := &searchTask{
+		schema: &schemaInfo{
+			CollectionSchema: schema,
+		},
+		translatedOutputFields: []string{"intField", "floatField", "structArrayField", "structVectorField"},
+	}
+
+	op, err := newFilterFieldOperator(task, nil)
+	s.NoError(err)
+
+	// Create mock search results with fields including struct array fields
+	searchResults := &milvuspb.SearchResults{
+		Results: &schemapb.SearchResultData{
+			FieldsData: []*schemapb.FieldData{
+				{FieldId: 101}, // intField
+				{FieldId: 102}, // floatField
+				{FieldId: 104}, // structArrayField
+				{FieldId: 105}, // structVectorField
+			},
+		},
+	}
+
+	results, err := op.run(context.Background(), s.span, searchResults)
+	s.NoError(err)
+	s.NotNil(results)
+
+	resultData := results[0].(*milvuspb.SearchResults)
+	s.NotNil(resultData.Results.FieldsData)
+	s.Len(resultData.Results.FieldsData, 4)
+
+	// Verify all fields including struct array fields got their names and types set
+	for _, field := range resultData.Results.FieldsData {
+		switch field.FieldId {
+		case 101:
+			s.Equal("intField", field.FieldName)
+			s.Equal(schemapb.DataType_Int64, field.Type)
+			s.False(field.IsDynamic)
+		case 102:
+			s.Equal("floatField", field.FieldName)
+			s.Equal(schemapb.DataType_Float, field.Type)
+			s.False(field.IsDynamic)
+		case 104:
+			// Struct array field should be handled by GetAllFieldSchemas
+			s.Equal("structArrayField", field.FieldName)
+			s.Equal(schemapb.DataType_Array, field.Type)
+			s.False(field.IsDynamic)
+		case 105:
+			// Struct array vector field should be handled by GetAllFieldSchemas
+			s.Equal("structVectorField", field.FieldName)
+			s.Equal(schemapb.DataType_ArrayOfVector, field.Type)
+			s.False(field.IsDynamic)
+		}
+	}
+}
+
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},

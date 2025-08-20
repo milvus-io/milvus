@@ -281,6 +281,28 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		return nil, fmt.Errorf("parse iterator v2 info failed: %w", err)
 	}
 
+	// 7. check search for embedding list
+	annsFieldName, _ := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, searchParamsPair)
+	if annsFieldName != "" {
+		annField := typeutil.GetFieldByName(schema, annsFieldName)
+		if annField != nil && annField.GetDataType() == schemapb.DataType_ArrayOfVector {
+			if strings.Contains(searchParamStr, radiusKey) {
+				return nil, merr.WrapErrParameterInvalid("", "",
+					"range search is not supported for vector array (embedding list) fields, fieldName: %s", annsFieldName)
+			}
+
+			if groupByFieldId > 0 {
+				return nil, merr.WrapErrParameterInvalid("", "",
+					"group by search is not supported for vector array (embedding list) fields, fieldName: %s", annsFieldName)
+			}
+
+			if isIterator {
+				return nil, merr.WrapErrParameterInvalid("", "",
+					"search iterator is not supported for vector array (embedding list) fields, fieldName: %s", annsFieldName)
+			}
+		}
+	}
+
 	return &SearchInfo{
 		planInfo: &planpb.QueryInfo{
 			Topk:                 queryTopK,

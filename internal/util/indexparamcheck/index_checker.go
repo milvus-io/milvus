@@ -21,8 +21,8 @@ import (
 )
 
 type IndexChecker interface {
-	CheckTrain(schemapb.DataType, map[string]string) error
+	CheckTrain(schemapb.DataType, schemapb.DataType, map[string]string) error
 	CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error
 	SetDefaultMetricTypeIfNotExist(schemapb.DataType, map[string]string)
-	StaticCheck(schemapb.DataType, map[string]string) error
+	StaticCheck(schemapb.DataType, schemapb.DataType, map[string]string) error
 }

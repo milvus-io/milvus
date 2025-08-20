@@ -109,7 +109,7 @@ func Test_cagraChecker_CheckTrain(t *testing.T) {
 		return
 	}
 	for _, test := range cases {
-		err := c.CheckTrain(schemapb.DataType_FloatVector, test.params)
+		err := c.CheckTrain(schemapb.DataType_FloatVector, schemapb.DataType_None, test.params)
 		if test.errIsNil {
 			assert.NoError(t, err)
 		} else {

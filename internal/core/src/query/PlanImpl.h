@@ -68,6 +68,9 @@ struct Plan {
 
 struct Placeholder {
     std::string tag_;
+    // note: for embedding list search, num_of_queries_ stands for the number of vectors.
+    // lims_ records the offsets of embedding list in the flattened vector and
+    // hence lims_.size() - 1 is the number of queries in embedding list search.
     int64_t num_of_queries_;
     // TODO(SPARSE): add a dim_ field here, use the dim passed in search request
     // instead of the dim in schema, since the dim of sparse float column is
@@ -78,6 +81,8 @@ struct Placeholder {
     // dense vector search and sparse_matrix_ is for sparse vector search.
     aligned_vector<char> blob_;
     std::unique_ptr<knowhere::sparse::SparseRow<float>[]> sparse_matrix_;
+    // offsets for embedding list
+    aligned_vector<size_t> lims_;
 
     const void*
     get_blob() const {
@@ -93,6 +98,16 @@ struct Placeholder {
             return sparse_matrix_.get();
         }
         return blob_.data();
+    }
+
+    const size_t*
+    get_lims() const {
+        return lims_.data();
+    }
+
+    size_t*
+    get_lims() {
+        return lims_.data();
     }
 };
 
