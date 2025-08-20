@@ -143,12 +143,28 @@ message BroadcastAckResponse {
 // Server: log coord. Running on every log node.
 // Client: all log publish/consuming node.
 service StreamingCoordAssignmentService {
+    // UpdateReplicateConfiguration applies a full replacement of the current
+    // replication configuration across Milvus clusters.
+    //
+    // Semantics:
+    //   - The provided ReplicateConfiguration completely replaces any existing
+    //     configuration persisted in the metadata store.
+    //   - Passing an empty ReplicateConfiguration is treated as a "clear"
+    //     operation, effectively removing all replication configuration.
+    //   - The RPC is expected to be idempotent: submitting the same configuration
+    //     multiple times must not cause side effects.
+    rpc UpdateReplicateConfiguration(milvus.UpdateReplicateConfigurationRequest)
+        returns (UpdateReplicateConfigurationResponse) {}
+
     // AssignmentDiscover is used to discover all log nodes managed by the
     // streamingcoord. Channel assignment information will be pushed to client
     // by stream.
     rpc AssignmentDiscover(stream AssignmentDiscoverRequest)
         returns (stream AssignmentDiscoverResponse) {}
 }
+
+// UpdateReplicateConfigurationResponse is the response of UpdateReplicateConfiguration service
+message UpdateReplicateConfigurationResponse {}
 
 // AssignmentDiscoverRequest is the request of Discovery
 message AssignmentDiscoverRequest {
@@ -273,6 +289,10 @@ message StreamingError {
 // write on that log node. Server: all log node. Running on every log node.
 // Client: all log produce or consuming node.
 service StreamingNodeHandlerService {
+    // GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
+    // from the correct position, ensuring no duplicate or missing messages.
+    rpc GetWALCheckpoint(GetWALCheckpointRequest) returns (GetWALCheckpointResponse) {}
+
     // Produce is a bi-directional streaming RPC to send messages to a channel.
     // All messages sent to a channel will be assigned a unique messageID.
     // The messageID is used to identify the message in the channel.
@@ -289,6 +309,24 @@ service StreamingNodeHandlerService {
     // log node, the RPC will return error CHANNEL_NOT_EXIST. If channel is
     // moving away to other log node, the RPC will return error CHANNEL_FENCED.
     rpc Consume(stream ConsumeRequest) returns (stream ConsumeResponse) {};
+}
+
+// GetWALCheckpointRequest is the request of GetWALCheckpoint service.
+message GetWALCheckpointRequest {
+  string channel_name = 1;
+}
+
+// GetWALCheckpointResponse is the response of GetWALCheckpoint service.
+message GetWALCheckpointResponse {
+  WALCheckpoint WAL_checkpoint                    = 1;
+  ReplicateWALCheckpoint replicate_WAL_checkpoint = 2;
+}
+
+// ReplicateWALCheckpoint is the replicate WAL checkpoint in the target cluster.
+message ReplicateWALCheckpoint {
+  string source_channel_name             = 1;
+  string target_channel_name             = 2;
+  messages.MessageID replicate_messageID = 3;
 }
 
 // ProduceRequest is the request of the Produce RPC.

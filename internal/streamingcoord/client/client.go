@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast"
@@ -32,6 +33,9 @@ var _ Client = (*clientImpl)(nil)
 type AssignmentService interface {
 	// AssignmentDiscover is used to watches the assignment discovery.
 	types.AssignmentDiscoverWatcher
+
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error
 }
 
 // BroadcastService is the interface of broadcast service.

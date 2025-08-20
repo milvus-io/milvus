@@ -239,13 +239,25 @@ var StreamingCoordBroadcastService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingCoordAssignmentService_AssignmentDiscover_FullMethodName = "/milvus.proto.streaming.StreamingCoordAssignmentService/AssignmentDiscover"
+	StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName = "/milvus.proto.streaming.StreamingCoordAssignmentService/UpdateReplicateConfiguration"
+	StreamingCoordAssignmentService_AssignmentDiscover_FullMethodName           = "/milvus.proto.streaming.StreamingCoordAssignmentService/AssignmentDiscover"
 )
 
 // StreamingCoordAssignmentServiceClient is the client API for StreamingCoordAssignmentService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingCoordAssignmentServiceClient interface {
+	// UpdateReplicateConfiguration applies a full replacement of the current
+	// replication configuration across Milvus clusters.
+	//
+	// Semantics:
+	//   - The provided ReplicateConfiguration completely replaces any existing
+	//     configuration persisted in the metadata store.
+	//   - Passing an empty ReplicateConfiguration is treated as a "clear"
+	//     operation, effectively removing all replication configuration.
+	//   - The RPC is expected to be idempotent: submitting the same configuration
+	//     multiple times must not cause side effects.
+	UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error)
 	// AssignmentDiscover is used to discover all log nodes managed by the
 	// streamingcoord. Channel assignment information will be pushed to client
 	// by stream.
@@ -258,6 +270,15 @@ type streamingCoordAssignmentServiceClient struct {
 
 func NewStreamingCoordAssignmentServiceClient(cc grpc.ClientConnInterface) StreamingCoordAssignmentServiceClient {
 	return &streamingCoordAssignmentServiceClient{cc}
+}
+
+func (c *streamingCoordAssignmentServiceClient) UpdateReplicateConfiguration(ctx context.Context, in *milvuspb.UpdateReplicateConfigurationRequest, opts ...grpc.CallOption) (*UpdateReplicateConfigurationResponse, error) {
+	out := new(UpdateReplicateConfigurationResponse)
+	err := c.cc.Invoke(ctx, StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingCoordAssignmentServiceClient) AssignmentDiscover(ctx context.Context, opts ...grpc.CallOption) (StreamingCoordAssignmentService_AssignmentDiscoverClient, error) {
@@ -295,6 +316,17 @@ func (x *streamingCoordAssignmentServiceAssignmentDiscoverClient) Recv() (*Assig
 // All implementations should embed UnimplementedStreamingCoordAssignmentServiceServer
 // for forward compatibility
 type StreamingCoordAssignmentServiceServer interface {
+	// UpdateReplicateConfiguration applies a full replacement of the current
+	// replication configuration across Milvus clusters.
+	//
+	// Semantics:
+	//   - The provided ReplicateConfiguration completely replaces any existing
+	//     configuration persisted in the metadata store.
+	//   - Passing an empty ReplicateConfiguration is treated as a "clear"
+	//     operation, effectively removing all replication configuration.
+	//   - The RPC is expected to be idempotent: submitting the same configuration
+	//     multiple times must not cause side effects.
+	UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error)
 	// AssignmentDiscover is used to discover all log nodes managed by the
 	// streamingcoord. Channel assignment information will be pushed to client
 	// by stream.
@@ -305,6 +337,9 @@ type StreamingCoordAssignmentServiceServer interface {
 type UnimplementedStreamingCoordAssignmentServiceServer struct {
 }
 
+func (UnimplementedStreamingCoordAssignmentServiceServer) UpdateReplicateConfiguration(context.Context, *milvuspb.UpdateReplicateConfigurationRequest) (*UpdateReplicateConfigurationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateReplicateConfiguration not implemented")
+}
 func (UnimplementedStreamingCoordAssignmentServiceServer) AssignmentDiscover(StreamingCoordAssignmentService_AssignmentDiscoverServer) error {
 	return status.Errorf(codes.Unimplemented, "method AssignmentDiscover not implemented")
 }
@@ -318,6 +353,24 @@ type UnsafeStreamingCoordAssignmentServiceServer interface {
 
 func RegisterStreamingCoordAssignmentServiceServer(s grpc.ServiceRegistrar, srv StreamingCoordAssignmentServiceServer) {
 	s.RegisterService(&StreamingCoordAssignmentService_ServiceDesc, srv)
+}
+
+func _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(milvuspb.UpdateReplicateConfigurationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingCoordAssignmentService_UpdateReplicateConfiguration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingCoordAssignmentServiceServer).UpdateReplicateConfiguration(ctx, req.(*milvuspb.UpdateReplicateConfigurationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingCoordAssignmentService_AssignmentDiscover_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -352,7 +405,12 @@ func (x *streamingCoordAssignmentServiceAssignmentDiscoverServer) Recv() (*Assig
 var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.streaming.StreamingCoordAssignmentService",
 	HandlerType: (*StreamingCoordAssignmentServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "UpdateReplicateConfiguration",
+			Handler:    _StreamingCoordAssignmentService_UpdateReplicateConfiguration_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "AssignmentDiscover",
@@ -365,14 +423,18 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	StreamingNodeHandlerService_Produce_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
-	StreamingNodeHandlerService_Consume_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/Consume"
+	StreamingNodeHandlerService_GetWALCheckpoint_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/GetWALCheckpoint"
+	StreamingNodeHandlerService_Produce_FullMethodName          = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
+	StreamingNodeHandlerService_Consume_FullMethodName          = "/milvus.proto.streaming.StreamingNodeHandlerService/Consume"
 )
 
 // StreamingNodeHandlerServiceClient is the client API for StreamingNodeHandlerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
+	// GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetWALCheckpoint(ctx context.Context, in *GetWALCheckpointRequest, opts ...grpc.CallOption) (*GetWALCheckpointResponse, error)
 	// Produce is a bi-directional streaming RPC to send messages to a channel.
 	// All messages sent to a channel will be assigned a unique messageID.
 	// The messageID is used to identify the message in the channel.
@@ -396,6 +458,15 @@ type streamingNodeHandlerServiceClient struct {
 
 func NewStreamingNodeHandlerServiceClient(cc grpc.ClientConnInterface) StreamingNodeHandlerServiceClient {
 	return &streamingNodeHandlerServiceClient{cc}
+}
+
+func (c *streamingNodeHandlerServiceClient) GetWALCheckpoint(ctx context.Context, in *GetWALCheckpointRequest, opts ...grpc.CallOption) (*GetWALCheckpointResponse, error) {
+	out := new(GetWALCheckpointResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_GetWALCheckpoint_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *streamingNodeHandlerServiceClient) Produce(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ProduceClient, error) {
@@ -464,6 +535,9 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
+	// GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetWALCheckpoint(context.Context, *GetWALCheckpointRequest) (*GetWALCheckpointResponse, error)
 	// Produce is a bi-directional streaming RPC to send messages to a channel.
 	// All messages sent to a channel will be assigned a unique messageID.
 	// The messageID is used to identify the message in the channel.
@@ -485,6 +559,9 @@ type StreamingNodeHandlerServiceServer interface {
 type UnimplementedStreamingNodeHandlerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeHandlerServiceServer) GetWALCheckpoint(context.Context, *GetWALCheckpointRequest) (*GetWALCheckpointResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetWALCheckpoint not implemented")
+}
 func (UnimplementedStreamingNodeHandlerServiceServer) Produce(StreamingNodeHandlerService_ProduceServer) error {
 	return status.Errorf(codes.Unimplemented, "method Produce not implemented")
 }
@@ -501,6 +578,24 @@ type UnsafeStreamingNodeHandlerServiceServer interface {
 
 func RegisterStreamingNodeHandlerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeHandlerServiceServer) {
 	s.RegisterService(&StreamingNodeHandlerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeHandlerService_GetWALCheckpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetWALCheckpointRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).GetWALCheckpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_GetWALCheckpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).GetWALCheckpoint(ctx, req.(*GetWALCheckpointRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingNodeHandlerService_Produce_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -561,7 +656,12 @@ func (x *streamingNodeHandlerServiceConsumeServer) Recv() (*ConsumeRequest, erro
 var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.streaming.StreamingNodeHandlerService",
 	HandlerType: (*StreamingNodeHandlerServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetWALCheckpoint",
+			Handler:    _StreamingNodeHandlerService_GetWALCheckpoint_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Produce",

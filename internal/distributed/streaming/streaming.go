@@ -4,7 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/pkg/v2/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/types"
@@ -81,10 +83,22 @@ type Scanner interface {
 	Close()
 }
 
+// ReplicateService is the interface for the replicate service.
+type ReplicateService interface {
+	// UpdateReplicateConfiguration updates the replicate configuration to the milvus cluster.
+	UpdateReplicateConfiguration(ctx context.Context, config *milvuspb.ReplicateConfiguration) error
+
+	// GetWALCheckpoint returns the WAL checkpoint that will be used to create scanner
+	// from the correct position, ensuring no duplicate or missing messages.
+	GetWALCheckpoint(ctx context.Context, channelName string) (*streamingpb.ReplicateWALCheckpoint, error)
+}
+
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
 	// WALName returns the name of the wal.
 	WALName() string
+
+	ReplicateService
 
 	// Local returns the local services.
 	Local() Local
