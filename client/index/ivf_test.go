@@ -16,8 +16,30 @@
 
 package index
 
-import "testing"
+import (
+	"testing"
 
-func TestGenericIndex(t *testing.T) {
-	// idx := NewGenericIndex("auto_scalar_index")
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestIvfRabitQ(t *testing.T) {
+	idx := NewIvfRabitQIndex(entity.COSINE, 128)
+
+	assert.NotZero(t, idx)
+
+	result := idx.Params()
+	assert.NotEmpty(t, result)
+
+	assert.EqualValues(t, entity.COSINE, result[MetricTypeKey])
+	assert.EqualValues(t, IvfRabitQ, result[IndexTypeKey])
+	assert.Equal(t, "128", result[ivfNlistKey])
+
+	idx = idx.WithRefineType("SQ8")
+
+	result = idx.Params()
+
+	assert.NotEmpty(t, result)
+	assert.Equal(t, "SQ8", result[ivfRefineTypeKey])
+	assert.Equal(t, "true", result[ivfRefineKey])
 }

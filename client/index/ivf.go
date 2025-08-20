@@ -19,10 +19,12 @@ package index
 import "strconv"
 
 const (
-	ivfNlistKey  = `nlist`
-	ivfPQMKey    = `m`
-	ivfPQNbits   = `nbits`
-	ivfNprobeKey = `nprobe`
+	ivfNlistKey      = `nlist`
+	ivfPQMKey        = `m`
+	ivfPQNbits       = `nbits`
+	ivfNprobeKey     = `nprobe`
+	ivfRefineKey     = `refine`
+	ivfRefineTypeKey = `refine_type`
 )
 
 var _ Index = ivfFlatIndex{}
@@ -106,6 +108,45 @@ func NewIvfSQ8Index(metricType MetricType, nlist int) Index {
 		baseIndex: baseIndex{
 			metricType: metricType,
 			indexType:  IvfSQ8,
+		},
+
+		nlist: nlist,
+	}
+}
+
+type ivfRabitQIndex struct {
+	baseIndex
+
+	nlist      int
+	refine     bool
+	refineType string
+}
+
+func (idx *ivfRabitQIndex) Params() map[string]string {
+	result := map[string]string{
+		MetricTypeKey: string(idx.metricType),
+		IndexTypeKey:  string(IvfRabitQ),
+		ivfNlistKey:   strconv.Itoa(idx.nlist),
+	}
+
+	if idx.refine {
+		result[ivfRefineKey] = strconv.FormatBool(idx.refine)
+		result[ivfRefineTypeKey] = idx.refineType
+	}
+	return result
+}
+
+func (idx *ivfRabitQIndex) WithRefineType(refineType string) *ivfRabitQIndex {
+	idx.refine = true
+	idx.refineType = refineType
+	return idx
+}
+
+func NewIvfRabitQIndex(metricType MetricType, nlist int) *ivfRabitQIndex {
+	return &ivfRabitQIndex{
+		baseIndex: baseIndex{
+			metricType: metricType,
+			indexType:  BinIvfFlat,
 		},
 
 		nlist: nlist,
