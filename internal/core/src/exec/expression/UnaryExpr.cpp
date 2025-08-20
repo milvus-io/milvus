@@ -2017,15 +2017,14 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch() {
     }
 
     if (cached_ngram_match_res_ == nullptr) {
-        index::NgramInvertedIndex* index;
+        PinWrapper<index::NgramInvertedIndex*> pinned_index;
         if (expr_->column_.data_type_ == DataType::JSON) {
-            auto pinned_index = segment_->GetNgramIndexForJson(
+            pinned_index = segment_->GetNgramIndexForJson(
                 field_id_, milvus::Json::pointer(expr_->column_.nested_path_));
-            index = pinned_index.get();
         } else {
-            auto pinned_index = segment_->GetNgramIndex(field_id_);
-            index = pinned_index.get();
+            pinned_index = segment_->GetNgramIndex(field_id_);
         }
+        index::NgramInvertedIndex* index = pinned_index.get();
         AssertInfo(index != nullptr,
                    "ngram index should not be null, field_id: {}",
                    field_id_.get());
