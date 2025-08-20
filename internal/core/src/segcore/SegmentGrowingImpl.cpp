@@ -1167,7 +1167,7 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
 
 void
 SegmentGrowingImpl::CreateTextIndex(FieldId field_id) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     AssertInfo(IsStringDataType(field_meta.get_data_type()),
                "cannot create text index on non-string type");
@@ -1201,7 +1201,7 @@ SegmentGrowingImpl::AddTexts(milvus::FieldId field_id,
                              const bool* texts_valid_data,
                              size_t n,
                              int64_t offset_begin) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lock(mutex_);
     auto iter = text_indexes_.find(field_id);
     if (iter == text_indexes_.end()) {
         throw SegcoreError(
@@ -1217,7 +1217,7 @@ SegmentGrowingImpl::AddJSONDatas(FieldId field_id,
                                  const bool* jsondatas_valid_data,
                                  size_t n,
                                  int64_t offset_begin) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lock(mutex_);
     auto iter = json_indexes_.find(field_id);
     AssertInfo(iter != json_indexes_.end(), "json index not found");
     iter->second->AddJSONDatas(
@@ -1235,7 +1235,7 @@ SegmentGrowingImpl::CreateJSONIndexes() {
 
 void
 SegmentGrowingImpl::CreateJSONIndex(FieldId field_id) {
-    folly::SharedMutex::WriteHolder lck(&mutex_);
+    std::unique_lock lock(mutex_);
     const auto& field_meta = schema_->operator[](field_id);
     AssertInfo(IsJsonDataType(field_meta.get_data_type()),
                "cannot create json index on non-json type");
