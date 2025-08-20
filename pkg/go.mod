@@ -40,7 +40,7 @@ require (
 	github.com/tikv/client-go/v2 v2.0.4
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/x448/float16 v0.8.4
-	github.com/zilliztech/woodpecker v0.1.4-0.20250818130358-cfb64730fc90
+	github.com/zilliztech/woodpecker v0.1.4
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5

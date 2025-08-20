@@ -465,6 +465,10 @@ func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
+	rm.handleNodeUp(ctx, node)
+}
+
+func (rm *ResourceManager) handleNodeUp(ctx context.Context, node int64) {
 	rm.incomingNode.Insert(node)
 	// Trigger assign incoming node right away.
 	// error can be ignored here, because `AssignPendingIncomingNode`` will retry assign node.
@@ -480,7 +484,10 @@ func (rm *ResourceManager) HandleNodeUp(ctx context.Context, node int64) {
 func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
+	rm.handleNodeDown(ctx, node)
+}
 
+func (rm *ResourceManager) handleNodeDown(ctx context.Context, node int64) {
 	rm.incomingNode.Remove(node)
 
 	// for stopping query node becomes offline, node change won't be triggered,
@@ -500,7 +507,10 @@ func (rm *ResourceManager) HandleNodeDown(ctx context.Context, node int64) {
 func (rm *ResourceManager) HandleNodeStopping(ctx context.Context, node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
+	rm.handleNodeStopping(ctx, node)
+}
 
+func (rm *ResourceManager) handleNodeStopping(ctx context.Context, node int64) {
 	rm.incomingNode.Remove(node)
 	rgName, err := rm.unassignNode(ctx, node)
 	log.Info("HandleNodeStopping: remove node from resource group",
@@ -993,4 +1003,31 @@ func (rm *ResourceManager) GetResourceGroupsJSON(ctx context.Context) string {
 	}
 
 	return string(ret)
+}
+
+func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+
+	// clean stopping/offline nodes
+	assignedNodes := typeutil.NewUniqueSet()
+	for _, rg := range rm.groups {
+		for _, node := range rg.GetNodes() {
+			assignedNodes.Insert(node)
+			info := rm.nodeMgr.Get(node)
+			if info == nil {
+				rm.handleNodeDown(ctx, node)
+			} else if info.GetState() == session.NodeStateStopping {
+				log.Warn("node is stopping", zap.Int64("node", node))
+				rm.handleNodeStopping(ctx, node)
+			}
+		}
+	}
+
+	// add new nodes
+	for _, node := range rm.nodeMgr.GetAll() {
+		if !assignedNodes.Contain(node.ID()) {
+			rm.handleNodeUp(context.Background(), node.ID())
+		}
+	}
 }
