@@ -71,15 +71,13 @@ NewPackedReaderWithStorageConfig(char** paths,
                 "[StorageV2] Failed to get filesystem");
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
-        std::shared_ptr<CPluginContext> context_ptr = nullptr;
         auto plugin_ptr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
         if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            context_ptr = std::make_shared<CPluginContext>(*c_plugin_context);
             plugin_ptr->Update(c_plugin_context->ez_id, c_plugin_context->collection_id, std::string(c_plugin_context->key));
         }
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs, truePaths, trueSchema, buffer_size, milvus::storage::GetReaderProperties(context_ptr));
+            trueFs, truePaths, trueSchema, buffer_size, milvus::storage::GetReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -107,15 +105,13 @@ NewPackedReader(char** paths,
         }
         auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
 
-        std::shared_ptr<CPluginContext> context_ptr = nullptr;
         auto plugin_ptr = milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
         if (plugin_ptr != nullptr && c_plugin_context != nullptr) {
-            context_ptr = std::make_shared<CPluginContext>(*c_plugin_context);
-            plugin_ptr->Update(context_ptr->ez_id, context_ptr->collection_id, std::string(context_ptr->key));
+            plugin_ptr->Update(c_plugin_context->ez_id, c_plugin_context->collection_id, std::string(c_plugin_context->key));
         }
 
         auto reader = std::make_unique<milvus_storage::PackedRecordBatchReader>(
-            trueFs, truePaths, trueSchema, buffer_size, milvus::storage::GetReaderProperties(context_ptr));
+            trueFs, truePaths, trueSchema, buffer_size, milvus::storage::GetReaderProperties());
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

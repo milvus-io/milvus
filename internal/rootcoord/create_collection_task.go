@@ -382,11 +382,8 @@ func (t *createCollectionTask) Prepare(ctx context.Context) error {
 	}
 	t.dbProperties = db.Properties
 
-	if hookutil.IsDBEncyptionEnabled(t.dbProperties) {
-		t.Req.Properties = append(t.Req.Properties, &commonpb.KeyValuePair{
-			Key:   hookutil.EncryptionEzIDKey,
-			Value: strconv.FormatInt(t.dbID, 10),
-		})
+	if hookutil.GetEzPropByDBProperties(t.dbProperties) != nil {
+		t.Req.Properties = append(t.Req.Properties, hookutil.GetEzPropByDBProperties(t.dbProperties))
 	}
 
 	if err := t.validate(ctx); err != nil {

@@ -1071,8 +1071,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
                            DataType data_type,
                            int64_t dim,
-                           milvus_storage::ArrowFileSystemPtr fs, 
-                           std::shared_ptr<CPluginContext> plugin_context) {
+                           milvus_storage::ArrowFileSystemPtr fs) {
     AssertInfo(remote_files.size() > 0, "[StorageV2] remote files size is 0");
     std::vector<FieldDataPtr> field_data_list;
 
@@ -1101,7 +1100,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
 
     // find column offset
     milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs, plugin_context);
+        FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
     size_t col_offset = -1;
     for (size_t i = 0; i < field_id_list.size(); ++i) {
         if (field_id_list.Get(i) == field_id) {
@@ -1137,7 +1136,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
             fs,
             column_group_file,
             milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(plugin_context));
+            GetReaderProperties());
 
         auto row_group_num =
             reader->file_metadata()->GetRowGroupMetadataVector().size();
@@ -1164,8 +1163,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     std::move(strategy),
                                     row_group_lists,
                                     nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH,
-                                    plugin_context);
+                                    milvus::proto::common::LoadPriority::HIGH);
         });
         // read field data from channel
         std::shared_ptr<milvus::ArrowDataWrapper> r;
@@ -1242,8 +1240,7 @@ milvus_storage::FieldIDList
 GetFieldIDList(FieldId column_group_id,
                const std::string& filepath,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
-               milvus_storage::ArrowFileSystemPtr fs,
-               std::shared_ptr<CPluginContext> plugin_context) {
+               milvus_storage::ArrowFileSystemPtr fs) {
     milvus_storage::FieldIDList field_id_list;
     if (column_group_id >= FieldId(START_USER_FIELDID)) {
         field_id_list.Add(column_group_id.get());
@@ -1252,7 +1249,7 @@ GetFieldIDList(FieldId column_group_id,
     auto file_reader = std::make_shared<milvus_storage::FileRowGroupReader>(
         fs, filepath, arrow_schema,
         milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-        GetReaderProperties(plugin_context));
+        GetReaderProperties());
     field_id_list =
         file_reader->file_metadata()->GetGroupFieldIDList().GetFieldIDList(
             column_group_id.get());

@@ -280,7 +280,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                       .GetArrowFileSystem();
 
         milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-            column_group_id, insert_files[0], arrow_schema, fs, plugin_context_);
+            column_group_id, insert_files[0], arrow_schema, fs);
 
         // if multiple fields share same column group
         // hint for not loading certain field shall not be working for now
@@ -317,8 +317,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 insert_files,
                 info.enable_mmap,
                 milvus_field_ids.size(),
-                load_info.load_priority,
-                plugin_context_);
+                load_info.load_priority);
 
         auto chunked_column_group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
@@ -1124,8 +1123,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     IndexMetaPtr index_meta,
     const SegcoreConfig& segcore_config,
     int64_t segment_id,
-    bool is_sorted_by_pk,
-    std::shared_ptr<CPluginContext> plugin_context)
+    bool is_sorted_by_pk)
     : segcore_config_(segcore_config),
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
@@ -1150,7 +1148,6 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                   callback);
           },
           segment_id) {
-    plugin_context_ = plugin_context;
     auto mcm = storage::MmapManager::GetInstance().GetMmapChunkManager();
     mmap_descriptor_ = mcm->Register();
 }

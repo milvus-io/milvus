@@ -48,7 +48,8 @@ func (t *createDatabaseTask) Prepare(ctx context.Context) error {
 		return err
 	}
 
-	properties, err := hookutil.TidyDBCipherProperties(t.Req.Properties)
+	// Use dbID as ezID because the dbID is unqiue
+	properties, err := hookutil.TidyDBCipherProperties(t.dbID, t.Req.Properties)
 	if err != nil {
 		return err
 	}

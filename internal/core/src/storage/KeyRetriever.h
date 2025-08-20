@@ -9,7 +9,7 @@ public:
 };
 
 parquet::ReaderProperties
-GetReaderProperties(std::shared_ptr<CPluginContext> context);
+GetReaderProperties();
 
 std::string
 EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key) ;
