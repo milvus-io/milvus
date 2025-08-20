@@ -17,15 +17,13 @@ KeyRetriever::GetKey(const std::string& key_metadata) {
 }
 
 parquet::ReaderProperties
-GetReaderProperties(std::shared_ptr<CPluginContext> context) {
+GetReaderProperties() {
     parquet::ReaderProperties reader_properties = parquet::default_reader_properties();
-    // if (context != nullptr) {
     std::shared_ptr<milvus::storage::KeyRetriever> key_retriever = std::make_shared<milvus::storage::KeyRetriever>();
     parquet::FileDecryptionProperties::Builder builder;
     reader_properties.file_decryption_properties(builder.key_retriever(key_retriever)
             ->plaintext_files_allowed()
             ->build());
-    // }
     return reader_properties;
 }
 

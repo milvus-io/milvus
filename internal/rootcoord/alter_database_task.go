@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -63,26 +64,35 @@ func (a *alterDatabaseTask) Prepare(ctx context.Context) error {
 }
 
 func (a *alterDatabaseTask) Execute(ctx context.Context) error {
-	// Now we support alter and delete properties of database
+	log := log.Ctx(ctx).With(
+		zap.String("alterDatabaseTask", a.Req.GetDbName()),
+		zap.String("db", a.Req.GetDbId()),
+		zap.Uint64("ts", a.GetTs()))
+
 	if a.Req.GetProperties() == nil && a.Req.GetDeleteKeys() == nil {
-		return errors.New("alter database requires either properties or deletekeys to modify or delete keys, both cannot be empty")
+		log.Warn("alter database with empty properties and delete keys, expected to set either properties or delete keys ")
+		return errors.New("alter database with empty properties and delete keys, expected to set either properties or delete keys")
 	}
 
 	if len(a.Req.GetProperties()) > 0 && len(a.Req.GetDeleteKeys()) > 0 {
-		return errors.New("alter database operation cannot modify properties and delete keys at the same time")
+		return errors.New("alter database cannot modify properties and delete keys at the same time")
 	}
 
-	oldDB, err := a.core.meta.GetDatabaseByName(ctx, a.Req.GetDbName(), a.ts)
+	if hookutil.ContainsCipherProperties(a.Req.GetProperties(), a.Req.GetDeleteKeys()) {
+		log.Info("skip to alter collection due to cipher properties were detected in the request properties")
+		return errors.New("can not alter cipher related properties")
+	}
+
+	oldDB, err := a.core.meta.GetDatabaseByName(ctx, a.Req.GetDbName(), a.GetTs())
 	if err != nil {
-		log.Ctx(ctx).Warn("get database failed during changing database props",
-			zap.String("databaseName", a.Req.GetDbName()), zap.Uint64("ts", a.ts))
+		log.Warn("get database failed during changing database props")
 		return err
 	}
 
 	var newProperties []*commonpb.KeyValuePair
 	if (len(a.Req.GetProperties())) > 0 {
-		if ContainsKeyPairArray(a.Req.GetProperties(), oldDB.Properties) {
-			log.Info("skip to alter database due to no changes were detected in the properties", zap.String("databaseName", a.Req.GetDbName()))
+		if IsSubsetOfProperties(a.Req.GetProperties(), oldDB.Properties) {
+			log.Info("skip to alter database due to no changes were detected in the properties")
 			return nil
 		}
 		newProperties = MergeProperties(oldDB.Properties, a.Req.GetProperties())
@@ -90,7 +100,7 @@ func (a *alterDatabaseTask) Execute(ctx context.Context) error {
 		newProperties = DeleteProperties(oldDB.Properties, a.Req.GetDeleteKeys())
 	}
 
-	return executeAlterDatabaseTaskSteps(ctx, a.core, oldDB, oldDB.Properties, newProperties, a.ts)
+	return executeAlterDatabaseTaskSteps(ctx, a.core, oldDB, oldDB.Properties, newProperties, a.GetTs())
 }
 
 func (a *alterDatabaseTask) GetLockerKey() LockerKey {
@@ -100,7 +110,7 @@ func (a *alterDatabaseTask) GetLockerKey() LockerKey {
 	)
 }
 
-func MergeProperties(oldProps []*commonpb.KeyValuePair, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
+func MergeProperties(oldProps, updatedProps []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	_, existEndTS := common.GetReplicateEndTS(updatedProps)
 	if existEndTS {
 		updatedProps = append(updatedProps, &commonpb.KeyValuePair{

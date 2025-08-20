@@ -50,8 +50,7 @@ GroupChunkTranslator::GroupChunkTranslator(
     std::vector<std::string> insert_files,
     bool use_mmap,
     int64_t num_fields,
-    milvus::proto::common::LoadPriority load_priority,
-    std::shared_ptr<CPluginContext> context)
+    milvus::proto::common::LoadPriority load_priority)
     : segment_id_(segment_id),
       key_(fmt::format("seg_{}_cg_{}", segment_id, column_group_info.field_id)),
       field_metas_(field_metas),
@@ -59,7 +58,6 @@ GroupChunkTranslator::GroupChunkTranslator(
       insert_files_(insert_files),
       use_mmap_(use_mmap),
       load_priority_(load_priority),
-      plugin_context_(context),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
                      : milvus::cachinglayer::StorageType::MEMORY,
@@ -84,7 +82,7 @@ GroupChunkTranslator::GroupChunkTranslator(
         auto reader =
             std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties(context));
+                storage::GetReaderProperties());
         row_group_meta_list_.push_back(
             reader->file_metadata()->GetRowGroupMetadataVector());
         auto status = reader->Close();
@@ -225,8 +223,7 @@ GroupChunkTranslator::get_cells(const std::vector<cachinglayer::cid_t>& cids) {
                                 std::move(strategy),
                                 row_group_lists,
                                 nullptr,
-                                load_priority_,
-                                plugin_context_);
+                                load_priority_);
     });
     LOG_INFO(
         "[StorageV2] translator {} submits load column group {} task to thread "

@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -338,11 +337,6 @@ func NewSegment(ctx context.Context,
 		zap.String("level", loadInfo.GetLevel().String()),
 	)
 
-	var ez *hookutil.EZ
-	if hookutil.IsClusterEncyptionEnabled() {
-		ez = hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collection.ID())
-	}
-
 	var csegment segcore.CSegment
 	if _, err := GetDynamicPool().Submit(func() (any, error) {
 		var err error
@@ -351,7 +345,6 @@ func NewSegment(ctx context.Context,
 			SegmentID:   loadInfo.GetSegmentID(),
 			SegmentType: segmentType,
 			IsSorted:    loadInfo.GetIsSorted(),
-			EZ:          ez,
 		})
 		return nil, err
 	}).Await(); err != nil {

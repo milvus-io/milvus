@@ -24,12 +24,14 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/hook"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
@@ -53,10 +55,12 @@ func IsClusterEncyptionEnabled() bool {
 }
 
 const (
+	// Used in db and collection properties
 	EncryptionEnabledKey = "cipher.enabled"
 	EncryptionRootKeyKey = "cipher.key"
 	EncryptionEzIDKey    = "cipher.ezID"
 
+	// Used in Plugins
 	CipherConfigCreateEZ       = "cipher.ez.create"
 	CipherConfigRemoveEZ       = "cipher.ez.remove"
 	CipherConfigMilvusRoleName = "cipher.milvusRoleName"
@@ -81,6 +85,19 @@ type CipherContext struct {
 	key []byte
 }
 
+func ContainsCipherProperties(properties []*commonpb.KeyValuePair, deletedKeys []string) bool {
+	for _, property := range properties {
+		if property.Key == EncryptionEnabledKey ||
+			property.Key == EncryptionEzIDKey ||
+			property.Key == EncryptionRootKeyKey {
+			return true
+		}
+	}
+	return lo.ContainsBy(deletedKeys, func(data string) bool {
+		return lo.Contains([]string{EncryptionEnabledKey, EncryptionEzIDKey, EncryptionRootKeyKey}, data)
+	})
+}
+
 func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID int64) *EZ {
 	if len(collProperties) == 0 {
 		log.Warn("GetEzByCollProperties empty properties",
@@ -101,24 +118,165 @@ func GetEzByCollProperties(collProperties []*commonpb.KeyValuePair, collectionID
 	return nil
 }
 
-func TidyDBCipherProperties(dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
-	if IsDBEncyptionEnabled(dbProperties) {
-		if !IsClusterEncyptionEnabled() {
+// GetStoragePluginContext returns the local plugin context for RPC from datacoord to datanode
+func GetStoragePluginContext(properties []*commonpb.KeyValuePair, collectionID int64) []*commonpb.KeyValuePair {
+	if GetCipher() == nil {
+		return nil
+	}
+
+	if ez := GetEzByCollProperties(properties, collectionID); ez != nil {
+		key := GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
+		pluginContext := []*commonpb.KeyValuePair{
+			{
+				Key:   CipherConfigCreateEZ,
+				Value: strconv.FormatInt(ez.EzID, 10),
+			},
+			{
+				Key:   CipherConfigUnsafeEZK,
+				Value: string(key),
+			},
+		}
+		return pluginContext
+	}
+
+	return nil
+}
+
+func GetDBCipherProperties(ezID uint64, kmsKey string) []*commonpb.KeyValuePair {
+	return []*commonpb.KeyValuePair{
+		{
+			Key:   EncryptionEnabledKey,
+			Value: "true",
+		},
+		{
+			Key:   EncryptionEzIDKey,
+			Value: strconv.FormatUint(ezID, 10),
+		},
+		{
+			Key:   EncryptionRootKeyKey,
+			Value: kmsKey,
+		},
+	}
+}
+
+func RemoveEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
+	if GetCipher() == nil {
+		return nil
+	}
+
+	ezIdStr := ""
+	for _, property := range dbProperties {
+		if property.Key == EncryptionEzIDKey {
+			ezIdStr = property.Value
+		}
+	}
+	if len(ezIdStr) == 0 {
+		return nil
+	}
+
+	dropConfig := map[string]string{CipherConfigRemoveEZ: ezIdStr}
+	if err := GetCipher().Init(dropConfig); err != nil {
+		return err
+	}
+	return nil
+}
+
+func CreateLocalEZByPluginContext(context []*commonpb.KeyValuePair) (*indexcgopb.StoragePluginContext, error) {
+	if GetCipher() == nil {
+		return nil, nil
+	}
+	config := make(map[string]string)
+	ctx := &indexcgopb.StoragePluginContext{}
+	for _, value := range context {
+		if value.GetKey() == CipherConfigCreateEZ {
+			ezID, err := strconv.ParseInt(value.GetValue(), 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			config[CipherConfigCreateEZ] = value.GetValue()
+			ctx.EncryptionZoneId = ezID
+		}
+		if value.GetKey() == CipherConfigUnsafeEZK {
+			config[CipherConfigUnsafeEZK] = value.GetValue()
+			ctx.EncryptionKey = value.GetValue()
+		}
+	}
+	if len(config) == 2 {
+		return ctx, GetCipher().Init(config)
+	}
+	return nil, nil
+}
+
+func CreateEZByDBProperties(dbProperties []*commonpb.KeyValuePair) error {
+	if GetCipher() == nil {
+		return nil
+	}
+
+	config := make(map[string]string)
+	for _, property := range dbProperties {
+		if property.GetKey() == EncryptionEzIDKey {
+			config[CipherConfigCreateEZ] = property.Value
+		}
+		if property.GetKey() == EncryptionRootKeyKey {
+			config[CipherConfigKeyKmsKeyArn] = property.GetValue()
+		}
+	}
+
+	if len(config) == 2 {
+		return GetCipher().Init(config)
+	}
+
+	return nil
+}
+
+func TidyDBCipherProperties(ezID int64, dbProperties []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+	dbEncryptionEnabled := IsDBEncyptionEnabled(dbProperties)
+	if GetCipher() == nil {
+		if dbEncryptionEnabled {
 			return nil, ErrCipherPluginMissing
 		}
+		return dbProperties, nil
+	}
+
+	if dbEncryptionEnabled {
+		ezIDKv := &commonpb.KeyValuePair{
+			Key:   EncryptionEzIDKey,
+			Value: strconv.FormatInt(ezID, 10),
+		}
+		// kmsKey already in the properties
 		for _, property := range dbProperties {
 			if property.Key == EncryptionRootKeyKey {
+				dbProperties = append(dbProperties, ezIDKv)
 				return dbProperties, nil
 			}
 		}
 
-		// set default root key from config if EncryuptionRootKeyKey left empty
-		dbProperties = append(dbProperties, &commonpb.KeyValuePair{
-			Key:   EncryptionRootKeyKey,
-			Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
-		})
+		if defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue(); defaultRootKey != "" {
+			// set default root key from config if EncryuptionRootKeyKey left empty
+			dbProperties = append(dbProperties,
+				ezIDKv,
+				&commonpb.KeyValuePair{
+					Key:   EncryptionRootKeyKey,
+					Value: defaultRootKey,
+				},
+			)
+			return dbProperties, nil
+		}
+		return nil, fmt.Errorf("Empty default root key for encrypted database without kms key")
 	}
 	return dbProperties, nil
+}
+
+func GetEzPropByDBProperties(dbProperties []*commonpb.KeyValuePair) *commonpb.KeyValuePair {
+	for _, property := range dbProperties {
+		if property.Key == EncryptionEzIDKey {
+			return &commonpb.KeyValuePair{
+				Key:   EncryptionEzIDKey,
+				Value: property.Value,
+			}
+		}
+	}
+	return nil
 }
 
 func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
@@ -128,15 +286,6 @@ func IsDBEncyptionEnabled(dbProperties []*commonpb.KeyValuePair) bool {
 		}
 	}
 	return false
-}
-
-func GetEZRootKeyByDBProperties(dbProperties []*commonpb.KeyValuePair) string {
-	for _, property := range dbProperties {
-		if property.Key == EncryptionRootKeyKey {
-			return property.Value
-		}
-	}
-	return paramtable.GetCipherParams().DefaultRootKey.GetValue()
 }
 
 // For test only

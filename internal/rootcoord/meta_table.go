@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -303,17 +301,16 @@ func (mt *MetaTable) createDefaultDb() error {
 		return err
 	}
 
-	if hookutil.IsClusterEncyptionEnabled() {
-		cipherProps := []*commonpb.KeyValuePair{
-			{
-				Key:   hookutil.EncryptionEnabledKey,
-				Value: "true",
-			},
-			{
-				Key:   hookutil.EncryptionRootKeyKey,
-				Value: paramtable.GetCipherParams().DefaultRootKey.GetValue(),
-			},
+	defaultRootKey := paramtable.GetCipherParams().DefaultRootKey.GetValue()
+	if hookutil.IsClusterEncyptionEnabled() && len(defaultRootKey) > 0 {
+		// Set unique ID as ezID because the default dbID for each cluster
+		// is the same
+		ezID, err := mt.tsoAllocator.GenerateTSO(1)
+		if err != nil {
+			return err
 		}
+
+		cipherProps := hookutil.GetDBCipherProperties(ezID, defaultRootKey)
 		defaultProperties = append(defaultProperties, cipherProps...)
 	}
 
@@ -342,14 +339,8 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	}
 
 	// Call back cipher plugin when creating database succeeded
-	if hookutil.IsDBEncyptionEnabled(db.Properties) {
-		createConfig := map[string]string{
-			hookutil.CipherConfigCreateEZ:     strconv.FormatInt(db.ID, 10),
-			hookutil.CipherConfigKeyKmsKeyArn: hookutil.GetEZRootKeyByDBProperties(db.Properties),
-		}
-		if err := hookutil.GetCipher().Init(createConfig); err != nil {
-			return err
-		}
+	if err := hookutil.CreateEZByDBProperties(db.Properties); err != nil {
+		return err
 	}
 
 	mt.names.createDbIfNotExist(dbName)
@@ -404,14 +395,8 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 	}
 
 	// Call back cipher plugin when dropping database succeeded
-	if hookutil.IsDBEncyptionEnabled(db.Properties) {
-		dropConfig := map[string]string{
-			hookutil.CipherConfigRemoveEZ: strconv.FormatInt(db.ID, 10),
-		}
-		if err := hookutil.GetCipher().Init(dropConfig); err != nil {
-			log.Ctx(ctx).Warn("drop database ez failed", zap.String("db", dbName), zap.Int64("dbID", db.ID), zap.Uint64("ts", ts), zap.Error(err))
-			// ignore the err
-		}
+	if err := hookutil.RemoveEZByDBProperties(db.Properties); err != nil {
+		return err
 	}
 
 	mt.names.dropDb(dbName)

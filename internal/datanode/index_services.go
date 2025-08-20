@@ -30,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
+	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -608,4 +610,18 @@ func (node *DataNode) DropJobsV2(ctx context.Context, req *workerpb.DropJobsV2Re
 		log.Warn("DataNode receive dropping unknown type jobs")
 		return merr.Status(errors.New("DataNode receive dropping unknown type jobs")), nil
 	}
+}
+
+func ParseCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	pluginContext, err := hookutil.CreateLocalEZByPluginContext(context)
+	if err != nil {
+		return nil, err
+	}
+
+	if pluginContext != nil {
+		pluginContext.CollectionId = collectionID
+		return pluginContext, nil
+	}
+
+	return nil, nil
 }

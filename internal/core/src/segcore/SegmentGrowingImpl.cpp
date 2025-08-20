@@ -466,7 +466,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
             auto reader =
                 std::make_shared<milvus_storage::FileRowGroupReader>(fs, file,
                     milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                    storage::GetReaderProperties(plugin_context_));
+                    storage::GetReaderProperties());
             auto row_group_num =
                 reader->file_metadata()->GetRowGroupMetadataVector().size();
             std::vector<int64_t> all_row_groups(row_group_num);
@@ -492,8 +492,7 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     std::move(strategy),
                                     row_group_lists,
                                     nullptr,
-                                    infos.load_priority,
-                                    plugin_context_);
+                                    infos.load_priority);
         });
 
         LOG_INFO(

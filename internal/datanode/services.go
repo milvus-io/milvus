@@ -22,7 +22,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -39,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v2/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v2/taskcommon"
@@ -524,52 +522,6 @@ func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCo
 	return merr.Success(), nil
 }
 
-func ParseCPluginContext(context []*commonpb.KeyValuePair, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	config := make(map[string]string)
-	pluginContext := &indexcgopb.StoragePluginContext{CollectionId: collectionID}
-
-	if hookutil.IsClusterEncyptionEnabled() {
-		for _, value := range context {
-			if value.GetKey() == hookutil.CipherConfigCreateEZ {
-				config[hookutil.CipherConfigCreateEZ] = value.GetValue()
-
-				ezID, err := strconv.ParseInt(value.GetValue(), 10, 64)
-				if err != nil {
-					return nil, err
-				}
-				pluginContext.EncryptionZoneId = ezID
-			}
-
-			if value.GetKey() == hookutil.CipherConfigUnsafeEZK {
-				config[hookutil.CipherConfigUnsafeEZK] = value.GetValue()
-				pluginContext.EncryptionKey = value.GetValue()
-			}
-		}
-	}
-	if len(config) > 0 {
-		return pluginContext, hookutil.GetCipher().Init(config)
-	}
-	return nil, nil
-}
-
-func ParsePluginContext(context []*commonpb.KeyValuePair) error {
-	config := make(map[string]string)
-	if hookutil.IsClusterEncyptionEnabled() {
-		for _, value := range context {
-			if value.GetKey() == hookutil.CipherConfigCreateEZ {
-				config[hookutil.CipherConfigCreateEZ] = value.GetValue()
-			}
-			if value.GetKey() == hookutil.CipherConfigUnsafeEZK {
-				config[hookutil.CipherConfigUnsafeEZK] = value.GetValue()
-			}
-		}
-	}
-	if len(config) > 0 {
-		return hookutil.GetCipher().Init(config)
-	}
-	return nil
-}
-
 // CreateTask creates different types of tasks based on task type
 func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTaskRequest) (*commonpb.Status, error) {
 	log.Ctx(ctx).Info("CreateTask received", zap.Any("properties", request.GetProperties()))
@@ -587,7 +539,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := ParsePluginContext(req.GetPluginContext()); err != nil {
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.PreImport(ctx, req)
@@ -596,7 +548,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := ParsePluginContext(req.GetPluginContext()); err != nil {
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
@@ -605,7 +557,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := ParsePluginContext(req.GetPluginContext()); err != nil {
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.CompactionV2(ctx, req)
@@ -620,7 +572,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := ParsePluginContext(req.GetPluginContext()); err != nil {
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createStatsTask(ctx, req)
@@ -629,7 +581,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
 			return merr.Status(err), nil
 		}
-		if err := ParsePluginContext(req.GetPluginContext()); err != nil {
+		if _, err := hookutil.CreateLocalEZByPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
 		}
 		return node.createAnalyzeTask(ctx, req)
